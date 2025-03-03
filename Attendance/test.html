@@ -349,17 +349,16 @@
         </div>
     </div>
     
-    <!-- Firebase SDKs -->
+    <!-- Firebase SDK -->
     <script type="module">
         // Import Firebase Core and required services
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
-        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-analytics.js";
-        import { getDatabase, ref, set, get, child, onValue } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
+        import { getDatabase, ref, set, get, child } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
 
         // Your Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyAy39MxxKKYMFnOfwLmVYNCVAUa7IV-ScQ",
-            authDomain: "attendance-sync-f81c8.firebaseapp.com",
+            authDomain: "attendance-sync-f81c8.firebaseapp.com", 
             databaseURL: "https://attendance-sync-f81c8-default-rtdb.europe-west1.firebasedatabase.app",
             projectId: "attendance-sync-f81c8",
             storageBucket: "attendance-sync-f81c8.firebasestorage.app",
@@ -370,20 +369,12 @@
 
         // Initialize Firebase
         const app = initializeApp(firebaseConfig);
-        const analytics = getAnalytics(app);
         const database = getDatabase(app);
 
-        // Make Firebase available to main script
-        window.firebaseDB = { 
-            database,
-            ref,
-            set,
-            get, 
-            child,
-            onValue
-        };
+        // Make Firebase available globally
+        window.firebaseDB = { database, ref, set, get, child };
         
-        // Notify when Firebase is ready
+        console.log("Firebase initialized successfully");
         document.dispatchEvent(new Event('firebase-ready'));
     </script>
     
@@ -445,7 +436,7 @@
             initFirebaseSync();
             
             // Load last sync time
-            const lastSyncTime = localStorage.getItem('MTH202_lastSync');
+            const lastSyncTime = localStorage.getItem('MTH_202_lastSync');
             if (lastSyncTime) {
                 lastSyncElement.textContent = new Date(lastSyncTime).toLocaleString();
             }
@@ -458,7 +449,7 @@
         function initFirebaseSync() {
             // Add event listener for when Firebase is ready
             document.addEventListener('firebase-ready', () => {
-                console.log('Firebase is ready');
+                console.log('Firebase is ready, setting up sync button');
                 syncBtn.addEventListener('click', syncWithFirebase);
             });
         }
@@ -468,19 +459,22 @@
             if (syncInProgress) return;
             
             syncInProgress = true;
+            console.log("Starting Firebase sync");
             showNotification('info', 'Syncing', 'Connecting to Firebase...');
             
             try {
-                // First pull latest data
-                await syncFromFirebase();
-                
-                // Then push current data
+                // Push current data to Firebase first
+                console.log("Pushing data to Firebase");
                 await syncToFirebase();
+                
+                // Then pull latest data
+                console.log("Pulling data from Firebase");
+                await syncFromFirebase();
                 
                 // Update last sync time
                 const now = new Date();
                 lastSyncElement.textContent = now.toLocaleString();
-                localStorage.setItem('MTH202_lastSync', now.toISOString());
+                localStorage.setItem('MTH_202_lastSync', now.toISOString());
                 
                 showNotification('success', 'Sync Complete', 'Data synchronized with Firebase');
             } catch (error) {
@@ -494,6 +488,7 @@
         // Pull data from Firebase
         async function syncFromFirebase() {
             if (!window.firebaseDB) {
+                console.error("Firebase not initialized");
                 throw new Error('Firebase not initialized');
             }
             
@@ -501,244 +496,78 @@
             const dbRef = ref(database);
             
             try {
-                // Get logs
-                const logsSnapshot = await get(child(dbRef, 'MTH202/logs'));
-                if (logsSnapshot.exists()) {
-                    const remoteLogs = logsSnapshot.val();
-                    if (remoteLogs && remoteLogs.length > 0) {
-                        // Show import dialog with remote logs
-                        await showImportDialogPromise(remoteLogs);
-                    }
-                }
-                
+                console.log("Reading database from Firebase");
                 // Get database (UID to name mappings)
-                const dbSnapshot = await get(child(dbRef, 'MTH202/database'));
+                const dbSnapshot = await get(child(dbRef, 'MTH_202/database'));
                 if (dbSnapshot.exists()) {
                     const remoteDb = dbSnapshot.val();
-                    if (remoteDb) {
-                        // Show database import dialog with remote database
-                        await showDatabaseImportDialogPromise(remoteDb);
+                    console.log("Found database in Firebase:", remoteDb);
+                    if (remoteDb && Object.keys(remoteDb).length > 0) {
+                        uidToNameMap = remoteDb;
+                        saveDatabase();
+                        updateUI();
+                        showNotification('success', 'Database Updated', `Imported ${Object.keys(remoteDb).length} name mappings from Firebase.`);
                     }
+                } else {
+                    console.log("No database found in Firebase");
                 }
+                
+                console.log("Reading logs from Firebase");
+                // Get logs
+                const logsSnapshot = await get(child(dbRef, 'MTH_202/logs'));
+                if (logsSnapshot.exists()) {
+                    const remoteLogs = logsSnapshot.val();
+                    console.log("Found logs in Firebase:", remoteLogs ? remoteLogs.length : 0);
+                    if (remoteLogs && remoteLogs.length > 0) {
+                        // Merge logs (add only new ones)
+                        const existingIds = new Set(logs.map(log => log.id));
+                        let newLogsCount = 0;
+                        
+                        remoteLogs.forEach(log => {
+                            if (!existingIds.has(log.id)) {
+                                logs.push(log);
+                                newLogsCount++;
+                            }
+                        });
+                        
+                        // Sort logs by timestamp (newest first)
+                        logs.sort((a, b) => b.timestamp - a.timestamp);
+                        
+                        saveLogs();
+                        updateUI();
+                        
+                        if (newLogsCount > 0) {
+                            showNotification('success', 'Logs Updated', `Added ${newLogsCount} new logs from Firebase.`);
+                        }
+                    }
+                } else {
+                    console.log("No logs found in Firebase");
+                }
+                
+                return true;
             } catch (error) {
                 console.error("Error getting data from Firebase:", error);
                 throw error;
             }
         }
         
-        // Promise versions of dialog functions
-        function showImportDialogPromise(importedLogs) {
-            return new Promise((resolve) => {
-                // Create dialog backdrop
-                const dialogBackdrop = document.createElement('div');
-                dialogBackdrop.style.position = 'fixed';
-                dialogBackdrop.style.top = '0';
-                dialogBackdrop.style.left = '0';
-                dialogBackdrop.style.width = '100%';
-                dialogBackdrop.style.height = '100%';
-                dialogBackdrop.style.backgroundColor = 'rgba(0,0,0,0.5)';
-                dialogBackdrop.style.zIndex = '1000';
-                dialogBackdrop.style.display = 'flex';
-                dialogBackdrop.style.justifyContent = 'center';
-                dialogBackdrop.style.alignItems = 'center';
-                
-                // Create dialog box
-                const dialog = document.createElement('div');
-                dialog.style.backgroundColor = 'white';
-                dialog.style.borderRadius = '10px';
-                dialog.style.padding = '20px';
-                dialog.style.width = '90%';
-                dialog.style.maxWidth = '500px';
-                dialog.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
-                
-                dialog.innerHTML = `
-                    <h3 style="margin-top: 0;">Import ${importedLogs.length} logs from Firebase</h3>
-                    <p>How would you like to import these logs?</p>
-                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
-                        <button id="replace-btn" class="btn-red">Replace All</button>
-                        <button id="merge-btn" class="btn-blue">Merge with Existing</button>
-                        <button id="cancel-btn">Skip Import</button>
-                    </div>
-                `;
-                
-                dialogBackdrop.appendChild(dialog);
-                document.body.appendChild(dialogBackdrop);
-                
-                // Handle dialog buttons
-                document.getElementById('replace-btn').addEventListener('click', function() {
-                    logs = importedLogs;
-                    saveLogs();
-                    updateUI();
-                    showNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported logs.`);
-                    document.body.removeChild(dialogBackdrop);
-                    resolve(true);
-                });
-                
-                document.getElementById('merge-btn').addEventListener('click', function() {
-                    // Create a map of existing IDs for quick lookup
-                    const existingIds = new Set(logs.map(log => log.id));
-                    
-                    // Add only new logs
-                    let newLogsCount = 0;
-                    
-                    importedLogs.forEach(log => {
-                        if (!existingIds.has(log.id)) {
-                            logs.push(log);
-                            newLogsCount++;
-                        }
-                    });
-                    
-                    // Sort logs by timestamp (newest first)
-                    logs.sort((a, b) => b.timestamp - a.timestamp);
-                    
-                    saveLogs();
-                    updateUI();
-                    showNotification('success', 'Import Complete', `Added ${newLogsCount} new logs.`);
-                    document.body.removeChild(dialogBackdrop);
-                    resolve(true);
-                });
-                
-                document.getElementById('cancel-btn').addEventListener('click', function() {
-                    document.body.removeChild(dialogBackdrop);
-                    resolve(false);
-                });
-            });
-        }
-        
-        function showDatabaseImportDialogPromise(excelMappings) {
-            return new Promise((resolve) => {
-                // Create dialog backdrop
-                const dialogBackdrop = document.createElement('div');
-                dialogBackdrop.style.position = 'fixed';
-                dialogBackdrop.style.top = '0';
-                dialogBackdrop.style.left = '0';
-                dialogBackdrop.style.width = '100%';
-                dialogBackdrop.style.height = '100%';
-                dialogBackdrop.style.backgroundColor = 'rgba(0,0,0,0.5)';
-                dialogBackdrop.style.zIndex = '1000';
-                dialogBackdrop.style.display = 'flex';
-                dialogBackdrop.style.justifyContent = 'center';
-                dialogBackdrop.style.alignItems = 'center';
-                
-                // Create dialog box
-                const dialog = document.createElement('div');
-                dialog.style.backgroundColor = 'white';
-                dialog.style.borderRadius = '10px';
-                dialog.style.padding = '20px';
-                dialog.style.width = '90%';
-                dialog.style.maxWidth = '500px';
-                dialog.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
-                
-                const currentCount = Object.keys(uidToNameMap).length;
-                const newCount = Object.keys(excelMappings).length;
-                
-                dialog.innerHTML = `
-                    <h3 style="margin-top: 0;">Import Firebase Database</h3>
-                    <p>Found ${newCount} UID-name mappings in Firebase.</p>
-                    <p>How would you like to handle this import?</p>
-                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap;">
-                        <button id="replace-all-btn" class="btn-red">Replace All Entries</button>
-                        <button id="merge-add-btn" class="btn-blue">Merge & Add New</button>
-                        <button id="smart-update-btn" class="btn-green">Smart Update</button>
-                        <button id="cancel-btn">Skip Import</button>
-                    </div>
-                `;
-                
-                dialogBackdrop.appendChild(dialog);
-                document.body.appendChild(dialogBackdrop);
-                
-                // Replace All: Clear existing database and use only the new data
-                document.getElementById('replace-all-btn').addEventListener('click', function() {
-                    uidToNameMap = {...excelMappings};
-                    saveDatabase();
-                    updateUI();
-                    showNotification('success', 'Database Updated', `Replaced database with ${newCount} mappings from Firebase.`);
-                    document.body.removeChild(dialogBackdrop);
-                    resolve(true);
-                });
-                
-                // Merge & Add New: Keep existing entries and only add new ones (don't update existing)
-                document.getElementById('merge-add-btn').addEventListener('click', function() {
-                    // Add only new mappings, don't change existing ones
-                    let addedCount = 0;
-                    
-                    Object.entries(excelMappings).forEach(([uid, name]) => {
-                        if (!uidToNameMap[uid]) {
-                            uidToNameMap[uid] = name;
-                            addedCount++;
-                        }
-                    });
-                    
-                    saveDatabase();
-                    updateUI();
-                    showNotification('success', 'Database Updated', `Added ${addedCount} new mappings to database.`);
-                    document.body.removeChild(dialogBackdrop);
-                    resolve(true);
-                });
-                
-                // Smart Update: Replace existing entries, add new ones
-                document.getElementById('smart-update-btn').addEventListener('click', function() {
-                    // Count stats for reporting
-                    let addedCount = 0;
-                    let updatedCount = 0;
-                    let removedCount = 0;
-                    
-                    // Keep track of existing entries that are in Excel
-                    const oldUids = new Set(Object.keys(uidToNameMap));
-                    const excelUids = new Set(Object.keys(excelMappings));
-                    
-                    // 1. Update existing + add new
-                    Object.entries(excelMappings).forEach(([uid, name]) => {
-                        if (uidToNameMap[uid]) {
-                            // Entry exists - check if name changed
-                            if (uidToNameMap[uid] !== name) {
-                                uidToNameMap[uid] = name;
-                                updatedCount++;
-                            }
-                        } else {
-                            // New entry
-                            uidToNameMap[uid] = name;
-                            addedCount++;
-                        }
-                    });
-                    
-                    // 2. Remove entries not in Excel
-                    oldUids.forEach(uid => {
-                        if (!excelUids.has(uid)) {
-                            delete uidToNameMap[uid];
-                            removedCount++;
-                        }
-                    });
-                    
-                    saveDatabase();
-                    updateUI();
-                    showNotification('success', 'Database Updated', 
-                        `Smart update complete: ${addedCount} added, ${updatedCount} updated, ${removedCount} removed.`);
-                    document.body.removeChild(dialogBackdrop);
-                    resolve(true);
-                });
-                
-                document.getElementById('cancel-btn').addEventListener('click', function() {
-                    document.body.removeChild(dialogBackdrop);
-                    resolve(false);
-                });
-            });
-        }
-        
         // Push data to Firebase
         async function syncToFirebase() {
             if (!window.firebaseDB) {
+                console.error("Firebase not initialized");
                 throw new Error('Firebase not initialized');
             }
             
             const { database, ref, set } = window.firebaseDB;
             
             try {
+                console.log("Pushing logs to Firebase:", logs.length);
                 // Push logs
-                await set(ref(database, 'MTH202/logs'), logs);
+                await set(ref(database, 'MTH_202/logs'), logs);
                 
+                console.log("Pushing database to Firebase:", Object.keys(uidToNameMap).length);
                 // Push database
-                await set(ref(database, 'MTH202/database'), uidToNameMap);
+                await set(ref(database, 'MTH_202/database'), uidToNameMap);
                 
                 return true;
             } catch (error) {
@@ -1273,7 +1102,7 @@
         
         // Load logs from localStorage
         function loadLogs() {
-            const savedLogs = localStorage.getItem('MTH202_nfcLogs');
+            const savedLogs = localStorage.getItem('MTH_202_nfcLogs');
             if (savedLogs) {
                 try {
                     logs = JSON.parse(savedLogs);
@@ -1286,12 +1115,12 @@
         
         // Save logs to localStorage
         function saveLogs() {
-            localStorage.setItem('MTH202_nfcLogs', JSON.stringify(logs));
+            localStorage.setItem('MTH_202_nfcLogs', JSON.stringify(logs));
         }
         
         // Load database from localStorage
         function loadDatabase() {
-            const savedDatabase = localStorage.getItem('nfcDatabase');
+            const savedDatabase = localStorage.getItem('MTH_202_database');
             if (savedDatabase) {
                 try {
                     uidToNameMap = JSON.parse(savedDatabase);
@@ -1305,7 +1134,7 @@
         
         // Save database to localStorage
         function saveDatabase() {
-            localStorage.setItem('nfcDatabase', JSON.stringify(uidToNameMap));
+            localStorage.setItem('MTH_202_database', JSON.stringify(uidToNameMap));
             updateDatabaseStatus();
         }
         
