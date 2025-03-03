@@ -250,6 +250,146 @@
             }
         }
     </style>
+<script>
+// Add this code to your existing script
+
+// GitHub configuration
+const githubConfig = {
+  owner: 'BredzPro',
+  repo: 'BredzNFC',
+  path: 'nfc-logs.json',
+  // Personal access token (classic) with repo scope
+  // Create one at: https://github.com/settings/tokens
+  token: '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',
+  sha: null // Will be set after first load
+};
+
+// Load logs from GitHub
+async function loadLogsFromGitHub() {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${githubConfig.owner}/${githubConfig.repo}/contents/${githubConfig.path}`);
+    const data = await response.json();
+    
+    if (data.content) {
+      // Decode base64 content
+      const content = atob(data.content);
+      logs = JSON.parse(content);
+      
+      // Save SHA for later updates
+      githubConfig.sha = data.sha;
+      
+      // Update UI
+      updateUI();
+      console.log('Logs loaded from GitHub');
+    }
+  } catch (error) {
+    console.log('No existing logs file found or other error:', error);
+    // We'll create the file on first save
+  }
+}
+
+// Save logs to GitHub
+async function saveLogsToGitHub() {
+  try {
+    // Prepare content
+    const content = JSON.stringify(logs, null, 2);
+    const encodedContent = btoa(unescape(encodeURIComponent(content)));
+    
+    // Prepare request body
+    const body = {
+      message: `Update NFC logs: ${new Date().toISOString()}`,
+      content: encodedContent,
+      branch: 'main' // or your default branch name
+    };
+    
+    // Add SHA if we're updating existing file
+    if (githubConfig.sha) {
+      body.sha = githubConfig.sha;
+    }
+    
+    // Send request to GitHub API
+    const response = await fetch(`https://api.github.com/repos/${githubConfig.owner}/${githubConfig.repo}/contents/${githubConfig.path}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `token ${githubConfig.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    
+    const data = await response.json();
+    
+    if (data.content && data.content.sha) {
+      // Update SHA for next commit
+      githubConfig.sha = data.content.sha;
+      console.log('Logs saved to GitHub');
+    }
+  } catch (error) {
+    console.error('Error saving to GitHub:', error);
+  }
+}
+
+// Modify the existing functions
+
+// Handle NFC reading
+function handleNfcReading({ serialNumber }) {
+  // Create log entry
+  const timestamp = new Date();
+  const newLog = {
+    uid: serialNumber,
+    timestamp: timestamp.toISOString(),
+    id: Date.now()
+  };
+  
+  // Add to logs
+  logs.unshift(newLog);
+  
+  // Save to localStorage
+  saveLogs();
+  
+  // Save to GitHub
+  saveLogsToGitHub();
+  
+  // Update UI
+  updateUI();
+  
+  // Show success notification
+  showNotification('success', 'Tag scanned', `UID: ${serialNumber}`);
+}
+
+// Clear all logs
+function clearLogs() {
+  if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
+    logs = [];
+    
+    // Save to localStorage
+    saveLogs();
+    
+    // Save to GitHub
+    saveLogsToGitHub();
+    
+    updateUI();
+    showNotification('success', 'Logs cleared', 'All scan logs have been removed.');
+  }
+}
+
+// Modify init function to load from GitHub
+const originalInit = init;
+function init() {
+  // Call original init
+  originalInit();
+  
+  // Add GitHub info to header
+  const githubInfo = document.createElement('span');
+  githubInfo.className = 'info-item';
+  githubInfo.innerHTML = '<i class="fab fa-github"></i> Syncing to GitHub';
+  document.querySelector('.app-info').appendChild(githubInfo);
+  
+  // Load logs from GitHub
+  loadLogsFromGitHub();
+}
+</script>
+
 </head>
 <body>
     <div class="container">
