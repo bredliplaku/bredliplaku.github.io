@@ -6,6 +6,7 @@
     <title>NFC UID Logger</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         :root {
             --primary-color: #3949ab;
@@ -148,6 +149,8 @@
         .btn-blue:hover { background-color: #1e87db; }
         .btn-red { background-color: #f44336; }
         .btn-red:hover { background-color: #d32f2f; }
+        .btn-purple { background-color: #9c27b0; }
+        .btn-purple:hover { background-color: #7b1fa2; }
         
         .filter-container {
             margin-bottom: 15px;
@@ -174,6 +177,7 @@
         .logs-actions {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .logs-table {
             width: 100%;
@@ -195,6 +199,24 @@
         .uid-cell {
             font-family: monospace;
             font-weight: 500;
+        }
+        .name-cell {
+            font-weight: 500;
+        }
+        .date-cell {
+            white-space: nowrap;
+        }
+        .times-cell {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .time-tag {
+            background-color: #e3f2fd;
+            border-radius: 4px;
+            padding: 3px 6px;
+            font-size: 0.85em;
+            white-space: nowrap;
         }
         .empty-logs {
             text-align: center;
@@ -250,146 +272,6 @@
             }
         }
     </style>
-<script>
-// Add this code to your existing script
-
-// GitHub configuration
-const githubConfig = {
-  owner: 'BredzPro',
-  repo: 'BredzNFC',
-  path: 'nfc-logs.json',
-  // Personal access token (classic) with repo scope
-  // Create one at: https://github.com/settings/tokens
-  token: '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',
-  sha: null // Will be set after first load
-};
-
-// Load logs from GitHub
-async function loadLogsFromGitHub() {
-  try {
-    const response = await fetch(`https://api.github.com/repos/${githubConfig.owner}/${githubConfig.repo}/contents/${githubConfig.path}`);
-    const data = await response.json();
-    
-    if (data.content) {
-      // Decode base64 content
-      const content = atob(data.content);
-      logs = JSON.parse(content);
-      
-      // Save SHA for later updates
-      githubConfig.sha = data.sha;
-      
-      // Update UI
-      updateUI();
-      console.log('Logs loaded from GitHub');
-    }
-  } catch (error) {
-    console.log('No existing logs file found or other error:', error);
-    // We'll create the file on first save
-  }
-}
-
-// Save logs to GitHub
-async function saveLogsToGitHub() {
-  try {
-    // Prepare content
-    const content = JSON.stringify(logs, null, 2);
-    const encodedContent = btoa(unescape(encodeURIComponent(content)));
-    
-    // Prepare request body
-    const body = {
-      message: `Update NFC logs: ${new Date().toISOString()}`,
-      content: encodedContent,
-      branch: 'main' // or your default branch name
-    };
-    
-    // Add SHA if we're updating existing file
-    if (githubConfig.sha) {
-      body.sha = githubConfig.sha;
-    }
-    
-    // Send request to GitHub API
-    const response = await fetch(`https://api.github.com/repos/${githubConfig.owner}/${githubConfig.repo}/contents/${githubConfig.path}`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `token ${githubConfig.token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
-    
-    const data = await response.json();
-    
-    if (data.content && data.content.sha) {
-      // Update SHA for next commit
-      githubConfig.sha = data.content.sha;
-      console.log('Logs saved to GitHub');
-    }
-  } catch (error) {
-    console.error('Error saving to GitHub:', error);
-  }
-}
-
-// Modify the existing functions
-
-// Handle NFC reading
-function handleNfcReading({ serialNumber }) {
-  // Create log entry
-  const timestamp = new Date();
-  const newLog = {
-    uid: serialNumber,
-    timestamp: timestamp.toISOString(),
-    id: Date.now()
-  };
-  
-  // Add to logs
-  logs.unshift(newLog);
-  
-  // Save to localStorage
-  saveLogs();
-  
-  // Save to GitHub
-  saveLogsToGitHub();
-  
-  // Update UI
-  updateUI();
-  
-  // Show success notification
-  showNotification('success', 'Tag scanned', `UID: ${serialNumber}`);
-}
-
-// Clear all logs
-function clearLogs() {
-  if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
-    logs = [];
-    
-    // Save to localStorage
-    saveLogs();
-    
-    // Save to GitHub
-    saveLogsToGitHub();
-    
-    updateUI();
-    showNotification('success', 'Logs cleared', 'All scan logs have been removed.');
-  }
-}
-
-// Modify init function to load from GitHub
-const originalInit = init;
-function init() {
-  // Call original init
-  originalInit();
-  
-  // Add GitHub info to header
-  const githubInfo = document.createElement('span');
-  githubInfo.className = 'info-item';
-  githubInfo.innerHTML = '<i class="fab fa-github"></i> Syncing to GitHub';
-  document.querySelector('.app-info').appendChild(githubInfo);
-  
-  // Load logs from GitHub
-  loadLogsFromGitHub();
-}
-</script>
-
 </head>
 <body>
     <div class="container">
@@ -399,6 +281,7 @@ function init() {
             <div class="app-info">
                 <span class="info-item"><i class="fas fa-sync-alt"></i> Scans logged: <span id="total-scans">0</span></span>
                 <span class="info-item"><i class="fas fa-clock"></i> Last scan: <span id="last-scan">Never</span></span>
+                <span class="info-item"><i class="fas fa-database"></i> Database: <span id="database-status">Not loaded</span></span>
             </div>
         </div>
         
@@ -412,6 +295,7 @@ function init() {
                 <div class="scan-buttons">
                     <button id="start-scan-btn" class="btn-blue"><i class="fas fa-play"></i> Start Scanning</button>
                     <button id="stop-scan-btn" class="btn-red" style="display: none;"><i class="fas fa-stop"></i> Stop Scanning</button>
+                    <button id="import-excel-btn" class="btn-purple"><i class="fas fa-file-excel"></i> Import Excel Database</button>
                 </div>
             </div>
         </div>
@@ -422,22 +306,29 @@ function init() {
             </div>
             <div class="module-content">
                 <div class="filter-container">
-                    <input type="text" id="filter-input" class="filter-input" placeholder="Filter by UID...">
+                    <input type="text" id="filter-input" class="filter-input" placeholder="Filter by UID or name...">
                 </div>
                 
                 <div class="logs-header">
                     <div class="logs-count">Found logs: <span id="filtered-count">0</span></div>
                     <div class="logs-actions">
-                        <button id="export-btn" class="btn-green" disabled><i class="fas fa-file-export"></i> Export</button>
+                        <button id="import-btn" class="btn-blue"><i class="fas fa-file-import"></i> Import Logs</button>
+                        <button id="export-btn" class="btn-green" disabled><i class="fas fa-file-export"></i> Export Logs</button>
                         <button id="clear-btn" class="btn-orange" disabled><i class="fas fa-trash"></i> Clear All</button>
                     </div>
                 </div>
                 
+                <!-- Hidden file inputs -->
+                <input type="file" id="import-input" accept="application/json" style="display: none;">
+                <input type="file" id="excel-input" accept=".xlsx,.xls" style="display: none;">
+                
                 <table class="logs-table">
                     <thead>
                         <tr>
+                            <th>Name</th>
                             <th>UID</th>
-                            <th>Timestamp</th>
+                            <th>Date</th>
+                            <th>Times</th>
                         </tr>
                     </thead>
                     <tbody id="logs-tbody">
@@ -463,11 +354,16 @@ function init() {
         let nfcSupported = true;
         let nfcReader = null;
         let filter = '';
+        let uidToNameMap = {}; // Map UIDs to names
         
         // DOM Elements
         const startScanBtn = document.getElementById('start-scan-btn');
         const stopScanBtn = document.getElementById('stop-scan-btn');
+        const importExcelBtn = document.getElementById('import-excel-btn');
+        const excelInput = document.getElementById('excel-input');
         const filterInput = document.getElementById('filter-input');
+        const importBtn = document.getElementById('import-btn');
+        const importInput = document.getElementById('import-input');
         const exportBtn = document.getElementById('export-btn');
         const clearBtn = document.getElementById('clear-btn');
         const logsTbody = document.getElementById('logs-tbody');
@@ -475,6 +371,7 @@ function init() {
         const filteredCount = document.getElementById('filtered-count');
         const totalScans = document.getElementById('total-scans');
         const lastScan = document.getElementById('last-scan');
+        const databaseStatus = document.getElementById('database-status');
         const notificationContainer = document.getElementById('notification-container');
         
         // Initialize the app
@@ -486,13 +383,18 @@ function init() {
                 startScanBtn.disabled = true;
             }
             
-            // Load logs from localStorage
+            // Load logs and database from localStorage
             loadLogs();
+            loadDatabase();
             
             // Add event listeners
             startScanBtn.addEventListener('click', startScanning);
             stopScanBtn.addEventListener('click', stopScanning);
+            importExcelBtn.addEventListener('click', () => excelInput.click());
+            excelInput.addEventListener('change', handleExcelFile);
             filterInput.addEventListener('input', handleFilterChange);
+            importBtn.addEventListener('click', () => importInput.click());
+            importInput.addEventListener('change', handleImportFile);
             exportBtn.addEventListener('click', exportLogs);
             clearBtn.addEventListener('click', clearLogs);
             
@@ -532,6 +434,183 @@ function init() {
             }
         }
         
+        // Handle Excel file import
+    // Replace the handleExcelFile function with this updated version
+
+function handleExcelFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            // Get the first sheet
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            
+            // Convert to JSON
+            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+            
+            // Extract UID-name mappings
+            const excelMappings = {};
+            jsonData.forEach(row => {
+                // Get values from the row
+                const keys = Object.keys(row);
+                if (keys.length >= 3) {
+                    const name = row[keys[1]]; // Column B
+                    const uid = String(row[keys[2]]); // Column C
+                    
+                    if (name && uid) {
+                        excelMappings[uid] = name;
+                    }
+                }
+            });
+            
+            // Count mappings in the Excel file
+            const excelCount = Object.keys(excelMappings).length;
+            
+            if (excelCount === 0) {
+                showNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns (B and C).');
+                return;
+            }
+            
+            // Ask user how to handle the import
+            showDatabaseImportDialog(excelMappings);
+            
+        } catch (error) {
+            console.error('Excel import error:', error);
+            showNotification('error', 'Import Failed', 'Could not process the Excel file. Make sure it has the correct format.');
+        }
+    };
+    
+    reader.onerror = function() {
+        showNotification('error', 'Import Failed', 'Failed to read the Excel file.');
+    };
+    
+    reader.readAsArrayBuffer(file);
+    
+    // Reset the file input
+    event.target.value = '';
+}
+
+// Add this new function to show import options for the database
+function showDatabaseImportDialog(excelMappings) {
+    // Create dialog backdrop
+    const dialogBackdrop = document.createElement('div');
+    dialogBackdrop.style.position = 'fixed';
+    dialogBackdrop.style.top = '0';
+    dialogBackdrop.style.left = '0';
+    dialogBackdrop.style.width = '100%';
+    dialogBackdrop.style.height = '100%';
+    dialogBackdrop.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    dialogBackdrop.style.zIndex = '1000';
+    dialogBackdrop.style.display = 'flex';
+    dialogBackdrop.style.justifyContent = 'center';
+    dialogBackdrop.style.alignItems = 'center';
+    
+    // Create dialog box
+    const dialog = document.createElement('div');
+    dialog.style.backgroundColor = 'white';
+    dialog.style.borderRadius = '10px';
+    dialog.style.padding = '20px';
+    dialog.style.width = '90%';
+    dialog.style.maxWidth = '500px';
+    dialog.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+    
+    const currentCount = Object.keys(uidToNameMap).length;
+    const newCount = Object.keys(excelMappings).length;
+    
+    dialog.innerHTML = `
+        <h3 style="margin-top: 0;">Import Excel Database</h3>
+        <p>Found ${newCount} UID-name mappings in the Excel file.</p>
+        <p>How would you like to handle this import?</p>
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap;">
+            <button id="replace-all-btn" class="btn-red">Replace All Entries</button>
+            <button id="merge-add-btn" class="btn-blue">Merge & Add New</button>
+            <button id="smart-update-btn" class="btn-green">Smart Update</button>
+            <button id="cancel-btn">Cancel</button>
+        </div>
+    `;
+    
+    dialogBackdrop.appendChild(dialog);
+    document.body.appendChild(dialogBackdrop);
+    
+    // Replace All: Clear existing database and use only the new data
+    document.getElementById('replace-all-btn').addEventListener('click', function() {
+        uidToNameMap = {...excelMappings};
+        saveDatabase();
+        updateUI();
+        showNotification('success', 'Database Updated', `Replaced database with ${newCount} mappings from Excel.`);
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    // Merge & Add New: Keep existing entries and only add new ones (don't update existing)
+    document.getElementById('merge-add-btn').addEventListener('click', function() {
+        // Add only new mappings, don't change existing ones
+        let addedCount = 0;
+        
+        Object.entries(excelMappings).forEach(([uid, name]) => {
+            if (!uidToNameMap[uid]) {
+                uidToNameMap[uid] = name;
+                addedCount++;
+            }
+        });
+        
+        saveDatabase();
+        updateUI();
+        showNotification('success', 'Database Updated', `Added ${addedCount} new mappings to database.`);
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    // Smart Update: Replace existing entries, add new ones, remove ones not in Excel
+    document.getElementById('smart-update-btn').addEventListener('click', function() {
+        // Count stats for reporting
+        let addedCount = 0;
+        let updatedCount = 0;
+        let removedCount = 0;
+        
+        // Keep track of existing entries that are in Excel
+        const oldUids = new Set(Object.keys(uidToNameMap));
+        const excelUids = new Set(Object.keys(excelMappings));
+        
+        // 1. Update existing + add new
+        Object.entries(excelMappings).forEach(([uid, name]) => {
+            if (uidToNameMap[uid]) {
+                // Entry exists - check if name changed
+                if (uidToNameMap[uid] !== name) {
+                    uidToNameMap[uid] = name;
+                    updatedCount++;
+                }
+            } else {
+                // New entry
+                uidToNameMap[uid] = name;
+                addedCount++;
+            }
+        });
+        
+        // 2. Remove entries not in Excel
+        oldUids.forEach(uid => {
+            if (!excelUids.has(uid)) {
+                delete uidToNameMap[uid];
+                removedCount++;
+            }
+        });
+        
+        saveDatabase();
+        updateUI();
+        showNotification('success', 'Database Updated', 
+            `Smart update complete: ${addedCount} added, ${updatedCount} updated, ${removedCount} removed.`);
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    document.getElementById('cancel-btn').addEventListener('click', function() {
+        document.body.removeChild(dialogBackdrop);
+    });
+}
         // Start NFC scanning
         async function startScanning() {
             if (!nfcSupported) return;
@@ -593,8 +672,11 @@ function init() {
             // Update UI
             updateUI();
             
+            // Determine name for notification
+            const name = uidToNameMap[serialNumber] || 'Unknown';
+            
             // Show success notification
-            showNotification('success', 'Tag scanned', `UID: ${serialNumber}`);
+            showNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
         }
         
         // Handle NFC error
@@ -633,6 +715,115 @@ function init() {
         function handleFilterChange() {
             filter = filterInput.value.toLowerCase();
             updateLogsList();
+        }
+        
+        // Handle import file selection for logs
+        function handleImportFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const importedLogs = JSON.parse(e.target.result);
+                    
+                    // Validate imported data
+                    if (!Array.isArray(importedLogs)) {
+                        throw new Error('Invalid format: Logs must be an array');
+                    }
+                    
+                    // Show import options dialog
+                    showImportDialog(importedLogs);
+                    
+                } catch (error) {
+                    showNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
+                    console.error('Import error:', error);
+                }
+            };
+            
+            reader.onerror = function() {
+                showNotification('error', 'Import Failed', 'Failed to read the selected file.');
+            };
+            
+            reader.readAsText(file);
+            
+            // Reset the file input
+            event.target.value = '';
+        }
+        
+        // Show import options dialog
+        function showImportDialog(importedLogs) {
+            // Create dialog backdrop
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.style.position = 'fixed';
+            dialogBackdrop.style.top = '0';
+            dialogBackdrop.style.left = '0';
+            dialogBackdrop.style.width = '100%';
+            dialogBackdrop.style.height = '100%';
+            dialogBackdrop.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            dialogBackdrop.style.zIndex = '1000';
+            dialogBackdrop.style.display = 'flex';
+            dialogBackdrop.style.justifyContent = 'center';
+            dialogBackdrop.style.alignItems = 'center';
+            
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.style.backgroundColor = 'white';
+            dialog.style.borderRadius = '10px';
+            dialog.style.padding = '20px';
+            dialog.style.width = '90%';
+            dialog.style.maxWidth = '500px';
+            dialog.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+            
+            dialog.innerHTML = `
+                <h3 style="margin-top: 0;">Import ${importedLogs.length} logs</h3>
+                <p>How would you like to import these logs?</p>
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button id="replace-btn" class="btn-red">Replace All</button>
+                    <button id="merge-btn" class="btn-blue">Merge with Existing</button>
+                    <button id="cancel-btn">Cancel</button>
+                </div>
+            `;
+            
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+            
+            // Handle dialog buttons
+            document.getElementById('replace-btn').addEventListener('click', function() {
+                logs = importedLogs;
+                saveLogs();
+                updateUI();
+                showNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported logs.`);
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            document.getElementById('merge-btn').addEventListener('click', function() {
+                // Create a map of existing IDs for quick lookup
+                const existingIds = new Set(logs.map(log => log.id));
+                
+                // Add only new logs
+                let newLogsCount = 0;
+                
+                importedLogs.forEach(log => {
+                    if (!existingIds.has(log.id)) {
+                        logs.push(log);
+                        newLogsCount++;
+                    }
+                });
+                
+                // Sort logs by timestamp (newest first)
+                logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                
+                saveLogs();
+                updateUI();
+                showNotification('success', 'Import Complete', `Added ${newLogsCount} new logs.`);
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            document.getElementById('cancel-btn').addEventListener('click', function() {
+                document.body.removeChild(dialogBackdrop);
+            });
         }
         
         // Clear all logs
@@ -680,11 +871,91 @@ function init() {
             localStorage.setItem('nfcLogs', JSON.stringify(logs));
         }
         
+        // Load database from localStorage
+        function loadDatabase() {
+            const savedDatabase = localStorage.getItem('nfcDatabase');
+            if (savedDatabase) {
+                try {
+                    uidToNameMap = JSON.parse(savedDatabase);
+                    updateDatabaseStatus();
+                } catch (e) {
+                    uidToNameMap = {};
+                    console.error('Error parsing saved database:', e);
+                }
+            }
+        }
+        
+        // Save database to localStorage
+        function saveDatabase() {
+            localStorage.setItem('nfcDatabase', JSON.stringify(uidToNameMap));
+            updateDatabaseStatus();
+        }
+        
+        // Update database status indicator
+        function updateDatabaseStatus() {
+            const count = Object.keys(uidToNameMap).length;
+            if (count > 0) {
+                databaseStatus.textContent = `${count} entries`;
+            } else {
+                databaseStatus.textContent = 'Not loaded';
+            }
+        }
+        
+        // Group logs by date and UID
+        function groupLogsByDateAndUid(filteredLogs) {
+            const grouped = {};
+            
+            filteredLogs.forEach(log => {
+                const date = new Date(log.timestamp).toLocaleDateString();
+                const uid = log.uid;
+                const time = new Date(log.timestamp).toLocaleTimeString();
+                const name = uidToNameMap[uid] || 'Unknown';
+                
+                // Create key for date and UID combination
+                const key = `${date}_${uid}`;
+                
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        date,
+                        uid,
+                        name,
+                        times: []
+                    };
+                }
+                
+                grouped[key].times.push(time);
+            });
+            
+            // Convert to array and sort by date (newest first)
+            return Object.values(grouped).sort((a, b) => {
+                const dateA = new Date(a.date);
+                const dateB = new Date(b.date);
+                return dateB - dateA;
+            });
+        }
+        
         // Update the logs list based on filter
         function updateLogsList() {
+            // Filter logs
             const filteredLogs = filter 
-                ? logs.filter(log => log.uid.toLowerCase().includes(filter))
+                ? logs.filter(log => {
+                    // Match UID
+                    if (log.uid.toLowerCase().includes(filter)) {
+                        return true;
+                    }
+                    
+                    // Match name if in database
+                    const name = uidToNameMap[log.uid];
+                    if (name && name.toLowerCase().includes(filter)) {
+                        return true;
+                    }
+                    
+                    return false;
+                })
                 : logs;
+                
+            // Group logs by date and UID
+            const groupedLogs = groupLogsByDateAndUid(filteredLogs);
                 
             // Update filtered count
             filteredCount.textContent = filteredLogs.length;
@@ -695,20 +966,41 @@ function init() {
             // Clear table
             logsTbody.innerHTML = '';
             
-            // Add filtered logs to table
-            filteredLogs.forEach(log => {
+            // Add grouped logs to table
+            groupedLogs.forEach(group => {
                 const row = document.createElement('tr');
                 
+                // Name cell
+                const nameCell = document.createElement('td');
+                nameCell.className = 'name-cell';
+                nameCell.textContent = group.name;
+                
+                // UID cell
                 const uidCell = document.createElement('td');
                 uidCell.className = 'uid-cell';
-                uidCell.textContent = log.uid;
+                uidCell.textContent = group.uid;
                 
-                const timeCell = document.createElement('td');
-                const date = new Date(log.timestamp);
-                timeCell.textContent = date.toLocaleString();
+                // Date cell
+                const dateCell = document.createElement('td');
+                dateCell.className = 'date-cell';
+                dateCell.textContent = group.date;
                 
+                // Times cell
+                const timesCell = document.createElement('td');
+                timesCell.className = 'times-cell';
+                
+                // Add time tags
+                group.times.forEach(time => {
+                    const timeTag = document.createElement('span');
+                    timeTag.className = 'time-tag';
+                    timeTag.textContent = time;
+                    timesCell.appendChild(timeTag);
+                });
+                
+                row.appendChild(nameCell);
                 row.appendChild(uidCell);
-                row.appendChild(timeCell);
+                row.appendChild(dateCell);
+                row.appendChild(timesCell);
                 
                 logsTbody.appendChild(row);
             });
@@ -717,6 +1009,7 @@ function init() {
         // Update the entire UI
         function updateUI() {
             updateLogsList();
+            updateDatabaseStatus();
             
             // Update total scans
             totalScans.textContent = logs.length;
