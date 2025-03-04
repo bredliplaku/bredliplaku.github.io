@@ -179,15 +179,24 @@
             gap: 10px;
             flex-wrap: wrap;
         }
+        
+        /* Table responsiveness fixes */
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
         .logs-table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 600px; /* Ensures table doesn't get too compressed */
         }
         .logs-table th {
             text-align: left;
             padding: 12px 15px;
             background-color: #f5f5f5;
             font-weight: 500;
+            white-space: nowrap;
         }
         .logs-table td {
             padding: 12px 15px;
@@ -217,6 +226,25 @@
             padding: 3px 6px;
             font-size: 0.85em;
             white-space: nowrap;
+        }
+        .actions-cell {
+            white-space: nowrap;
+        }
+        .action-icon {
+            cursor: pointer;
+            padding: 5px;
+            margin: 0 3px;
+            color: var(--primary-color);
+            transition: color 0.3s, transform 0.3s;
+        }
+        .action-icon:hover {
+            transform: scale(1.2);
+        }
+        .action-icon.edit-icon:hover {
+            color: var(--info-color);
+        }
+        .action-icon.delete-icon:hover {
+            color: var(--danger-color);
         }
         .empty-logs {
             text-align: center;
@@ -258,7 +286,55 @@
             font-size: 0.8em;
         }
         
-        /* Responsive */
+        /* Edit dialog styles */
+        .dialog-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .dialog {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .dialog-title {
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 0.9em;
+            box-sizing: border-box;
+        }
+        .dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        /* Responsive adjustments */
         @media (max-width: 768px) {
             .scan-buttons {
                 flex-direction: column;
@@ -269,6 +345,17 @@
             }
             .logs-count {
                 margin-bottom: 10px;
+            }
+            .logs-table {
+                font-size: 0.9em;
+            }
+            .logs-table th, 
+            .logs-table td {
+                padding: 8px 10px;
+            }
+            .time-tag {
+                font-size: 0.8em;
+                padding: 2px 4px;
             }
         }
     </style>
@@ -282,7 +369,6 @@
                 <span class="info-item"><i class="fas fa-sync-alt"></i> <span id="total-scans">0</span> scans </span>
                 <span class="info-item"><i class="fas fa-clock"></i> Last scan: <span id="last-scan">Never</span></span>
                 <span class="info-item"><i class="fas fa-database"></i> Database: <span id="database-status">Not loaded</span></span>
-                <span class="info-item"><i class="fas fa-cloud"></i> Last sync: <span id="last-sync">Never</span></span>
             </div>
         </div>
         
@@ -297,7 +383,6 @@
                     <button id="start-scan-btn" class="btn-blue"><i class="fas fa-play"></i> Start Scanning</button>
                     <button id="stop-scan-btn" class="btn-red" style="display: none;"><i class="fas fa-stop"></i> Stop Scanning</button>
                     <button id="import-excel-btn" class="btn-green"><i class="fas fa-file-excel"></i> Import Excel Database</button>
-                    <button id="sync-btn" class="btn-purple"><i class="fas fa-sync-alt"></i> Sync Data</button>
                 </div>
             </div>
         </div>
@@ -324,19 +409,23 @@
                 <input type="file" id="import-input" accept="application/json" style="display: none;">
                 <input type="file" id="excel-input" accept=".xlsx,.xls" style="display: none;">
                 
-                <table class="logs-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>UID</th>
-                            <th>Date</th>
-                            <th>Time</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logs-tbody">
-                        <!-- Log entries will go here -->
-                    </tbody>
-                </table>
+                <!-- Table container for horizontal scrolling -->
+                <div class="table-container">
+                    <table class="logs-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>UID</th>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-tbody">
+                            <!-- Log entries will go here -->
+                        </tbody>
+                    </table>
+                </div>
                 
                 <div id="empty-logs" class="empty-logs">
                     <i class="fas fa-info-circle"></i> No scan logs yet. Start scanning to collect UIDs.
@@ -349,35 +438,6 @@
         </div>
     </div>
     
-    <!-- Firebase SDK -->
-    <script type="module">
-        // Import Firebase Core and required services
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
-        import { getDatabase, ref, set, get, child } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
-
-        // Your Firebase configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyAy39MxxKKYMFnOfwLmVYNCVAUa7IV-ScQ",
-            authDomain: "attendance-sync-f81c8.firebaseapp.com", 
-            databaseURL: "https://attendance-sync-f81c8-default-rtdb.europe-west1.firebasedatabase.app",
-            projectId: "attendance-sync-f81c8",
-            storageBucket: "attendance-sync-f81c8.firebasestorage.app",
-            messagingSenderId: "732480523427",
-            appId: "1:732480523427:web:71b0fbc02e825f2e3a4316",
-            measurementId: "G-K0QYLWS7T5"
-        };
-
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const database = getDatabase(app);
-
-        // Make Firebase available globally
-        window.firebaseDB = { database, ref, set, get, child };
-        
-        console.log("Firebase initialized successfully");
-        document.dispatchEvent(new Event('firebase-ready'));
-    </script>
-    
     <script>
         // App state
         let logs = [];
@@ -386,7 +446,7 @@
         let nfcReader = null;
         let filter = '';
         let uidToNameMap = {}; // Map UIDs to names
-        let syncInProgress = false;
+        let currentEditLog = null; // Store the log being edited
         
         // DOM Elements
         const startScanBtn = document.getElementById('start-scan-btn');
@@ -405,8 +465,6 @@
         const lastScan = document.getElementById('last-scan');
         const databaseStatus = document.getElementById('database-status');
         const notificationContainer = document.getElementById('notification-container');
-        const lastSyncElement = document.getElementById('last-sync');
-        const syncBtn = document.getElementById('sync-btn');
         
         // Initialize the app
         function init() {
@@ -432,148 +490,8 @@
             exportBtn.addEventListener('click', exportLogs);
             clearBtn.addEventListener('click', clearLogs);
             
-            // Initialize Firebase sync
-            initFirebaseSync();
-            
-            // Load last sync time
-            const lastSyncTime = localStorage.getItem('MTH_202_lastSync');
-            if (lastSyncTime) {
-                lastSyncElement.textContent = new Date(lastSyncTime).toLocaleString();
-            }
-            
             // Update UI based on loaded logs
             updateUI();
-        }
-        
-        // Firebase Sync Functions
-        function initFirebaseSync() {
-            // Add event listener for when Firebase is ready
-            document.addEventListener('firebase-ready', () => {
-                console.log('Firebase is ready, setting up sync button');
-                syncBtn.addEventListener('click', syncWithFirebase);
-            });
-        }
-        
-        // Sync data with Firebase
-        async function syncWithFirebase() {
-            if (syncInProgress) return;
-            
-            syncInProgress = true;
-            console.log("Starting Firebase sync");
-            showNotification('info', 'Syncing', 'Connecting to Firebase...');
-            
-            try {
-                // Push current data to Firebase first
-                console.log("Pushing data to Firebase");
-                await syncToFirebase();
-                
-                // Then pull latest data
-                console.log("Pulling data from Firebase");
-                await syncFromFirebase();
-                
-                // Update last sync time
-                const now = new Date();
-                lastSyncElement.textContent = now.toLocaleString();
-                localStorage.setItem('MTH_202_lastSync', now.toISOString());
-                
-                showNotification('success', 'Sync Complete', 'Data synchronized with Firebase');
-            } catch (error) {
-                console.error('Firebase sync error:', error);
-                showNotification('error', 'Sync Failed', error.message || 'Could not connect to Firebase');
-            } finally {
-                syncInProgress = false;
-            }
-        }
-        
-        // Pull data from Firebase
-        async function syncFromFirebase() {
-            if (!window.firebaseDB) {
-                console.error("Firebase not initialized");
-                throw new Error('Firebase not initialized');
-            }
-            
-            const { database, ref, get, child } = window.firebaseDB;
-            const dbRef = ref(database);
-            
-            try {
-                console.log("Reading database from Firebase");
-                // Get database (UID to name mappings)
-                const dbSnapshot = await get(child(dbRef, 'MTH_202/database'));
-                if (dbSnapshot.exists()) {
-                    const remoteDb = dbSnapshot.val();
-                    console.log("Found database in Firebase:", remoteDb);
-                    if (remoteDb && Object.keys(remoteDb).length > 0) {
-                        uidToNameMap = remoteDb;
-                        saveDatabase();
-                        updateUI();
-                        showNotification('success', 'Database Updated', `Imported ${Object.keys(remoteDb).length} name mappings from Firebase.`);
-                    }
-                } else {
-                    console.log("No database found in Firebase");
-                }
-                
-                console.log("Reading logs from Firebase");
-                // Get logs
-                const logsSnapshot = await get(child(dbRef, 'MTH_202/logs'));
-                if (logsSnapshot.exists()) {
-                    const remoteLogs = logsSnapshot.val();
-                    console.log("Found logs in Firebase:", remoteLogs ? remoteLogs.length : 0);
-                    if (remoteLogs && remoteLogs.length > 0) {
-                        // Merge logs (add only new ones)
-                        const existingIds = new Set(logs.map(log => log.id));
-                        let newLogsCount = 0;
-                        
-                        remoteLogs.forEach(log => {
-                            if (!existingIds.has(log.id)) {
-                                logs.push(log);
-                                newLogsCount++;
-                            }
-                        });
-                        
-                        // Sort logs by timestamp (newest first)
-                        logs.sort((a, b) => b.timestamp - a.timestamp);
-                        
-                        saveLogs();
-                        updateUI();
-                        
-                        if (newLogsCount > 0) {
-                            showNotification('success', 'Logs Updated', `Added ${newLogsCount} new logs from Firebase.`);
-                        }
-                    }
-                } else {
-                    console.log("No logs found in Firebase");
-                }
-                
-                return true;
-            } catch (error) {
-                console.error("Error getting data from Firebase:", error);
-                throw error;
-            }
-        }
-        
-        // Push data to Firebase
-        async function syncToFirebase() {
-            if (!window.firebaseDB) {
-                console.error("Firebase not initialized");
-                throw new Error('Firebase not initialized');
-            }
-            
-            const { database, ref, set } = window.firebaseDB;
-            
-            try {
-                console.log("Pushing logs to Firebase:", logs.length);
-                // Push logs
-                await set(ref(database, 'MTH_202/logs'), logs);
-                
-                console.log("Pushing database to Firebase:", Object.keys(uidToNameMap).length);
-                // Push database
-                await set(ref(database, 'MTH_202/database'), uidToNameMap);
-                
-                return true;
-            } catch (error) {
-                console.error("Error saving data to Firebase:", error);
-                throw error;
-            }
         }
         
         // Show notification
@@ -669,42 +587,28 @@
             event.target.value = '';
         }
 
-        // Add this new function to show import options for the database
+        // Show import options for the database
         function showDatabaseImportDialog(excelMappings) {
             // Create dialog backdrop
             const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.style.position = 'fixed';
-            dialogBackdrop.style.top = '0';
-            dialogBackdrop.style.left = '0';
-            dialogBackdrop.style.width = '100%';
-            dialogBackdrop.style.height = '100%';
-            dialogBackdrop.style.backgroundColor = 'rgba(0,0,0,0.5)';
-            dialogBackdrop.style.zIndex = '1000';
-            dialogBackdrop.style.display = 'flex';
-            dialogBackdrop.style.justifyContent = 'center';
-            dialogBackdrop.style.alignItems = 'center';
+            dialogBackdrop.className = 'dialog-backdrop';
             
             // Create dialog box
             const dialog = document.createElement('div');
-            dialog.style.backgroundColor = 'white';
-            dialog.style.borderRadius = '10px';
-            dialog.style.padding = '20px';
-            dialog.style.width = '90%';
-            dialog.style.maxWidth = '500px';
-            dialog.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+            dialog.className = 'dialog';
             
             const currentCount = Object.keys(uidToNameMap).length;
             const newCount = Object.keys(excelMappings).length;
             
             dialog.innerHTML = `
-                <h3 style="margin-top: 0;">Import Excel Database</h3>
+                <h3 class="dialog-title">Import Excel Database</h3>
                 <p>Found ${newCount} UID-name mappings in the Excel file.</p>
                 <p>How would you like to handle this import?</p>
-                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap;">
+                <div class="dialog-actions">
                     <button id="replace-all-btn" class="btn-red">Replace All Entries</button>
                     <button id="merge-add-btn" class="btn-blue">Merge & Add New</button>
                     <button id="smart-update-btn" class="btn-green">Smart Update</button>
-                    <button id="cancel-btn">Cancel</button>
+                    <button id="cancel-db-btn">Cancel</button>
                 </div>
             `;
             
@@ -779,10 +683,11 @@
                 document.body.removeChild(dialogBackdrop);
             });
             
-            document.getElementById('cancel-btn').addEventListener('click', function() {
+            document.getElementById('cancel-db-btn').addEventListener('click', function() {
                 document.body.removeChild(dialogBackdrop);
             });
         }
+        
         // Start NFC scanning
         async function startScanning() {
             if (!nfcSupported) return;
@@ -832,10 +737,10 @@
             // Create log entry
             const timestamp = new Date();
             const newLog = {
-				uid: serialNumber,
-				timestamp: timestamp.getTime(), // Store milliseconds instead
-				id: Date.now()
-			};
+                uid: serialNumber,
+                timestamp: timestamp.getTime(), // Store milliseconds
+                id: Date.now()
+            };
             
             // Add to logs
             logs.unshift(newLog);
@@ -850,35 +755,35 @@
             // Show success notification
             showNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
         }
-		
-		// When displaying timestamps:
-		function formatTimestamp(timestamp) {
-			if (!timestamp) return 'Invalid date';
-			
-			try {
-				// Convert any format to a Date object
-				const date = new Date(timestamp);
-				
-				// Check if date is valid
-				if (isNaN(date.getTime())) {
-					return 'Invalid date';
-				}
-				
-				// Manual formatting to use hyphens
-				const day = String(date.getDate()).padStart(2, '0');
-				const month = String(date.getMonth() + 1).padStart(2, '0');
-				const year = date.getFullYear();
-				const hours = String(date.getHours()).padStart(2, '0');
-				const minutes = String(date.getMinutes()).padStart(2, '0');
-				const seconds = String(date.getSeconds()).padStart(2, '0');
-				
-				// Format as DD-MM-YYYY HH:MM:SS
-				return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
-			} catch (err) {
-				console.error('Error formatting timestamp:', err);
-				return 'Invalid date';
-			}
-		}
+        
+        // Format timestamp
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'Invalid date';
+            
+            try {
+                // Convert any format to a Date object
+                const date = new Date(timestamp);
+                
+                // Check if date is valid
+                if (isNaN(date.getTime())) {
+                    return 'Invalid date';
+                }
+                
+                // Manual formatting to use hyphens
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+                
+                // Format as DD-MM-YYYY HH:MM:SS
+                return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+            } catch (err) {
+                console.error('Error formatting timestamp:', err);
+                return 'Invalid date';
+            }
+        }
         
         // Handle NFC error
         function handleNfcError(error) {
@@ -920,95 +825,81 @@
         
         // Handle import file selection for logs
         function handleImportFile(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    
-    reader.onload = function(e) {
-        try {
-            const importedLogs = JSON.parse(e.target.result);
+            const file = event.target.files[0];
+            if (!file) return;
             
-            if (!Array.isArray(importedLogs)) {
-                throw new Error('Invalid format: Logs must be an array');
-            }
+            const reader = new FileReader();
             
-            // Normalize all timestamps to milliseconds
-            importedLogs.forEach(log => {
-                if (log.timestamp) {
-                    try {
-                        // Convert any timestamp format to milliseconds
-                        log.timestamp = new Date(log.timestamp).getTime();
-                        
-                        // If invalid, use current time
-                        if (isNaN(log.timestamp)) {
-                            console.warn(`Invalid timestamp: ${log.timestamp}`);
+            reader.onload = function(e) {
+                try {
+                    const importedLogs = JSON.parse(e.target.result);
+                    
+                    if (!Array.isArray(importedLogs)) {
+                        throw new Error('Invalid format: Logs must be an array');
+                    }
+                    
+                    // Normalize all timestamps to milliseconds
+                    importedLogs.forEach(log => {
+                        if (log.timestamp) {
+                            try {
+                                // Convert any timestamp format to milliseconds
+                                log.timestamp = new Date(log.timestamp).getTime();
+                                
+                                // If invalid, use current time
+                                if (isNaN(log.timestamp)) {
+                                    console.warn(`Invalid timestamp: ${log.timestamp}`);
+                                    log.timestamp = Date.now();
+                                }
+                            } catch (err) {
+                                console.warn(`Error parsing timestamp: ${err}`);
+                                log.timestamp = Date.now();
+                            }
+                        } else {
                             log.timestamp = Date.now();
                         }
-                    } catch (err) {
-                        console.warn(`Error parsing timestamp: ${err}`);
-                        log.timestamp = Date.now();
-                    }
-                } else {
-                    log.timestamp = Date.now();
+                        
+                        // Ensure each log has an ID
+                        if (!log.id) {
+                            log.id = Date.now() + Math.floor(Math.random() * 1000);
+                        }
+                    });
+                    
+                    // Show import options dialog
+                    showImportDialog(importedLogs);
+                    
+                } catch (error) {
+                    showNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
+                    console.error('Import error:', error);
                 }
-                
-                // Ensure each log has an ID
-                if (!log.id) {
-                    log.id = Date.now() + Math.floor(Math.random() * 1000);
-                }
-            });
+            };
             
-            // Show import options dialog
-            showImportDialog(importedLogs);
+            reader.onerror = function() {
+                showNotification('error', 'Import Failed', 'Failed to read the selected file.');
+            };
             
-        } catch (error) {
-            showNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
-            console.error('Import error:', error);
+            reader.readAsText(file);
+            
+            // Reset the file input
+            event.target.value = '';
         }
-    };
-    
-    reader.onerror = function() {
-        showNotification('error', 'Import Failed', 'Failed to read the selected file.');
-    };
-    
-    reader.readAsText(file);
-    
-    // Reset the file input
-    event.target.value = '';
-}
         
         // Show import options dialog
         function showImportDialog(importedLogs) {
             // Create dialog backdrop
             const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.style.position = 'fixed';
-            dialogBackdrop.style.top = '0';
-            dialogBackdrop.style.left = '0';
-            dialogBackdrop.style.width = '100%';
-            dialogBackdrop.style.height = '100%';
-            dialogBackdrop.style.backgroundColor = 'rgba(0,0,0,0.5)';
-            dialogBackdrop.style.zIndex = '1000';
-            dialogBackdrop.style.display = 'flex';
-            dialogBackdrop.style.justifyContent = 'center';
-            dialogBackdrop.style.alignItems = 'center';
+            dialogBackdrop.className = 'dialog-backdrop';
             
             // Create dialog box
             const dialog = document.createElement('div');
-            dialog.style.backgroundColor = 'white';
-            dialog.style.borderRadius = '10px';
-            dialog.style.padding = '20px';
-            dialog.style.width = '90%';
-            dialog.style.maxWidth = '500px';
-            dialog.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+            dialog.className = 'dialog';
             
             dialog.innerHTML = `
-                <h3 style="margin-top: 0;">Import ${importedLogs.length} logs</h3>
+                <h3 class="dialog-title">Import ${importedLogs.length} logs</h3>
                 <p>How would you like to import these logs?</p>
-                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <div class="dialog-actions">
                     <button id="replace-btn" class="btn-red">Replace All</button>
                     <button id="merge-btn" class="btn-blue">Merge with Existing</button>
-                    <button id="cancel-btn">Cancel</button>
+                    <button id="cancel-import-btn">Cancel</button>
                 </div>
             `;
             
@@ -1047,7 +938,7 @@
                 document.body.removeChild(dialogBackdrop);
             });
             
-            document.getElementById('cancel-btn').addEventListener('click', function() {
+            document.getElementById('cancel-import-btn').addEventListener('click', function() {
                 document.body.removeChild(dialogBackdrop);
             });
         }
@@ -1062,7 +953,6 @@
             }
         }
         
-        // Export logs to JSON file
         // Export logs preserving the exact local time
         function exportLogs() {
             // Create export data with timestamps that preserve local time exactly
@@ -1102,7 +992,7 @@
         
         // Load logs from localStorage
         function loadLogs() {
-            const savedLogs = localStorage.getItem('MTH_202_nfcLogs');
+            const savedLogs = localStorage.getItem('CEN104_nfcLogs');
             if (savedLogs) {
                 try {
                     logs = JSON.parse(savedLogs);
@@ -1115,12 +1005,12 @@
         
         // Save logs to localStorage
         function saveLogs() {
-            localStorage.setItem('MTH_202_nfcLogs', JSON.stringify(logs));
+            localStorage.setItem('CEN104_nfcLogs', JSON.stringify(logs));
         }
         
         // Load database from localStorage
         function loadDatabase() {
-            const savedDatabase = localStorage.getItem('MTH_202_database');
+            const savedDatabase = localStorage.getItem('nfcDatabase');
             if (savedDatabase) {
                 try {
                     uidToNameMap = JSON.parse(savedDatabase);
@@ -1134,7 +1024,7 @@
         
         // Save database to localStorage
         function saveDatabase() {
-            localStorage.setItem('MTH_202_database', JSON.stringify(uidToNameMap));
+            localStorage.setItem('nfcDatabase', JSON.stringify(uidToNameMap));
             updateDatabaseStatus();
         }
         
@@ -1174,11 +1064,13 @@
                         date,
                         uid,
                         name,
-                        times: []
+                        times: [],
+                        originalLogs: [] // Store original log references for edit/delete
                     };
                 }
                 
                 grouped[key].times.push(time);
+                grouped[key].originalLogs.push(log); // Store reference to original log
             });
             
             // Convert to array and sort by date (newest first)
@@ -1215,35 +1107,35 @@
                 })
                 : logs;
                 
-                function formatDate(date) {
-                    if (!date) return '';
-                    
-                    // Handle different input types
-                    const d = typeof date === 'string' ? new Date(date) : 
-                            typeof date === 'number' ? new Date(date) : date;
-                    
-                    if (isNaN(d.getTime())) return 'Invalid date';
-                    
-                    // Format as DD-MM-YYYY
-                    const day = String(d.getDate()).padStart(2, '0');
-                    const month = String(d.getMonth() + 1).padStart(2, '0');
-                    const year = d.getFullYear();
-                    
-                    return `${day}-${month}-${year}`;
-                }
+            function formatDate(date) {
+                if (!date) return '';
+                
+                // Handle different input types
+                const d = typeof date === 'string' ? new Date(date) : 
+                          typeof date === 'number' ? new Date(date) : date;
+                
+                if (isNaN(d.getTime())) return 'Invalid date';
+                
+                // Format as DD-MM-YYYY
+                const day = String(d.getDate()).padStart(2, '0');
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const year = d.getFullYear();
+                
+                return `${day}-${month}-${year}`;
+            }
 
-                // Format time consistently
-                function formatTime(date) {
-                    if (!date) return '';
-                    
-                    const d = typeof date === 'string' ? new Date(date) : 
-                            typeof date === 'number' ? new Date(date) : date;
-                    
-                    if (isNaN(d.getTime())) return 'Invalid time';
-                    
-                    // Format as HH:MM:SS
-                    return d.toTimeString().split(' ')[0];
-                }
+            // Format time consistently
+            function formatTime(date) {
+                if (!date) return '';
+                
+                const d = typeof date === 'string' ? new Date(date) : 
+                          typeof date === 'number' ? new Date(date) : date;
+                
+                if (isNaN(d.getTime())) return 'Invalid time';
+                
+                // Format as HH:MM:SS
+                return d.toTimeString().split(' ')[0];
+            }
                 
             // Group logs by date and UID
             const groupedLogs = groupLogsByDateAndUid(filteredLogs);
@@ -1288,13 +1180,143 @@
                     timesCell.appendChild(timeTag);
                 });
                 
+                // Actions cell
+                const actionsCell = document.createElement('td');
+                actionsCell.className = 'actions-cell';
+                
+                // Edit button
+                const editIcon = document.createElement('i');
+                editIcon.className = 'fas fa-edit action-icon edit-icon';
+                editIcon.title = 'Edit';
+                editIcon.addEventListener('click', () => showEditLogDialog(group));
+                
+                // Delete button
+                const deleteIcon = document.createElement('i');
+                deleteIcon.className = 'fas fa-trash-alt action-icon delete-icon';
+                deleteIcon.title = 'Delete';
+                deleteIcon.addEventListener('click', () => confirmDeleteLog(group));
+                
+                actionsCell.appendChild(editIcon);
+                actionsCell.appendChild(deleteIcon);
+                
                 row.appendChild(nameCell);
                 row.appendChild(uidCell);
                 row.appendChild(dateCell);
                 row.appendChild(timesCell);
+                row.appendChild(actionsCell);
                 
                 logsTbody.appendChild(row);
             });
+        }
+        
+        // Show edit log dialog
+        function showEditLogDialog(group) {
+            // Select the first log for this group as the one to edit
+            // (This approach will modify all logs for the same UID on the same day)
+            currentEditLog = group.originalLogs[0];
+            
+            // Create dialog backdrop
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            
+            // Get current values
+            const currentDate = new Date(currentEditLog.timestamp);
+            const formattedDate = currentDate.toISOString().split('T')[0]; // YYYY-MM-DD format for date input
+            const formattedTime = currentDate.toTimeString().split(' ')[0]; // HH:MM:SS format for time input
+            
+            dialog.innerHTML = `
+                <h3 class="dialog-title">Edit Log Entry</h3>
+                
+                <div class="form-group">
+                    <label for="edit-name">Name:</label>
+                    <input type="text" id="edit-name" class="form-control" value="${group.name}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-uid">UID:</label>
+                    <input type="text" id="edit-uid" class="form-control" value="${group.uid}" readonly>
+                    <small style="color: #777; display: block; margin-top: 5px;">UID cannot be changed</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-date">Date:</label>
+                    <input type="date" id="edit-date" class="form-control" value="${formattedDate}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-time">Time:</label>
+                    <input type="time" id="edit-time" class="form-control" value="${formattedTime.substr(0, 5)}" step="1">
+                </div>
+                
+                <div class="dialog-actions">
+                    <button id="save-log-btn" class="btn-green">Save Changes</button>
+                    <button id="cancel-edit-btn">Cancel</button>
+                </div>
+            `;
+            
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+            
+            // Handle save button
+            document.getElementById('save-log-btn').addEventListener('click', function() {
+                const newName = document.getElementById('edit-name').value.trim();
+                const newDate = document.getElementById('edit-date').value;
+                const newTime = document.getElementById('edit-time').value;
+                
+                // Update the name in the database if changed
+                if (newName !== group.name) {
+                    uidToNameMap[group.uid] = newName;
+                    saveDatabase();
+                }
+                
+                // Update all logs in this group with new date and time
+                const newDateTime = new Date(`${newDate}T${newTime}`);
+                
+                // Update all logs with the same UID and date
+                group.originalLogs.forEach(log => {
+                    // Keep hours/minutes from the new time, but use original seconds/milliseconds
+                    const originalDate = new Date(log.timestamp);
+                    const updatedDate = new Date(newDateTime);
+                    updatedDate.setSeconds(originalDate.getSeconds());
+                    updatedDate.setMilliseconds(originalDate.getMilliseconds());
+                    
+                    // Update the timestamp
+                    log.timestamp = updatedDate.getTime();
+                });
+                
+                // Save changes
+                saveLogs();
+                updateUI();
+                
+                showNotification('success', 'Log Updated', 'The log entry has been successfully updated.');
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            // Handle cancel button
+            document.getElementById('cancel-edit-btn').addEventListener('click', function() {
+                document.body.removeChild(dialogBackdrop);
+                currentEditLog = null;
+            });
+        }
+        
+        // Confirm delete log
+        function confirmDeleteLog(group) {
+            if (confirm(`Are you sure you want to delete all log entries for ${group.name} (${group.uid}) on ${group.date}?`)) {
+                // Get all log IDs in this group
+                const logIds = group.originalLogs.map(log => log.id);
+                
+                // Remove all logs with matching IDs
+                logs = logs.filter(log => !logIds.includes(log.id));
+                
+                saveLogs();
+                updateUI();
+                
+                showNotification('success', 'Logs Deleted', `Deleted ${logIds.length} log entries.`);
+            }
         }
         
         // Update the entire UI
