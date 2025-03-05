@@ -400,6 +400,101 @@
   margin-top: 5px;
   font-size: 0.85em;
 }
+/* Modal styles */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.5);
+  overflow-y: auto;
+}
+
+.modal-content {
+  background-color: var(--card-background);
+  margin: 5% auto;
+  max-width: 600px;
+  border-radius: 20px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  animation: modalFadeIn 0.3s;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+@keyframes modalFadeIn {
+  from {opacity: 0; transform: translateY(-30px);}
+  to {opacity: 1; transform: translateY(0);}
+}
+
+.modal-header {
+  background: linear-gradient(135deg, #ff7043, #f4511e);
+  color: white;
+  padding: 15px 20px;
+  border-radius: 20px 20px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5em;
+  font-weight: 500;
+}
+
+.close, .close-confirmation {
+  color: white;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+/* Form styles */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.form-group input[type="text"],
+.form-group input[type="email"],
+.form-group input[type="date"],
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 1em;
+  box-sizing: border-box;
+}
+
+.form-group input[readonly] {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.form-group small {
+  display: block;
+  color: #666;
+  margin-top: 5px;
+  font-size: 0.85em;
+}
 
 .form-group.checkbox-group {
   display: flex;
@@ -443,6 +538,7 @@
   .modal-content {
     width: 95%;
     margin: 10% auto;
+    max-height: 80vh;
   }
   
   .form-buttons {
@@ -859,6 +955,199 @@ function storeSubmission(referenceID) {
   // This is where you would typically make an API call to send an email
   // For example using fetch() to call a server endpoint
 }
+// Absence reporting system
+document.addEventListener('DOMContentLoaded', function() {
+  // Get modal elements
+  const absenceModal = document.getElementById('absenceModal');
+  const confirmationModal = document.getElementById('confirmationModal');
+  const absenceButton = document.getElementById('absenceButton');
+  const closeButton = document.querySelector('.close');
+  const closeConfirmationButton = document.querySelector('.close-confirmation');
+  const cancelButton = document.getElementById('cancelButton');
+  const confirmOkButton = document.getElementById('confirmOkButton');
+  const explanationField = document.getElementById('absenceExplanation');
+  const charCount = document.getElementById('charCount');
+  const absenceDate = document.getElementById('absenceDate');
+  const dateWarning = document.getElementById('dateWarning');
+  
+  // Generate a reference ID
+  function generateReferenceID() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    return `ABS-${year}${month}${day}-${random}`;
+  }
+  
+  // Open the modal when button is clicked
+  absenceButton.addEventListener('click', function() {
+    absenceModal.style.display = 'block';
+    document.body.style.overflow = 'hidden'; // Prevent scrolling behind modal
+  });
+  
+  // Close the modal when X is clicked
+  closeButton.addEventListener('click', function() {
+    absenceModal.style.display = 'none';
+    document.body.style.overflow = '';
+  });
+  
+  // Close confirmation modal
+  closeConfirmationButton.addEventListener('click', function() {
+    confirmationModal.style.display = 'none';
+    document.body.style.overflow = '';
+  });
+  
+  // Close the modal when Cancel is clicked
+  cancelButton.addEventListener('click', function() {
+    absenceModal.style.display = 'none';
+    document.body.style.overflow = '';
+  });
+  
+  // Close confirmation when OK is clicked
+  confirmOkButton.addEventListener('click', function() {
+    confirmationModal.style.display = 'none';
+    document.body.style.overflow = '';
+  });
+  
+  // Close the modal when clicking outside it
+  window.addEventListener('click', function(event) {
+    if (event.target == absenceModal) {
+      absenceModal.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+    if (event.target == confirmationModal) {
+      confirmationModal.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+  });
+  
+  // Update character count for explanation field
+  explanationField.addEventListener('input', function() {
+    charCount.textContent = this.value.length;
+    if (this.value.length < 50) {
+      charCount.style.color = '#e53935';
+    } else {
+      charCount.style.color = '#4caf50';
+    }
+  });
+  
+  // Set default date to today
+  const today = new Date();
+  const todayString = today.toISOString().split('T')[0];
+  absenceDate.value = todayString;
+  
+  // Validate date when changed
+  absenceDate.addEventListener('change', function() {
+    validateDate();
+  });
+  
+  // Date validation function
+  function validateDate() {
+    const selectedDate = new Date(absenceDate.value);
+    const now = new Date();
+    const hoursDifference = (now - selectedDate) / (1000 * 60 * 60);
+    
+    if (selectedDate > now) {
+      // Future date not allowed
+      dateWarning.textContent = "You cannot report a future absence";
+      dateWarning.style.display = 'block';
+      absenceDate.classList.add('error');
+      return false;
+    } else if (hoursDifference > 36) {
+      // Too late to report
+      dateWarning.textContent = "This absence report has expired";
+      dateWarning.style.display = 'block';
+      absenceDate.classList.add('error');
+      return false;
+    } else {
+      // Date is valid
+      dateWarning.style.display = 'none';
+      absenceDate.classList.remove('error');
+      return true;
+    }
+  }
+});
+
+// Handle form submission
+function submitAbsenceForm(event) {
+  event.preventDefault();
+  
+  // Validate date before submitting
+  const absenceDate = document.getElementById('absenceDate');
+  const selectedDate = new Date(absenceDate.value);
+  const now = new Date();
+  const hoursDifference = (now - selectedDate) / (1000 * 60 * 60);
+  
+  if (selectedDate > now) {
+    alert("You cannot report a future absence");
+    return false;
+  } else if (hoursDifference > 36) {
+    alert("This absence report has expired");
+    return false;
+  }
+  
+  // Get justified hours from selected reason
+  const reasonSelect = document.getElementById('absenceReason');
+  const selectedOption = reasonSelect.options[reasonSelect.selectedIndex];
+  const justifiedHours = selectedOption.getAttribute('data-hours');
+  
+  // Generate a reference ID
+  const referenceID = generateReferenceID();
+  
+  // Submit to Google Form
+  const form = document.getElementById('absenceForm');
+  const formData = new FormData();
+  
+  // Add the form fields to formData (replace with your actual form field entry IDs)
+  formData.append('entry.XXXXX1', form.courseName.value); // Replace XXXXX1 with actual entry ID
+  formData.append('entry.XXXXX2', form.studentName.value); // Replace XXXXX2 with actual entry ID
+  formData.append('entry.XXXXX3', form.studentID.value);
+  formData.append('entry.XXXXX4', form.studentEmail.value);
+  formData.append('entry.XXXXX5', form.absenceDate.value);
+  formData.append('entry.XXXXX6', form.absenceReason.value);
+  formData.append('entry.XXXXX7', form.absenceExplanation.value);
+  formData.append('entry.XXXXX8', justifiedHours);
+  formData.append('entry.XXXXX9', referenceID);
+  formData.append('entry.XXXXX10', 'Yes'); // Honor code checkbox
+  
+  // Create a new XMLHttpRequest
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', 'https://docs.google.com/forms/d/e/YOUR_FORM_ID/formResponse', true);
+  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+  
+  // Convert FormData to URL encoded string
+  let urlEncodedData = "";
+  for (const [key, value] of formData.entries()) {
+    urlEncodedData += encodeURIComponent(key) + '=' + encodeURIComponent(value) + '&';
+  }
+  urlEncodedData = urlEncodedData.slice(0, -1); // Remove the trailing '&'
+  
+  // Set up completion handler
+  xhr.onload = function() {
+    // Show confirmation modal
+    document.getElementById('referenceID').textContent = referenceID;
+    document.getElementById('hoursJustified').textContent = justifiedHours;
+    document.getElementById('absenceModal').style.display = 'none';
+    document.getElementById('confirmationModal').style.display = 'block';
+    
+    // Reset the form
+    form.reset();
+    document.getElementById('charCount').textContent = '0';
+    document.getElementById('absenceDate').value = new Date().toISOString().split('T')[0];
+  };
+  
+  // Handle errors
+  xhr.onerror = function() {
+    console.error('Form submission failed');
+    alert("There was an error submitting your absence report. Please try again.");
+  };
+  
+  // Send the request
+  xhr.send(urlEncodedData);
+  
+  return false;
+}
 
 // Generate a reference ID for the submission
 function generateReferenceID() {
@@ -916,7 +1205,7 @@ function generateReferenceID() {
 			<button onclick="window.open('https://chat.google.com/room/AAAAv-sISaI?cls=7', '_blank', 'noopener,noreferrer')" class="btn-orange"><i class="fas fa-bullhorn"></i> Announcements</button>
 			<button id="toggle-button" onclick="toggleIframe()"><i class="fas fa-calendar-alt"></i> Timetable</button>
 			<button class="btn-green" id="gradeDistributionButton" onclick="toggleGradeDistribution()"><i class="fas fa-chart-pie"></i> Evaluation Criteria</button>
-<button id="absenceButton" class="btn-purple"><i class="fas fa-user-clock"></i> Report Absence</button>
+<button id="absenceButton" class="btn-orange"><i class="fas fa-user-clock"></i> Report Absence</button>
 		</div>	
 	
 	<div class="course-schedule">
@@ -1063,6 +1352,84 @@ function generateReferenceID() {
 
 <!-- Add this modal for submission confirmation -->
 <div id="confirmationModal" class="modal">
+<!-- Add this modal form to the end of your body, before the closing body tag -->
+<div id="absenceModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Report Absence</h2>
+      <span class="close">&times;</span>
+    </div>
+    <div class="modal-body">
+      <form id="absenceForm" onsubmit="return submitAbsenceForm(event)">
+        <div class="form-group">
+          <label for="courseName">Course <span class="required">*</span></label>
+          <input type="text" id="courseName" name="courseName" value="MTH 202" readonly>
+        </div>
+        
+        <div class="form-group">
+          <label for="studentName">Full Name <span class="required">*</span></label>
+          <input type="text" id="studentName" name="studentName" required>
+        </div>
+        
+        <div class="form-group">
+          <label for="studentID">Student ID <span class="required">*</span></label>
+          <input type="text" id="studentID" name="studentID" pattern="[0-9]+" required>
+          <small>Enter your numeric ID only</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="studentEmail">EPOKA Email <span class="required">*</span></label>
+          <input type="email" id="studentEmail" name="studentEmail" pattern="[a-zA-Z0-9._%+-]+@epoka\.edu\.al$" required>
+          <small>Must be your official @epoka.edu.al email</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="absenceDate">Date of Absence <span class="required">*</span></label>
+          <input type="date" id="absenceDate" name="absenceDate" required>
+          <small id="dateWarning" class="error-message" style="display: none;">Absence reports must be submitted promptly after missing class</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="absenceReason">Reason for Absence <span class="required">*</span></label>
+          <select id="absenceReason" name="absenceReason" required>
+            <option value="" disabled selected>Select a reason</option>
+            <option value="Illness" data-hours="2">Illness or medical emergency (2 hours justified)</option>
+            <option value="Family" data-hours="3">Family emergency (3 hours justified)</option>
+            <option value="Academic" data-hours="2">Academic conflict (2 hours justified)</option>
+            <option value="Religious" data-hours="2">Religious observance (2 hours justified)</option>
+            <option value="Transport" data-hours="1">Transportation issues (1 hour justified)</option>
+            <option value="Other" data-hours="1">Other (1 hour justified)</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="absenceExplanation">Detailed Explanation <span class="required">*</span></label>
+          <textarea id="absenceExplanation" name="absenceExplanation" minlength="50" rows="4" required></textarea>
+          <small><span id="charCount">0</span>/50 characters minimum</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="absenceDocument">Supporting Documentation (optional)</label>
+          <input type="file" id="absenceDocument" name="absenceDocument">
+          <small>Accepted formats: PDF, JPG, PNG (max 5MB)</small>
+        </div>
+        
+        <div class="form-group checkbox-group">
+          <input type="checkbox" id="honorCode" name="honorCode" required>
+          <label for="honorCode">I certify that the information provided is accurate and complete. I understand that misrepresentation may result in disciplinary action. <span class="required">*</span></label>
+        </div>
+        
+        <div class="form-buttons">
+          <button type="submit" class="btn-orange">Submit</button>
+          <button type="button" class="btn-blue" id="cancelButton">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Add this modal for submission confirmation -->
+<div id="confirmationModal" class="modal">
   <div class="modal-content">
     <div class="modal-header">
       <h2>Absence Report Submitted</h2>
@@ -1071,13 +1438,17 @@ function generateReferenceID() {
     <div class="modal-body">
       <p>Your absence report has been submitted successfully.</p>
       <p>Reference ID: <span id="referenceID"></span></p>
+      <p>Hours justified: <span id="hoursJustified"></span></p>
       <p>Please keep this reference number for your records.</p>
       <div class="form-buttons">
-        <button type="button" class="btn-purple" id="confirmOkButton">OK</button>
+        <button type="button" class="btn-orange" id="confirmOkButton">OK</button>
       </div>
     </div>
   </div>
 </div>
+
+<!-- Hidden form for Google Forms submission -->
+<iframe name="hiddenFrame" id="hiddenFrame" style="display:none;"></iframe>
 
 	<footer class="footer">
         <div class="social-links">
