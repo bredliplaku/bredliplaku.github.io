@@ -1014,8 +1014,10 @@ function handleSignoutClick() {
         isAdmin = false;
         currentUser = null;
         updateAuthUI();
+        window.location.reload();  // Force a reload to reset the UI and event listeners
     }
 }
+
         
 function updateAuthUI() {
     // Get database tab
@@ -1192,40 +1194,38 @@ function handleCourseChange() {
         }
         
         // Fetch database from Google Sheet
-        async function fetchDatabaseFromSheet() {
-            try {
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:C', // Assuming headers in row 1
-                });
-                
-                const rows = response.result.values || [];
-                
-                // Extract UID-name mappings
-                const sheetMappings = {};
-                rows.forEach(row => {
-                    if (row.length >= 2) {
-                        const name = row[0];
-                        const uid = String(row[1]);
-                        
-                        if (name && uid) {
-                            sheetMappings[uid] = name;
-                        }
-                    }
-                });
-                
-                // Update local database
-                uidToNameMap = sheetMappings;
-                saveDatabase();
-                updateUI();
-                
-                showNotification('success', 'Database Updated', `Loaded ${Object.keys(uidToNameMap).length} entries from Google Sheets`);
-            } catch (error) {
-                console.error('Error fetching database:', error);
-                showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
-                throw error;
+async function fetchDatabaseFromSheet() {
+    try {
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: DATABASE_SPREADSHEET_ID,
+            range: 'Database!A2:C', // Header row is A1:C1 (Index, Name, UID)
+        });
+        
+        const rows = response.result.values || [];
+        const sheetMappings = {};
+        rows.forEach(row => {
+            // row[0] is the index, row[1] is Name, row[2] is UID.
+            const name = row[1];
+            const uid = row[2];
+            // Ignore entries with empty UID
+            if (name && uid) {
+                sheetMappings[uid] = name;
             }
-        }
+        });
+        
+        // Update local database
+        uidToNameMap = sheetMappings;
+        saveDatabase();
+        updateUI();
+        
+        showNotification('success', 'Database Updated', `Loaded ${Object.keys(uidToNameMap).length} entries from Google Sheets`);
+    } catch (error) {
+        console.error('Error fetching database:', error);
+        showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+        throw error;
+    }
+}
+
         
         // Fetch logs from Google Sheet for current course
         async function fetchLogsFromSheet() {
