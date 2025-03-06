@@ -379,7 +379,7 @@
     white-space: nowrap; /* Prevents text from wrapping */
 }
 
-/* Absence reporting system styles */
+/* Absence form styles */
 .absence-container {
     width: 100%;
     height: 0;
@@ -782,7 +782,7 @@ function generateGradeDistribution() {
     });
 }
 
-// Absence reporting system functions
+// Absence form functions
 function toggleAbsenceForm() {
     var absenceContainer = document.getElementById("absence-container");
     var button = document.getElementById("absenceButton");
@@ -790,377 +790,346 @@ function toggleAbsenceForm() {
     if (absenceContainer.classList.contains('visible')) {
         absenceContainer.classList.remove('visible');
         button.innerHTML = '<i class="fas fa-user-clock"></i> Report Absence';
-        setTimeout(() => {
-            absenceContainer.style.display = 'none';
-        }, 500); // Match this to the transition duration
     } else {
-        absenceContainer.style.display = 'block';
-        // Force a reflow before adding the 'visible' class
-        absenceContainer.offsetHeight;
         absenceContainer.classList.add('visible');
         button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Form';
     }
 }
 
-// Form validation and submission will be initialized on page load
-		
+// Generate a reference ID
+function generateReferenceID() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    return `ABS-${year}${month}${day}-${random}`;
+}
+
+// Validate date for absence form
+function validateDate() {
+    const dateField = document.getElementById('absenceDate');
+    const dateError = document.getElementById('dateError');
+    
+    const selectedDate = new Date(dateField.value + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const twoDaysAgo = new Date(today);
+    twoDaysAgo.setDate(today.getDate() - 2);
+    
+    const oneWeekLater = new Date(today);
+    oneWeekLater.setDate(today.getDate() + 7);
+    
+    if (selectedDate < twoDaysAgo) {
+        dateError.textContent = "You are reporting too late";
+        dateError.style.display = 'block';
+        dateField.classList.add('error');
+        return false;
+    } else if (selectedDate > oneWeekLater) {
+        dateError.textContent = "The date is too far in the future";
+        dateError.style.display = 'block';
+        dateField.classList.add('error');
+        return false;
+    } else {
+        dateError.style.display = 'none';
+        dateField.classList.remove('error');
+        return true;
+    }
+}
+
+// Update form based on selected reason
+function updateAbsenceReason() {
+    const reasonField = document.getElementById('absenceReason');
+    const explanationField = document.getElementById('absenceExplanation');
+    const documentGroup = document.getElementById('documentGroup');
+    const docRequired = document.getElementById('docRequired');
+    const documentField = document.getElementById('absenceDocument');
+    const attachmentDescription = document.getElementById('attachmentDescription');
+    const minChars = document.getElementById('minChars');
+    
+    // Configure form based on reason
+    switch(reasonField.value) {
+        case 'Illness':
+            // Show attachment field and make it required
+            documentGroup.style.display = 'block';
+            docRequired.style.display = 'inline';
+            documentField.required = true;
+            attachmentDescription.textContent = "Please upload a medical report or doctor's note (PDF, JPG, PNG, max 5MB)";
+            
+            // Set standard explanation length
+            minChars.textContent = '50';
+            explanationField.setAttribute('minlength', '50');
+            break;
+            
+        case 'Transport':
+            // Show attachment field but make it optional
+            documentGroup.style.display = 'block';
+            docRequired.style.display = 'none';
+            documentField.required = false;
+            attachmentDescription.textContent = "Please upload a photo of the traffic jam (optional, JPG, PNG, max 5MB)";
+            
+            // Increase explanation length
+            minChars.textContent = '100';
+            explanationField.setAttribute('minlength', '100');
+            break;
+            
+        case 'Family':
+            // Hide attachment field
+            documentGroup.style.display = 'none';
+            documentField.required = false;
+            
+            // Reduce explanation length
+            minChars.textContent = '10';
+            explanationField.setAttribute('minlength', '10');
+            break;
+            
+        case 'Other':
+            // Show attachment field as optional
+            documentGroup.style.display = 'block';
+            docRequired.style.display = 'none';
+            documentField.required = false;
+            attachmentDescription.textContent = "Supporting documentation (optional, PDF, JPG, PNG, max 5MB)";
+            
+            // Increase explanation length
+            minChars.textContent = '100';
+            explanationField.setAttribute('minlength', '100');
+            break;
+        default:
+            // Default case
+            documentGroup.style.display = 'block';
+            docRequired.style.display = 'none';
+            documentField.required = false;
+            minChars.textContent = '50';
+            explanationField.setAttribute('minlength', '50');
+    }
+    
+    // Update validation
+    validateForm();
+}
+
+// Update character count
+function updateCharCount() {
+    const explanationField = document.getElementById('absenceExplanation');
+    const charCount = document.getElementById('charCount');
+    const explanationError = document.getElementById('explanationError');
+    const minLength = parseInt(explanationField.getAttribute('minlength'));
+    const currentLength = explanationField.value.length;
+    
+    charCount.textContent = currentLength;
+    
+    if (currentLength < minLength) {
+        charCount.style.color = '#f44336';
+        explanationError.style.display = 'block';
+        explanationField.classList.add('error');
+    } else {
+        charCount.style.color = '#4caf50';
+        explanationError.style.display = 'none';
+        explanationField.classList.remove('error');
+    }
+}
+
+// Validate entire form
+function validateForm() {
+    const form = document.getElementById('absenceForm');
+    const nameField = document.getElementById('studentName');
+    const idField = document.getElementById('studentID');
+    const emailField = document.getElementById('studentEmail');
+    const reasonField = document.getElementById('absenceReason');
+    const explanationField = document.getElementById('absenceExplanation');
+    const documentField = document.getElementById('absenceDocument');
+    const honorCodeField = document.getElementById('honorCode');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    const nameValid = nameField.value.trim() !== '';
+    const idValid = idField.value.match(/^[0-9]+$/);
+    const emailValid = emailField.value.match(/[a-zA-Z0-9._%+-]+@epoka\.edu\.al$/);
+    const dateValid = validateDate();
+    const reasonValid = reasonField.value !== '' && reasonField.value !== null;
+    
+    // Explanation validation
+    const minLength = parseInt(explanationField.getAttribute('minlength') || '50');
+    const explanationValid = explanationField.value.length >= minLength;
+    
+    // Document validation (required only for illness)
+    const documentValid = reasonField.value !== 'Illness' || documentField.files.length > 0;
+    
+    // Honor code validation
+    const honorValid = honorCodeField.checked;
+    
+    // Enable submit button only if all validations pass
+    submitBtn.disabled = !(nameValid && idValid && emailValid && dateValid && 
+                        reasonValid && explanationValid && documentValid && honorValid);
+}
+
+// Submit the form to email
+function submitForm() {
+    const form = document.getElementById('absenceForm');
+    
+    // Final validation
+    validateForm();
+    
+    if (document.getElementById('submitBtn').disabled) {
+        return false;
+    }
+    
+    const name = document.getElementById('studentName').value;
+    const id = document.getElementById('studentID').value;
+    const email = document.getElementById('studentEmail').value;
+    const date = document.getElementById('absenceDate').value;
+    const reason = document.getElementById('absenceReason').value;
+    const explanation = document.getElementById('absenceExplanation').value;
+    const referenceID = generateReferenceID();
+    
+    // Create email body
+    let emailBody = `Reference ID: ${referenceID}%0D%0A`;
+    emailBody += `Course: MTH 202 Mathematics for Engineers%0D%0A`;
+    emailBody += `Student Name: ${name}%0D%0A`;
+    emailBody += `Student ID: ${id}%0D%0A`;
+    emailBody += `Student Email: ${email}%0D%0A`;
+    emailBody += `Date of Absence: ${date}%0D%0A`;
+    emailBody += `Reason: ${reason}%0D%0A`;
+    emailBody += `Explanation: ${explanation}%0D%0A`;
+    
+    // Create email subject
+    const emailSubject = `Absence Report: ${name} (${id}) - ${reason}`;
+    
+    // Open email client
+    window.location.href = `mailto:bplaku@epoka.edu.al?subject=${emailSubject}&body=${emailBody}`;
+    
+    // Show confirmation
+    document.getElementById('referenceID').textContent = referenceID;
+    
+    // Set appropriate confirmation message
+    const confirmationMessage = document.getElementById('confirmationMessage');
+    switch(reason) {
+        case 'Illness':
+            confirmationMessage.textContent = "I hope you feel better soon. Your absence has been recorded.";
+            break;
+        case 'Transport':
+            confirmationMessage.textContent = "Your transportation-related absence has been recorded.";
+            break;
+        case 'Family':
+            confirmationMessage.textContent = "I'm sorry to hear about your family emergency. I hope things get better soon.";
+            break;
+        case 'Other':
+            confirmationMessage.textContent = "Your absence has been recorded.";
+            break;
+    }
+    
+    // Show confirmation modal
+    document.getElementById('confirmationModal').style.display = 'block';
+    
+    // Reset the form
+    form.reset();
+    document.getElementById('absenceDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('charCount').textContent = '0';
+    document.getElementById('minChars').textContent = '50';
+    document.getElementById('absenceExplanation').setAttribute('minlength', '50');
+    document.getElementById('documentGroup').style.display = 'block';
+    document.getElementById('docRequired').style.display = 'none';
+    document.getElementById('absenceDocument').required = false;
+    document.getElementById('attachmentDescription').textContent = "Accepted formats: PDF, JPG, PNG (max 5MB)";
+    document.getElementById('submitBtn').disabled = true;
+    
+    // Hide the form
+    toggleAbsenceForm();
+    
+    return false;
+}
+
+// Initialize everything when page loads
 window.onload = function() {
     updateWeekCounter();
     updateProgress();
     updateYear();
     document.getElementById('timetable-form').submit();
-    initializeAbsenceForm();
-};
-
-
-// Initialize the absence form
-function initializeAbsenceForm() {
-    // Get elements
-    const absenceContainer = document.getElementById('absence-container');
-    const absenceButton = document.getElementById('absenceButton');
-    const closeAbsenceBtn = document.getElementById('close-absence-btn');
-    const confirmationModal = document.getElementById('confirmationModal');
-    const closeConfirmationButton = document.querySelector('.close-confirmation');
-    const cancelButton = document.getElementById('cancelButton');
-    const confirmOkButton = document.getElementById('confirmOkButton');
-    const submitBtn = document.getElementById('submitBtn');
-    const confirmationMessage = document.getElementById('confirmationMessage');
     
-    // Form fields
-    const form = document.getElementById('absenceForm');
-    const nameField = document.getElementById('studentName');
-    const idField = document.getElementById('studentID');
-    const emailField = document.getElementById('studentEmail');
-    const dateField = document.getElementById('absenceDate');
-    const reasonField = document.getElementById('absenceReason');
-    const explanationField = document.getElementById('absenceExplanation');
-    const documentField = document.getElementById('absenceDocument');
-    const honorCodeField = document.getElementById('honorCode');
-    const documentGroup = document.getElementById('documentGroup');
-    const attachmentDescription = document.getElementById('attachmentDescription');
+    // Initialize date field with today's date
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('absenceDate').value = today;
     
-    // Error messages
-    const nameError = document.getElementById('nameError');
-    const idError = document.getElementById('idError');
-    const emailError = document.getElementById('emailError');
-    const dateError = document.getElementById('dateError');
-    const reasonError = document.getElementById('reasonError');
-    const explanationError = document.getElementById('explanationError');
-    const documentError = document.getElementById('documentError');
-    const honorError = document.getElementById('honorError');
-    
-    // Other elements
-    const charCount = document.getElementById('charCount');
-    const minChars = document.getElementById('minChars');
-    const docRequired = document.getElementById('docRequired');
-    
-    // Toggle absence form visibility
-    absenceButton.addEventListener('click', toggleAbsenceForm);
-    
-    closeAbsenceBtn.addEventListener('click', function() {
-        toggleAbsenceForm();
+    // Set up event listeners for absence form
+    document.getElementById('studentName').addEventListener('input', function() {
+        if (this.value.trim() === '') {
+            document.getElementById('nameError').style.display = 'block';
+            this.classList.add('error');
+        } else {
+            document.getElementById('nameError').style.display = 'none';
+            this.classList.remove('error');
+        }
+        validateForm();
     });
     
-    cancelButton.addEventListener('click', function() {
-        toggleAbsenceForm();
+    document.getElementById('studentID').addEventListener('input', function() {
+        if (!this.value.match(/^[0-9]+$/)) {
+            document.getElementById('idError').style.display = 'block';
+            this.classList.add('error');
+        } else {
+            document.getElementById('idError').style.display = 'none';
+            this.classList.remove('error');
+        }
+        validateForm();
     });
+    
+    document.getElementById('studentEmail').addEventListener('input', function() {
+        if (!this.value.match(/[a-zA-Z0-9._%+-]+@epoka\.edu\.al$/)) {
+            document.getElementById('emailError').style.display = 'block';
+            this.classList.add('error');
+        } else {
+            document.getElementById('emailError').style.display = 'none';
+            this.classList.remove('error');
+        }
+        validateForm();
+    });
+    
+    document.getElementById('absenceDate').addEventListener('change', validateDate);
+    document.getElementById('absenceReason').addEventListener('change', updateAbsenceReason);
+    document.getElementById('absenceExplanation').addEventListener('input', updateCharCount);
+    
+    document.getElementById('absenceDocument').addEventListener('change', function() {
+        if (document.getElementById('absenceReason').value === 'Illness' && !this.files.length) {
+            document.getElementById('documentError').style.display = 'block';
+        } else {
+            document.getElementById('documentError').style.display = 'none';
+        }
+        validateForm();
+    });
+    
+    document.getElementById('honorCode').addEventListener('change', function() {
+        if (!this.checked) {
+            document.getElementById('honorError').style.display = 'block';
+        } else {
+            document.getElementById('honorError').style.display = 'none';
+        }
+        validateForm();
+    });
+    
+    document.getElementById('absenceForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitForm();
+    });
+    
+    document.getElementById('close-absence-btn').addEventListener('click', toggleAbsenceForm);
+    document.getElementById('cancelButton').addEventListener('click', toggleAbsenceForm);
+    document.getElementById('absenceButton').addEventListener('click', toggleAbsenceForm);
     
     // Close confirmation modal
-    closeConfirmationButton.addEventListener('click', function() {
-        confirmationModal.style.display = 'none';
+    document.querySelector('.close-confirmation').addEventListener('click', function() {
+        document.getElementById('confirmationModal').style.display = 'none';
     });
     
-    confirmOkButton.addEventListener('click', function() {
-        confirmationModal.style.display = 'none';
+    document.getElementById('confirmOkButton').addEventListener('click', function() {
+        document.getElementById('confirmationModal').style.display = 'none';
     });
     
     // Close modal when clicking outside
     window.addEventListener('click', function(event) {
-        if (event.target == confirmationModal) {
-            confirmationModal.style.display = 'none';
+        if (event.target == document.getElementById('confirmationModal')) {
+            document.getElementById('confirmationModal').style.display = 'none';
         }
     });
-    
-    // Validate name field
-    nameField.addEventListener('input', function() {
-        if (this.value.trim() === '') {
-            nameError.style.display = 'block';
-            this.classList.add('error');
-        } else {
-            nameError.style.display = 'none';
-            this.classList.remove('error');
-        }
-        validateForm();
-    });
-    
-    // Validate ID field
-    idField.addEventListener('input', function() {
-        if (!this.value.match(/^[0-9]+$/)) {
-            idError.style.display = 'block';
-            this.classList.add('error');
-        } else {
-            idError.style.display = 'none';
-            this.classList.remove('error');
-        }
-        validateForm();
-    });
-    
-    // Validate email field
-    emailField.addEventListener('input', function() {
-        if (!this.value.match(/[a-zA-Z0-9._%+-]+@epoka\.edu\.al$/)) {
-            emailError.style.display = 'block';
-            this.classList.add('error');
-        } else {
-            emailError.style.display = 'none';
-            this.classList.remove('error');
-        }
-        validateForm();
-    });
-    
-    // Set default date to today
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    dateField.value = todayStr;
-    
-    // Validate date field - allow today, yesterday, and up to one week in the future
-    dateField.addEventListener('change', function() {
-        const selectedDate = new Date(this.value + 'T00:00:00');
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        const twoDaysAgo = new Date(today);
-        twoDaysAgo.setDate(today.getDate() - 2);
-        
-        const oneWeekLater = new Date(today);
-        oneWeekLater.setDate(today.getDate() + 7);
-        
-        if (selectedDate < twoDaysAgo) {
-            dateError.textContent = "You are reporting too late";
-            dateError.style.display = 'block';
-            this.classList.add('error');
-        } else if (selectedDate > oneWeekLater) {
-            dateError.textContent = "The date is too far in the future";
-            dateError.style.display = 'block';
-            this.classList.add('error');
-        } else {
-            dateError.style.display = 'none';
-            this.classList.remove('error');
-        }
-        validateForm();
-    });
-    
-    // Validate reason field and handle special requirements
-    reasonField.addEventListener('change', function() {
-        if (this.value === '') {
-            reasonError.style.display = 'block';
-            this.classList.add('error');
-        } else {
-            reasonError.style.display = 'none';
-            this.classList.remove('error');
-            
-            // Configure form based on reason
-            switch(this.value) {
-                case 'Illness':
-                    // Show attachment field and make it required
-                    documentGroup.style.display = 'block';
-                    docRequired.style.display = 'inline';
-                    documentField.required = true;
-                    attachmentDescription.textContent = "Please upload a medical report or doctor's note (PDF, JPG, PNG, max 5MB)";
-                    
-                    // Set standard explanation length
-                    minChars.textContent = '50';
-                    explanationField.setAttribute('minlength', '50');
-                    break;
-                    
-                case 'Transport':
-                    // Show attachment field but make it optional
-                    documentGroup.style.display = 'block';
-                    docRequired.style.display = 'none';
-                    documentField.required = false;
-                    attachmentDescription.textContent = "Please upload a photo of the traffic jam (optional, JPG, PNG, max 5MB)";
-                    
-                    // Increase explanation length
-                    minChars.textContent = '100';
-                    explanationField.setAttribute('minlength', '100');
-                    break;
-                    
-                case 'Family':
-                    // Hide attachment field
-                    documentGroup.style.display = 'none';
-                    documentField.required = false;
-                    
-                    // Reduce explanation length
-                    minChars.textContent = '10';
-                    explanationField.setAttribute('minlength', '10');
-                    break;
-                    
-                case 'Other':
-                    // Show attachment field as optional
-                    documentGroup.style.display = 'block';
-                    docRequired.style.display = 'none';
-                    documentField.required = false;
-                    attachmentDescription.textContent = "Supporting documentation (optional, PDF, JPG, PNG, max 5MB)";
-                    
-                    // Increase explanation length
-                    minChars.textContent = '100';
-                    explanationField.setAttribute('minlength', '100');
-                    break;
-            }
-            
-            // Update character count validation
-            updateCharCount();
-        }
-        validateForm();
-    });
-    
-    // Update character count
-    function updateCharCount() {
-        const minLength = parseInt(explanationField.getAttribute('minlength'));
-        const currentLength = explanationField.value.length;
-        
-        charCount.textContent = currentLength;
-        
-        if (currentLength < minLength) {
-            charCount.style.color = '#f44336';
-            explanationError.style.display = 'block';
-            explanationField.classList.add('error');
-        } else {
-            charCount.style.color = '#4caf50';
-            explanationError.style.display = 'none';
-            explanationField.classList.remove('error');
-        }
-    }
-    
-    // Validate explanation field
-    explanationField.addEventListener('input', function() {
-        updateCharCount();
-        validateForm();
-    });
-    
-    // Validate document field
-    documentField.addEventListener('change', function() {
-        if (reasonField.value === 'Illness' && !this.files.length) {
-            documentError.style.display = 'block';
-        } else {
-            documentError.style.display = 'none';
-        }
-        validateForm();
-    });
-    
-    // Validate honor code
-    honorCodeField.addEventListener('change', function() {
-        if (!this.checked) {
-            honorError.style.display = 'block';
-        } else {
-            honorError.style.display = 'none';
-        }
-        validateForm();
-    });
-    
-    // Validate form and enable/disable submit button
-    function validateForm() {
-        const nameValid = nameField.value.trim() !== '';
-        const idValid = idField.value.match(/^[0-9]+$/);
-        const emailValid = emailField.value.match(/[a-zA-Z0-9._%+-]+@epoka\.edu\.al$/);
-        
-        // Date validation
-        const selectedDate = new Date(dateField.value + 'T00:00:00');
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        const twoDaysAgo = new Date(today);
-        twoDaysAgo.setDate(today.getDate() - 2);
-        
-        const oneWeekLater = new Date(today);
-        oneWeekLater.setDate(today.getDate() + 7);
-        
-        const dateValid = selectedDate >= twoDaysAgo && selectedDate <= oneWeekLater;
-        
-        // Reason validation
-        const reasonValid = reasonField.value !== '' && reasonField.value !== null;
-        
-        // Explanation validation
-        const minLength = parseInt(explanationField.getAttribute('minlength') || '50');
-        const explanationValid = explanationField.value.length >= minLength;
-        
-        // Document validation (required only for illness)
-        const documentValid = reasonField.value !== 'Illness' || documentField.files.length > 0;
-        
-        // Honor code validation
-        const honorValid = honorCodeField.checked;
-        
-        // Enable submit button only if all validations pass
-        submitBtn.disabled = !(nameValid && idValid && emailValid && dateValid && 
-                            reasonValid && explanationValid && documentValid && honorValid);
-    }
-    
-    // Generate a reference ID
-    function generateReferenceID() {
-        const date = new Date();
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-        return `ABS-${year}${month}${day}-${random}`;
-    }
-    
-    // Handle form submission
-    form.addEventListener('submit', function(event) {
-        event.preventDefault();
-        
-        // Final validation before submission
-        validateForm();
-        
-        if (submitBtn.disabled) {
-            return false;
-        }
-        
-        // Generate reference ID
-        const referenceID = generateReferenceID();
-        document.getElementById('referenceID').textContent = referenceID;
-        
-        // Set appropriate confirmation message based on reason
-        const reason = reasonField.value;
-        
-        switch(reason) {
-            case 'Illness':
-                confirmationMessage.textContent = "I hope you feel better soon. Your absence has been recorded.";
-                break;
-            case 'Transport':
-                confirmationMessage.textContent = "Your transportation-related absence has been recorded.";
-                break;
-            case 'Family':
-                confirmationMessage.textContent = "I'm sorry to hear about your family emergency. I hope things get better soon.";
-                break;
-            case 'Other':
-                confirmationMessage.textContent = "Your absence has been recorded.";
-                break;
-        }
-        
-        // For Google Forms, you would set up the form submission here
-        // This is where you'd submit the data to your Google Form
-        
-        // Show confirmation modal
-        confirmationModal.style.display = 'block';
-        
-        // Reset the form
-        form.reset();
-        dateField.value = new Date().toISOString().split('T')[0];
-        charCount.textContent = '0';
-        minChars.textContent = '50';
-        explanationField.setAttribute('minlength', '50');
-        documentGroup.style.display = 'block';
-        docRequired.style.display = 'none';
-        documentField.required = false;
-        attachmentDescription.textContent = "Accepted formats: PDF, JPG, PNG (max 5MB)";
-        submitBtn.disabled = true;
-        
-        // Hide the form
-        toggleAbsenceForm();
-        
-        return false;
-    });
-}
+};
     </script>
 </head>
 <body>
@@ -1199,7 +1168,7 @@ function initializeAbsenceForm() {
 			<button onclick="window.open('https://chat.google.com/room/AAAAv-sISaI?cls=7', '_blank', 'noopener,noreferrer')" class="btn-orange"><i class="fas fa-bullhorn"></i> Announcements</button>
 			<button id="toggle-button" onclick="toggleIframe()"><i class="fas fa-calendar-alt"></i> Timetable</button>
 			<button class="btn-green" id="gradeDistributionButton" onclick="toggleGradeDistribution()"><i class="fas fa-chart-pie"></i> Evaluation Criteria</button>
-            <button id="absenceButton" class="btn-red" onclick="toggleAbsenceForm()"><i class="fas fa-user-clock"></i> Report Absence</button>
+            <button id="absenceButton" class="btn-red"><i class="fas fa-user-clock"></i> Report Absence</button>
 		</div>
 
         <!-- Absence form container -->
@@ -1210,7 +1179,7 @@ function initializeAbsenceForm() {
               <button type="button" id="close-absence-btn" class="btn-red"><i class="fa fa-eye-slash"></i> Hide Form</button>
             </div>
             
-            <form id="absenceForm" onsubmit="return false;">
+            <form id="absenceForm">
               <div class="form-group">
                 <label for="courseName">Course <span class="required">*</span></label>
                 <input type="text" id="courseName" name="courseName" value="MTH 202 Mathematics for Engineers" readonly>
