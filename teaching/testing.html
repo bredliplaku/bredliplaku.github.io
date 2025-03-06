@@ -182,6 +182,11 @@
         transform: translateY(-2px);
 		cursor: pointer;
     }
+    button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+    }
     .btn-green { background-color: #43a047; }
     .btn-green:hover { background-color: #2e7d32; }
     .btn-orange { background-color: #fb8c00; }
@@ -387,7 +392,7 @@
     opacity: 0;
     transition: opacity 0.5s ease-out, height 0.5s ease-out;
     margin-bottom: 20px;
-    max-width: 1000px;
+    max-width: 900px;
     margin-left: auto;
     margin-right: auto;
 }
@@ -497,6 +502,48 @@
     justify-content: flex-end;
     gap: 10px;
     margin-top: 20px;
+}
+
+.email-field-container {
+    display: flex;
+    align-items: center;
+}
+
+.email-prefix, .email-suffix {
+    background-color: #f5f5f5;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 10px 0 0 10px;
+    color: #666;
+}
+
+.email-suffix {
+    border-radius: 0 10px 10px 0;
+    border-left: none;
+}
+
+.email-number {
+    border-radius: 0;
+    width: 60px !important;
+    text-align: center;
+    border-left: none;
+    border-right: none;
+}
+
+.notice-box {
+    background-color: #e8f4f8;
+    border-left: 5px solid #2196F3;
+    padding: 15px;
+    margin-top: 20px;
+    margin-bottom: 20px;
+    border-radius: 5px;
+}
+
+.disclaimer {
+    margin-top: 20px;
+    font-size: 0.9em;
+    color: #757575;
+    font-style: italic;
 }
 
 /* Modal styles */
@@ -617,6 +664,18 @@
         width: 95%;
         margin: 10% auto;
         max-height: 80vh;
+    }
+    
+    .email-field-container {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .email-prefix, .email-suffix, .email-number {
+        width: 100% !important;
+        border-radius: 10px;
+        border: 1px solid #ddd;
+        margin-bottom: 5px;
     }
     }
 </style>
@@ -863,25 +922,13 @@ function updateAbsenceReason() {
             break;
             
         case 'Transport':
-            // Show attachment field but make it optional
-            documentGroup.style.display = 'block';
-            docRequired.style.display = 'none';
-            documentField.required = false;
-            attachmentDescription.textContent = "Please upload a photo of the traffic jam (optional, JPG, PNG, max 5MB)";
-            
-            // Increase explanation length
-            minChars.textContent = '100';
-            explanationField.setAttribute('minlength', '100');
-            break;
-            
-        case 'Family':
             // Hide attachment field
             documentGroup.style.display = 'none';
             documentField.required = false;
             
-            // Reduce explanation length
-            minChars.textContent = '10';
-            explanationField.setAttribute('minlength', '10');
+            // Increase explanation length
+            minChars.textContent = '100';
+            explanationField.setAttribute('minlength', '100');
             break;
             
         case 'Other':
@@ -897,8 +944,7 @@ function updateAbsenceReason() {
             break;
         default:
             // Default case
-            documentGroup.style.display = 'block';
-            docRequired.style.display = 'none';
+            documentGroup.style.display = 'none';
             documentField.required = false;
             minChars.textContent = '50';
             explanationField.setAttribute('minlength', '50');
@@ -934,7 +980,7 @@ function validateForm() {
     const form = document.getElementById('absenceForm');
     const nameField = document.getElementById('studentName');
     const idField = document.getElementById('studentID');
-    const emailField = document.getElementById('studentEmail');
+    const emailNumberField = document.getElementById('emailNumber');
     const reasonField = document.getElementById('absenceReason');
     const explanationField = document.getElementById('absenceExplanation');
     const documentField = document.getElementById('absenceDocument');
@@ -943,7 +989,7 @@ function validateForm() {
     
     const nameValid = nameField.value.trim() !== '';
     const idValid = idField.value.match(/^[0-9]+$/);
-    const emailValid = emailField.value.match(/[a-zA-Z0-9._%+-]+@epoka\.edu\.al$/);
+    const emailValid = emailNumberField.value.match(/^[0-9]{2}$/);
     const dateValid = validateDate();
     const reasonValid = reasonField.value !== '' && reasonField.value !== null;
     
@@ -962,6 +1008,15 @@ function validateForm() {
                         reasonValid && explanationValid && documentValid && honorValid);
 }
 
+// Get full email from form
+function getFullEmail() {
+    const firstName = document.getElementById('firstName').value.toLowerCase();
+    const lastName = document.getElementById('lastName').value.toLowerCase();
+    const emailNumber = document.getElementById('emailNumber').value;
+    
+    return `${firstName}${lastName}${emailNumber}@epoka.edu.al`;
+}
+
 // Submit the form to email
 function submitForm() {
     const form = document.getElementById('absenceForm');
@@ -975,27 +1030,40 @@ function submitForm() {
     
     const name = document.getElementById('studentName').value;
     const id = document.getElementById('studentID').value;
-    const email = document.getElementById('studentEmail').value;
+    const firstName = document.getElementById('firstName').value;
+    const lastName = document.getElementById('lastName').value;
+    const emailNumber = document.getElementById('emailNumber').value;
+    const fullEmail = `${firstName}${lastName}${emailNumber}@epoka.edu.al`;
     const date = document.getElementById('absenceDate').value;
     const reason = document.getElementById('absenceReason').value;
     const explanation = document.getElementById('absenceExplanation').value;
     const referenceID = generateReferenceID();
     
-    // Create email body
-    let emailBody = `Reference ID: ${referenceID}%0D%0A`;
+    // Format date for email subject
+    const formattedDate = new Date(date).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+    
+    // Create email subject
+    const emailSubject = `MTH 202 Absence Request for ${formattedDate}`;
+    
+    // Create email body with better formatting
+    let emailBody = `Dear Mr. Plaku,%0D%0A%0D%0AI would like to request an absence for the following class:%0D%0A%0D%0A`;
+    emailBody += `Reference ID: ${referenceID}%0D%0A`;
     emailBody += `Course: MTH 202 Mathematics for Engineers%0D%0A`;
     emailBody += `Student Name: ${name}%0D%0A`;
     emailBody += `Student ID: ${id}%0D%0A`;
-    emailBody += `Student Email: ${email}%0D%0A`;
-    emailBody += `Date of Absence: ${date}%0D%0A`;
-    emailBody += `Reason: ${reason}%0D%0A`;
-    emailBody += `Explanation: ${explanation}%0D%0A`;
+    emailBody += `Date of Absence: ${formattedDate}%0D%0A`;
+    emailBody += `Reason: ${reason}%0D%0A%0D%0A`;
+    emailBody += `Explanation: ${explanation}%0D%0A%0D%0A`;
+    emailBody += `Please let me know if you need any additional information.%0D%0A%0D%0A`;
+    emailBody += `Thank you for your consideration.%0D%0A%0D%0A`;
+    emailBody += `Sincerely,%0D%0A${name}`;
     
-    // Create email subject
-    const emailSubject = `Absence Report: ${name} (${id}) - ${reason}`;
-    
-    // Open email client
-    window.location.href = `mailto:bplaku@epoka.edu.al?subject=${emailSubject}&body=${emailBody}`;
+    // Open email client with CC to student
+    window.location.href = `mailto:bplaku@epoka.edu.al?cc=${fullEmail}&subject=${emailSubject}&body=${emailBody}`;
     
     // Show confirmation
     document.getElementById('referenceID').textContent = referenceID;
@@ -1008,9 +1076,6 @@ function submitForm() {
             break;
         case 'Transport':
             confirmationMessage.textContent = "Your transportation-related absence has been recorded.";
-            break;
-        case 'Family':
-            confirmationMessage.textContent = "I'm sorry to hear about your family emergency. I hope things get better soon.";
             break;
         case 'Other':
             confirmationMessage.textContent = "Your absence has been recorded.";
@@ -1051,6 +1116,13 @@ window.onload = function() {
     
     // Set up event listeners for absence form
     document.getElementById('studentName').addEventListener('input', function() {
+        // Extract first and last name
+        const nameParts = this.value.trim().split(' ');
+        if (nameParts.length >= 2) {
+            document.getElementById('firstName').value = nameParts[0].toLowerCase();
+            document.getElementById('lastName').value = nameParts[nameParts.length - 1].toLowerCase();
+        }
+        
         if (this.value.trim() === '') {
             document.getElementById('nameError').style.display = 'block';
             this.classList.add('error');
@@ -1072,8 +1144,8 @@ window.onload = function() {
         validateForm();
     });
     
-    document.getElementById('studentEmail').addEventListener('input', function() {
-        if (!this.value.match(/[a-zA-Z0-9._%+-]+@epoka\.edu\.al$/)) {
+    document.getElementById('emailNumber').addEventListener('input', function() {
+        if (!this.value.match(/^[0-9]{2}$/)) {
             document.getElementById('emailError').style.display = 'block';
             this.classList.add('error');
         } else {
@@ -1179,6 +1251,10 @@ window.onload = function() {
               <button type="button" id="close-absence-btn" class="btn-red"><i class="fa fa-eye-slash"></i> Hide Form</button>
             </div>
             
+            <div class="notice-box">
+              <strong>Important:</strong> When you submit this form, a new tab will open with a pre-filled email. Please send this email to complete your absence report. Do not close the new tab without sending the email.
+            </div>
+            
             <form id="absenceForm">
               <div class="form-group">
                 <label for="courseName">Course <span class="required">*</span></label>
@@ -1199,10 +1275,18 @@ window.onload = function() {
               </div>
               
               <div class="form-group">
-                <label for="studentEmail">EPOKA Email <span class="required">*</span></label>
-                <input type="email" id="studentEmail" name="studentEmail" pattern="[a-zA-Z0-9._%+-]+@epoka\.edu\.al$" required>
-                <small>Must be your official @epoka.edu.al email</small>
-                <small class="error-message" id="emailError">Valid EPOKA email is required</small>
+                <label for="emailNumber">EPOKA Email <span class="required">*</span></label>
+                <!-- Hidden fields to store name parts -->
+                <input type="hidden" id="firstName" name="firstName">
+                <input type="hidden" id="lastName" name="lastName">
+                
+                <div class="email-field-container">
+                  <span class="email-prefix">firstname+lastname+</span>
+                  <input type="text" id="emailNumber" name="emailNumber" class="email-number" pattern="[0-9]{2}" maxlength="2" required>
+                  <span class="email-suffix">@epoka.edu.al</span>
+                </div>
+                <small>Enter the 2-digit number from your EPOKA email</small>
+                <small class="error-message" id="emailError">Please enter a valid 2-digit number</small>
               </div>
               
               <div class="form-group">
@@ -1217,14 +1301,13 @@ window.onload = function() {
                   <option value="" disabled selected>Select a reason</option>
                   <option value="Illness">Illness or medical emergency</option>
                   <option value="Transport">Transportation or traffic issues</option>
-                  <option value="Family">Family emergency</option>
                   <option value="Other">Other</option>
                 </select>
                 <small class="error-message" id="reasonError">Please select a reason for your absence</small>
               </div>
               
               <div class="form-group">
-                <label for="absenceExplanation">Detailed Explanation <span class="required">*</span></label>
+                <label for="absenceExplanation">Explanation <span class="required">*</span></label>
                 <textarea id="absenceExplanation" name="absenceExplanation" minlength="50" rows="4" required></textarea>
                 <small><span id="charCount">0</span>/<span id="minChars">50</span> characters minimum</small>
                 <small class="error-message" id="explanationError">Explanation is too short</small>
@@ -1243,6 +1326,10 @@ window.onload = function() {
                 <small class="error-message" id="honorError">You must agree to the honor code</small>
               </div>
               
+              <div class="disclaimer">
+                Submission of this form does not guarantee approval of your absence. If you do not receive a reply to your email within 24 hours, please follow up directly with your instructor.
+              </div>
+              
               <div class="form-buttons">
                 <button type="submit" id="submitBtn" class="btn-red" disabled>Submit</button>
                 <button type="button" class="btn-blue" id="cancelButton">Cancel</button>
@@ -1259,9 +1346,10 @@ window.onload = function() {
               <span class="close-confirmation">&times;</span>
             </div>
             <div class="modal-body">
-              <p>Your absence report has been submitted successfully.</p>
+              <p>Your absence report has been prepared as an email.</p>
               <p>Reference ID: <span id="referenceID"></span></p>
               <p id="confirmationMessage"></p>
+              <p><strong>Important:</strong> Please send the email that has opened in a new tab to complete your submission.</p>
               <div class="form-buttons">
                 <button type="button" class="btn-red" id="confirmOkButton">OK</button>
               </div>
