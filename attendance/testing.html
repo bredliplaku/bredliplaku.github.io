@@ -1017,8 +1017,8 @@ function handleSignoutClick() {
     }
 }
         
-function updateAuthUI() {
-    // Get all tabs and tab elements
+ffunction updateAuthUI() {
+    // Get database tab
     const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
     
     if (isSignedIn) {
@@ -1029,22 +1029,30 @@ function updateAuthUI() {
         // Show database tab for all signed-in users
         databaseTab.style.display = 'flex';
         
-        // Show admin-only elements ONLY FOR ADMIN
+        // Show/hide admin-only elements based on admin status
         document.querySelectorAll('.admin-only').forEach(el => {
-            // Make sure this ACTUALLY SHOWS for admin and hides for non-admin
-            el.style.display = isAdmin ? '' : 'none';
+            if (el.classList.contains('big-scan-button')) {
+                // Special handling for scan buttons
+                el.style.display = isAdmin ? 'flex' : 'none';
+            } 
+            else if (el.tagName === 'TH' || el.tagName === 'TD') {
+                // Table cells need different display
+                el.style.display = isAdmin ? 'table-cell' : 'none';
+            }
+            else {
+                // Default display for other elements
+                el.style.display = isAdmin ? 'inline-block' : 'none';
+            }
         });
         
-        // Show scan button for all signed-in users
+        // Show scan buttons only for admin
         document.querySelectorAll('.scan-button').forEach(el => {
-            el.style.display = '';
+            el.style.display = isAdmin ? 'flex' : 'none';
         });
         
-        // Ensure sync button is visible with correct name
-        syncBtn.textContent = 'Sync';
-        syncBtn.style.display = '';
+        // Ensure sync button is visible for signed-in users
+        syncBtn.style.display = 'inline-block';
         syncBtn.disabled = !isOnline;
-        
     } else {
         // User is not signed in
         loginContainer.style.display = 'flex';
@@ -1062,35 +1070,67 @@ function updateAuthUI() {
         syncBtn.style.display = 'none';
     }
     
-    // Logs should always be visible, even when signed out
-    document.getElementById('scanner-tab').style.display = 'block';
+    // Fix for NFC notification
+    // Only show NFC not supported notification if admin (who can scan)
+    if (!nfcSupported && isSignedIn && isAdmin) {
+        showNotification('error', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
+    } else {
+        // Clear any NFC notifications if not admin
+        const existingNotifications = document.querySelectorAll('.notification');
+        existingNotifications.forEach(note => {
+            if (note.textContent.includes('NFC not supported')) {
+                note.remove();
+            }
+        });
+    }
     
-    // Update lists
+    // Make sure scanner tab is properly set up
+    if (!currentCourse) {
+        emptyLogs.style.display = 'block';
+        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+    }
+    
+    // Always update lists
     updateLogsList();
     updateDatabaseList();
+    
+    // Correctly set initial scan button states
+    updateScanButtons();
 }
+
         // Handle course change
-        function handleCourseChange() {
-            currentCourse = courseSelect.value;
-            
-            // Load logs for this course
-            if (currentCourse) {
-                // Try to load from localStorage first
-                loadLogs();
-                
-                // If online and signed in, fetch from Google Sheets
-                if (isOnline && isSignedIn) {
-                    fetchLogsFromSheet();
-                }
-                
-                showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse}`);
-            } else {
-                // Clear logs if no course selected
-                logs = [];
-                updateUI();
-                showNotification('info', 'No Course', 'Please select a course to view attendance');
-            }
+function handleCourseChange() {
+    currentCourse = courseSelect.value;
+    
+    // Load logs for this course
+    if (currentCourse) {
+        // Try to load from localStorage first
+        loadLogs();
+        
+        // If online and signed in, fetch from Google Sheets
+        if (isOnline && isSignedIn) {
+            fetchLogsFromSheet();
+        } else {
+            // Make sure UI is updated even when offline/not signed in
+            updateUI();
         }
+        
+        showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse}`);
+        
+        // Update empty logs message
+        if (logs.length === 0) {
+            emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
+        }
+    } else {
+        // Clear logs if no course selected
+        logs = [];
+        updateUI();
+        showNotification('info', 'No Course', 'Please select a course to view attendance');
+        
+        // Update empty logs message
+        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+    }
+}
         
         // Populate course dropdown
         function populateCourseDropdown() {
@@ -1745,16 +1785,16 @@ function updateAuthUI() {
         }
         
         // Update scan buttons based on state
-        function updateScanButtons() {
-            if (isScanning) {
-                startScanBtn.style.display = 'none';
-                stopScanBtn.style.display = 'flex';
-            } else {
-                startScanBtn.style.display = 'flex';
-                stopScanBtn.style.display = 'none';
-            }
-        }
-        
+function updateScanButtons() {
+    if (isScanning) {
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'flex';
+    } else {
+        // Only show start button if admin and signed in
+        startScanBtn.style.display = isAdmin && isSignedIn ? 'flex' : 'none';
+        stopScanBtn.style.display = 'none';
+    }
+}
         // Handle filter changes
         function handleFilterChange() {
             filter = filterInput.value.toLowerCase();
@@ -2873,47 +2913,44 @@ function updateAuthUI() {
         }
         
         // Initialize on load
-window.addEventListener('load', function() {
-    // Check if token exists in localStorage
-    const savedToken = localStorage.getItem('gapi_token');
-    if (savedToken) {
-        try {
-            const tokenObj = JSON.parse(savedToken);
-            gapi.client.setToken(tokenObj);
-            isSignedIn = true;
-        } catch (e) {
-            console.error('Error restoring token:', e);
-        }
-    }
-    
-    // Initialize Google API
-    gapi.load('client', function() {
-        gapi.client.init({
-            apiKey: API_KEY,
-            discoveryDocs: DISCOVERY_DOCS,
-        }).then(function() {
-            // If we have a token, fetch user info
-            if (isSignedIn) {
-                fetchUserInfo().then(() => {
-                    // Check if user is admin
-                    isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
-                    updateAuthUI();
-                    
-                    // Load data
-                    if (isOnline) {
-                        syncData();
-                    }
-                });
-            }
-            
-            // Initialize the app
-            init();
-        }).catch(function(error) {
-            console.error('Error initializing Google API:', error);
-            init();
-        });
-    });
-});
+		window.addEventListener('load', function() {
+			// Initialize Google API first, then check token
+			gapi.load('client', function() {
+				gapi.client.init({
+					apiKey: API_KEY,
+					discoveryDocs: DISCOVERY_DOCS,
+				}).then(function() {
+					// Now try to restore token
+					const savedToken = localStorage.getItem('gapi_token');
+					if (savedToken) {
+						try {
+							const tokenObj = JSON.parse(savedToken);
+							gapi.client.setToken(tokenObj);
+							isSignedIn = true;
+							
+							// Fetch user info after token is set
+							return fetchUserInfo().then(() => {
+								isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
+								updateAuthUI();
+								
+								// Load data if online
+								if (isOnline) {
+									syncData();
+								}
+							});
+						} catch (e) {
+							console.error('Error restoring token:', e);
+						}
+					}
+					
+					// Always initialize the app
+					init();
+				}).catch(function(error) {
+					console.error('Error initializing Google API:', error);
+					init();
+				});
+			});
+		});
     </script>
 </body>
 </html>
