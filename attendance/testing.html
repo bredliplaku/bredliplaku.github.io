@@ -623,7 +623,7 @@
             <div id="sync-status" class="sync-status offline">
                 <i class="fas fa-circle"></i> <span id="sync-text">Offline</span>
             </div>
-            <button id="sync-btn" class="btn-blue admin-only" disabled><i class="fas fa-sync-alt"></i> Sync Data</button>
+		<button id="sync-btn" class="btn-blue" disabled><i class="fas fa-sync-alt"></i> Sync</button>
         </div>
         
         <!-- Notification area -->
@@ -631,10 +631,14 @@
         
         <!-- Scanner & History Tab -->
         <div id="scanner-tab" class="tab-content active">                    
-            <div class="scan-buttons admin-only">
-                <button id="start-scan-btn" class="big-scan-button btn-blue"><i class="fas fa-play"></i><b> &nbspSTART SCANNING</b></button>
-                <button id="stop-scan-btn" class="big-scan-button btn-red" style="display: none;"><i class="fas fa-stop"></i><b> &nbspSTOP SCANNING</b></button>
-            </div>
+		 <div class="scan-buttons">
+			<button id="start-scan-btn" class="big-scan-button btn-blue scan-button" style="display: none;">
+				<i class="fas fa-play"></i><b> &nbspSTART SCANNING</b>
+			</button>
+			<button id="stop-scan-btn" class="big-scan-button btn-red scan-button" style="display: none;">
+				<i class="fas fa-stop"></i><b> &nbspSTOP SCANNING</b>
+			</button>
+		</div>
             
             <div class="module">
                 <div class="module-header">
@@ -936,29 +940,32 @@
         }
         
         // Handle token response
-        function handleTokenResponse(resp) {
-            if (resp.error !== undefined) {
-                showNotification('error', 'Auth Error', resp.error);
-                return;
-            }
-            
-            // User is signed in
-            isSignedIn = true;
-            
-            // Get user info
-            fetchUserInfo().then(() => {
-                // Check if user is admin
-                isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
-                
-                // Update UI for admin/user view
-                updateAuthUI();
-                
-                // Load data from Google Sheets if online
-                if (isOnline) {
-                    syncData();
-                }
-            });
+function handleTokenResponse(resp) {
+    if (resp.error !== undefined) {
+        showNotification('error', 'Auth Error', resp.error);
+        return;
+    }
+    
+    // Store token in localStorage
+    localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
+    
+    // User is signed in
+    isSignedIn = true;
+    
+    // Get user info
+    fetchUserInfo().then(() => {
+        // Check if user is admin
+        isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
+        
+        // Update UI for admin/user view
+        updateAuthUI();
+        
+        // Load data from Google Sheets if online
+        if (isOnline) {
+            syncData();
         }
+    });
+}
         
         // Fetch user info
         async function fetchUserInfo() {
@@ -997,101 +1004,71 @@
         }
         
         // Handle signout click
-        function handleSignoutClick() {
-            const token = gapi.client.getToken();
-            if (token !== null) {
-                google.accounts.oauth2.revoke(token.access_token);
-                gapi.client.setToken('');
-                isSignedIn = false;
-                isAdmin = false;
-                currentUser = null;
-                updateAuthUI();
-            }
-        }
+function handleSignoutClick() {
+    const token = gapi.client.getToken();
+    if (token !== null) {
+        google.accounts.oauth2.revoke(token.access_token);
+        gapi.client.setToken('');
+        localStorage.removeItem('gapi_token');
+        isSignedIn = false;
+        isAdmin = false;
+        currentUser = null;
+        updateAuthUI();
+    }
+}
         
-        // Update auth UI
 function updateAuthUI() {
     // Get all tabs and tab elements
     const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-    const databaseTabContent = document.getElementById('database-tab');
     
     if (isSignedIn) {
         // User is signed in
         loginContainer.style.display = 'none';
         userContainer.style.display = 'flex';
         
-        // Show the Database tab
+        // Show database tab for all signed-in users
         databaseTab.style.display = 'flex';
         
-        // Show/hide admin-only elements
+        // Show admin-only elements ONLY FOR ADMIN
         document.querySelectorAll('.admin-only').forEach(el => {
-            el.style.display = isAdmin ? 'block' : 'none';
+            // Make sure this ACTUALLY SHOWS for admin and hides for non-admin
+            el.style.display = isAdmin ? '' : 'none';
         });
         
-        document.querySelectorAll('.admin-cell').forEach(el => {
-            el.style.display = isAdmin ? 'table-cell' : 'none';
-        });
-        
-        // Show UIDs for logged in users
-        document.querySelectorAll('.uid-column, .uid-cell').forEach(el => {
+        // Show scan button for all signed-in users
+        document.querySelectorAll('.scan-button').forEach(el => {
             el.style.display = '';
         });
         
-        // Special case for buttons with flex display
-        document.querySelectorAll('.admin-only.big-scan-button').forEach(el => {
-            el.style.display = isAdmin ? 'flex' : 'none';
-        });
-        
-        // Ensure sync button is visible for all logged-in users
-        syncBtn.style.display = 'block';
+        // Ensure sync button is visible with correct name
+        syncBtn.textContent = 'Sync';
+        syncBtn.style.display = '';
         syncBtn.disabled = !isOnline;
         
-        // Show admin notification if appropriate
-        if (isAdmin) {
-            showNotification('success', 'Admin Access', 'You have full access to all features');
-        } else {
-            showNotification('info', 'Signed In', 'You have view-only access');
-        }
     } else {
         // User is not signed in
         loginContainer.style.display = 'flex';
         userContainer.style.display = 'none';
         
-        // Hide the Database tab completely
+        // Hide database tab for non-signed-in users
         databaseTab.style.display = 'none';
         
-        // If database tab was active, switch to scanner tab
-        if (databaseTabContent.classList.contains('active')) {
-            databaseTabContent.classList.remove('active');
-            document.getElementById('scanner-tab').classList.add('active');
-            
-            document.querySelector('.tab[data-tab="scanner-tab"]').classList.add('active');
-            databaseTab.classList.remove('active');
-        }
-        
-        // Hide admin elements
-        document.querySelectorAll('.admin-only').forEach(el => {
+        // Hide admin elements and scan buttons
+        document.querySelectorAll('.admin-only, .scan-button').forEach(el => {
             el.style.display = 'none';
         });
         
-        document.querySelectorAll('.admin-cell').forEach(el => {
-            el.style.display = 'none';
-        });
-        
-        // Hide UIDs for non-logged in users
-        document.querySelectorAll('.uid-column, .uid-cell').forEach(el => {
-            el.style.display = 'none';
-        });
-        
-        // Hide sync button for non-logged in users
+        // Hide sync button
         syncBtn.style.display = 'none';
     }
     
-    // Always update lists after UI changes
+    // Logs should always be visible, even when signed out
+    document.getElementById('scanner-tab').style.display = 'block';
+    
+    // Update lists
     updateLogsList();
     updateDatabaseList();
 }
-        
         // Handle course change
         function handleCourseChange() {
             currentCourse = courseSelect.value;
@@ -1507,36 +1484,59 @@ function updateAuthUI() {
         }
         
         // Sync database to Google Sheet
-        async function syncDatabaseToSheet() {
-            try {
-                // Convert database to sheet format
-                const sheetData = Object.entries(uidToNameMap).map(([uid, name]) => [name, uid]);
-                
-                // Clear existing data
-                await gapi.client.sheets.spreadsheets.values.clear({
+		async function syncDatabaseToSheet() {
+    try {
+        // Convert database to sheet format with index column
+        const sheetData = Object.entries(uidToNameMap).map((entry, index) => {
+            const [uid, name] = entry;
+            return [index + 1, name, uid]; // Add index column
+        });
+        
+        // Add header row if needed
+        await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: DATABASE_SPREADSHEET_ID,
+            range: 'Database!A1:C1',
+        }).then(response => {
+            const headers = response.result.values?.[0] || [];
+            if (headers.length === 0 || headers[0] !== 'Index' || headers[1] !== 'Name' || headers[2] !== 'UID') {
+                // Add header row if missing or incorrect
+                return gapi.client.sheets.spreadsheets.values.update({
                     spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:B',
+                    range: 'Database!A1:C1',
+                    valueInputOption: 'RAW',
+                    resource: {
+                        values: [['Index', 'Name', 'UID']]
+                    }
                 });
-                
-                // Update with all database entries
-                if (sheetData.length > 0) {
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: DATABASE_SPREADSHEET_ID,
-                        range: 'Database!A2:B',
-                        valueInputOption: 'RAW',
-                        resource: {
-                            values: sheetData
-                        }
-                    });
-                }
-                
-                showNotification('success', 'Database Synced', `Successfully synced ${sheetData.length} entries to Google Sheets`);
-            } catch (error) {
-                console.error('Error syncing database:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
             }
+            return Promise.resolve();
+        });
+        
+        // Clear existing data (except header)
+        await gapi.client.sheets.spreadsheets.values.clear({
+            spreadsheetId: DATABASE_SPREADSHEET_ID,
+            range: 'Database!A2:C',
+        });
+		        // Update with all database entries
+        if (sheetData.length > 0) {
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: DATABASE_SPREADSHEET_ID,
+                range: 'Database!A2:C',
+                valueInputOption: 'RAW',
+                resource: {
+                    values: sheetData
+                }
+            });
         }
         
+        showNotification('success', 'Database Synced', `Successfully synced ${sheetData.length} entries to Google Sheets`);
+        return true;
+    } catch (error) {
+        console.error('Error syncing database:', error);
+        showNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
+        throw error;
+    }
+}
         // Start NFC scanning
         async function startScanning() {
             if (!nfcSupported) return;
@@ -2873,22 +2873,47 @@ function updateAuthUI() {
         }
         
         // Initialize on load
-        window.addEventListener('load', function() {
-            // Wait for Google API to load
-            gapi.load('client', function() {
-                gapi.client.init({
-                    apiKey: API_KEY,
-                    discoveryDocs: DISCOVERY_DOCS,
-                }).then(function() {
-                    // API is ready
-                    init();
-                }).catch(function(error) {
-                    console.error('Error initializing Google API:', error);
-                    // Still initialize the app for offline mode
-                    init();
+window.addEventListener('load', function() {
+    // Check if token exists in localStorage
+    const savedToken = localStorage.getItem('gapi_token');
+    if (savedToken) {
+        try {
+            const tokenObj = JSON.parse(savedToken);
+            gapi.client.setToken(tokenObj);
+            isSignedIn = true;
+        } catch (e) {
+            console.error('Error restoring token:', e);
+        }
+    }
+    
+    // Initialize Google API
+    gapi.load('client', function() {
+        gapi.client.init({
+            apiKey: API_KEY,
+            discoveryDocs: DISCOVERY_DOCS,
+        }).then(function() {
+            // If we have a token, fetch user info
+            if (isSignedIn) {
+                fetchUserInfo().then(() => {
+                    // Check if user is admin
+                    isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
+                    updateAuthUI();
+                    
+                    // Load data
+                    if (isOnline) {
+                        syncData();
+                    }
                 });
-            });
+            }
+            
+            // Initialize the app
+            init();
+        }).catch(function(error) {
+            console.error('Error initializing Google API:', error);
+            init();
         });
+    });
+});
     </script>
 </body>
 </html>
