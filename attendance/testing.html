@@ -773,7 +773,7 @@
         let currentUser = null; // Current user info
         let tokenClient = null; // Google OAuth token client
         let currentCourse = ''; // Currently selected course
-        let availableCourses = ['CEN_104', 'CEN_302', 'CEN_404']; // Example courses, will be dynamically loaded
+        let availableCourses = ['CEN_104', 'MTH_202', 'CE_382']; // Example courses, will be dynamically loaded
         let isOnline = navigator.onLine;
         let isSyncing = false;
         
@@ -820,6 +820,13 @@
         
         // Initialize the app
         function init() {
+		    if (gapi.client && gapi.client.getToken()) {
+			isSignedIn = true;
+			fetchUserInfo().then(() => {
+				isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
+				updateAuthUI();
+        });
+    }
             // Check online status
             updateOnlineStatus();
             
@@ -1009,17 +1016,29 @@
                 userContainer.style.display = 'flex';
                 
                 // Show/hide admin elements
-                document.querySelectorAll('.admin-only').forEach(el => {
-                    el.style.display = isAdmin ? '' : 'none';
-                });
+document.querySelectorAll('.admin-only').forEach(el => {
+            el.style.display = isAdmin ? 'block' : 'none';
+        });
                 
-                document.querySelectorAll('.admin-cell').forEach(el => {
-                    el.style.display = isAdmin ? '' : 'none';
-                });
+        document.querySelectorAll('.admin-cell').forEach(el => {
+            el.style.display = isAdmin ? 'table-cell' : 'none';
+        });
+		
+		        // Special case for buttons that need specific display types
+        document.querySelectorAll('.admin-only.big-scan-button').forEach(el => {
+            el.style.display = isAdmin ? 'flex' : 'none';
+        });
                 
-                // Enable sync if online
-                syncBtn.disabled = !isOnline;
+        // Ensure sync button is visible for logged-in users
+        syncBtn.style.display = 'block';
+        syncBtn.disabled = !isOnline;
+        
+    } else {
+        loginContainer.style.display = 'flex';
+        userContainer.style.display = 'none';
                 
+				
+				
                 // Update notification
                 if (isAdmin) {
                     showNotification('success', 'Admin Access', 'You have full access to all features');
@@ -1030,15 +1049,19 @@
                 loginContainer.style.display = 'flex';
                 userContainer.style.display = 'none';
                 
-                // Hide admin elements
-                document.querySelectorAll('.admin-only').forEach(el => {
-                    el.style.display = 'none';
-                });
-                
-                document.querySelectorAll('.admin-cell').forEach(el => {
-                    el.style.display = 'none';
-                });
-            }
+        // Hide admin elements
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.style.display = 'none';
+        });
+        
+        document.querySelectorAll('.admin-cell').forEach(el => {
+            el.style.display = 'none';
+        });
+        
+        // Hide sync button for non-logged in users
+        syncBtn.style.display = 'none';
+    }
+    
             
             // Refresh UI
             updateLogsList();
@@ -1558,35 +1581,42 @@
         
         // Handle NFC reading
         function handleNfcReading({ serialNumber }) {
-            // Create log entry
-            const timestamp = new Date();
-            const newLog = {
-                uid: serialNumber,
-                timestamp: timestamp.getTime(), // Store milliseconds
-                id: Date.now() + Math.random().toString(36).substr(2, 9) // Unique ID
-            };
+			// Create log entry
+			const timestamp = new Date();
+			const newLog = {
+				uid: serialNumber,
+				timestamp: timestamp.getTime(), // Store milliseconds
+				id: Date.now() + Math.random().toString(36).substr(2, 9) // Unique ID
+			};
             
             // Add to logs
             logs.unshift(newLog);
             saveLogs();
             
-            // If online and signed in, sync single log to sheet
-            if (isOnline && isSignedIn && isAdmin) {
-                appendLogToSheet(newLog);
-            }
+    // If online and signed in as admin, immediately sync this log
+    if (isOnline && isSignedIn && isAdmin) {
+        appendLogToSheet(newLog)
+            .then(() => {
+                console.log('Log automatically synced to Google Sheets');
+            })
+            .catch(error => {
+                console.error('Error auto-syncing log:', error);
+                showNotification('warning', 'Sync Warning', 'Log saved locally. Click Sync to retry uploading to Google Sheets.');
+            });
+    }
             
             // Update UI
             updateUI();
             
-            // Determine name for notification
-            const name = uidToNameMap[serialNumber] || 'Unknown';
+			// Determine name for notification
+			const name = uidToNameMap[serialNumber] || 'Unknown';
             
             // Play success sound
             playSound(true);
             
-            // Show success notification
-            showNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
-        }
+				// Show success notification
+				showNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
+			}
         
         // Append a single log to Google Sheet
         async function appendLogToSheet(log) {
