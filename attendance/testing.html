@@ -3,11 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MTH 202 Attendance Logger</title>
+    <title>COURSE Attendance Logger</title>
     <link rel="icon" type="image/png" href="https://bredliplaku.github.io/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Google API client library -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
     <style>
         :root {
             --primary-color: #3949ab;
@@ -22,68 +25,6 @@
             --info-color: #2196F3;
             --danger-color: #f44336;
         }
-        
-        // Confirm delete log group
-        function confirmDeleteLog(group) {
-            if (!isAdmin) return;
-            
-            if (confirm(`Are you sure you want to delete all log entries for ${group.name} (${group.uid}) on ${group.date}?`)) {
-                // Get all log IDs in this group
-                const logIds = group.originalLogs.map(log => log.id);
-                
-                // Remove all logs with matching IDs
-                logs = logs.filter(log => !logIds.includes(log.id));
-                
-                saveLogs();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    syncLogsWithSheets().catch(error => {
-                        console.error('Log sync error:', error);
-                    });
-                }
-                
-                showNotification('success', 'Logs Deleted', `Deleted ${logIds.length} log entries.`);
-            }
-        }
-        
-        // Update the entire UI
-        function updateUI() {
-            updateLogsList();
-            updateDatabaseList();
-            updateDatabaseStatus();
-            
-            // Update total scans
-            totalScans.textContent = logs.length;
-            
-            // Update last scan
-            if (logs.length > 0) {
-                // Sort logs by timestamp (newest first)
-                const sortedLogs = [...logs].sort((a, b) => b.timestamp - a.timestamp);
-                const lastTimestamp = new Date(sortedLogs[0].timestamp);
-                lastScan.textContent = lastTimestamp.toLocaleString();
-            } else {
-                lastScan.textContent = 'Never';
-            }
-            
-            // Enable/disable buttons
-            if (isAdmin) {
-                exportBtn.disabled = logs.length === 0;
-                clearBtn.disabled = logs.length === 0;
-            }
-        }
-        
-        // Update year in footer
-        function updateYear() {
-            const yearElement = document.getElementById('currentYear');
-            if (yearElement) {
-                yearElement.textContent = new Date().getFullYear();
-            }
-        }
-        
-        // Initialize on load
-        window.addEventListener('DOMContentLoaded', init);
         body, html {
             margin: 0;
             padding: 0;
@@ -212,7 +153,7 @@
             background-color: var(--primary-color);
             color: var(--text-light);
             padding: 15px 30px;
-            border-radius: 15px; 
+            border-radius: 15px;
             text-decoration: none;
             font-size: 1.2em;
             transition: background-color 0.3s, transform 0.3s;
@@ -223,7 +164,7 @@
             -khtml-user-select: none;
             cursor: pointer;
             margin: 0 auto;
-            width: 100%;  /* Full width */
+            width: 100%;
         }
         .big-scan-button:hover {
             background-color: #1a237e;
@@ -270,7 +211,6 @@
             padding: 6px 12px;
             font-size: 0.85em;
         }
-        
         .filter-container {
             margin-bottom: 15px;
             display: flex;
@@ -310,7 +250,6 @@
             gap: 10px;
             flex-wrap: wrap;
         }
-        
         /* Table responsiveness fixes */
         .table-container {
             width: 100%;
@@ -320,7 +259,7 @@
         .logs-table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 600px; /* Ensures table doesn't get too compressed */
+            min-width: 600px;
         }
         .logs-table th {
             text-align: left;
@@ -429,7 +368,6 @@
             background-color: #e8f5e9;
             color: #1b5e20;
         }
-        
         /* Database UI Styles */
         .database-controls {
             display: flex;
@@ -471,7 +409,6 @@
             font-size: 1.1em;
             font-weight: 500;
         }
-        
         /* Dialog styles */
         .dialog-backdrop {
             position: fixed;
@@ -519,52 +456,6 @@
             gap: 10px;
             margin-top: 20px;
         }
-        
-        /* Google Auth styles */
-        .auth-container {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .user-profile {
-            display: flex;
-            align-items: center;
-            background: rgba(255,255,255,0.1);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.9em;
-        }
-        .user-avatar {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-        .sync-status {
-            font-size: 0.85em;
-            margin-left: 5px;
-        }
-        .sync-button {
-            background-color: var(--secondary-color);
-            color: var(--text-color);
-            padding: 8px 15px;
-            border-radius: 15px;
-            font-size: 0.9em;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        .sync-button:hover {
-            background-color: #ff8f00;
-        }
-        .sync-button i.fa-spin {
-            animation: fa-spin 2s infinite linear;
-        }
-        @keyframes fa-spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
         .footer {
             max-width: 1000px;
             text-align: center;
@@ -576,7 +467,6 @@
             -webkit-user-select: none;
             -khtml-user-select: none;
         }
-        
         .social-links {
             margin-bottom: 10px;
             margin-top: 10px;
@@ -590,7 +480,53 @@
         .social-links a:hover {
             color: var(--secondary-color);
         }
-        
+        /* Auth styles */
+        .auth-container {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 15px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+        }
+        .sync-container {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        .sync-status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.9em;
+        }
+        .sync-status.online i {
+            color: var(--success-color);
+        }
+        .sync-status.offline i {
+            color: var(--warning-color);
+        }
+        .course-select {
+            min-width: 150px;
+            padding: 5px 10px;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 10px;
+            font-size: 0.9em;
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+        }
+        .course-select option {
+            background-color: #fff;
+            color: #333;
+        }
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .logs-header {
@@ -631,17 +567,34 @@
             <source src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c6e26d.mp3?filename=wrong-answer-sound-effect-21367.mp3" type="audio/mpeg">
         </audio>
         
+        <!-- Auth container -->
+        <div class="auth-container">
+            <div id="login-container">
+                <button id="login-btn" class="btn-blue"><i class="fas fa-sign-in-alt"></i> Sign in with Google</button>
+            </div>
+            <div id="user-container" style="display: none">
+                <div class="user-info">
+                    <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
+                    <span id="user-name"></span>
+                    <button id="logout-btn" class="btn-sm"><i class="fas fa-sign-out-alt"></i></button>
+                </div>
+            </div>
+        </div>
+        
         <div class="app-header">
-            <h1><i class="fas fa-clipboard-list"></i> MTH 202 Attendance</h1>
+            <h1><i class="fas fa-clipboard-list"></i> Course Attendance</h1>
             <h2>Scan and log your attendance</h2>
             <div class="app-info">
+                <span class="info-item">
+                    <select id="course-select" class="course-select">
+                        <option value="">Select course</option>
+                        <!-- Courses will be populated here -->
+                    </select>
+                </span>
                 <span class="info-item"><i class="fas fa-sync-alt"></i> <span id="total-scans">0</span> scans </span>
                 <span class="info-item"><i class="fas fa-clock"></i> Last scan: <span id="last-scan">Never</span></span>
                 <span class="info-item"><i class="fas fa-database"></i> Database: <span id="database-status">Not loaded</span></span>
                 <button id="toggle-sound-btn" class="info-item"><i class="fas fa-volume-up"></i></button>
-                <div id="google-auth-container" class="auth-container">
-                    <!-- Auth content will be added here dynamically -->
-                </div>
             </div>
             <div class="tabs">
                 <div class="tab active" data-tab="scanner-tab">
@@ -653,14 +606,26 @@
             </div>
         </div>
         
+        <!-- Sync status and button -->
+        <div class="sync-container">
+            <div id="sync-status" class="sync-status offline">
+                <i class="fas fa-circle"></i> <span id="sync-text">Offline</span>
+            </div>
+            <button id="sync-btn" class="btn-blue" disabled><i class="fas fa-sync-alt"></i> Sync</button>
+        </div>
+        
         <!-- Notification area -->
         <div id="notification-container"></div>
         
         <!-- Scanner & History Tab -->
         <div id="scanner-tab" class="tab-content active">
-            <div id="scan-buttons-container" class="scan-buttons admin-only" style="display: none;">
-                <button id="start-scan-btn" class="big-scan-button btn-blue"><i class="fas fa-play"></i><b> &nbspSTART SCANNING</b></button>
-                <button id="stop-scan-btn" class="big-scan-button btn-red" style="display: none;"><i class="fas fa-stop"></i><b> &nbspSTOP SCANNING</b></button>
+            <div class="scan-buttons">
+                <button id="start-scan-btn" class="big-scan-button btn-blue scan-button" style="display: none;">
+                    <i class="fas fa-play"></i><b> &nbspSTART SCANNING</b>
+                </button>
+                <button id="stop-scan-btn" class="big-scan-button btn-red scan-button" style="display: none;">
+                    <i class="fas fa-stop"></i><b> &nbspSTOP SCANNING</b>
+                </button>
             </div>
             
             <div class="module">
@@ -682,11 +647,11 @@
                     
                     <div class="logs-header">
                         <div class="logs-count">Found logs: <span id="filtered-count">0</span></div>
-                        <div id="logs-actions" class="logs-actions admin-only" style="display: none;">
-                            <button id="import-btn" class="btn-blue"><i class="fas fa-file-import"></i> Import</button>
-                            <button id="export-btn" class="btn-blue" disabled><i class="fas fa-file-export"></i> Export</button>
-                            <button id="add-log-btn" class="btn-green"><i class="fas fa-plus"></i></button>
-                            <button id="clear-btn" class="btn-red" disabled><i class="fas fa-trash"></i></button>
+                        <div class="logs-actions">
+                            <button id="import-btn" class="btn-blue admin-only" style="display: none;"><i class="fas fa-file-import"></i> Import</button>
+                            <button id="export-btn" class="btn-blue admin-only" style="display: none;" disabled><i class="fas fa-file-export"></i> Export</button>
+                            <button id="add-log-btn" class="btn-green admin-only" style="display: none;"><i class="fas fa-plus"></i></button>
+                            <button id="clear-btn" class="btn-red admin-only" style="display: none;" disabled><i class="fas fa-trash"></i></button>
                         </div>
                     </div>
                     
@@ -700,7 +665,7 @@
                             <thead>
                                 <tr>
                                     <th class="sortable" data-sort="name">Name <i class="sort-icon fas fa-sort"></i></th>
-                                    <th class="sortable" data-sort="uid">UID <i class="sort-icon fas fa-sort"></i></th>
+                                    <th class="sortable uid-column" data-sort="uid">UID <i class="sort-icon fas fa-sort"></i></th>
                                     <th class="sortable" data-sort="date">Date <i class="sort-icon fas fa-sort-down"></i></th>
                                     <th>Time</th>
                                     <th class="admin-only" style="display: none;">Actions</th>
@@ -713,7 +678,7 @@
                     </div>
                     
                     <div id="empty-logs" class="empty-logs">
-                        <i class="fas fa-info-circle"></i> No scan logs yet. Start scanning to collect UIDs.
+                        <i class="fas fa-info-circle"></i> Please select a course to view attendance logs.
                     </div>
                 </div>
             </div>
@@ -732,11 +697,11 @@
                     
                     <div class="database-controls">
                         <div class="entry-count">Database entries: <span id="db-entry-count">0</span></div>
-                        <div id="database-actions" class="database-actions admin-only" style="display: none;">
-                            <button id="import-excel-btn" class="btn-blue"><i class="fas fa-file-import"></i> Import</button>
-                            <button id="export-excel-btn" class="btn-blue"><i class="fas fa-file-export"></i> Export</button>
-                            <button id="add-entry-btn" class="btn-green"><i class="fas fa-plus"></i></button>
-                            <button id="clear-db-btn" class="btn-red"><i class="fas fa-trash"></i></button>
+                        <div class="database-actions">
+                            <button id="import-excel-btn" class="btn-blue admin-only" style="display: none;"><i class="fas fa-file-import"></i> Import</button>
+                            <button id="export-excel-btn" class="btn-blue admin-only" style="display: none;"><i class="fas fa-file-export"></i> Export</button>
+                            <button id="add-entry-btn" class="btn-green admin-only" style="display: none;"><i class="fas fa-plus"></i></button>
+                            <button id="clear-db-btn" class="btn-red admin-only" style="display: none;"><i class="fas fa-trash"></i></button>
                         </div>
                     </div>
                     
@@ -745,7 +710,7 @@
                             <thead>
                                 <tr>
                                     <th>Name</th>
-                                    <th>UID</th>
+                                    <th class="uid-column">UID</th>
                                     <th class="admin-only" style="display: none;">Actions</th>
                                 </tr>
                             </thead>
@@ -756,7 +721,7 @@
                     </div>
                     
                     <div id="empty-database" class="empty-logs">
-                        <i class="fas fa-info-circle"></i> No database entries yet. Add entries manually or import from Excel.
+                        <i class="fas fa-info-circle"></i> No database entries yet. Please sign in as admin to view and manage the database.
                     </div>
                 </div>
             </div>
@@ -770,21 +735,19 @@
             <p style="font-size:0.7em"><i class="far fa-copyright"></i> 2023-<span id="currentYear"></span> Bredli Plaku. All Rights Reserved.</p>
         </footer>
     </div>
-
-    <!-- Google API Client -->
-    <script src="https://accounts.google.com/gsi/client"></script>
-    <script src="https://apis.google.com/js/api.js"></script>
     
     <script>
-        // Constants
+        // Config
         const ADMIN_EMAIL = 'bplaku@epoka.edu.al';
-        const LOGS_STORAGE_KEY = 'MTH202_nfcLogs';
-        const DATABASE_STORAGE_KEY = 'MTH202_nfcDatabase';
-        const GOOGLE_API_KEY = 'AIzaSyA5el9Fo6rn7E8AKw97kf0M8kU-_NE4vmE'; // Replace with your actual API key
-        const GOOGLE_CLIENT_ID = '756584862544-5kttdsi9tfb3m6e4b2uj261pc68c3jln.apps.googleusercontent.com'; // Replace with your actual client ID
-        const LOGS_SPREADSHEET_ID = '1nVLGQQfwRG2xeZFbcMp_KTq4ohRBhoBWrI33qNC8kIA'; // Replace with your logs spreadsheet ID
-        const DATABASE_SPREADSHEET_ID = '1cJ8ET-N9thKqEKO2MzQKwKfHaK3J_W6xHe_qc-oL47E'; // Replace with your database spreadsheet ID
-
+        const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
+        const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
+        const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
+        const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
+        
+        // Discovery docs and scopes for Google API
+        const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
+        const SCOPES = "https://www.googleapis.com/auth/spreadsheets";
+        
         // App state
         let logs = [];
         let isScanning = false;
@@ -793,17 +756,17 @@
         let filter = '';
         let dbFilter = '';
         let uidToNameMap = {}; // Map UIDs to names
-        let currentEditLog = null; // Store the log being edited
         let currentSort = 'date-desc'; // Default sort
         let soundEnabled = true; // Sound effects enabled by default
-        let isAuthenticated = false;
-        let isAdmin = false;
-        let userProfile = null;
+        let isAdmin = false; // Current user is admin
+        let isSignedIn = false; // User is signed in
+        let currentUser = null; // Current user info
+        let tokenClient = null; // Google OAuth token client
+        let currentCourse = ''; // Currently selected course
+        let availableCourses = []; // Will be populated from spreadsheet
+        let isOnline = navigator.onLine;
         let isSyncing = false;
-        let lastSyncTime = null;
-        let googleTokenClient = null;
-        let googleAccessToken = null;
-
+        
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
         const tabContents = document.querySelectorAll('.tab-content');
@@ -834,38 +797,58 @@
         const notificationContainer = document.getElementById('notification-container');
         const successSound = document.getElementById('success-sound');
         const errorSound = document.getElementById('error-sound');
-        const googleAuthContainer = document.getElementById('google-auth-container');
-        const adminOnlyElements = document.querySelectorAll('.admin-only');
-
-        // Initialize the app
+        const courseSelect = document.getElementById('course-select');
+        const syncBtn = document.getElementById('sync-btn');
+        const syncStatus = document.getElementById('sync-status');
+        const syncText = document.getElementById('sync-text');
+        const loginBtn = document.getElementById('login-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const loginContainer = document.getElementById('login-container');
+        const userContainer = document.getElementById('user-container');
+        const userName = document.getElementById('user-name');
+        const userAvatar = document.getElementById('user-avatar');
+        
+        /**
+         * Initialize the application.
+         * Sets up event listeners, checks NFC support, and prepares the UI.
+         */
         function init() {
+            // Update current year in footer
             updateYear();
+            
+            // Check online status and set up listeners for online/offline events
+            updateOnlineStatus();
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
             
             // Check if NFC is supported
             if (!('NDEFReader' in window)) {
                 nfcSupported = false;
-                showNotification('warning', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
+                if (isAdmin) {
+                    showNotification('warning', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
+                }
             }
-            
-            // Load logs and database from localStorage
-            loadLogs();
-            loadDatabase();
             
             // Set up tab navigation
             tabs.forEach(tab => {
                 tab.addEventListener('click', () => {
-                    // Remove active class from all tabs
+                    // Don't allow switching to database tab for non-admin users
+                    if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
+                        return;
+                    }
+                    
+                    // Remove active class from all tabs and tab contents
                     tabs.forEach(t => t.classList.remove('active'));
                     tabContents.forEach(c => c.classList.remove('active'));
                     
-                    // Add active class to clicked tab
+                    // Add active class to clicked tab and corresponding content
                     tab.classList.add('active');
                     const tabId = tab.getAttribute('data-tab');
                     document.getElementById(tabId).classList.add('active');
                 });
             });
             
-            // Add event listeners
+            // Add event listeners for buttons
             startScanBtn.addEventListener('click', startScanning);
             stopScanBtn.addEventListener('click', stopScanning);
             importExcelBtn.addEventListener('click', () => excelInput.click());
@@ -881,199 +864,1680 @@
             addEntryBtn.addEventListener('click', showAddEntryDialog);
             exportExcelBtn.addEventListener('click', exportDatabaseToExcel);
             clearDbBtn.addEventListener('click', clearDatabase);
-            
-            // Add sound toggle button listener
-            const toggleSoundBtn = document.getElementById('toggle-sound-btn');
-            toggleSoundBtn.addEventListener('click', function() {
-                soundEnabled = !soundEnabled;
-                toggleSoundBtn.innerHTML = soundEnabled ? 
-                    '<i class="fas fa-volume-up"></i>' : 
-                    '<i class="fas fa-volume-mute"></i>';
-            });
+            syncBtn.addEventListener('click', syncData);
+            courseSelect.addEventListener('change', handleCourseChange);
             
             // Set up sortable table headers
             document.querySelectorAll('.sortable').forEach(header => {
                 header.addEventListener('click', () => {
                     const sortKey = header.getAttribute('data-sort');
-                    if (currentSort === `${sortKey}-asc`) {
-                        currentSort = `${sortKey}-desc`;
-                    } else {
-                        currentSort = `${sortKey}-asc`;
-                    }
+                    currentSort = (currentSort === `${sortKey}-asc`) ? `${sortKey}-desc` : `${sortKey}-asc`;
                     
                     // Update sort dropdown to match
                     sortSelect.value = currentSort;
-                    
-                    // Update sort icons
                     updateSortIcons();
-                    
-                    // Update the logs list with new sort
                     updateLogsList();
                 });
             });
             
-            // Initialize Google API
-            initializeGoogleAPI();
+            // Toggle sound button
+            const toggleSoundBtn = document.getElementById('toggle-sound-btn');
+            toggleSoundBtn.addEventListener('click', function() {
+                soundEnabled = !soundEnabled;
+                toggleSoundBtn.innerHTML = soundEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
+            });
             
-            // Update UI based on loaded logs
+            // Update UI to show login screen initially
             updateUI();
         }
         
-        // Initialize Google API
-        function initializeGoogleAPI() {
-            // Load the Google API client library
-            gapi.load('client', initGapiClient);
-            
-            // Initialize the Google Identity Services client
-            initializeGIS();
-        }
-        
-        // Initialize Google API Client
-        function initGapiClient() {
-            gapi.client.init({
-                apiKey: GOOGLE_API_KEY,
-                discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
-            }).then(() => {
-                console.log('GAPI client initialized');
-            }).catch(error => {
-                console.error('Error initializing GAPI client', error);
-                showNotification('error', 'Google API Error', 'Failed to initialize Google API client.');
-            });
-        }
-        
-        // Initialize Google Identity Services
-        function initializeGIS() {
-            // Create the sign-in button container
-            const signInButtonContainer = document.createElement('div');
-            signInButtonContainer.id = 'g_id_signin';
-            googleAuthContainer.appendChild(signInButtonContainer);
-            
-            // Configure the token client
-            googleTokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: GOOGLE_CLIENT_ID,
-                scope: 'https://www.googleapis.com/auth/spreadsheets',
-                callback: handleTokenResponse
-            });
-            
-            // Initialize the button
-            google.accounts.id.initialize({
-                client_id: GOOGLE_CLIENT_ID,
-                callback: handleCredentialResponse,
-                auto_select: false,
-                cancel_on_tap_outside: true
-            });
-            
-            // Render the sign-in button
-            google.accounts.id.renderButton(
-                document.getElementById('g_id_signin'),
-                { 
-                    theme: 'outline', 
-                    size: 'large',
-                    text: 'signin_with',
-                    logo_alignment: 'left'
+        /**
+         * Initialize Google API client.
+         * Set up auth token client and event listeners for login/logout.
+         */
+        function initGoogleApi() {
+            gapi.load('client', async () => {
+                try {
+                    await gapi.client.init({
+                        apiKey: API_KEY,
+                        discoveryDocs: DISCOVERY_DOCS
+                    });
+                    
+                    // Check if we have a saved token in localStorage
+                    const savedToken = localStorage.getItem('gapi_token');
+                    if (savedToken) {
+                        try {
+                            const tokenObj = JSON.parse(savedToken);
+                            gapi.client.setToken(tokenObj);
+                            isSignedIn = true;
+                            
+                            // Fetch user info to check if admin
+                            await fetchUserInfo();
+                            isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
+                            updateAuthUI();
+                            
+                            // If online, fetch available courses and sync data
+                            if (isOnline) {
+                                await fetchAvailableCourses();
+                                await syncData();
+                            }
+                        } catch (e) {
+                            console.error('Error restoring token:', e);
+                            isSignedIn = false;
+                            isAdmin = false;
+                            localStorage.removeItem('gapi_token');
+                        }
+                    }
+                    
+                    // Initialize token client for auth
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: SCOPES,
+                        callback: handleTokenResponse
+                    });
+                    
+                    // Add event listeners for login/logout buttons
+                    loginBtn.addEventListener('click', handleAuthClick);
+                    logoutBtn.addEventListener('click', handleSignoutClick);
+                    
+                    console.log('Google API initialized successfully');
+                } catch (error) {
+                    console.error('Error initializing Google API:', error);
+                    showNotification('error', 'API Error', 'Failed to initialize Google API. Some features may not work.');
                 }
-            );
+            });
         }
         
-        // Handle Google credential response
-        function handleCredentialResponse(response) {
-            // Parse the JWT token
-            const payload = parseJwt(response.credential);
+        /**
+         * Handle token response from Google OAuth.
+         * @param {Object} resp - The token response object.
+         */
+        function handleTokenResponse(resp) {
+            if (resp.error !== undefined) {
+                showNotification('error', 'Auth Error', resp.error);
+                return;
+            }
             
-            // Store profile info
-            userProfile = {
-                email: payload.email,
-                name: payload.name,
-                picture: payload.picture
-            };
+            // Store token in localStorage for session persistence
+            localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
             
-            // Set authentication status
-            isAuthenticated = true;
-            isAdmin = userProfile.email === ADMIN_EMAIL;
+            // User is signed in
+            isSignedIn = true;
             
-            // Update the UI based on auth status
-            updateAuthUI();
-            
-            // Request token for API access
-            googleTokenClient.requestAccessToken();
-        }
-        
-        // Handle token response
-        function handleTokenResponse(tokenResponse) {
-            if (tokenResponse && tokenResponse.access_token) {
-                googleAccessToken = tokenResponse.access_token;
+            // Get user info and update UI
+            fetchUserInfo().then(() => {
+                // Check if user is admin
+                isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
                 
-                // Update UI with sync status
-                updateSyncStatus('ready');
+                // Update UI for admin/user
+                updateAuthUI();
                 
-                // Perform initial sync if admin
-                if (isAdmin) {
-                    syncWithGoogleSheets();
+                // Fetch course list and populate dropdown
+                if (isOnline) {
+                    fetchAvailableCourses()
+                        .then(() => {
+                            // Auto-sync data if online
+                            return syncData();
+                        })
+                        .catch(err => {
+                            console.error('Error during initial sync:', err);
+                            showNotification('error', 'Sync Error', 'Failed to sync data. Please try again later.');
+                        });
                 }
-            } else {
-                console.error('Failed to obtain access token');
-                showNotification('error', 'Authentication Error', 'Failed to obtain access token from Google.');
+            });
+        }
+        
+        /**
+         * Fetch user info (profile) from Google.
+         * @returns {Promise} A promise that resolves when user info is fetched.
+         */
+        async function fetchUserInfo() {
+            try {
+                const tokenObj = gapi.client.getToken();
+                if (!tokenObj || !tokenObj.access_token) {
+                    throw new Error('No valid token available');
+                }
+                
+                const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: { 'Authorization': `Bearer ${tokenObj.access_token}` }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch user info');
+                }
+                
+                const userInfo = await response.json();
+                currentUser = {
+                    id: userInfo.sub,
+                    name: userInfo.name || userInfo.email,
+                    email: userInfo.email,
+                    picture: userInfo.picture
+                };
+                
+                // Update user info in UI
+                userName.textContent = currentUser.name;
+                userAvatar.src = currentUser.picture;
+                
+                return currentUser;
+            } catch (error) {
+                console.error('Error fetching user info:', error);
+                showNotification('error', 'User Info Error', 'Failed to get user information');
+                throw error;
             }
         }
         
-        // Parse JWT token
-        function parseJwt(token) {
-            const base64Url = token.split('.')[1];
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            return JSON.parse(window.atob(base64));
+        /**
+         * Handle sign-in button click.
+         */
+        function handleAuthClick() {
+            if (!tokenClient) {
+                showNotification('error', 'Auth Error', 'Google API not initialized');
+                return;
+            }
+            tokenClient.requestAccessToken();
         }
         
-        // Update UI based on authentication status
+        /**
+         * Handle sign-out button click.
+         */
+        function handleSignoutClick() {
+            const token = gapi.client.getToken();
+            if (token !== null) {
+                google.accounts.oauth2.revoke(token.access_token, () => {
+                    gapi.client.setToken('');
+                    localStorage.removeItem('gapi_token');
+                    isSignedIn = false;
+                    isAdmin = false;
+                    currentUser = null;
+                    updateAuthUI();
+                    logs = [];
+                    uidToNameMap = {};
+                    updateUI();
+                    showNotification('info', 'Signed Out', 'You have been successfully signed out');
+                });
+            } else {
+                // If no token, just clear the UI state
+                localStorage.removeItem('gapi_token');
+                isSignedIn = false;
+                isAdmin = false;
+                currentUser = null;
+                updateAuthUI();
+                logs = [];
+                uidToNameMap = {};
+                updateUI();
+            }
+        }
+        
+        /**
+         * Update authentication-dependent UI elements.
+         * Show/hide elements based on sign-in status and admin privileges.
+         */
         function updateAuthUI() {
-            // Clear the auth container
-            googleAuthContainer.innerHTML = '';
+            // Update user container
+            loginContainer.style.display = isSignedIn ? 'none' : 'flex';
+            userContainer.style.display = isSignedIn ? 'flex' : 'none';
             
-            if (isAuthenticated) {
-                // Show user profile
-                const profileElement = document.createElement('div');
-                profileElement.className = 'user-profile';
+            // Show/hide database tab based on admin status
+            const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+            databaseTab.style.display = isAdmin ? 'flex' : 'none';
+            
+            // If database tab is active but user is not admin, switch to scanner tab
+            if (!isAdmin && tabContents[1].classList.contains('active')) {
+                tabs[0].click();
+            }
+            
+            // Show/hide admin-only elements
+            document.querySelectorAll('.admin-only').forEach(el => {
+                if (el.tagName === 'TH' || el.tagName === 'TD') {
+                    el.style.display = isAdmin ? 'table-cell' : 'none';
+                } else {
+                    el.style.display = isAdmin ? 'inline-block' : 'none';
+                }
+            });
+            
+            // Show scan buttons only for admin
+            document.querySelectorAll('.scan-button').forEach(el => {
+                el.style.display = isAdmin && !isScanning ? 'flex' : 'none';
+            });
+            
+            // Show active scan button based on scanning state
+            if (isAdmin && isScanning) {
+                startScanBtn.style.display = 'none';
+                stopScanBtn.style.display = 'flex';
+            }
+            
+            // Enable/disable sync button based on online status and sign-in
+            syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+            syncBtn.style.display = isSignedIn ? 'inline-block' : 'none';
+            
+            // Update empty messages based on authentication
+            if (!isSignedIn) {
+                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please sign in to view attendance logs.';
+                emptyDatabase.innerHTML = '<i class="fas fa-info-circle"></i> Please sign in as admin to view the database.';
+            } else if (!currentCourse) {
+                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+            } else if (logs.length === 0) {
+                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
+            }
+            
+            // Show NFC support notification for admin only
+            if (!nfcSupported && isAdmin) {
+                showNotification('warning', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
+            }
+        }
+        
+        /**
+         * Handle course selection change.
+         * Load logs for the selected course.
+         */
+        function handleCourseChange() {
+            currentCourse = courseSelect.value;
+            
+            if (!currentCourse) {
+                // No course selected, clear logs
+                logs = [];
+                updateUI();
+                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+                return;
+            }
+            
+            // Update UI immediately with any existing logs
+            updateUI();
+            
+            if (isOnline && isSignedIn) {
+                // Fetch logs from Google Sheets for selected course
+                fetchLogsFromSheet()
+                    .then(() => {
+                        showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse}`);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching logs:', error);
+                        showNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                    });
+            } else {
+                showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse}`);
+                if (logs.length === 0) {
+                    emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
+                }
+            }
+        }
+        
+        /**
+         * Populate course dropdown with available courses.
+         */
+        function populateCourseDropdown() {
+            // Clear existing options (except first placeholder)
+            while (courseSelect.options.length > 1) {
+                courseSelect.remove(1);
+            }
+            
+            // Add available courses
+            availableCourses.forEach(course => {
+                const option = document.createElement('option');
+                option.value = course;
+                option.textContent = course.replace('_', ' ');
+                courseSelect.appendChild(option);
+            });
+            
+            // If we have a current course, select it
+            if (currentCourse && availableCourses.includes(currentCourse)) {
+                courseSelect.value = currentCourse;
+            }
+        }
+        
+        /**
+         * Update online/offline status indicator.
+         */
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            
+            if (isOnline) {
+                syncStatus.className = 'sync-status online';
+                syncText.textContent = 'Online';
+                syncBtn.disabled = !isSignedIn || isSyncing;
+            } else {
+                syncStatus.className = 'sync-status offline';
+                syncText.textContent = 'Offline';
+                syncBtn.disabled = true;
+            }
+        }
+        
+        /**
+         * Sync data with Google Sheets.
+         * Fetches and updates both database and logs.
+         */
+        async function syncData() {
+            if (!isOnline || !isSignedIn || isSyncing) {
+                return;
+            }
+            
+            isSyncing = true;
+            
+            // Show syncing indicator
+            const syncIcon = syncBtn.querySelector('i');
+            if (syncIcon) {
+                syncIcon.classList.add('fa-spin');
+            }
+            syncBtn.disabled = true;
+            
+            showNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
+            
+            try {
+                // First sync database to get up-to-date UID-name mappings
+                await fetchDatabaseFromSheet();
                 
-                profileElement.innerHTML = `
-                    <img src="${userProfile.picture}" alt="${userProfile.name}" class="user-avatar">
-                    <span>${userProfile.name}</span>
-                `;
-                
-                // Add sign out button
-                const signOutButton = document.createElement('button');
-                signOutButton.className = 'btn-sm';
-                signOutButton.innerHTML = '<i class="fas fa-sign-out-alt"></i> Sign Out';
-                signOutButton.addEventListener('click', handleSignOut);
-                
-                // Add elements to container
-                googleAuthContainer.appendChild(profileElement);
-                
-                // If admin, add sync button
-                if (isAdmin) {
-                    const syncButton = document.createElement('button');
-                    syncButton.id = 'sync-button';
-                    syncButton.className = 'sync-button';
-                    syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> Sync';
-                    syncButton.addEventListener('click', syncWithGoogleSheets);
-                    
-                    // Add sync status indicator
-                    const syncStatus = document.createElement('span');
-                    syncStatus.id = 'sync-status';
-                    syncStatus.className = 'sync-status';
-                    syncStatus.textContent = 'Not synced';
-                    
-                    googleAuthContainer.appendChild(syncButton);
-                    googleAuthContainer.appendChild(syncStatus);
+                // Then sync logs if a course is selected
+                if (currentCourse) {
+                    await syncLogsWithSheet();
+                } else if (availableCourses.length > 0) {
+                    // If no course selected but courses are available, select the first one
+                    currentCourse = availableCourses[0];
+                    courseSelect.value = currentCourse;
+                    await fetchLogsFromSheet();
                 }
                 
-                googleAuthContainer.appendChild(signOutButton);
+                showNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
+            } catch (error) {
+                console.error('Sync error:', error);
+                showNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+            } finally {
+                isSyncing = false;
                 
-                // Show admin-only elements if admin
-                adminOnlyElements.forEach(el => {
-                    if (isAdmin) {
-                        el.style.display = '';
-                    } else {
-                        el.style.display = 'none';
+                if (syncIcon) {
+                    syncIcon.classList.remove('fa-spin');
+                }
+                
+                syncBtn.disabled = !isSignedIn || !isOnline;
+                updateUI();
+            }
+        }
+        
+        /**
+         * Fetch database entries from Google Sheet.
+         * Updates uidToNameMap with the latest data.
+         */
+        async function fetchDatabaseFromSheet() {
+            try {
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: DATABASE_SPREADSHEET_ID,
+                    range: 'Database!A2:C',
+                });
+                
+                const rows = response.result.values || [];
+                const sheetMappings = {};
+                
+                rows.forEach(row => {
+                    if (row.length >= 2) {
+                        const name = row[0];
+                        const uid = String(row[1]);
+                        
+                        if (name && uid) {
+                            sheetMappings[uid] = name;
+                        }
                     }
+                });
+                
+                uidToNameMap = sheetMappings;
+                updateDatabaseStatus();
+                updateDatabaseList();
+                
+                console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
+            } catch (error) {
+                console.error('Error fetching database:', error);
+                showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+                throw error;
+            }
+        }
+        
+        /**
+         * Fetch available courses (sheet names) from logs spreadsheet.
+         */
+        async function fetchAvailableCourses() {
+            try {
+                const response = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID
+                });
+                
+                const sheets = response.result.sheets || [];
+                availableCourses = sheets.map(sheet => sheet.properties.title);
+                
+                populateCourseDropdown();
+                console.log(`Found ${availableCourses.length} courses in spreadsheet`);
+            } catch (error) {
+                console.error('Error fetching courses:', error);
+                showNotification('error', 'Courses Error', 'Failed to fetch available courses');
+                throw error;
+            }
+        }
+        
+        /**
+         * Fetch logs from Google Sheet for current course.
+         */
+        async function fetchLogsFromSheet() {
+            if (!currentCourse) {
+                return;
+            }
+            
+            try {
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: `${currentCourse}!A2:D`,
+                });
+                
+                const rows = response.result.values || [];
+                const sheetLogs = [];
+                
+                rows.forEach(row => {
+                    if (row.length >= 3) {
+                        const uid = String(row[0]);
+                        const timestamp = new Date(row[1]).getTime();
+                        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+                        const manual = row.length >= 4 ? row[3] === 'true' : false;
+                        
+                        if (uid && !isNaN(timestamp)) {
+                            sheetLogs.push({ uid, timestamp, id, manual });
+                        }
+                    }
+                });
+                
+                // Sort logs by timestamp (newest first)
+                sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
+                logs = sheetLogs;
+                
+                updateUI();
+                console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                showNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+                throw error;
+            }
+        }
+        
+        /**
+         * Sync local logs with Google Sheet (two-way sync).
+         */
+        async function syncLogsWithSheet() {
+            if (!currentCourse) {
+                return;
+            }
+            
+            try {
+                // Fetch existing logs from sheet
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: `${currentCourse}!A2:D`,
+                });
+                
+                const rows = response.result.values || [];
+                const remoteLogs = [];
+                
+                rows.forEach(row => {
+                    if (row.length >= 3) {
+                        const uid = String(row[0]);
+                        const timestamp = new Date(row[1]).getTime();
+                        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+                        const manual = row.length >= 4 ? row[3] === 'true' : false;
+                        
+                        if (uid && !isNaN(timestamp)) {
+                            remoteLogs.push({ uid, timestamp, id, manual });
+                        }
+                    }
+                });
+                
+                // Merge remote logs with local logs
+                const allLogsById = {};
+                
+                // First add remote logs
+                remoteLogs.forEach(log => {
+                    allLogsById[log.id] = log;
+                });
+                
+                // Then add local logs (will overwrite remote if same ID)
+                logs.forEach(log => {
+                    allLogsById[log.id] = log;
+                });
+                
+                // Update logs array with merged logs
+                logs = Object.values(allLogsById);
+                logs.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // Format logs for sheet
+                const sheetData = logs.map(log => [
+                    log.uid,
+                    new Date(log.timestamp).toISOString(),
+                    log.id,
+                    log.manual ? 'true' : 'false'
+                ]);
+                
+                // Clear existing data in sheet
+                await gapi.client.sheets.spreadsheets.values.clear({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: `${currentCourse}!A2:D`,
+                });
+                
+                // Write new data if we have any logs
+                if (sheetData.length > 0) {
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: LOGS_SPREADSHEET_ID,
+                        range: `${currentCourse}!A2:D`,
+                        valueInputOption: 'RAW',
+                        resource: { values: sheetData }
+                    });
+                }
+                
+                updateUI();
+                console.log(`Synced ${logs.length} logs with ${currentCourse} sheet`);
+            } catch (error) {
+                console.error('Error syncing logs:', error);
+                showNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+                throw error;
+            }
+        }
+        
+        /**
+         * Sync database (UID-name map) to Google Sheets.
+         */
+        async function syncDatabaseToSheet() {
+            try {
+                const entries = Object.entries(uidToNameMap);
+                
+                // Format data for sheet (Name, UID, Index)
+                const sheetData = entries.map(([uid, name], index) => [
+                    name,
+                    uid,
+                    index + 1
+                ]);
+                
+                // Clear existing data
+                await gapi.client.sheets.spreadsheets.values.clear({
+                    spreadsheetId: DATABASE_SPREADSHEET_ID,
+                    range: 'Database!A2:C'
+                });
+                
+                // Write new data if we have any entries
+                if (sheetData.length > 0) {
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: DATABASE_SPREADSHEET_ID,
+                        range: 'Database!A2:C',
+                        valueInputOption: 'RAW',
+                        resource: { values: sheetData }
+                    });
+                }
+                
+                console.log(`Synced ${entries.length} database entries to sheet`);
+            } catch (error) {
+                console.error('Error syncing database:', error);
+                showNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
+                throw error;
+            }
+        }
+        
+        /**
+         * Append a single log to Google Sheet (for immediate sync).
+         * @param {Object} log - The log entry to append.
+         */
+        async function appendLogToSheet(log) {
+            if (!currentCourse || !isOnline || !isSignedIn) {
+                return;
+            }
+            
+            try {
+                await gapi.client.sheets.spreadsheets.values.append({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: `${currentCourse}!A2:D`,
+                    valueInputOption: 'RAW',
+                    insertDataOption: 'INSERT_ROWS',
+                    resource: {
+                        values: [[
+                            log.uid,
+                            new Date(log.timestamp).toISOString(),
+                            log.id,
+                            log.manual ? 'true' : 'false'
+                        ]]
+                    }
+                });
+                
+                console.log('Log appended to Google Sheet');
+            } catch (error) {
+                console.error('Error appending log:', error);
+                showNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
+            }
+        }
+        
+        /**
+         * Update sort icons in the table headers.
+         */
+        function updateSortIcons() {
+            // Reset all sort icons
+            document.querySelectorAll('.sort-icon').forEach(icon => {
+                icon.className = 'sort-icon fas fa-sort';
+            });
+            
+            // Set sort icon for current sort field
+            const [field, direction] = currentSort.split('-');
+            const header = document.querySelector(`.sortable[data-sort="${field}"]`);
+            
+            if (header) {
+                const icon = header.querySelector('.sort-icon');
+                icon.className = `sort-icon fas fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
+            }
+        }
+        
+        /**
+         * Show notification message.
+         * @param {string} type - Type of notification (success, error, warning, info).
+         * @param {string} title - Notification title.
+         * @param {string} message - Notification message.
+         */
+        function showNotification(type, title, message) {
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            
+            let icon;
+            switch(type) {
+                case 'success': icon = 'check-circle'; break;
+                case 'error': icon = 'times-circle'; break;
+                case 'warning': icon = 'exclamation-circle'; break;
+                default: icon = 'info-circle';
+            }
+            
+            notification.innerHTML = `
+                <i class="fas fa-${icon}"></i>
+                <div>
+                    <strong>${title}</strong><br>
+                    ${message}
+                </div>
+            `;
+            
+            // Make room for the new notification by removing old ones
+            const existingNotifications = notificationContainer.querySelectorAll('.notification');
+            if (existingNotifications.length >= 3) {
+                notificationContainer.removeChild(existingNotifications[0]);
+            }
+            
+            notificationContainer.appendChild(notification);
+            
+            // Auto-remove success and info notifications after a few seconds
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    notification.classList.add('fade-out');
+                    setTimeout(() => {
+                        if (notification.parentNode) {
+                            notification.parentNode.removeChild(notification);
+                        }
+                    }, 500);
+                }, 4000);
+            }
+        }
+        
+        /**
+         * Handle filter input change for logs.
+         */
+        function handleFilterChange() {
+            filter = filterInput.value.toLowerCase();
+            updateLogsList();
+        }
+        
+        /**
+         * Handle sort dropdown change for logs.
+         */
+        function handleSortChange() {
+            currentSort = sortSelect.value;
+            updateSortIcons();
+            updateLogsList();
+        }
+        
+        /**
+         * Handle filter input change for database.
+         */
+        function handleDbFilterChange() {
+            dbFilter = dbFilterInput.value.toLowerCase();
+            updateDatabaseList();
+        }
+        
+        /**
+         * Add new database entry.
+         */
+        function showAddEntryDialog() {
+            if (!isAdmin) return;
+            
+            // Prompt for UID and name
+            const uid = prompt("Enter UID for new entry:");
+            if (uid === null) return;
+            
+            const trimmedUid = uid.trim();
+            if (!trimmedUid) {
+                alert("UID cannot be empty.");
+                return;
+            }
+            
+            if (uidToNameMap[trimmedUid]) {
+                alert("This UID already exists in the database.");
+                return;
+            }
+            
+            const name = prompt("Enter name for UID " + trimmedUid + ":");
+            if (name === null) return;
+            
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                alert("Name cannot be empty.");
+                return;
+            }
+            
+            // Add to database
+            uidToNameMap[trimmedUid] = trimmedName;
+            
+            // Sync to sheet if online
+            if (isOnline && isSignedIn) {
+                syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+            }
+            
+            updateUI();
+            showNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
+        }
+        
+        /**
+         * Edit database entry (change name).
+         * @param {string} uid - The UID of the entry to edit.
+         */
+        function editDatabaseEntry(uid) {
+            if (!isAdmin) return;
+            
+            const currentName = uidToNameMap[uid] || '';
+            const newName = prompt(`Enter a new name for ${uid}:`, currentName);
+            
+            if (newName === null) return;
+            
+            const trimmed = newName.trim();
+            if (!trimmed) {
+                alert('Name cannot be empty.');
+                return;
+            }
+            
+            uidToNameMap[uid] = trimmed;
+            
+            // Sync to sheet if online
+            if (isOnline && isSignedIn) {
+                syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+            }
+            
+            updateUI();
+            showNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
+        }
+        
+        /**
+         * Delete database entry.
+         * @param {string} uid - The UID of the entry to delete.
+         */
+        function deleteDatabaseEntry(uid) {
+            if (!isAdmin) return;
+            
+            const name = uidToNameMap[uid];
+            if (!name) return;
+            
+            if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the database?`)) {
+                delete uidToNameMap[uid];
+                
+                // Sync to sheet if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
+            }
+        }
+        
+        /**
+         * Clear the entire database.
+         */
+        function clearDatabase() {
+            if (!isAdmin) return;
+            
+            if (confirm('Are you sure you want to clear the entire database? This will remove all UID-name mappings.')) {
+                uidToNameMap = {};
+                
+                // Sync to sheet if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Database Cleared', 'All database entries have been removed.');
+            }
+        }
+        
+        /**
+         * Add manual log entry.
+         */
+        function showAddLogEntryDialog() {
+            if (!isAdmin) return;
+            
+            if (!currentCourse) {
+                showNotification('warning', 'No Course Selected', 'Please select a course before adding a log entry');
+                return;
+            }
+            
+            // Create dialog for adding a manual log entry
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            
+            // Get current date and time for default values
+            const now = new Date();
+            const formattedDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+            const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+            
+            // Build options for known people from database
+            let nameOptions = '';
+            const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
+            
+            sortedEntries.forEach(([uid, name]) => {
+                nameOptions += `<option value="${uid}">${name} (${uid})</option>`;
+            });
+            
+            dialog.innerHTML = `
+                <h3 class="dialog-title">Add Manual Log Entry</h3>
+                <div class="form-group">
+                    <label for="manual-name">Person:</label>
+                    <select id="manual-name" class="form-control">
+                        <option value="">-- Select Person --</option>
+                        ${nameOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="manual-date">Date:</label>
+                    <input type="date" id="manual-date" class="form-control" value="${formattedDate}">
+                </div>
+                <div class="form-group">
+                    <label for="manual-time">Time:</label>
+                    <input type="time" id="manual-time" class="form-control" value="${formattedTime}">
+                </div>
+                <div class="dialog-actions">
+                    <button id="save-manual-log-btn" class="btn-green">Add Entry</button>
+                    <button id="cancel-manual-btn">Cancel</button>
+                </div>
+            `;
+            
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+            
+            // Handle save button
+            document.getElementById('save-manual-log-btn').addEventListener('click', function() {
+                const selectedUid = document.getElementById('manual-name').value;
+                const manualDate = document.getElementById('manual-date').value;
+                const manualTime = document.getElementById('manual-time').value;
+                
+                if (!selectedUid) {
+                    alert('Please select a person.');
+                    return;
+                }
+                
+                if (!manualDate) {
+                    alert('Please enter a date.');
+                    return;
+                }
+                
+                if (!manualTime) {
+                    alert('Please enter a time.');
+                    return;
+                }
+                
+                // Create new log entry
+                const timestamp = new Date(`${manualDate}T${manualTime}:00`);
+                const newLog = {
+                    uid: selectedUid,
+                    timestamp: timestamp.getTime(),
+                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    manual: true
+                };
+                
+                // Add to logs
+                logs.unshift(newLog);
+                
+                // Sync with sheets if online
+                if (isOnline && isSignedIn) {
+                    appendLogToSheet(newLog).catch(err => console.error('Error appending log:', err));
+                }
+                
+                updateUI();
+                
+                const name = uidToNameMap[selectedUid] || 'Unknown';
+                showNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate} ${manualTime}`);
+                
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            // Handle cancel button
+            document.getElementById('cancel-manual-btn').addEventListener('click', function() {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
+        
+        /**
+         * Show dialog to edit a log entry group.
+         * @param {Object} group - The log group to edit.
+         */
+        function showEditLogDialog(group) {
+            if (!isAdmin) return;
+            
+            // Create dialog backdrop
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            
+            // Get date from first log in group
+            const firstLog = group.originalLogs[0];
+            const commonDateObj = new Date(firstLog.timestamp);
+            const formattedDate = commonDateObj.toISOString().split('T')[0];
+            
+            // Create timestamp edit fields for each log in group
+            let timestampFields = '';
+            group.originalLogs.forEach((log, index) => {
+                const timeObj = new Date(log.timestamp);
+                const formattedTime = timeObj.toTimeString().split(' ')[0].substring(0, 5);
+                
+                timestampFields += `
+                    <div class="timestamp-edit-group" data-log-id="${log.id}">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <h4>Timestamp ${index + 1}</h4>
+                            <button class="delete-time-btn btn-red" style="padding: 2px 8px; font-size: 0.8em;" data-index="${index}">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                        <div class="form-group">
+                            <label>Time:</label>
+                            <input type="time" class="form-control timestamp-time" value="${formattedTime}">
+                        </div>
+                    </div>
+                `;
+            });
+            
+            dialog.innerHTML = `
+                <h3 class="dialog-title">Edit Log Entry</h3>
+                <div class="form-group">
+                    <label for="edit-name">Name:</label>
+                    <input type="text" id="edit-name" class="form-control" value="${group.name}">
+                    <small style="color: #777; display: block; margin-top: 5px;">This will update the database for this UID</small>
+                </div>
+                <div class="form-group">
+                    <label for="edit-uid">UID:</label>
+                    <input type="text" id="edit-uid" class="form-control" value="${group.uid}" disabled>
+                </div>
+                <div class="form-group">
+                    <label>Date:</label>
+                    <input type="date" id="edit-date" class="form-control" value="${formattedDate}">
+                </div>
+                <div id="timestamp-container">
+                    ${timestampFields}
+                </div>
+                <div class="dialog-actions">
+                    <button id="save-edit-log-btn" class="btn-blue">Save</button>
+                    <button id="cancel-edit-log-btn" class="btn-red">Cancel</button>
+                </div>
+            `;
+            
+            // Add some custom styling
+            const style = document.createElement('style');
+            style.textContent = `
+                .timestamp-edit-group {
+                    background-color: #f9f9f9;
+                    padding: 10px;
+                    border-radius: 5px;
+                    margin-bottom: 10px;
+                }
+                .timestamp-edit-group h4 {
+                    margin-top: 0;
+                    margin-bottom: 10px;
+                    color: #3949ab;
+                }
+                .timestamp-edit-group.deleted {
+                    display: none;
+                }
+            `;
+            
+            dialog.appendChild(style);
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+            
+            // Track logs to delete
+            const logsToDelete = new Set();
+            
+            // Handle delete time buttons
+            dialog.querySelectorAll('.delete-time-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const index = parseInt(this.getAttribute('data-index'));
+                    const logId = group.originalLogs[index].id;
+                    const timestampGroup = this.closest('.timestamp-edit-group');
+                    
+                    // Count visible timestamp groups (not deleted)
+                    const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)').length;
+                    
+                    // Don't allow deleting the last timestamp
+                    if (visibleGroups <= 1) {
+                        showNotification('warning', 'Cannot Delete', 'At least one timestamp must remain.');
+                        return;
+                    }
+                    
+                    // Mark for deletion
+                    logsToDelete.add(logId);
+                    timestampGroup.classList.add('deleted');
+                    
+                    showNotification('info', 'Timestamp Marked for Deletion', 'The timestamp will be deleted when you save changes.');
+                });
+            });
+            
+            // Handle save button
+            document.getElementById('save-edit-log-btn').addEventListener('click', function() {
+                const newName = document.getElementById('edit-name').value.trim();
+                const newDate = document.getElementById('edit-date').value;
+                
+                if (!newName) {
+                    alert('Name cannot be empty.');
+                    return;
+                }
+                
+                // Update name in database
+                uidToNameMap[group.uid] = newName;
+                
+                // Update each log in the group
+                const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)');
+                
+                visibleGroups.forEach(groupElement => {
+                    const logId = groupElement.getAttribute('data-log-id');
+                    const timeInput = groupElement.querySelector('.timestamp-time').value;
+                    
+                    // Find the corresponding log
+                    const log = logs.find(log => log.id === logId);
+                    
+                    if (log) {
+                        // Update timestamp with new date and time
+                        const newTimestamp = new Date(`${newDate}T${timeInput}:00`);
+                        log.timestamp = newTimestamp.getTime();
+                    }
+                });
+                
+                // Remove logs marked for deletion
+                if (logsToDelete.size > 0) {
+                    logs = logs.filter(log => !logsToDelete.has(log.id));
+                }
+                
+                // Sort logs by timestamp
+                logs.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // Sync with sheets if online
+                if (isOnline && isSignedIn) {
+                    Promise.all([
+                        syncDatabaseToSheet(),
+                        syncLogsWithSheet()
+                    ]).catch(err => console.error('Error syncing after edit:', err));
+                }
+                
+                updateUI();
+                
+                showNotification('success', 'Log Updated', 'Log entry has been updated successfully.');
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            // Handle cancel button
+            document.getElementById('cancel-edit-log-btn').addEventListener('click', function() {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
+        
+        /**
+         * Delete a log group.
+         * @param {Object} group - The log group to delete.
+         */
+        function confirmDeleteLog(group) {
+            if (!isAdmin) return;
+            
+            if (confirm(`Are you sure you want to delete all log entries for ${group.name} (${group.uid}) on ${group.date}?`)) {
+                // Get IDs of all logs in this group
+                const idsToRemove = group.originalLogs.map(log => log.id);
+                
+                // Remove logs with these IDs
+                logs = logs.filter(log => !idsToRemove.includes(log.id));
+                
+                // Sync with sheets if online
+                if (isOnline && isSignedIn) {
+                    syncLogsWithSheet().catch(err => console.error('Error syncing after delete:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Log Deleted', `Removed all logs for ${group.name} on ${group.date}.`);
+            }
+        }
+        
+        /**
+         * Clear all logs for current course.
+         */
+        function clearLogs() {
+            if (!isAdmin) return;
+            
+            if (!currentCourse) {
+                showNotification('warning', 'No Course Selected', 'Please select a course before clearing logs');
+                return;
+            }
+            
+            if (confirm(`Are you sure you want to clear all logs for ${currentCourse}? This cannot be undone.`)) {
+                logs = [];
+                
+                // Sync with sheets if online
+                if (isOnline && isSignedIn) {
+                    syncLogsWithSheet().catch(err => console.error('Error syncing after clear:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Logs Cleared', `All logs for ${currentCourse} have been removed.`);
+            }
+        }
+        
+        /**
+         * Handle file selection for Excel import.
+         * @param {Event} event - The change event from the file input.
+         */
+        function handleExcelFile(event) {
+            if (!isAdmin) return;
+            
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    // Get the first sheet
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    
+                    // Convert to JSON
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                    
+                    // Extract UID-name mappings
+                    const excelMappings = {};
+                    
+                    jsonData.forEach(row => {
+                        // Get first two columns (name and UID)
+                        const keys = Object.keys(row);
+                        
+                        if (keys.length >= 2) {
+                            const name = row[keys[0]];
+                            const uid = String(row[keys[1]]);
+                            
+                            if (name && uid) {
+                                excelMappings[uid] = name;
+                            }
+                        }
+                    });
+                    
+                    const excelCount = Object.keys(excelMappings).length;
+                    
+                    if (excelCount === 0) {
+                        showNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns.');
+                        return;
+                    }
+                    
+                    // Show import dialog
+                    showDatabaseImportDialog(excelMappings);
+                } catch (error) {
+                    console.error('Excel import error:', error);
+                    showNotification('error', 'Import Failed', 'Could not process the Excel file.');
+                }
+            };
+            
+            reader.onerror = function() {
+                showNotification('error', 'Import Failed', 'Failed to read the Excel file.');
+            };
+            
+            reader.readAsArrayBuffer(file);
+            
+            // Reset the file input
+            event.target.value = '';
+        }
+        
+        /**
+         * Show import dialog for database Excel data.
+         * @param {Object} excelMappings - The UID-name mappings from Excel.
+         */
+        function showDatabaseImportDialog(excelMappings) {
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            
+            dialog.innerHTML = `
+                <h3 class="dialog-title">Import UID Database</h3>
+                <p>Found ${Object.keys(excelMappings).length} entries in the Excel file.</p>
+                <p>How would you like to import them?</p>
+                <div class="dialog-actions">
+                    <button id="merge-db-btn" class="btn-blue">Merge</button>
+                    <button id="replace-db-btn" class="btn-blue">Replace</button>
+                    <button id="cancel-db-import-btn" class="btn-red">Cancel</button>
+                </div>
+            `;
+            
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+            
+            // Merge option
+            document.getElementById('merge-db-btn').addEventListener('click', () => {
+                // Add new mappings without overwriting existing ones
+                let newCount = 0;
+                
+                for (const [uid, name] of Object.entries(excelMappings)) {
+                    if (!uidToNameMap[uid]) {
+                        uidToNameMap[uid] = name;
+                        newCount++;
+                    }
+                }
+                
+                // Sync to sheet if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Database Merged', `Added ${newCount} new entries to the database.`);
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            // Replace option
+            document.getElementById('replace-db-btn').addEventListener('click', () => {
+                uidToNameMap = { ...excelMappings };
+                
+                // Sync to sheet if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Database Replaced', `Database now contains ${Object.keys(excelMappings).length} entries from Excel.`);
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            // Cancel import
+            document.getElementById('cancel-db-import-btn').addEventListener('click', () => {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
+        
+        /**
+         * Handle file selection for logs JSON import.
+         * @param {Event} event - The change event from the file input.
+         */
+        function handleImportFile(event) {
+            if (!isAdmin) return;
+            
+            if (!currentCourse) {
+                showNotification('warning', 'No Course Selected', 'Please select a course before importing logs');
+                return;
+            }
+            
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const importedLogs = JSON.parse(e.target.result);
+                    
+                    if (!Array.isArray(importedLogs)) {
+                        throw new Error('Invalid format: Logs must be an array');
+                    }
+                    
+                    // Normalize timestamps to milliseconds and ensure IDs
+                    importedLogs.forEach(log => {
+                        if (log.timestamp) {
+                            try {
+                                log.timestamp = new Date(log.timestamp).getTime();
+                                
+                                if (isNaN(log.timestamp)) {
+                                    console.warn(`Invalid timestamp: ${log.timestamp}`);
+                                    log.timestamp = Date.now();
+                                }
+                            } catch (err) {
+                                console.warn(`Error parsing timestamp: ${err}`);
+                                log.timestamp = Date.now();
+                            }
+                        } else {
+                            log.timestamp = Date.now();
+                        }
+                        
+                        // Ensure each log has an ID
+                        if (!log.id) {
+                            log.id = Date.now() + Math.random().toString(36).substr(2, 9);
+                        }
+                    });
+                    
+                    // Show import dialog
+                    showImportDialog(importedLogs);
+                } catch (error) {
+                    showNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
+                    console.error('Import error:', error);
+                }
+            };
+            
+            reader.onerror = function() {
+                showNotification('error', 'Import Failed', 'Failed to read the file.');
+            };
+            
+            reader.readAsText(file);
+            
+            // Reset the file input
+            event.target.value = '';
+        }
+        
+        /**
+         * Show import dialog for logs.
+         * @param {Array} importedLogs - The logs to import.
+         */
+        function showImportDialog(importedLogs) {
+            // Create dialog backdrop
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            
+            dialog.innerHTML = `
+                <h3 class="dialog-title">Import Logs</h3>
+                <p>Imported ${importedLogs.length} log entries. How would you like to proceed?</p>
+                <div class="dialog-actions">
+                    <button id="merge-logs-btn" class="btn-blue">Merge with Existing</button>
+                    <button id="replace-logs-btn" class="btn-red">Replace All</button>
+                    <button id="cancel-import-btn">Cancel</button>
+                </div>
+            `;
+            
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+            
+            // Merge option
+            document.getElementById('merge-logs-btn').addEventListener('click', () => {
+                // Create map of existing log IDs
+                const existingIds = new Set(logs.map(log => log.id));
+                
+                // Add only new logs
+                let newCount = 0;
+                
+                importedLogs.forEach(log => {
+                    if (!existingIds.has(log.id)) {
+                        logs.push(log);
+                        newCount++;
+                    }
+                });
+                
+                // Sort logs by timestamp
+                logs.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // Sync with sheets if online
+                if (isOnline && isSignedIn) {
+                    syncLogsWithSheet().catch(err => console.error('Error syncing logs:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Import Complete', `Added ${newCount} new log entries.`);
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            // Replace option
+            document.getElementById('replace-logs-btn').addEventListener('click', () => {
+                logs = [...importedLogs];
+                logs.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // Sync with sheets if online
+                if (isOnline && isSignedIn) {
+                    syncLogsWithSheet().catch(err => console.error('Error syncing logs:', err));
+                }
+                
+                updateUI();
+                showNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported entries.`);
+                document.body.removeChild(dialogBackdrop);
+            });
+            
+            // Cancel option
+            document.getElementById('cancel-import-btn').addEventListener('click', () => {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
+        
+        /**
+         * Export logs to JSON file.
+         */
+        function exportLogs() {
+            if (logs.length === 0) {
+                showNotification('warning', 'Export Failed', 'No logs to export');
+                return;
+            }
+            
+            // Format timestamps for export
+            const exportData = logs.map(log => ({
+                ...log,
+                timestamp: new Date(log.timestamp).toISOString()
+            }));
+            
+            // Create download link
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `${currentCourse || 'attendance'}_logs.json`);
+            
+            // Trigger download
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            document.body.removeChild(downloadAnchor);
+            
+            showNotification('success', 'Export Complete', 'Logs exported to JSON file');
+        }
+        
+        /**
+         * Export database to Excel file.
+         */
+        function exportDatabaseToExcel() {
+            const entries = Object.entries(uidToNameMap);
+            
+            if (entries.length === 0) {
+                showNotification('warning', 'Export Failed', 'No database entries to export');
+                return;
+            }
+            
+            // Create worksheet data
+            const wsData = [["Name", "UID"]]; // header
+            
+            entries.sort((a, b) => a[1].localeCompare(b[1])).forEach(([uid, name]) => {
+                wsData.push([name, uid]);
+            });
+            
+            // Create worksheet
+            const worksheet = XLSX.utils.aoa_to_sheet(wsData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Database");
+            
+            // Generate Excel file
+            XLSX.writeFile(workbook, "uid_database.xlsx");
+            
+            showNotification('success', 'Export Complete', 'Database exported to Excel file');
+        }
+        
+        /**
+         * Update the filtered and sorted logs list in the UI.
+         */
+        function updateLogsList() {
+            // If no course selected, show message
+            if (!currentCourse) {
+                emptyLogs.style.display = 'block';
+                filteredCount.textContent = '0';
+                logsTbody.innerHTML = '';
+                return;
+            }
+            
+            // Filter logs based on search input
+            const filteredLogs = filter 
+                ? logs.filter(log => {
+                    // Match UID
+                    if (log.uid.toLowerCase().includes(filter)) {
+                        return true;
+                    }
+                    
+                    // Match name if in database
+                    const name = uidToNameMap[log.uid];
+                    if (name && name.toLowerCase().includes(filter)) {
+                        return true;
+                    }
+                    
+                    return false;
+                })
+                : logs;
+            
+            // Group logs by date and UID
+            const grouped = {};
+            
+            filteredLogs.forEach(log => {
+                // Get date object
+                const dateObj = new Date(log.timestamp);
+                
+                if (isNaN(dateObj.getTime())) {
+                    console.warn('Invalid timestamp:', log.timestamp);
+                    return;
+                }
+                
+                // Format date for display (DD-MM-YYYY)
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const year = dateObj.getFullYear();
+                const date = `${day}-${month}-${year}`;
+                
+                const uid = log.uid;
+                const time = dateObj.toLocaleTimeString();
+                const name = uidToNameMap[uid] || 'Unknown';
+                
+                // Create key for date and UID combination
+                const key = `${date}_${uid}`;
+                
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        date,
+                        dateObj: new Date(year, month - 1, day), // For sorting
+                        uid,
+                        name,
+                        times: [],
+                        timeObjs: [], // Store time objects for sorting
+                        originalLogs: [] // Store original log references for edit/delete
+                    };
+                }
+                
+                grouped[key].times.push(time);
+                grouped[key].timeObjs.push(dateObj.getTime());
+                grouped[key].originalLogs.push(log);
+            });
+            
+            // Convert to array
+            let result = Object.values(grouped);
+            
+            // Apply sort based on currentSort value
+            const [field, direction] = currentSort.split('-');
+            const sortMultiplier = direction === 'asc' ? 1 : -1;
+            
+            switch (field) {
+                case 'date':
+                    // First sort by date
+                    result.sort((a, b) => sortMultiplier * (a.dateObj - b.dateObj));
+                    
+                    // Now we need to group entries by date
+                    const dateGroups = {};
+                    result.forEach(entry => {
+                        const dateStr = entry.date;
+                        if (!dateGroups[dateStr]) {
+                            dateGroups[dateStr] = [];
+                        }
+                        dateGroups[dateStr].push(entry);
+                    });
+                    
+                    // Sort each date group by name and then by earliest time
+                    Object.keys(dateGroups).forEach(dateStr => {
+                        dateGroups[dateStr].sort((a, b) => {
+                            // Primary sort by name
+                            const nameCompare = a.name.localeCompare(b.name);
+                            if (nameCompare !== 0) return nameCompare;
+                            
+                            // Secondary sort by earliest time in the day
+                            const aEarliestTime = Math.min(...a.timeObjs);
+                            const bEarliestTime = Math.min(...b.timeObjs);
+                            return aEarliestTime - bEarliestTime;
+                        });
+                    });
+                    
+                    // Reconstruct the result array based on the original sort order of dates
+                    result = [];
+                    const dates = Object.keys(dateGroups).sort((a, b) => {
+                        const dateA = new Date(a.split('-').reverse().join('-'));
+                        const dateB = new Date(b.split('-').reverse().join('-'));
+                        return sortMultiplier * (dateA - dateB);
+                    });
+                    
+                    dates.forEach(dateStr => {
+                        result = result.concat(dateGroups[dateStr]);
+                    });
+                    break;
+                    
+                case 'name':
+                    result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
+                    break;
+                case 'uid':
+                    result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
+                    break;
+                default:
+                    // Default sort by date desc
+                    result.sort((a, b) => -1 * (a.dateObj - b.dateObj));
+            }
+            
+            // Update filtered count
+            filteredCount.textContent = filteredLogs.length;
+            
+            // Show/hide empty message
+            emptyLogs.style.display = filteredLogs.length > 0 ? 'none' : 'block';
+            
+            // Clear table
+            logsTbody.innerHTML = '';
+            
+            // Track the current day for separators
+            let currentDay = null;
+            
+            // Add grouped logs to table with day separators
+            result.forEach((group) => {
+                // Check if we need a day separator (if sorting by date)
+                if (currentSort.startsWith('date')) {
+                    const thisDay = group.date;
+                    
+                    // If this is a new day, add a separator
+                    if (thisDay !== currentDay) {
+                        currentDay = thisDay;
+                        
+                        // Create day separator row
+                        const separatorRow = document.createElement('tr');
+                        separatorRow.className = 'day-separator';
+                        
+                        const separatorCell = document.createElement('td');
+                        separatorCell.colSpan = isAdmin ? 5 : 4; // Span all columns
+                        separatorCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                        
+                        separatorRow.appendChild(separatorCell);
+                        logsTbody.appendChild(separatorRow);
+                    }
+                }
                 
                 // Create log entry row
                 const row = document.createElement('tr');
@@ -1114,11 +2578,17 @@
                     timesCell.appendChild(timeTag);
                 });
                 
-                // Actions cell - only shown to admin
-                const actionsCell = document.createElement('td');
-                actionsCell.className = 'actions-cell';
+                // Add cells to row
+                row.appendChild(nameCell);
+                row.appendChild(uidCell);
+                row.appendChild(dateCell);
+                row.appendChild(timesCell);
                 
+                // Actions cell (admin only)
                 if (isAdmin) {
+                    const actionsCell = document.createElement('td');
+                    actionsCell.className = 'actions-cell';
+                    
                     // Edit button
                     const editIcon = document.createElement('i');
                     editIcon.className = 'fas fa-edit action-icon edit-icon';
@@ -1133,19 +2603,16 @@
                     
                     actionsCell.appendChild(editIcon);
                     actionsCell.appendChild(deleteIcon);
+                    row.appendChild(actionsCell);
                 }
-                
-                row.appendChild(nameCell);
-                row.appendChild(uidCell);
-                row.appendChild(dateCell);
-                row.appendChild(timesCell);
-                row.appendChild(actionsCell);
                 
                 logsTbody.appendChild(row);
             });
         }
         
-        // Update the database list
+        /**
+         * Update the database list in the UI.
+         */
         function updateDatabaseList() {
             // Filter database entries
             const entries = Object.entries(uidToNameMap)
@@ -1164,12 +2631,6 @@
             // Show/hide empty message
             emptyDatabase.style.display = Object.keys(uidToNameMap).length > 0 ? 'none' : 'block';
             
-            // Enable/disable buttons
-            if (isAdmin) {
-                clearDbBtn.disabled = Object.keys(uidToNameMap).length === 0;
-                exportExcelBtn.disabled = Object.keys(uidToNameMap).length === 0;
-            }
-            
             // Clear table
             databaseTbody.innerHTML = '';
             
@@ -1187,11 +2648,14 @@
                 uidCell.className = 'uid-cell';
                 uidCell.textContent = uid;
                 
-                // Actions cell - only shown to admin
-                const actionsCell = document.createElement('td');
-                actionsCell.className = 'actions-cell';
+                row.appendChild(nameCell);
+                row.appendChild(uidCell);
                 
+                // Actions cell (admin only)
                 if (isAdmin) {
+                    const actionsCell = document.createElement('td');
+                    actionsCell.className = 'actions-cell';
+                    
                     // Edit button
                     const editIcon = document.createElement('i');
                     editIcon.className = 'fas fa-edit action-icon edit-icon';
@@ -1206,476 +2670,81 @@
                     
                     actionsCell.appendChild(editIcon);
                     actionsCell.appendChild(deleteIcon);
+                    row.appendChild(actionsCell);
                 }
-                
-                row.appendChild(nameCell);
-                row.appendChild(uidCell);
-                row.appendChild(actionsCell);
                 
                 databaseTbody.appendChild(row);
             });
-        });
+        }
+        
+        /**
+         * Update database status indicator.
+         */
+        function updateDatabaseStatus() {
+            const count = Object.keys(uidToNameMap).length;
+            databaseStatus.textContent = count > 0 ? `${count} entries` : 'Not loaded';
+        }
+        
+        /**
+         * Update the entire UI.
+         */
+        function updateUI() {
+            updateLogsList();
+            updateDatabaseList();
+            updateDatabaseStatus();
+            
+            // Update total scans and last scan info
+            totalScans.textContent = logs.length;
+            
+            if (logs.length > 0) {
+                const latestLog = logs.reduce((latest, log) => 
+                    log.timestamp > latest.timestamp ? log : latest, logs[0]);
+                    
+                const lastTimestamp = new Date(latestLog.timestamp);
+                lastScan.textContent = lastTimestamp.toLocaleString();
             } else {
-                // Initialize the sign-in button
-                const signInButtonContainer = document.createElement('div');
-                signInButtonContainer.id = 'g_id_signin';
-                googleAuthContainer.appendChild(signInButtonContainer);
-                
-                // Render the sign-in button
-                google.accounts.id.renderButton(
-                    document.getElementById('g_id_signin'),
-                    { 
-                        theme: 'outline', 
-                        size: 'large',
-                        text: 'signin_with',
-                        logo_alignment: 'left'
-                    }
-                );
-                
-                // Hide admin-only elements
-                adminOnlyElements.forEach(el => {
-                    el.style.display = 'none';
-                });
-            }
-        }
-        
-        // Handle sign out
-        function handleSignOut() {
-            // Sign out from Google
-            google.accounts.id.disableAutoSelect();
-            
-            // Clear token
-            googleAccessToken = null;
-            
-            // Reset auth state
-            isAuthenticated = false;
-            isAdmin = false;
-            userProfile = null;
-            
-            // Update UI
-            updateAuthUI();
-            
-            // Show notification
-            showNotification('info', 'Signed Out', 'You have been signed out successfully.');
-        }
-        
-        // Update sync status
-        function updateSyncStatus(status) {
-            const syncStatusElement = document.getElementById('sync-status');
-            const syncButton = document.getElementById('sync-button');
-            
-            if (!syncStatusElement || !syncButton) return;
-            
-            switch (status) {
-                case 'syncing':
-                    syncStatusElement.textContent = 'Syncing...';
-                    syncButton.disabled = true;
-                    syncButton.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Syncing';
-                    isSyncing = true;
-                    break;
-                case 'success':
-                    const now = new Date();
-                    lastSyncTime = now;
-                    syncStatusElement.textContent = `Last sync: ${now.toLocaleTimeString()}`;
-                    syncButton.disabled = false;
-                    syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> Sync';
-                    isSyncing = false;
-                    break;
-                case 'error':
-                    syncStatusElement.textContent = 'Sync failed';
-                    syncButton.disabled = false;
-                    syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> Retry';
-                    isSyncing = false;
-                    break;
-                case 'ready':
-                    syncStatusElement.textContent = 'Not synced yet';
-                    syncButton.disabled = false;
-                    syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> Sync';
-                    isSyncing = false;
-                    break;
-                default:
-                    syncStatusElement.textContent = status;
-                    syncButton.disabled = false;
-                    syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> Sync';
-                    isSyncing = false;
-            }
-        }
-        
-        // Sync with Google Sheets
-        function syncWithGoogleSheets() {
-            if (!isAdmin || !googleAccessToken || isSyncing) return;
-            
-            updateSyncStatus('syncing');
-            showNotification('info', 'Syncing Data', 'Syncing with Google Sheets. Please wait...');
-            
-            // First sync the database (UID to name mapping)
-            syncDatabaseWithSheets()
-                .then(() => {
-                    // Then sync the logs
-                    return syncLogsWithSheets();
-                })
-                .then(() => {
-                    updateSyncStatus('success');
-                    showNotification('success', 'Sync Complete', 'Data successfully synchronized with Google Sheets.');
-                    updateUI();
-                })
-                .catch(error => {
-                    console.error('Sync error:', error);
-                    updateSyncStatus('error');
-                    showNotification('error', 'Sync Failed', `Error synchronizing with Google Sheets: ${error.message}`);
-                });
-        }
-        
-        // Sync database with Google Sheets
-        async function syncDatabaseWithSheets() {
-            // Step 1: Get the database from Google Sheets
-            return gapi.client.sheets.spreadsheets.values.get({
-                spreadsheetId: DATABASE_SPREADSHEET_ID,
-                range: 'Database!A2:C',
-                valueRenderOption: 'UNFORMATTED_VALUE'
-            }).then(response => {
-                const sheetsData = response.result.values || [];
-                
-                // Create a map from the sheets data
-                const sheetsMap = {};
-                if (sheetsData.length > 0) {
-                    sheetsData.forEach(row => {
-                        if (row.length >= 3) {
-                            const uid = String(row[2]).trim();
-                            const name = String(row[1]).trim();
-                            if (uid && name) {
-                                sheetsMap[uid] = name;
-                            }
-                        }
-                    });
-                }
-                
-                // Merge with local data (two-way sync)
-                
-                // 1. Entries in sheets but not in local - add to local
-                Object.entries(sheetsMap).forEach(([uid, name]) => {
-                    if (!uidToNameMap[uid]) {
-                        uidToNameMap[uid] = name;
-                    }
-                });
-                
-                // 2. Entries in local but not in sheets - add to sheets
-                const rowsToAdd = [];
-                Object.entries(uidToNameMap).forEach(([uid, name], index) => {
-                    if (!sheetsMap[uid]) {
-                        rowsToAdd.push([index + 1, name, uid]);
-                    }
-                });
-                
-                // Save to local storage
-                saveDatabase();
-                
-                // If there are new entries to add to the sheet
-                if (rowsToAdd.length > 0) {
-                    return gapi.client.sheets.spreadsheets.values.append({
-                        spreadsheetId: DATABASE_SPREADSHEET_ID,
-                        range: 'Database!A2:C',
-                        valueInputOption: 'RAW',
-                        insertDataOption: 'INSERT_ROWS',
-                        resource: {
-                            values: rowsToAdd
-                        }
-                    });
-                }
-                
-                return Promise.resolve();
-            });
-        }
-        
-        // Sync logs with Google Sheets
-        async function syncLogsWithSheets() {
-            // Step 1: Get logs from Google Sheets
-            return gapi.client.sheets.spreadsheets.values.get({
-                spreadsheetId: LOGS_SPREADSHEET_ID,
-                range: 'Logs!A2:E',
-                valueRenderOption: 'UNFORMATTED_VALUE'
-            }).then(response => {
-                const sheetsData = response.result.values || [];
-                
-                // Create a map of log IDs from sheets
-                const sheetsLogIds = new Set();
-                const sheetsLogs = [];
-                
-                if (sheetsData.length > 0) {
-                    sheetsData.forEach(row => {
-                        if (row.length >= 5) {
-                            const logId = String(row[0]);
-                            const uid = String(row[1]);
-                            const name = String(row[2]);
-                            const timestamp = new Date(row[3]);
-                            const isManual = row[4] === 'true';
-                            
-                            if (logId && uid && !isNaN(timestamp.getTime())) {
-                                sheetsLogIds.add(logId);
-                                
-                                // Create a log object from sheet data
-                                const log = {
-                                    id: logId,
-                                    uid: uid,
-                                    timestamp: timestamp.getTime(),
-                                    manual: isManual
-                                };
-                                
-                                sheetsLogs.push(log);
-                            }
-                        }
-                    });
-                }
-                
-                // Find logs in sheets but not in local - add to local
-                sheetsLogs.forEach(sheetLog => {
-                    const existingLog = logs.find(log => log.id === sheetLog.id);
-                    if (!existingLog) {
-                        logs.push(sheetLog);
-                    }
-                });
-                
-                // Find logs in local but not in sheets - add to sheets
-                const rowsToAdd = [];
-                logs.forEach(log => {
-                    if (!sheetsLogIds.has(String(log.id))) {
-                        const name = uidToNameMap[log.uid] || 'Unknown';
-                        const timestamp = new Date(log.timestamp);
-                        const isManual = log.manual ? 'true' : 'false';
-                        
-                        rowsToAdd.push([
-                            log.id,
-                            log.uid,
-                            name,
-                            timestamp.toISOString(),
-                            isManual
-                        ]);
-                    }
-                });
-                
-                // Save to local storage
-                saveLogs();
-                
-                // If there are new logs to add to the sheet
-                if (rowsToAdd.length > 0) {
-                    return gapi.client.sheets.spreadsheets.values.append({
-                        spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: 'Logs!A2:E',
-                        valueInputOption: 'RAW',
-                        insertDataOption: 'INSERT_ROWS',
-                        resource: {
-                            values: rowsToAdd
-                        }
-                    });
-                }
-                
-                return Promise.resolve();
-            });
-        }
-        
-        // Update sort icons based on current sort
-        function updateSortIcons() {
-            // Reset all icons
-            document.querySelectorAll('.sort-icon').forEach(icon => {
-                icon.className = 'sort-icon fas fa-sort';
-            });
-            
-            // Set active sort icon
-            const [field, direction] = currentSort.split('-');
-            const header = document.querySelector(`.sortable[data-sort="${field}"]`);
-            if (header) {
-                const icon = header.querySelector('.sort-icon');
-                icon.className = `sort-icon fas fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
-            }
-        }
-        
-        // Show notification
-        function showNotification(type, title, message) {
-            const notification = document.createElement('div');
-            notification.className = `notification notification-${type}`;
-            
-            let icon;
-            switch(type) {
-                case 'success': icon = 'check-circle'; break;
-                case 'error': icon = 'exclamation-circle'; break;
-                case 'warning': icon = 'exclamation-triangle'; break;
-                default: icon = 'info-circle';
+                lastScan.textContent = 'Never';
             }
             
-            notification.innerHTML = `
-                <i class="fas fa-${icon}"></i>
-                <div>
-                    <strong>${title}</strong><br>
-                    ${message}
-                </div>
-            `;
+            // Enable/disable buttons
+            exportBtn.disabled = logs.length === 0;
+            clearBtn.disabled = logs.length === 0;
             
-            notificationContainer.innerHTML = '';
-            notificationContainer.appendChild(notification);
-            
-            // Auto-remove success notifications after 3 seconds
-            if (type === 'success') {
-                setTimeout(() => {
-                    notification.remove();
-                }, 3000);
-            }
-        }
-        
-        // Handle Excel file import
-        function handleExcelFile(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            const reader = new FileReader();
-            
-            reader.onload = function(e) {
-                try {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    
-                    // Get the first sheet
-                    const firstSheetName = workbook.SheetNames[0];
-                    const worksheet = workbook.Sheets[firstSheetName];
-                    
-                    // Convert to JSON
-                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
-                    
-                    // Extract UID-name mappings
-                    const excelMappings = {};
-                    jsonData.forEach(row => {
-                        // Get values from the row
-                        const keys = Object.keys(row);
-                        if (keys.length >= 3) {
-                            const name = row[keys[1]]; // Column B
-                            const uid = String(row[keys[2]]); // Column C
-                            
-                            if (name && uid) {
-                                excelMappings[uid] = name;
-                            }
-                        }
-                    });
-                    
-                    // Count mappings in the Excel file
-                    const excelCount = Object.keys(excelMappings).length;
-                    
-                    if (excelCount === 0) {
-                        showNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns (B and C).');
-                        return;
-                    }
-                    
-                    // Ask user how to handle the import
-                    showDatabaseImportDialog(excelMappings);
-                    
-                } catch (error) {
-                    console.error('Excel import error:', error);
-                    showNotification('error', 'Import Failed', 'Could not process the Excel file. Make sure it has the correct format.');
-                }
-            };
-            
-            reader.onerror = function() {
-                showNotification('error', 'Import Failed', 'Failed to read the Excel file.');
-            };
-            
-            reader.readAsArrayBuffer(file);
-            
-            // Reset the file input
-            event.target.value = '';
-        }
-
-        // Show import options for the database
-        function showDatabaseImportDialog(excelMappings) {
-            // Create dialog backdrop
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-            
-            // Create dialog box
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            
-            const currentCount = Object.keys(uidToNameMap).length;
-            const newCount = Object.keys(excelMappings).length;
-            
-            dialog.innerHTML = `
-                <h3 class="dialog-title">Import Excel Database</h3>
-                <p>Found ${newCount} UID-name mappings in the Excel file.</p>
-                <p>How would you like to handle this import?</p>
-                <div class="dialog-actions">
-                    <button id="replace-all-btn" class="btn-red">Replace All Entries</button>
-                    <button id="merge-add-btn" class="btn-blue">Merge & Add New</button>
-                    <button id="cancel-db-btn">Cancel</button>
-                </div>
-            `;
-            
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-            
-            // Replace All: Clear existing database and use only the new data
-            document.getElementById('replace-all-btn').addEventListener('click', function() {
-                uidToNameMap = {...excelMappings};
-                saveDatabase();
-                updateUI();
+            if (isAdmin) {
+                // Admin-specific UI updates
+                clearDbBtn.disabled = Object.keys(uidToNameMap).length === 0;
+                exportExcelBtn.disabled = Object.keys(uidToNameMap).length === 0;
                 
-                // If admin and synced, push changes to Google Sheets
-                if (isAdmin && googleAccessToken && !isSyncing) {
-                    syncDatabaseWithSheets()
-                        .then(() => {
-                            showNotification('success', 'Database Updated', `Replaced database with ${newCount} mappings from Excel and synced with Google Sheets.`);
-                        })
-                        .catch(error => {
-                            console.error('Database sync error:', error);
-                            showNotification('warning', 'Partial Update', `Updated local database but failed to sync with Google Sheets: ${error.message}`);
-                        });
+                // Update scan buttons based on scanning state
+                if (isScanning) {
+                    startScanBtn.style.display = 'none';
+                    stopScanBtn.style.display = 'flex';
                 } else {
-                    showNotification('success', 'Database Updated', `Replaced database with ${newCount} mappings from Excel.`);
+                    startScanBtn.style.display = 'flex';
+                    stopScanBtn.style.display = 'none';
                 }
-                
-                document.body.removeChild(dialogBackdrop);
-            });
-            
-            // Merge & Add New: Keep existing entries and only add new ones (don't update existing)
-            document.getElementById('merge-add-btn').addEventListener('click', function() {
-                // Add only new mappings, don't change existing ones
-                let addedCount = 0;
-                
-                Object.entries(excelMappings).forEach(([uid, name]) => {
-                    if (!uidToNameMap[uid]) {
-                        uidToNameMap[uid] = name;
-                        addedCount++;
-                    }
-                });
-                
-                saveDatabase();
-                updateUI();
-                
-                // If admin and synced, push changes to Google Sheets
-                if (isAdmin && googleAccessToken && !isSyncing && addedCount > 0) {
-                    syncDatabaseWithSheets()
-                        .then(() => {
-                            showNotification('success', 'Database Updated', `Added ${addedCount} new mappings to database and synced with Google Sheets.`);
-                        })
-                        .catch(error => {
-                            console.error('Database sync error:', error);
-                            showNotification('warning', 'Partial Update', `Updated local database but failed to sync with Google Sheets: ${error.message}`);
-                        });
-                } else {
-                    showNotification('success', 'Database Updated', `Added ${addedCount} new mappings to database.`);
-                }
-                
-                document.body.removeChild(dialogBackdrop);
-            });
-            
-            document.getElementById('cancel-db-btn').addEventListener('click', function() {
-                document.body.removeChild(dialogBackdrop);
-            });
+            }
         }
         
-        // Start NFC scanning
+        /**
+         * Start NFC scanning.
+         */
         async function startScanning() {
-            if (!nfcSupported || !isAdmin) return;
+            if (!isAdmin || !nfcSupported) return;
+            
+            if (!currentCourse) {
+                showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+                return;
+            }
             
             try {
                 // Clear previous notifications
-                notificationContainer.innerHTML = '';
+                const nfcNotifications = document.querySelectorAll('.notification-error, .notification-info');
+                nfcNotifications.forEach(n => {
+                    if (n.textContent.includes('NFC') || n.textContent.includes('scanner')) {
+                        n.remove();
+                    }
+                });
                 
                 // Show scanning notification
                 showNotification('info', 'Starting scanner', 'Requesting permission to use NFC...');
@@ -1713,36 +2782,27 @@
             }
         }
         
-        // Play sound effect
-        function playSound(success) {
-            if (!soundEnabled) return;
-            
-            try {
-                if (success) {
-                    successSound.currentTime = 0;
-                    successSound.play();
-                } else {
-                    errorSound.currentTime = 0;
-                    errorSound.play();
-                }
-            } catch (e) {
-                console.error("Error playing sound:", e);
-            }
-        }
-        
-        // Handle NFC reading
+        /**
+         * Handle NFC reading.
+         * @param {Object} event - The NFC reading event.
+         */
         function handleNfcReading({ serialNumber }) {
+            if (!currentCourse) {
+                showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+                return;
+            }
+            
             // Create log entry
             const timestamp = new Date();
             const newLog = {
                 uid: serialNumber,
-                timestamp: timestamp.getTime(), // Store milliseconds
-                id: Date.now()
+                timestamp: timestamp.getTime(),
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                manual: false
             };
             
             // Add to logs
             logs.unshift(newLog);
-            saveLogs();
             
             // Update UI
             updateUI();
@@ -1756,67 +2816,19 @@
             // Show success notification
             showNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
             
-            // If admin and synced, push changes to Google Sheets
-            if (isAdmin && googleAccessToken && !isSyncing) {
-                // We don't need to wait for sync to complete for each scan
-                syncLogsWithSheets().catch(error => {
-                    console.error('Log sync error:', error);
+            // If online and signed in, append log to sheet
+            if (isOnline && isSignedIn) {
+                appendLogToSheet(newLog).catch(err => {
+                    console.error('Error appending log:', err);
+                    showNotification('warning', 'Sync Warning', 'Failed to sync immediately. Will sync on next full sync.');
                 });
             }
         }
         
-        // Format timestamp
-        function formatTimestamp(timestamp) {
-            if (!timestamp) return 'Invalid date';
-            
-            try {
-                // Convert any format to a Date object
-                const date = new Date(timestamp);
-                
-                // Check if date is valid
-                if (isNaN(date.getTime())) {
-                    return 'Invalid date';
-                }
-                
-                // Manual formatting to use hyphens
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const year = date.getFullYear();
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                const seconds = String(date.getSeconds()).padStart(2, '0');
-                
-                // Format as DD-MM-YYYY HH:MM:SS
-                return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
-            } catch (err) {
-                console.error('Error formatting timestamp:', err);
-                return 'Invalid date';
-            }
-        }
-        
-        // Format date only (for day headers)
-        function formatDateOnly(timestamp) {
-            if (!timestamp) return 'Invalid date';
-            
-            try {
-                const date = new Date(timestamp);
-                
-                if (isNaN(date.getTime())) {
-                    return 'Invalid date';
-                }
-                
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const year = date.getFullYear();
-                
-                return `${day}-${month}-${year}`;
-            } catch (err) {
-                console.error('Error formatting date:', err);
-                return 'Invalid date';
-            }
-        }
-        
-        // Handle NFC error
+        /**
+         * Handle NFC error.
+         * @param {Object} error - The NFC error.
+         */
         function handleNfcError(error) {
             // Play error sound
             playSound(false);
@@ -1825,7 +2837,9 @@
             stopScanning();
         }
         
-        // Stop NFC scanning
+        /**
+         * Stop NFC scanning.
+         */
         function stopScanning() {
             isScanning = false;
             updateScanButtons();
@@ -1840,730 +2854,57 @@
             showNotification('info', 'Scanner stopped', 'NFC scanning has been stopped.');
         }
         
-        // Update scan buttons based on state
+        /**
+         * Update scan buttons based on state.
+         */
         function updateScanButtons() {
             if (isScanning) {
                 startScanBtn.style.display = 'none';
                 stopScanBtn.style.display = 'flex';
             } else {
-                startScanBtn.style.display = 'flex';
+                startScanBtn.style.display = isAdmin ? 'flex' : 'none';
                 stopScanBtn.style.display = 'none';
             }
         }
         
-        // Handle filter changes
-        function handleFilterChange() {
-            filter = filterInput.value.toLowerCase();
-            updateLogsList();
-        }
-        
-        // Handle sort changes
-        function handleSortChange() {
-            currentSort = sortSelect.value;
-            updateSortIcons();
-            updateLogsList();
-        }
-        
-        // Handle database filter changes
-        function handleDbFilterChange() {
-            dbFilter = dbFilterInput.value.toLowerCase();
-            updateDatabaseList();
-        }
-        
-        // Show add manual log entry dialog
-        function showAddLogEntryDialog() {
-            if (!isAdmin) return;
+        /**
+         * Play sound effect (success or error).
+         * @param {boolean} success - Whether to play success or error sound.
+         */
+        function playSound(success) {
+            if (!soundEnabled) return;
             
-            // Create dialog backdrop
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-            
-            // Create dialog box
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            
-            // Get the current date/time in format for the inputs
-            const now = new Date();
-            const formattedDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
-            const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
-            
-            // Generate name dropdown options from database
-            let nameOptions = '';
-            const sortedEntries = Object.entries(uidToNameMap)
-                .sort((a, b) => a[1].localeCompare(b[1])); // Sort by name
-                
-            sortedEntries.forEach(([uid, name]) => {
-                nameOptions += `<option value="${uid}">${name} (${uid})</option>`;
-            });
-            
-            dialog.innerHTML = `
-                <h3 class="dialog-title">Add Manual Log Entry</h3>
-                
-                <div class="form-group">
-                    <label for="manual-name">Person:</label>
-                    <select id="manual-name" class="form-control">
-                        <option value="">-- Select Person --</option>
-                        ${nameOptions}
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="manual-date">Date:</label>
-                    <input type="date" id="manual-date" class="form-control" value="${formattedDate}">
-                </div>
-                
-                <div class="form-group">
-                    <label for="manual-time">Time:</label>
-                    <input type="time" id="manual-time" class="form-control" value="${formattedTime}">
-                </div>
-                
-                <div class="dialog-actions">
-                    <button id="save-manual-log-btn" class="btn-green">Add Entry</button>
-                    <button id="cancel-manual-btn">Cancel</button>
-                </div>
-            `;
-            
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-            
-            // Handle save button
-            document.getElementById('save-manual-log-btn').addEventListener('click', function() {
-                const selectedUid = document.getElementById('manual-name').value;
-                const manualDate = document.getElementById('manual-date').value;
-                const manualTime = document.getElementById('manual-time').value;
-                
-                if (!selectedUid) {
-                    alert('Please select a person.');
-                    return;
-                }
-                
-                if (!manualDate) {
-                    alert('Please enter a date.');
-                    return;
-                }
-                
-                if (!manualTime) {
-                    alert('Please enter a time.');
-                    return;
-                }
-                
-                // Create timestamp
-                const timestamp = new Date(`${manualDate}T${manualTime}:00`);
-                
-                // Create log entry
-                const newLog = {
-                    uid: selectedUid,
-                    timestamp: timestamp.getTime(),
-                    id: Date.now(),
-                    manual: true // Flag to indicate this was manually added
-                };
-                
-                // Add to logs
-                logs.unshift(newLog);
-                saveLogs();
-                updateUI();
-                
-                // Show success notification
-                const name = uidToNameMap[selectedUid] || 'Unknown';
-                showNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate} ${manualTime}`);
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    syncLogsWithSheets().catch(error => {
-                        console.error('Log sync error:', error);
-                    });
-                }
-                
-                document.body.removeChild(dialogBackdrop);
-            });
-            
-            // Handle cancel button
-            document.getElementById('cancel-manual-btn').addEventListener('click', function() {
-                document.body.removeChild(dialogBackdrop);
-            });
-        }
-        
-        // Handle import file selection for logs
-        function handleImportFile(event) {
-            if (!isAdmin) return;
-            
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            const reader = new FileReader();
-            
-            reader.onload = function(e) {
-                try {
-                    const importedLogs = JSON.parse(e.target.result);
-                    
-                    if (!Array.isArray(importedLogs)) {
-                        throw new Error('Invalid format: Logs must be an array');
-                    }
-                    
-                    // Normalize all timestamps to milliseconds
-                    importedLogs.forEach(log => {
-                        if (log.timestamp) {
-                            try {
-                                // Convert any timestamp format to milliseconds
-                                log.timestamp = new Date(log.timestamp).getTime();
-                                
-                                // If invalid, use current time
-                                if (isNaN(log.timestamp)) {
-                                    console.warn(`Invalid timestamp: ${log.timestamp}`);
-                                    log.timestamp = Date.now();
-                                }
-                            } catch (err) {
-                                console.warn(`Error parsing timestamp: ${err}`);
-                                log.timestamp = Date.now();
-                            }
-                        } else {
-                            log.timestamp = Date.now();
-                        }
-                        
-                        // Ensure each log has an ID
-                        if (!log.id) {
-                            log.id = Date.now() + Math.floor(Math.random() * 1000);
-                        }
-                    });
-                    
-                    // Show import options dialog
-                    showImportDialog(importedLogs);
-                    
-                } catch (error) {
-                    showNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
-                    console.error('Import error:', error);
-                }
-            };
-            
-            reader.onerror = function() {
-                showNotification('error', 'Import Failed', 'Failed to read the selected file.');
-            };
-            
-            reader.readAsText(file);
-            
-            // Reset the file input
-            event.target.value = '';
-        }
-        
-        // Show import options dialog
-        function showImportDialog(importedLogs) {
-            // Create dialog backdrop
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-            
-            // Create dialog box
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            
-            dialog.innerHTML = `
-                <h3 class="dialog-title">Import ${importedLogs.length} logs</h3>
-                <p>How would you like to import these logs?</p>
-                <div class="dialog-actions">
-                    <button id="replace-btn" class="btn-red">Replace All</button>
-                    <button id="merge-btn" class="btn-blue">Merge with Existing</button>
-                    <button id="cancel-import-btn">Cancel</button>
-                </div>
-            `;
-            
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-            
-            // Handle dialog buttons
-            document.getElementById('replace-btn').addEventListener('click', function() {
-                logs = importedLogs;
-                saveLogs();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    syncLogsWithSheets()
-                        .then(() => {
-                            showNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported logs and synced with Google Sheets.`);
-                        })
-                        .catch(error => {
-                            console.error('Log sync error:', error);
-                            showNotification('warning', 'Partial Import', `Updated local logs but failed to sync with Google Sheets: ${error.message}`);
-                        });
+            try {
+                if (success) {
+                    successSound.currentTime = 0;
+                    successSound.play().catch(e => console.error("Error playing sound:", e));
                 } else {
-                    showNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported logs.`);
+                    errorSound.currentTime = 0;
+                    errorSound.play().catch(e => console.error("Error playing sound:", e));
                 }
-                
-                document.body.removeChild(dialogBackdrop);
-            });
-            
-            document.getElementById('merge-btn').addEventListener('click', function() {
-                // Create a map of existing IDs for quick lookup
-                const existingIds = new Set(logs.map(log => log.id));
-                
-                // Add only new logs
-                let newLogsCount = 0;
-                
-                importedLogs.forEach(log => {
-                    if (!existingIds.has(log.id)) {
-                        logs.push(log);
-                        newLogsCount++;
-                    }
-                });
-                
-                // Sort logs by timestamp (newest first)
-                logs.sort((a, b) => b.timestamp - a.timestamp);
-                
-                saveLogs();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing && newLogsCount > 0) {
-                    syncLogsWithSheets()
-                        .then(() => {
-                            showNotification('success', 'Import Complete', `Added ${newLogsCount} new logs and synced with Google Sheets.`);
-                        })
-                        .catch(error => {
-                            console.error('Log sync error:', error);
-                            showNotification('warning', 'Partial Import', `Updated local logs but failed to sync with Google Sheets: ${error.message}`);
-                        });
-                } else {
-                    showNotification('success', 'Import Complete', `Added ${newLogsCount} new logs.`);
-                }
-                
-                document.body.removeChild(dialogBackdrop);
-            });
-            
-            document.getElementById('cancel-import-btn').addEventListener('click', function() {
-                document.body.removeChild(dialogBackdrop);
-            });
-        }
-        
-        // Clear all logs
-        function clearLogs() {
-            if (!isAdmin) return;
-            
-            if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
-                logs = [];
-                saveLogs();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    // For clearing logs, we simply create a new sheet or clear the existing one
-                    // This requires additional API calls beyond our current scope
-                    // For simplicity, we'll just recommend a manual sync
-                    showNotification('warning', 'Logs cleared', 'All scan logs have been removed locally. Please sync manually to update Google Sheets.');
-                } else {
-                    showNotification('success', 'Logs cleared', 'All scan logs have been removed.');
-                }
+            } catch (e) {
+                console.error("Error playing sound:", e);
             }
         }
         
-        // Export logs preserving the exact local time
-        function exportLogs() {
-            // Create export data with timestamps that preserve local time exactly
-            const exportData = logs.map(log => {
-                const date = new Date(log.timestamp);
-                
-                // Format date in a consistent way that preserves local time
-                // Format: YYYY-MM-DDTHH:MM:SS.sss (without the Z suffix)
-                const localISOString = date.getFullYear() + '-' +
-                    String(date.getMonth() + 1).padStart(2, '0') + '-' +
-                    String(date.getDate()).padStart(2, '0') + 'T' +
-                    String(date.getHours()).padStart(2, '0') + ':' +
-                    String(date.getMinutes()).padStart(2, '0') + ':' +
-                    String(date.getSeconds()).padStart(2, '0') + '.' +
-                    String(date.getMilliseconds()).padStart(3, '0');
-                
-                return {
-                    ...log,
-                    timestamp: localISOString
-                };
-            });
-            
-            const dataStr = JSON.stringify(exportData, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-            
-            const exportFileName = `nfc-logs-${new Date().toISOString().slice(0,10)}.json`;
-            
-            const linkElement = document.createElement('a');
-            linkElement.setAttribute('href', dataUri);
-            linkElement.setAttribute('download', exportFileName);
-            document.body.appendChild(linkElement);
-            linkElement.click();
-            document.body.removeChild(linkElement);
-            
-            showNotification('success', 'Logs exported', `Logs saved to ${exportFileName}`);
-        }
-        
-        // Export database to Excel
-        function exportDatabaseToExcel() {
-            if (!isAdmin) return;
-            
-            // Create worksheet from database
-            const ws_data = [
-                ['Index', 'Name', 'UID'] // Header row
-            ];
-            
-            let index = 1;
-            for (const [uid, name] of Object.entries(uidToNameMap)) {
-                ws_data.push([index++, name, uid]);
-            }
-            
-            const ws = XLSX.utils.aoa_to_sheet(ws_data);
-            
-            // Create workbook
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Database');
-            
-            // Generate Excel file
-            const excelFileName = `nfc-database-${new Date().toISOString().slice(0,10)}.xlsx`;
-            XLSX.writeFile(wb, excelFileName);
-            
-            showNotification('success', 'Database exported', `Database saved to ${excelFileName}`);
-        }
-        
-        // Show add entry dialog
-        function showAddEntryDialog() {
-            if (!isAdmin) return;
-            
-            // Create dialog backdrop
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-            
-            // Create dialog box
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            
-            dialog.innerHTML = `
-                <h3 class="dialog-title">Add Database Entry</h3>
-                
-                <div class="form-group">
-                    <label for="add-name">Name:</label>
-                    <input type="text" id="add-name" class="form-control" placeholder="Enter name">
-                </div>
-                
-                <div class="form-group">
-                    <label for="add-uid">UID:</label>
-                    <input type="text" id="add-uid" class="form-control" placeholder="Enter UID">
-                </div>
-                
-                <div class="dialog-actions">
-                    <button id="save-entry-btn" class="btn-green">Save Entry</button>
-                    <button id="cancel-add-btn">Cancel</button>
-                </div>
-            `;
-            
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-            
-            // Handle save button
-            document.getElementById('save-entry-btn').addEventListener('click', function() {
-                const name = document.getElementById('add-name').value.trim();
-                const uid = document.getElementById('add-uid').value.trim();
-                
-                if (!name) {
-                    alert('Please enter a name.');
-                    return;
-                }
-                
-                if (!uid) {
-                    alert('Please enter a UID.');
-                    return;
-                }
-                
-                // Add to database
-                uidToNameMap[uid] = name;
-                saveDatabase();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    syncDatabaseWithSheets()
-                        .then(() => {
-                            showNotification('success', 'Entry Added', `Added ${name} (${uid}) to the database and synced with Google Sheets.`);
-                        })
-                        .catch(error => {
-                            console.error('Database sync error:', error);
-                            showNotification('warning', 'Partial Update', `Added entry locally but failed to sync with Google Sheets: ${error.message}`);
-                        });
-                } else {
-                    showNotification('success', 'Entry Added', `Added ${name} (${uid}) to the database.`);
-                }
-                
-                document.body.removeChild(dialogBackdrop);
-            });
-            
-            // Handle cancel button
-            document.getElementById('cancel-add-btn').addEventListener('click', function() {
-                document.body.removeChild(dialogBackdrop);
-            });
-        }
-        
-        // Edit database entry
-        function editDatabaseEntry(uid) {
-            if (!isAdmin) return;
-            
-            const name = uidToNameMap[uid];
-            
-            // Create dialog backdrop
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-            
-            // Create dialog box
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            
-            dialog.innerHTML = `
-                <h3 class="dialog-title">Edit Database Entry</h3>
-                
-                <div class="form-group">
-                    <label for="edit-db-name">Name:</label>
-                    <input type="text" id="edit-db-name" class="form-control" value="${name || ''}">
-                </div>
-                
-                <div class="form-group">
-                    <label for="edit-db-uid">UID:</label>
-                    <input type="text" id="edit-db-uid" class="form-control" value="${uid}" readonly style="background-color: #f5f5f5; color: #777;">
-                    <small style="color: #777; display: block; margin-top: 5px;">UID cannot be changed</small>
-                </div>
-                
-                <div class="dialog-actions">
-                    <button id="save-db-btn" class="btn-green">Save Changes</button>
-                    <button id="cancel-db-edit-btn">Cancel</button>
-                </div>
-            `;
-            
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-            
-            // Handle save button
-            document.getElementById('save-db-btn').addEventListener('click', function() {
-                const newName = document.getElementById('edit-db-name').value.trim();
-                
-                if (!newName) {
-                    alert('Please enter a name.');
-                    return;
-                }
-                
-                // Update database
-                uidToNameMap[uid] = newName;
-                saveDatabase();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    syncDatabaseWithSheets()
-                        .then(() => {
-                            showNotification('success', 'Entry Updated', `Updated ${uid} to ${newName} in the database and synced with Google Sheets.`);
-                        })
-                        .catch(error => {
-                            console.error('Database sync error:', error);
-                            showNotification('warning', 'Partial Update', `Updated entry locally but failed to sync with Google Sheets: ${error.message}`);
-                        });
-                } else {
-                    showNotification('success', 'Entry Updated', `Updated ${uid} to ${newName} in the database.`);
-                }
-                
-                document.body.removeChild(dialogBackdrop);
-            });
-            
-            // Handle cancel button
-            document.getElementById('cancel-db-edit-btn').addEventListener('click', function() {
-                document.body.removeChild(dialogBackdrop);
-            });
-        }
-        
-        // Delete database entry
-        function deleteDatabaseEntry(uid) {
-            if (!isAdmin) return;
-            
-            const name = uidToNameMap[uid];
-            
-            if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the database?`)) {
-                delete uidToNameMap[uid];
-                saveDatabase();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    syncDatabaseWithSheets()
-                        .then(() => {
-                            showNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database and synced with Google Sheets.`);
-                        })
-                        .catch(error => {
-                            console.error('Database sync error:', error);
-                            showNotification('warning', 'Partial Update', `Removed entry locally but failed to sync with Google Sheets: ${error.message}`);
-                        });
-                } else {
-                    showNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
-                }
+        /**
+         * Update current year in footer.
+         */
+        function updateYear() {
+            const yearElement = document.getElementById('currentYear');
+            if (yearElement) {
+                yearElement.textContent = new Date().getFullYear();
             }
         }
         
-        // Clear database
-        function clearDatabase() {
-            if (!isAdmin) return;
+        // Initialize the application when window loads
+        window.addEventListener('load', function() {
+            // Initialize the app UI
+            init();
             
-            if (confirm('Are you sure you want to clear the entire database? This will remove all UID-name mappings.')) {
-                uidToNameMap = {};
-                saveDatabase();
-                updateUI();
-                
-                // If synced, push changes to Google Sheets
-                if (googleAccessToken && !isSyncing) {
-                    // For clearing the database, we would need additional API calls
-                    // For simplicity, we'll just recommend a manual sync
-                    showNotification('warning', 'Database Cleared', 'All database entries have been removed locally. Please sync manually to update Google Sheets.');
-                } else {
-                    showNotification('success', 'Database Cleared', 'All database entries have been removed.');
-                }
-            }
-        }
-        
-        // Load logs from localStorage
-        function loadLogs() {
-            const savedLogs = localStorage.getItem(LOGS_STORAGE_KEY);
-            if (savedLogs) {
-                try {
-                    logs = JSON.parse(savedLogs);
-                } catch (e) {
-                    logs = [];
-                    console.error('Error parsing saved logs:', e);
-                }
-            }
-        }
-        
-        // Save logs to localStorage
-        function saveLogs() {
-            localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(logs));
-        }
-        
-        // Load database from localStorage
-        function loadDatabase() {
-            const savedDatabase = localStorage.getItem(DATABASE_STORAGE_KEY);
-            if (savedDatabase) {
-                try {
-                    uidToNameMap = JSON.parse(savedDatabase);
-                    updateDatabaseStatus();
-                } catch (e) {
-                    uidToNameMap = {};
-                    console.error('Error parsing saved database:', e);
-                }
-            }
-        }
-        
-        // Save database to localStorage
-        function saveDatabase() {
-            localStorage.setItem(DATABASE_STORAGE_KEY, JSON.stringify(uidToNameMap));
-            updateDatabaseStatus();
-        }
-        
-        // Update database status indicator
-        function updateDatabaseStatus() {
-            const count = Object.keys(uidToNameMap).length;
-            if (count > 0) {
-                databaseStatus.textContent = `${count} entries`;
-            } else {
-                databaseStatus.textContent = 'Not loaded';
-            }
-        }
-        
-        // Group and sort logs
-        function getGroupedAndSortedLogs(filteredLogs) {
-            // First, create a working copy of the filtered logs
-            let workingLogs = [...filteredLogs];
-            
-            // Group logs by date and UID
-            const grouped = {};
-            
-            workingLogs.forEach(log => {
-                // Get date object
-                const dateObj = new Date(log.timestamp);
-                
-                // Format date with hyphens
-                const day = String(dateObj.getDate()).padStart(2, '0');
-                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-                const year = dateObj.getFullYear();
-                const date = `${day}-${month}-${year}`;
-                
-                const uid = log.uid;
-                const time = dateObj.toLocaleTimeString();
-                const name = uidToNameMap[uid] || 'Unknown';
-                
-                // Create key for date and UID combination
-                const key = `${date}_${uid}`;
-                
-                if (!grouped[key]) {
-                    grouped[key] = {
-                        date,
-                        dateObj: new Date(year, month - 1, day), // For sorting
-                        uid,
-                        name,
-                        times: [],
-                        timeObjs: [], // Store time objects for sorting
-                        originalLogs: [] // Store original log references for edit/delete
-                    };
-                }
-                
-                grouped[key].times.push(time);
-                grouped[key].timeObjs.push(dateObj); // Store the original date object for time sorting
-                grouped[key].originalLogs.push(log); // Store reference to original log
-            });
-            
-            // Convert to array
-            let result = Object.values(grouped);
-            
-            // Apply sort based on currentSort value
-            const [field, direction] = currentSort.split('-');
-            const sortMultiplier = direction === 'asc' ? 1 : -1;
-            
-            switch (field) {
-                case 'date':
-                    // First sort by date
-                    result.sort((a, b) => sortMultiplier * (a.dateObj - b.dateObj));
-                    
-                    // Now we need to group entries by date
-                    const dateGroups = {};
-                    result.forEach(entry => {
-                        const dateStr = entry.date;
-                        if (!dateGroups[dateStr]) {
-                            dateGroups[dateStr] = [];
-                        }
-                        dateGroups[dateStr].push(entry);
-                    });
-                    
-                    // Sort each date group by name and then by earliest time
-                    Object.keys(dateGroups).forEach(dateStr => {
-                        dateGroups[dateStr].sort((a, b) => {
-                            // Primary sort by name
-                            const nameCompare = a.name.localeCompare(b.name);
-                            if (nameCompare !== 0) return nameCompare;
-                            
-                            // Secondary sort by earliest time in the day
-                            const aEarliestTime = Math.min(...a.timeObjs.map(t => t.getTime()));
-                            const bEarliestTime = Math.min(...b.timeObjs.map(t => t.getTime()));
-                            return aEarliestTime - bEarliestTime;
-                        });
-                    });
-                    
-                    // Reconstruct the result array based on the original sort order of dates
-                    result = [];
-                    const dates = Object.keys(dateGroups).sort((a, b) => {
-                        const dateA = new Date(a.split('-').reverse().join('-'));
-                        const dateB = new Date(b.split('-').reverse().join('-'));
-                        return sortMultiplier * (dateA - dateB);
-                    });
-                    
-                    dates.forEach(dateStr => {
-                        result = result.concat(dateGroups[dateStr]);
-                    });
-                    break;
-                    
-                case 'name':
-                    result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
-                    break;
-                case 'uid':
-                    result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
-                    break;
-                default:
-                    // Default sort by date desc
-                    result.sort((a, b) => -1 * (a.dateObj - b.dateObj));
-            }
-            
-            return result;
+            // Initialize Google API
+            initGoogleApi();
+        });
+    </script>
+</body>
+</html>
