@@ -211,12 +211,15 @@
             padding: 6px 12px;
             font-size: 0.85em;
         }
-		.notification-container {
+		#notification-container {
 		  position: fixed;
 		  top: 10px;
 		  right: 10px;
 		  z-index: 10000;
-		  width: auto;
+		  max-width: 300px;
+		}
+		.notification {
+		  margin-bottom: 10px; /* Reduced margin so new notifications don’t push content far down */
 		}
         .filter-container {
             margin-bottom: 15px;
@@ -489,9 +492,11 @@
         }
         /* Auth styles */
         .auth-container {
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 15px;
+		  display: flex;
+		  justify-content: flex-end; /* Align to right */
+		  align-items: center;
+		  gap: 10px;
+		  margin-bottom: 15px;
         }
         .user-info {
             display: flex;
@@ -503,11 +508,18 @@
             height: 32px;
             border-radius: 50%;
         }
+		.sync-auth-container {
+		  display: flex;
+		  justify-content: space-between; /* Puts first child to left, second to right */
+		  align-items: center;
+		  padding: 10px 0; /* Adjust as needed */
+		}
         .sync-container {
-            margin-bottom: 15px;
-            display: flex;
-            gap: 10px;
-            justify-content: flex-end;
+		  display: flex;
+		  justify-content: flex-start; /* Align to left */
+		  align-items: center;
+		  gap: 10px;
+		  margin-bottom: 15px;
         }
         .sync-status {
             display: flex;
@@ -574,19 +586,34 @@
             <source src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c6e26d.mp3?filename=wrong-answer-sound-effect-21367.mp3" type="audio/mpeg">
         </audio>
         
-        <!-- Auth container -->
-        <div class="auth-container">
-            <div id="login-container">
-                <button id="login-btn" class="btn-blue"><i class="fas fa-sign-in-alt"></i> Sign in with Google</button>
-            </div>
-            <div id="user-container" style="display: none">
-                <div class="user-info">
-                    <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
-                    <span id="user-name"></span>
-                    <button id="logout-btn" class="btn-sm"><i class="fas fa-sign-out-alt"></i></button>
-                </div>
-            </div>
-        </div>
+<div class="sync-auth-container">
+  <!-- Left: Sync status and button -->
+  <div class="sync-container">
+    <div id="sync-status" class="sync-status offline">
+      <i class="fas fa-circle"></i> <span id="sync-text">Offline</span>
+    </div>
+    <button id="sync-btn" class="btn-blue admin-only" style="display: none;">
+      <i class="fas fa-sync-alt"></i> Sync
+    </button>
+  </div>
+  <!-- Right: Auth container -->
+  <div class="auth-container">
+    <div id="login-container">
+      <button id="login-btn" class="btn-blue">
+        <i class="fas fa-sign-in-alt"></i> Sign in with Google
+      </button>
+    </div>
+    <div id="user-container" style="display: none">
+      <div class="user-info">
+        <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
+        <span id="user-name"></span>
+        <button id="logout-btn" class="btn-sm"><i class="fas fa-sign-out-alt"></i></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
         
         <div class="app-header">
             <h1><i class="fas fa-clipboard-list"></i> Course Attendance</h1>
@@ -613,13 +640,6 @@
             </div>
         </div>
         
-        <!-- Sync status and button -->
-        <div class="sync-container">
-            <div id="sync-status" class="sync-status offline">
-                <i class="fas fa-circle"></i> <span id="sync-text">Offline</span>
-            </div>
-            <button id="sync-btn" class="btn-blue admin-only" style="display: none;"><i class="fas fa-sync-alt"></i> Sync</button>
-        </div>
         
         <!-- Notification area -->
         <div id="notification-container"></div>
@@ -829,12 +849,12 @@
             window.addEventListener('offline', updateOnlineStatus);
             
             // Check if NFC is supported
-            if (!('NDEFReader' in window)) {
-                nfcSupported = false;
-                if (isAdmin) {
-                    showNotification('warning', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
-                }
-            }
+			if (!('NDEFReader' in window)) {
+				nfcSupported = false;
+				showNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
+				startScanBtn.style.display = 'none';
+				stopScanBtn.style.display = 'none';
+			}
             
             // Set up tab navigation
             tabs.forEach(tab => {
@@ -946,14 +966,15 @@ gapi.client.init({
             gapi.client.setToken(tokenObj);
             isSignedIn = true;
             
-            // Fetch user info to check if admin, then fetch courses and database
+            // Fetch user info and then update UI and load courses and database
             return fetchUserInfo()
                 .then(() => {
                     isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
                     updateAuthUI();
                     if (isOnline) {
-                        // Fetch both available courses and the database regardless of admin status
+                        // Always fetch courses
                         fetchAvailableCourses();
+                        // Also fetch the database so it loads on refresh
                         fetchDatabaseFromSheet().catch(err => console.error('Database load error:', err));
                     }
                 })
@@ -984,6 +1005,7 @@ gapi.client.init({
     showNotification('error', 'API Error', 'Failed to initialize Google API client.');
     updateAuthUI();
 });
+
 
                     
                     // Initialize token client for auth
@@ -1598,7 +1620,7 @@ function mergeLogs(localLogs, remoteLogs) {
     remoteLogs.forEach(log => {
         merged[log.id] = log;
     });
-    // Then add local logs. If a local log is newer (has a higher timestamp), update.
+    // For local logs, update only if local has a newer timestamp.
     localLogs.forEach(log => {
         if (!merged[log.id] || log.timestamp > merged[log.id].timestamp) {
             merged[log.id] = log;
@@ -1607,6 +1629,7 @@ function mergeLogs(localLogs, remoteLogs) {
     // Return sorted logs (newest first)
     return Object.values(merged).sort((a, b) => b.timestamp - a.timestamp);
 }
+
 
 async function syncLogsWithSheet() {
     if (!currentCourse) {
@@ -2298,13 +2321,9 @@ function clearLogs() {
 
 // Deletes a single log by its ID and then syncs the changes.
 function deleteLogEntry(logId) {
-    // Only admin can delete.
-    if (!isAdmin) return;
-
-    // Remove the log with the matching id.
+    if (!isAdmin) return; // Only admins can delete.
+    // Remove the log with the given ID.
     logs = logs.filter(log => log.id !== logId);
-
-    // If online and signed in, sync changes to Google Sheets.
     if (isOnline && isSignedIn) {
         syncLogsWithSheet()
             .then(() => {
@@ -2327,6 +2346,7 @@ function confirmDeleteLog(group) {
         });
     }
 }
+
 
 
 
@@ -3200,13 +3220,6 @@ function updateScanButtons() {
         window.addEventListener('load', function() {
             // Initialize the app UI first
             init();
-            if (!('NDEFReader' in window)) {
-				nfcSupported = false;
-				showNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
-				// Hide scan buttons regardless of state.
-				startScanBtn.style.display = 'none';
-				stopScanBtn.style.display = 'none';
-			}
             // Wait a bit before initializing Google API to ensure all scripts are loaded
             setTimeout(() => {
                 if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
