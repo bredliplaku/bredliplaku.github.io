@@ -1236,10 +1236,7 @@
             syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
             
             // Update empty messages based on authentication
-            if (!isSignedIn) {
-                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please sign in to view attendance logs.';
-                emptyDatabase.innerHTML = '<i class="fas fa-info-circle"></i> Please sign in as admin to view the database.';
-            } else if (!currentCourse) {
+            if (!currentCourse) {
                 emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
             } else if (logs.length === 0) {
                 emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
@@ -1263,6 +1260,28 @@
                 logs = [];
                 updateUI();
                 emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+                return;
+            }
+            
+            // Try to load logs for guests too (if not signed in)
+            if (!isSignedIn) {
+                // For guests, try to load logs from localStorage by course
+                const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+                if (storedLogs) {
+                    try {
+                        logs = JSON.parse(storedLogs);
+                        updateUI();
+                        showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (guest mode)`);
+                    } catch (e) {
+                        console.error('Error parsing stored logs:', e);
+                        logs = [];
+                        updateUI();
+                    }
+                } else {
+                    logs = [];
+                    updateUI();
+                    showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (guest mode)`);
+                }
                 return;
             }
             
@@ -1349,7 +1368,12 @@
             
             try {
                 // First sync database to get up-to-date UID-name mappings
-                await fetchDatabaseFromSheet();
+                try {
+                    await fetchDatabaseFromSheet();
+                } catch (dbError) {
+                    console.error('Database sync error:', dbError);
+                    // Continue with logs sync even if database sync fails
+                }
                 
                 // Then sync logs if a course is selected
                 if (currentCourse) {
