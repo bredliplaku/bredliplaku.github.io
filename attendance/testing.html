@@ -2280,26 +2280,35 @@ async function syncDatabaseToSheet() {
         /**
          * Clear all logs for current course.
          */
-        function clearLogs() {
-            if (!isAdmin) return;
-            
-            if (!currentCourse) {
-                showNotification('warning', 'No Course Selected', 'Please select a course before clearing logs');
-                return;
-            }
-            
-            if (confirm(`Are you sure you want to clear all logs for ${currentCourse}? This cannot be undone.`)) {
-                logs = [];
-                
-                // Sync with sheets if online
-                if (isOnline && isSignedIn) {
-                    syncLogsWithSheet().catch(err => console.error('Error syncing after clear:', err));
-                }
-                
+function clearLogs() {
+    // Only admins can clear all logs
+    if (!isAdmin) return;
+    
+    // Ask for confirmation
+    if (!confirm('Are you sure you want to delete ALL logs?')) {
+        return;
+    }
+    
+    // Clear the logs array locally
+    logs = [];
+    
+    // If we're online and signed in, sync the now-empty array to Sheets
+    if (isOnline && isSignedIn) {
+        syncLogsWithSheet()
+            .then(() => {
+                showNotification('success', 'Logs Cleared', 'All logs have been removed from the spreadsheet.');
                 updateUI();
-                showNotification('success', 'Logs Cleared', `All logs for ${currentCourse} have been removed.`);
-            }
-        }
+            })
+            .catch(err => {
+                console.error('Error clearing logs:', err);
+                showNotification('error', 'Clear Error', 'Failed to remove logs from the spreadsheet.');
+            });
+    } else {
+        // Offline or not signed in: just update locally
+        updateUI();
+    }
+}
+
         
         /**
          * Handle file selection for Excel import.
