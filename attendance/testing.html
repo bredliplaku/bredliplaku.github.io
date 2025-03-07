@@ -896,17 +896,25 @@
          * Set up auth token client and event listeners for login/logout.
          */
         function initGoogleApi() {
+            console.log('Initializing Google API...');
             gapi.load('client', async () => {
                 try {
+                    console.log('Initializing GAPI client...');
                     await gapi.client.init({
                         apiKey: API_KEY,
                         discoveryDocs: DISCOVERY_DOCS
                     });
+                    console.log('GAPI client initialized');
+                    
+                    // Default list of courses in case API fails
+                    availableCourses = ['MTH_202', 'CEN_104', 'CE_382'];
+                    populateCourseDropdown();
                     
                     // Check if we have a saved token in localStorage
                     const savedToken = localStorage.getItem('gapi_token');
                     if (savedToken) {
                         try {
+                            console.log('Found saved token, attempting to restore session');
                             const tokenObj = JSON.parse(savedToken);
                             gapi.client.setToken(tokenObj);
                             isSignedIn = true;
@@ -918,8 +926,10 @@
                             
                             // If online, fetch available courses and sync data
                             if (isOnline) {
-                                await fetchAvailableCourses();
-                                await syncData();
+                                fetchAvailableCourses().catch(e => {
+                                    console.error('Failed to fetch courses:', e);
+                                    showNotification('warning', 'Course Loading', 'Could not fetch course list');
+                                });
                             }
                         } catch (e) {
                             console.error('Error restoring token:', e);
@@ -943,6 +953,11 @@
                     console.log('Google API initialized successfully');
                 } catch (error) {
                     console.error('Error initializing Google API:', error);
+                    
+                    // Ensure default courses are available
+                    availableCourses = ['MTH_202', 'CEN_104', 'CE_382'];
+                    populateCourseDropdown();
+                    
                     showNotification('error', 'API Error', 'Failed to initialize Google API. Some features may not work.');
                 }
             });
@@ -954,9 +969,12 @@
          */
         function handleTokenResponse(resp) {
             if (resp.error !== undefined) {
+                console.error('Token response error:', resp.error);
                 showNotification('error', 'Auth Error', resp.error);
                 return;
             }
+            
+            console.log('Received token response, storing token');
             
             // Store token in localStorage for session persistence
             localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
@@ -968,6 +986,7 @@
             fetchUserInfo().then(() => {
                 // Check if user is admin
                 isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
+                console.log('User is admin:', isAdmin);
                 
                 // Update UI for admin/user
                 updateAuthUI();
@@ -976,6 +995,8 @@
                 if (isOnline) {
                     fetchAvailableCourses()
                         .then(() => {
+                            showNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
+                            
                             // Auto-sync data if online
                             return syncData();
                         })
@@ -983,7 +1004,12 @@
                             console.error('Error during initial sync:', err);
                             showNotification('error', 'Sync Error', 'Failed to sync data. Please try again later.');
                         });
+                } else {
+                    showNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
                 }
+            }).catch(error => {
+                console.error('Error after token response:', error);
+                showNotification('error', 'Authentication Error', 'Failed to complete sign-in process');
             });
         }
         
@@ -995,33 +1021,43 @@
             try {
                 const tokenObj = gapi.client.getToken();
                 if (!tokenObj || !tokenObj.access_token) {
+                    console.error('No valid token available');
                     throw new Error('No valid token available');
                 }
+                
+                console.log('Fetching user info with token:', tokenObj.access_token.substring(0, 10) + '...');
                 
                 const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                     headers: { 'Authorization': `Bearer ${tokenObj.access_token}` }
                 });
                 
                 if (!response.ok) {
-                    throw new Error('Failed to fetch user info');
+                    console.error('Failed to fetch user info, status:', response.status);
+                    throw new Error(`Failed to fetch user info: ${response.status} ${response.statusText}`);
                 }
                 
                 const userInfo = await response.json();
+                console.log('User info fetched successfully:', userInfo.email);
+                
                 currentUser = {
                     id: userInfo.sub,
                     name: userInfo.name || userInfo.email,
                     email: userInfo.email,
-                    picture: userInfo.picture
+                    picture: userInfo.picture || 'https://via.placeholder.com/32'
                 };
                 
                 // Update user info in UI
                 userName.textContent = currentUser.name;
                 userAvatar.src = currentUser.picture;
                 
+                // Check if user is admin
+                isAdmin = currentUser.email === ADMIN_EMAIL;
+                console.log('User is admin:', isAdmin);
+                
                 return currentUser;
             } catch (error) {
                 console.error('Error fetching user info:', error);
-                showNotification('error', 'User Info Error', 'Failed to get user information');
+                showNotification('error', 'User Info Error', error.message || 'Failed to get user information');
                 throw error;
             }
         }
@@ -1294,6 +1330,16 @@
          */
         async function fetchAvailableCourses() {
             try {
+                console.log('Fetching available courses from spreadsheet...');
+                
+                if (!isOnline || !isSignedIn) {
+                    console.log('Not online or not signed in, using default courses');
+                    // Default courses if offline or not signed in
+                    availableCourses = ['MTH_202', 'CEN_104', 'CE_382'];
+                    populateCourseDropdown();
+                    return;
+                }
+                
                 const response = await gapi.client.sheets.spreadsheets.get({
                     spreadsheetId: LOGS_SPREADSHEET_ID
                 });
@@ -1301,11 +1347,25 @@
                 const sheets = response.result.sheets || [];
                 availableCourses = sheets.map(sheet => sheet.properties.title);
                 
+                console.log('Fetched courses:', availableCourses);
+                
+                // If no courses found, use defaults
+                if (availableCourses.length === 0) {
+                    console.warn('No courses found in spreadsheet, using defaults');
+                    availableCourses = ['MTH_202', 'CEN_104', 'CE_382'];
+                }
+                
                 populateCourseDropdown();
                 console.log(`Found ${availableCourses.length} courses in spreadsheet`);
             } catch (error) {
                 console.error('Error fetching courses:', error);
-                showNotification('error', 'Courses Error', 'Failed to fetch available courses');
+                
+                // Use default courses if fetch fails
+                console.log('Using default courses due to error');
+                availableCourses = ['MTH_202', 'CEN_104', 'CE_382'];
+                populateCourseDropdown();
+                
+                showNotification('warning', 'Courses Warning', 'Using default course list');
                 throw error;
             }
         }
