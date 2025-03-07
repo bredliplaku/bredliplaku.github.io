@@ -1205,37 +1205,14 @@
 function updateAuthUI() {
     console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
 
-    // If the user is NOT signed in (Guest Mode)
+    // Guest Mode: Not signed in
     if (!isSignedIn) {
-        // Show login, hide user info
         loginContainer.style.display = 'flex';
         userContainer.style.display = 'none';
 
-        // In Guest mode, show the scan button for local NFC reading
-        document.querySelectorAll('.scan-button').forEach(el => {
-            el.style.display = 'flex';
-        });
-
-        // Hide all admin-only elements
-        document.querySelectorAll('.admin-only').forEach(el => {
-            el.style.display = 'none';
-        });
-        // Hide the Database tab
-        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-        if (databaseTab) {
-            databaseTab.style.display = 'none';
-        }
-    }
-    // If the user is signed in but NOT an admin (Read-Only Mode)
-    else if (isSignedIn && !isAdmin) {
-        // Hide login, show user info
-        loginContainer.style.display = 'none';
-        userContainer.style.display = 'flex';
-
-        // In this mode, hide the scan buttons (they work only locally)
-        document.querySelectorAll('.scan-button').forEach(el => {
-            el.style.display = 'none';
-        });
+        // Show scan button (for local NFC scanning)
+        startScanBtn.style.display = 'flex';
+        stopScanBtn.style.display = 'none';
 
         // Hide all admin-only elements and the Database tab
         document.querySelectorAll('.admin-only').forEach(el => {
@@ -1246,16 +1223,32 @@ function updateAuthUI() {
             databaseTab.style.display = 'none';
         }
     }
-    // If the user is signed in as Admin (Full Access Mode)
-    else if (isAdmin) {
-        // Hide login, show user info
+    // Read-Only Mode: Signed in as non-admin
+    else if (isSignedIn && !isAdmin) {
         loginContainer.style.display = 'none';
         userContainer.style.display = 'flex';
 
-        // Hide the scan button (admin doesn’t use local scanning)
-        document.querySelectorAll('.scan-button').forEach(el => {
+        // Hide scan buttons in read-only mode
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+
+        // Hide admin-only elements and the Database tab
+        document.querySelectorAll('.admin-only').forEach(el => {
             el.style.display = 'none';
         });
+        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+        if (databaseTab) {
+            databaseTab.style.display = 'none';
+        }
+    }
+    // Admin Mode: Full access
+    else if (isAdmin) {
+        loginContainer.style.display = 'none';
+        userContainer.style.display = 'flex';
+
+        // In admin mode, hide the scan button (admin doesn't use local scanning)
+        startScanBtn.style.display = isScanning ? 'none' : 'none'; // Always hide for admin
+        stopScanBtn.style.display = isScanning ? 'flex' : 'none';
 
         // Show the Database tab and all admin-only elements
         const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
@@ -1263,7 +1256,7 @@ function updateAuthUI() {
             databaseTab.style.display = 'flex';
         }
         document.querySelectorAll('.admin-only').forEach(el => {
-            // If it is a table header or cell, show as table-cell
+            // For table headers/cells, set display to table-cell; for others, inline-block
             if (el.tagName === 'TH' || el.tagName === 'TD') {
                 el.style.display = 'table-cell';
             } else {
@@ -1272,23 +1265,18 @@ function updateAuthUI() {
         });
     }
 
-    // Common updates (for all states)
-    // Update sync button: only visible in Admin mode
+    // Update sync button: only visible for admin
     syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
     syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 
-    // Update empty logs message based on course and logs availability
+    // Update empty logs message based on course selection
     if (!currentCourse) {
         emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
     } else if (logs.length === 0) {
         emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
     }
-
-    // (Optional) Show an NFC support message only in Admin mode
-    if (!nfcSupported && isAdmin) {
-        showNotification('warning', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
-    }
 }
+
 
         
         /**
@@ -1299,14 +1287,13 @@ function handleCourseChange() {
     currentCourse = courseSelect.value;
 
     if (!currentCourse) {
-        // No course selected; clear logs and update UI.
         logs = [];
         updateUI();
         emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
         return;
     }
 
-    // Guest Mode: Not Signed In – use local storage only.
+    // Guest Mode: Not signed in – load logs from local storage only.
     if (!isSignedIn) {
         const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
         if (storedLogs) {
@@ -1324,21 +1311,20 @@ function handleCourseChange() {
         return;
     }
 
-    // Read-Only Mode for Signed-In Non-Admin Users
+    // Read-Only Mode: Signed in as non-admin
     if (isSignedIn && !isAdmin) {
-        // Immediately update the UI
         updateUI();
         if (isOnline) {
             fetchLogsFromSheet()
                 .then(() => {
-                    showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse} (read-only mode)`);
+                    showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse} (read-only)`);
                 })
                 .catch(error => {
                     console.error('Error fetching logs:', error);
                     showNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
                 });
         } else {
-            // Offline: Optionally load from localStorage.
+            // Offline: fallback to localStorage if available.
             const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
             if (storedLogs) {
                 try {
@@ -1356,7 +1342,7 @@ function handleCourseChange() {
         return;
     }
 
-    // Admin Mode: Signed in as Admin – fetch logs with full access.
+    // Admin Mode: Signed in as admin
     if (isSignedIn && isAdmin) {
         updateUI();
         if (isOnline) {
@@ -1376,6 +1362,7 @@ function handleCourseChange() {
         }
     }
 }
+
 
         
         /**
@@ -1478,37 +1465,37 @@ function handleCourseChange() {
          * Updates uidToNameMap with the latest data.
          */
         async function fetchDatabaseFromSheet() {
-            try {
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:C',
-                });
-                
-                const rows = response.result.values || [];
-                const sheetMappings = {};
-                
-                rows.forEach(row => {
-                    if (row.length >= 2) {
-                        const name = row[0];
-                        const uid = String(row[1]);
-                        
-                        if (name && uid) {
-                            sheetMappings[uid] = name;
-                        }
-                    }
-                });
-                
-                uidToNameMap = sheetMappings;
-                updateDatabaseStatus();
-                updateDatabaseList();
-                
-                console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
-            } catch (error) {
-                console.error('Error fetching database:', error);
-                showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
-                throw error;
+    try {
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: DATABASE_SPREADSHEET_ID,
+            range: 'Database!A2:C'
+        });
+        
+        const rows = response.result.values || [];
+        const sheetMappings = {};
+        
+        // Expecting each row as [Index, Name, UID]
+        rows.forEach(row => {
+            if (row.length >= 3) {
+                const name = row[1];
+                const uid = row[2];
+                if (name && uid) {
+                    sheetMappings[uid] = name;
+                }
             }
-        }
+        });
+        
+        uidToNameMap = sheetMappings;
+        updateDatabaseStatus();
+        updateDatabaseList();
+        console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
+    } catch (error) {
+        console.error('Error fetching database:', error);
+        showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+        throw error;
+    }
+}
+
         
         /**
          * Fetch available courses (sheet names) from logs spreadsheet.
@@ -1683,23 +1670,28 @@ function handleCourseChange() {
          * Sync database (UID-name map) to Google Sheets.
          */
 async function syncDatabaseToSheet() {
+    // Only allow sync if the user is signed in as admin.
+    if (!isSignedIn || !isAdmin) {
+        console.warn('Database sync aborted: Not signed in as admin.');
+        return;
+    }
+    
     try {
         const entries = Object.entries(uidToNameMap);
-        
-        // Format data for sheet (Index, Name, UID)
+        // Format data as [Index, Name, UID]
         const sheetData = entries.map(([uid, name], index) => [
             index + 1,
             name,
             uid
         ]);
         
-        // Clear existing data
+        // Clear existing data in the range
         await gapi.client.sheets.spreadsheets.values.clear({
             spreadsheetId: DATABASE_SPREADSHEET_ID,
             range: 'Database!A2:C'
         });
         
-        // Write new data if we have any entries
+        // Write new data if there are entries
         if (sheetData.length > 0) {
             await gapi.client.sheets.spreadsheets.values.update({
                 spreadsheetId: DATABASE_SPREADSHEET_ID,
@@ -1716,6 +1708,7 @@ async function syncDatabaseToSheet() {
         throw error;
     }
 }
+
 
         
         /**
@@ -2281,18 +2274,9 @@ async function syncDatabaseToSheet() {
          * Clear all logs for current course.
          */
 function clearLogs() {
-    // Only admins can clear all logs
     if (!isAdmin) return;
-    
-    // Ask for confirmation
-    if (!confirm('Are you sure you want to delete ALL logs?')) {
-        return;
-    }
-    
-    // Clear the logs array locally
+    if (!confirm('Are you sure you want to delete ALL logs?')) return;
     logs = [];
-    
-    // If we're online and signed in, sync the now-empty array to Sheets
     if (isOnline && isSignedIn) {
         syncLogsWithSheet()
             .then(() => {
@@ -2304,7 +2288,26 @@ function clearLogs() {
                 showNotification('error', 'Clear Error', 'Failed to remove logs from the spreadsheet.');
             });
     } else {
-        // Offline or not signed in: just update locally
+        updateUI();
+    }
+}
+
+function deleteLogEntry(logId) {
+    // Only admin can delete
+    if (!isAdmin) return;
+
+    logs = logs.filter(log => log.id !== logId);
+    if (isOnline && isSignedIn) {
+        syncLogsWithSheet()
+            .then(() => {
+                showNotification('success', 'Log Deleted', 'Successfully removed the log from the spreadsheet.');
+                updateUI();
+            })
+            .catch(err => {
+                console.error('Error deleting log:', err);
+                showNotification('error', 'Delete Error', 'Failed to remove the log from the spreadsheet.');
+            });
+    } else {
         updateUI();
     }
 }
@@ -3128,15 +3131,22 @@ function clearLogs() {
         /**
          * Update scan buttons based on state.
          */
-        function updateScanButtons() {
-            if (isScanning) {
-                startScanBtn.style.display = 'none';
-                stopScanBtn.style.display = 'flex';
-            } else {
-                startScanBtn.style.display = isAdmin ? 'flex' : 'none';
-                stopScanBtn.style.display = 'none';
-            }
-        }
+function updateScanButtons() {
+    if (!isSignedIn) {
+        // Guest mode: show start button; stop button hidden
+        startScanBtn.style.display = 'flex';
+        stopScanBtn.style.display = 'none';
+    } else if (isSignedIn && !isAdmin) {
+        // Read-only signed-in mode: hide both scan buttons
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+    } else if (isAdmin) {
+        // Admin mode: hide scan buttons regardless of scanning state
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+    }
+}
+
         
         /**
          * Play sound effect (success or error).
