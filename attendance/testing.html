@@ -211,6 +211,13 @@
             padding: 6px 12px;
             font-size: 0.85em;
         }
+		.notification-container {
+		  position: fixed;
+		  top: 10px;
+		  right: 10px;
+		  z-index: 10000;
+		  width: auto;
+		}
         .filter-container {
             margin-bottom: 15px;
             display: flex;
@@ -925,60 +932,59 @@
                 try {
                     console.log('Initializing GAPI client with API key:', API_KEY);
                     
-                    gapi.client.init({
-                        apiKey: API_KEY,
-                        discoveryDocs: DISCOVERY_DOCS
-                    }).then(() => {
-                        console.log('GAPI client initialized successfully');
-                        
-                        // Check if we have a saved token in localStorage
-                        const savedToken = localStorage.getItem('gapi_token');
-                        if (savedToken) {
-                            try {
-                                console.log('Found saved token, attempting to restore session');
-                                const tokenObj = JSON.parse(savedToken);
-                                gapi.client.setToken(tokenObj);
-                                isSignedIn = true;
-                                
-                                // Fetch user info to check if admin
-                                return fetchUserInfo()
-                                    .then(() => {
-                                        isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-                                        updateAuthUI();
-                                        
-                                        // If online, fetch available courses
-                                        if (isOnline) {
-                                            return fetchAvailableCourses();
-                                        }
-                                    })
-                                    .catch(e => {
-                                        console.error('Error fetching user info:', e);
-                                        // Token might be expired, clear it
-                                        isSignedIn = false;
-                                        isAdmin = false;
-                                        localStorage.removeItem('gapi_token');
-                                        gapi.client.setToken('');
-                                        updateAuthUI();
-                                    });
-                            } catch (e) {
-                                console.error('Error restoring token:', e);
-                                isSignedIn = false;
-                                isAdmin = false;
-                                localStorage.removeItem('gapi_token');
-                                updateAuthUI();
-                            }
-                        } else {
-							  console.log('No saved token found, user needs to sign in');
-							  updateAuthUI();
-							  if (isOnline) {
-								fetchAvailableCourses();
-							  }
-							}
-                    }).catch(error => {
-                        console.error('gapi.client.init error:', error);
-                        showNotification('error', 'API Error', 'Failed to initialize Google API client.');
-                        updateAuthUI();
-                    });
+gapi.client.init({
+    apiKey: API_KEY,
+    discoveryDocs: DISCOVERY_DOCS
+}).then(() => {
+    console.log('GAPI client initialized successfully');
+    
+    const savedToken = localStorage.getItem('gapi_token');
+    if (savedToken) {
+        try {
+            console.log('Found saved token, attempting to restore session');
+            const tokenObj = JSON.parse(savedToken);
+            gapi.client.setToken(tokenObj);
+            isSignedIn = true;
+            
+            // Fetch user info to check if admin, then fetch courses and database
+            return fetchUserInfo()
+                .then(() => {
+                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                    updateAuthUI();
+                    if (isOnline) {
+                        // Fetch both available courses and the database regardless of admin status
+                        fetchAvailableCourses();
+                        fetchDatabaseFromSheet().catch(err => console.error('Database load error:', err));
+                    }
+                })
+                .catch(e => {
+                    console.error('Error fetching user info:', e);
+                    isSignedIn = false;
+                    isAdmin = false;
+                    localStorage.removeItem('gapi_token');
+                    gapi.client.setToken('');
+                    updateAuthUI();
+                });
+        } catch (e) {
+            console.error('Error restoring token:', e);
+            isSignedIn = false;
+            isAdmin = false;
+            localStorage.removeItem('gapi_token');
+            updateAuthUI();
+        }
+    } else {
+        console.log('No saved token found, user needs to sign in');
+        updateAuthUI();
+        if (isOnline) {
+            fetchAvailableCourses();
+        }
+    }
+}).catch(error => {
+    console.error('gapi.client.init error:', error);
+    showNotification('error', 'API Error', 'Failed to initialize Google API client.');
+    updateAuthUI();
+});
+
                     
                     // Initialize token client for auth
                     try {
@@ -1585,86 +1591,84 @@ function handleCourseChange() {
             }
         }
         
-        /**
-         * Sync local logs with Google Sheet (two-way sync).
-         */
-        async function syncLogsWithSheet() {
-            if (!currentCourse) {
-                return;
-            }
-            
-            try {
-                // Fetch existing logs from sheet
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${currentCourse}!A2:D`,
-                });
-                
-                const rows = response.result.values || [];
-                const remoteLogs = [];
-                
-                rows.forEach(row => {
-                    if (row.length >= 3) {
-                        const uid = String(row[0]);
-                        const timestamp = new Date(row[1]).getTime();
-                        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
-                        const manual = row.length >= 4 ? row[3] === 'true' : false;
-                        
-                        if (uid && !isNaN(timestamp)) {
-                            remoteLogs.push({ uid, timestamp, id, manual });
-                        }
-                    }
-                });
-                
-                // Merge remote logs with local logs
-                const allLogsById = {};
-                
-                // First add remote logs
-                remoteLogs.forEach(log => {
-                    allLogsById[log.id] = log;
-                });
-                
-                // Then add local logs (will overwrite remote if same ID)
-                logs.forEach(log => {
-                    allLogsById[log.id] = log;
-                });
-                
-                // Update logs array with merged logs
-                logs = Object.values(allLogsById);
-                logs.sort((a, b) => b.timestamp - a.timestamp);
-                
-                // Format logs for sheet
-                const sheetData = logs.map(log => [
-                    log.uid,
-                    new Date(log.timestamp).toISOString(),
-                    log.id,
-                    log.manual ? 'true' : 'false'
-                ]);
-                
-                // Clear existing data in sheet
-                await gapi.client.sheets.spreadsheets.values.clear({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${currentCourse}!A2:D`,
-                });
-                
-                // Write new data if we have any logs
-                if (sheetData.length > 0) {
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: `${currentCourse}!A2:D`,
-                        valueInputOption: 'RAW',
-                        resource: { values: sheetData }
-                    });
-                }
-                
-                updateUI();
-                console.log(`Synced ${logs.length} logs with ${currentCourse} sheet`);
-            } catch (error) {
-                console.error('Error syncing logs:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
-                throw error;
-            }
+// Helper function to merge local and remote logs.
+function mergeLogs(localLogs, remoteLogs) {
+    const merged = {};
+    // Add remote logs first.
+    remoteLogs.forEach(log => {
+        merged[log.id] = log;
+    });
+    // Then add local logs. If a local log is newer (has a higher timestamp), update.
+    localLogs.forEach(log => {
+        if (!merged[log.id] || log.timestamp > merged[log.id].timestamp) {
+            merged[log.id] = log;
         }
+    });
+    // Return sorted logs (newest first)
+    return Object.values(merged).sort((a, b) => b.timestamp - a.timestamp);
+}
+
+async function syncLogsWithSheet() {
+    if (!currentCourse) {
+        return;
+    }
+    
+    try {
+        // Fetch remote logs from the spreadsheet.
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: LOGS_SPREADSHEET_ID,
+            range: `${currentCourse}!A2:D`,
+        });
+        const rows = response.result.values || [];
+        const remoteLogs = [];
+        
+        rows.forEach(row => {
+            if (row.length >= 3) {
+                const uid = String(row[0]);
+                const timestamp = new Date(row[1]).getTime();
+                const id = row[2] || (Date.now() + Math.random().toString(36).substr(2, 9));
+                const manual = row.length >= 4 ? row[3] === 'true' : false;
+                if (uid && !isNaN(timestamp)) {
+                    remoteLogs.push({ uid, timestamp, id, manual });
+                }
+            }
+        });
+        
+        // Merge local logs and remote logs.
+        logs = mergeLogs(logs, remoteLogs);
+        
+        // Prepare the data to write back (each row as [uid, ISO date, id, manual]).
+        const sheetData = logs.map(log => [
+            log.uid,
+            new Date(log.timestamp).toISOString(),
+            log.id,
+            log.manual ? 'true' : 'false'
+        ]);
+        
+        // Clear the existing data in the spreadsheet.
+        await gapi.client.sheets.spreadsheets.values.clear({
+            spreadsheetId: LOGS_SPREADSHEET_ID,
+            range: `${currentCourse}!A2:D`,
+        });
+        
+        // Write the merged logs to the spreadsheet.
+        if (sheetData.length > 0) {
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: LOGS_SPREADSHEET_ID,
+                range: `${currentCourse}!A2:D`,
+                valueInputOption: 'RAW',
+                resource: { values: sheetData }
+            });
+        }
+        
+        updateUI();
+        console.log(`Synced ${logs.length} logs with ${currentCourse} sheet`);
+    } catch (error) {
+        console.error('Error syncing logs:', error);
+        showNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+        throw error;
+    }
+}
         
         /**
          * Sync database (UID-name map) to Google Sheets.
@@ -2292,11 +2296,15 @@ function clearLogs() {
     }
 }
 
+// Deletes a single log by its ID and then syncs the changes.
 function deleteLogEntry(logId) {
-    // Only admin can delete
+    // Only admin can delete.
     if (!isAdmin) return;
 
+    // Remove the log with the matching id.
     logs = logs.filter(log => log.id !== logId);
+
+    // If online and signed in, sync changes to Google Sheets.
     if (isOnline && isSignedIn) {
         syncLogsWithSheet()
             .then(() => {
@@ -2311,6 +2319,16 @@ function deleteLogEntry(logId) {
         updateUI();
     }
 }
+
+function confirmDeleteLog(group) {
+    if (confirm(`Are you sure you want to delete all logs for ${group.name} on ${group.date}?`)) {
+        group.originalLogs.forEach(log => {
+            deleteLogEntry(log.id);
+        });
+    }
+}
+
+
 
         
         /**
@@ -3182,7 +3200,13 @@ function updateScanButtons() {
         window.addEventListener('load', function() {
             // Initialize the app UI first
             init();
-            
+            if (!('NDEFReader' in window)) {
+				nfcSupported = false;
+				showNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
+				// Hide scan buttons regardless of state.
+				startScanBtn.style.display = 'none';
+				stopScanBtn.style.display = 'none';
+			}
             // Wait a bit before initializing Google API to ensure all scripts are loaded
             setTimeout(() => {
                 if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
