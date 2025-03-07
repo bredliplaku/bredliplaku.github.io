@@ -987,6 +987,7 @@
                             client_id: CLIENT_ID,
                             scope: SCOPES,
                             callback: handleTokenResponse,
+							auto_select: true,
                             error_callback: (err) => {
                                 console.error('Token client error:', err);
                                 showNotification('error', 'Auth Error', 'Failed to initialize authentication.');
@@ -1201,116 +1202,181 @@
          * Update authentication-dependent UI elements.
          * Show/hide elements based on sign-in status and admin privileges.
          */
-        function updateAuthUI() {
-            console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
-            
-            // Update user container
-            loginContainer.style.display = isSignedIn ? 'none' : 'flex';
-            userContainer.style.display = isSignedIn ? 'flex' : 'none';
-            
-            // Hide database tab for non-admins
-            const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-            databaseTab.style.display = isAdmin ? 'flex' : 'none';
-            
-            // If database tab is active but user is not admin, switch to scanner tab
-            if (!isAdmin && tabContents[1].classList.contains('active')) {
-                tabs[0].click();
-            }
-            
-            // Show/hide admin-only elements
-            document.querySelectorAll('.admin-only').forEach(el => {
-                if (el.tagName === 'TH' || el.tagName === 'TD') {
-                    el.style.display = isAdmin ? 'table-cell' : 'none';
-                } else {
-                    el.style.display = isAdmin ? 'inline-block' : 'none';
-                }
-            });
-            
-            // Show scan buttons only for admin
-            document.querySelectorAll('.scan-button').forEach(el => {
-                el.style.display = isAdmin && !isScanning ? 'flex' : 'none';
-            });
-            
-            // Show active scan button based on scanning state
-            if (isAdmin && isScanning) {
-                startScanBtn.style.display = 'none';
-                stopScanBtn.style.display = 'flex';
-            }
-            
-            // Update sync button
-            syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
-            syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
-            
-            // Update empty messages based on authentication
-            if (!currentCourse) {
-                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
-            } else if (logs.length === 0) {
-                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
-            }
-            
-            // Show NFC support notification for admin only
-            if (!nfcSupported && isAdmin) {
-                showNotification('warning', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
-            }
+function updateAuthUI() {
+    console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
+
+    // If the user is NOT signed in (Guest Mode)
+    if (!isSignedIn) {
+        // Show login, hide user info
+        loginContainer.style.display = 'flex';
+        userContainer.style.display = 'none';
+
+        // In Guest mode, show the scan button for local NFC reading
+        document.querySelectorAll('.scan-button').forEach(el => {
+            el.style.display = 'flex';
+        });
+
+        // Hide all admin-only elements
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.style.display = 'none';
+        });
+        // Hide the Database tab
+        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+        if (databaseTab) {
+            databaseTab.style.display = 'none';
         }
+    }
+    // If the user is signed in but NOT an admin (Read-Only Mode)
+    else if (isSignedIn && !isAdmin) {
+        // Hide login, show user info
+        loginContainer.style.display = 'none';
+        userContainer.style.display = 'flex';
+
+        // In this mode, hide the scan buttons (they work only locally)
+        document.querySelectorAll('.scan-button').forEach(el => {
+            el.style.display = 'none';
+        });
+
+        // Hide all admin-only elements and the Database tab
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.style.display = 'none';
+        });
+        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+        if (databaseTab) {
+            databaseTab.style.display = 'none';
+        }
+    }
+    // If the user is signed in as Admin (Full Access Mode)
+    else if (isAdmin) {
+        // Hide login, show user info
+        loginContainer.style.display = 'none';
+        userContainer.style.display = 'flex';
+
+        // Hide the scan button (admin doesn’t use local scanning)
+        document.querySelectorAll('.scan-button').forEach(el => {
+            el.style.display = 'none';
+        });
+
+        // Show the Database tab and all admin-only elements
+        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+        if (databaseTab) {
+            databaseTab.style.display = 'flex';
+        }
+        document.querySelectorAll('.admin-only').forEach(el => {
+            // If it is a table header or cell, show as table-cell
+            if (el.tagName === 'TH' || el.tagName === 'TD') {
+                el.style.display = 'table-cell';
+            } else {
+                el.style.display = 'inline-block';
+            }
+        });
+    }
+
+    // Common updates (for all states)
+    // Update sync button: only visible in Admin mode
+    syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+    syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+
+    // Update empty logs message based on course and logs availability
+    if (!currentCourse) {
+        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+    } else if (logs.length === 0) {
+        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
+    }
+
+    // (Optional) Show an NFC support message only in Admin mode
+    if (!nfcSupported && isAdmin) {
+        showNotification('warning', 'NFC not supported', 'This browser doesn\'t support the Web NFC API. Please use Chrome on Android.');
+    }
+}
+
         
         /**
          * Handle course selection change.
          * Load logs for the selected course.
          */
-        function handleCourseChange() {
-            currentCourse = courseSelect.value;
-            
-            if (!currentCourse) {
-                // No course selected, clear logs
+function handleCourseChange() {
+    currentCourse = courseSelect.value;
+
+    if (!currentCourse) {
+        // No course selected; clear logs and update UI.
+        logs = [];
+        updateUI();
+        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+        return;
+    }
+
+    // Guest Mode: Not Signed In – use local storage only.
+    if (!isSignedIn) {
+        const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+        if (storedLogs) {
+            try {
+                logs = JSON.parse(storedLogs);
+            } catch (e) {
+                console.error('Error parsing stored logs:', e);
                 logs = [];
-                updateUI();
-                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
-                return;
             }
-            
-            // Try to load logs for guests too (if not signed in)
-            if (!isSignedIn) {
-                // For guests, try to load logs from localStorage by course
-                const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-                if (storedLogs) {
-                    try {
-                        logs = JSON.parse(storedLogs);
-                        updateUI();
-                        showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (guest mode)`);
-                    } catch (e) {
-                        console.error('Error parsing stored logs:', e);
-                        logs = [];
-                        updateUI();
-                    }
-                } else {
+        } else {
+            logs = [];
+        }
+        updateUI();
+        showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (guest mode)`);
+        return;
+    }
+
+    // Read-Only Mode for Signed-In Non-Admin Users
+    if (isSignedIn && !isAdmin) {
+        // Immediately update the UI
+        updateUI();
+        if (isOnline) {
+            fetchLogsFromSheet()
+                .then(() => {
+                    showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse} (read-only mode)`);
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                    showNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                });
+        } else {
+            // Offline: Optionally load from localStorage.
+            const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+            if (storedLogs) {
+                try {
+                    logs = JSON.parse(storedLogs);
+                } catch (e) {
+                    console.error('Error parsing stored logs:', e);
                     logs = [];
-                    updateUI();
-                    showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (guest mode)`);
                 }
-                return;
-            }
-            
-            // Update UI immediately with any existing logs
-            updateUI();
-            
-            if (isOnline && isSignedIn) {
-                // Fetch logs from Google Sheets for selected course
-                fetchLogsFromSheet()
-                    .then(() => {
-                        showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse}`);
-                    })
-                    .catch(error => {
-                        console.error('Error fetching logs:', error);
-                        showNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
-                    });
             } else {
-                showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse}`);
-                if (logs.length === 0) {
-                    emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
-                }
+                logs = [];
+            }
+            updateUI();
+            showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (read-only, offline)`);
+        }
+        return;
+    }
+
+    // Admin Mode: Signed in as Admin – fetch logs with full access.
+    if (isSignedIn && isAdmin) {
+        updateUI();
+        if (isOnline) {
+            fetchLogsFromSheet()
+                .then(() => {
+                    showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse}`);
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                    showNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                });
+        } else {
+            showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse}`);
+            if (logs.length === 0) {
+                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
             }
         }
+    }
+}
+
         
         /**
          * Populate course dropdown with available courses.
