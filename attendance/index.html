@@ -224,21 +224,33 @@
 		  margin-bottom: 10px; /* Reduced margin so new notifications don’t push content far down */
 		}
 		/* Add these styles */
+/* Desktop: Notifications appear at top-right without pushing the layout */
 .in-page-notifications {
-    margin: 15px 0;
-    max-height: 150px;
-    overflow-y: auto;
+    position: fixed;
+    top: 15px;
+    right: 15px;
+    z-index: 10000;
+    width: 300px;
+    pointer-events: none; /* Allow clicks to pass through if needed */
 }
 
-.in-page-notification {
-    padding: 10px 15px;
-    border-radius: 8px;
-    margin-bottom: 10px;
-    display: flex;
-    align-items: center;
-    animation: slide-in 0.3s ease-out;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+/* Allow individual notifications to be interactive */
+.in-page-notifications .in-page-notification {
+    pointer-events: auto;
 }
+
+/* Mobile: Position notifications as a small toast at bottom center */
+@media (max-width: 600px) {
+    .in-page-notifications {
+        top: auto;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: auto;
+        max-width: 90%;
+    }
+}
+
 
 @keyframes slide-in {
     from {
@@ -895,104 +907,114 @@
          * Initialize the application.
          * Sets up event listeners, checks NFC support, and prepares the UI.
          */
-        function init() {
-		    const allButtons = document.querySelectorAll('button');
-    allButtons.forEach(button => {
-        const newButton = button.cloneNode(true);
-        if (button.parentNode) {
-            button.parentNode.replaceChild(newButton, button);
-        }
-    });
-    
-    // Re-assign DOM elements after cloning
+function init() {
+
+    // Re-assign DOM elements
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
     const startScanBtn = document.getElementById('start-scan-btn');
     const stopScanBtn = document.getElementById('stop-scan-btn');
-    // ... other buttons you need to access immediately
-            // Update current year in footer
-            updateYear();
-            
-            // Check online status and set up listeners for online/offline events
-            updateOnlineStatus();
-			window.addEventListener('online', function() {
-				console.log('You are online.');
-				updateOnlineStatus();
-			});
-			window.addEventListener('offline', function() {
-				console.log('You are offline.');
-				updateOnlineStatus();
-			});
-            
-            // Check if NFC is supported
-			if (!('NDEFReader' in window)) {
-				nfcSupported = false;
-				showImprovedNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
-				startScanBtn.style.display = 'none';
-				stopScanBtn.style.display = 'none';
-			}
-            
-            // Set up tab navigation
-            tabs.forEach(tab => {
-                tab.addEventListener('click', () => {
-                    // Don't allow switching to database tab for non-admin users
-                    if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
-                        return;
-                    }
-                    
-                    // Remove active class from all tabs and tab contents
-                    tabs.forEach(t => t.classList.remove('active'));
-                    tabContents.forEach(c => c.classList.remove('active'));
-                    
-                    // Add active class to clicked tab and corresponding content
-                    tab.classList.add('active');
-                    const tabId = tab.getAttribute('data-tab');
-                    document.getElementById(tabId).classList.add('active');
-                });
-            });
-            
-            // Add event listeners for buttons
-            startScanBtn.addEventListener('click', startScanning);
-            stopScanBtn.addEventListener('click', stopScanning);
-            importExcelBtn.addEventListener('click', () => excelInput.click());
-            excelInput.addEventListener('change', handleExcelFile);
-            filterInput.addEventListener('input', handleFilterChange);
-            sortSelect.addEventListener('change', handleSortChange);
-            dbFilterInput.addEventListener('input', handleDbFilterChange);
-            importBtn.addEventListener('click', () => importInput.click());
-            importInput.addEventListener('change', handleImportFile);
-            exportBtn.addEventListener('click', exportLogs);
-            clearBtn.addEventListener('click', clearLogs);
-            addLogBtn.addEventListener('click', showAddLogEntryDialog);
-            addEntryBtn.addEventListener('click', showAddEntryDialog);
-            exportExcelBtn.addEventListener('click', exportDatabaseToExcel);
-            clearDbBtn.addEventListener('click', clearDatabase);
-            syncBtn.addEventListener('click', syncData);
-            courseSelect.addEventListener('change', handleCourseChange);
-            
-            // Set up sortable table headers
-            document.querySelectorAll('.sortable').forEach(header => {
-                header.addEventListener('click', () => {
-                    const sortKey = header.getAttribute('data-sort');
-                    currentSort = (currentSort === `${sortKey}-asc`) ? `${sortKey}-desc` : `${sortKey}-asc`;
-                    
-                    // Update sort dropdown to match
-                    sortSelect.value = currentSort;
-                    updateSortIcons();
-                    updateLogsList();
-                });
-            });
-            
-            // Toggle sound button
-            const toggleSoundBtn = document.getElementById('toggle-sound-btn');
-            toggleSoundBtn.addEventListener('click', function() {
-                soundEnabled = !soundEnabled;
-                toggleSoundBtn.innerHTML = soundEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
-            });
-            
-            // Update UI to show login screen initially
-            updateUI();
-        }
+    const importExcelBtn = document.getElementById('import-excel-btn');
+    const excelInput = document.getElementById('excel-input');
+    const filterInput = document.getElementById('filter-input');
+    const sortSelect = document.getElementById('sort-select');
+    const dbFilterInput = document.getElementById('db-filter-input');
+    const importBtn = document.getElementById('import-btn');
+    const importInput = document.getElementById('import-input');
+    const exportBtn = document.getElementById('export-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const addLogBtn = document.getElementById('add-log-btn');
+    const addEntryBtn = document.getElementById('add-entry-btn');
+    const exportExcelBtn = document.getElementById('export-excel-btn');
+    const clearDbBtn = document.getElementById('clear-db-btn');
+    const syncBtn = document.getElementById('sync-btn');
+    const courseSelect = document.getElementById('course-select');
+    const toggleSoundBtn = document.getElementById('toggle-sound-btn');
+
+    // Update current year in footer
+    updateYear();
+
+    // Set up online/offline listeners
+    updateOnlineStatus();
+    window.addEventListener('online', function() {
+        console.log('You are online.');
+        updateOnlineStatus();
+    });
+    window.addEventListener('offline', function() {
+        console.log('You are offline.');
+        updateOnlineStatus();
+    });
+
+    // Check if NFC is supported
+    if (!('NDEFReader' in window)) {
+        nfcSupported = false;
+        showImprovedNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+    }
+
+    // Set up tab navigation (assuming tabs and tabContents are defined globally)
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Prevent non-admin users from accessing the database tab
+            if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
+                return;
+            }
+            // Remove active class from all tabs and tab contents
+            tabs.forEach(t => t.classList.remove('active'));
+            tabContents.forEach(c => c.classList.remove('active'));
+            // Add active class to clicked tab and corresponding content
+            tab.classList.add('active');
+            const tabId = tab.getAttribute('data-tab');
+            document.getElementById(tabId).classList.add('active');
+        });
+    });
+
+    // Add event listeners for buttons and inputs
+    startScanBtn.addEventListener('click', startScanning);
+    stopScanBtn.addEventListener('click', stopScanning);
+    importExcelBtn.addEventListener('click', () => excelInput.click());
+    excelInput.addEventListener('change', handleExcelFile);
+    filterInput.addEventListener('input', handleFilterChange);
+    sortSelect.addEventListener('change', handleSortChange);
+    dbFilterInput.addEventListener('input', handleDbFilterChange);
+    importBtn.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', handleImportFile);
+    exportBtn.addEventListener('click', exportLogs);
+    clearBtn.addEventListener('click', clearLogs);
+    addLogBtn.addEventListener('click', showAddLogEntryDialog);
+    addEntryBtn.addEventListener('click', showAddEntryDialog);
+    exportExcelBtn.addEventListener('click', exportDatabaseToExcel);
+    clearDbBtn.addEventListener('click', clearDatabase);
+    syncBtn.addEventListener('click', syncData);
+    courseSelect.addEventListener('change', handleCourseChange);
+
+    // Set up sortable table headers
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.addEventListener('click', () => {
+            const sortKey = header.getAttribute('data-sort');
+            currentSort = (currentSort === `${sortKey}-asc`) ? `${sortKey}-desc` : `${sortKey}-asc`;
+            // Update sort dropdown to match
+            sortSelect.value = currentSort;
+            updateSortIcons();
+            updateLogsList();
+        });
+    });
+
+    // Toggle sound button event
+    toggleSoundBtn.addEventListener('click', function() {
+        soundEnabled = !soundEnabled;
+        toggleSoundBtn.innerHTML = soundEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
+    });
+
+    // Add event listeners for authentication buttons
+    loginBtn.addEventListener('click', handleAuthClick);
+    logoutBtn.addEventListener('click', handleSignoutClick);
+
+    // Update UI to show the initial state
+    updateUI();
+}
+
         
         /**
          * Initialize Google API client.
