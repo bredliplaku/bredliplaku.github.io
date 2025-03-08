@@ -852,7 +852,7 @@
             // Check if NFC is supported
 			if (!('NDEFReader' in window)) {
 				nfcSupported = false;
-				showNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
+				showImprovedNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
 				startScanBtn.style.display = 'none';
 				stopScanBtn.style.display = 'none';
 			}
@@ -933,14 +933,14 @@
             // Make sure gapi and google objects exist
             if (typeof gapi === 'undefined') {
                 console.error('gapi object is undefined');
-                showNotification('error', 'API Error', 'Google API client not loaded. Using limited functionality.');
+                showImprovedNotification('error', 'API Error', 'Google API client not loaded. Using limited functionality.');
                 updateAuthUI();
                 return;
             }
             
             if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
                 console.error('google.accounts object is undefined');
-                showNotification('error', 'API Error', 'Google Identity Services not loaded. Using limited functionality.');
+                showImprovedNotification('error', 'API Error', 'Google Identity Services not loaded. Using limited functionality.');
                 updateAuthUI();
                 return;
             }
@@ -1003,7 +1003,7 @@ gapi.client.init({
     }
 }).catch(error => {
     console.error('gapi.client.init error:', error);
-    showNotification('error', 'API Error', 'Failed to initialize Google API client.');
+    showImprovedNotification('error', 'API Error', 'Failed to initialize Google API client.');
     updateAuthUI();
 });
 
@@ -1019,7 +1019,7 @@ gapi.client.init({
 							auto_select: true,
                             error_callback: (err) => {
                                 console.error('Token client error:', err);
-                                showNotification('error', 'Auth Error', 'Failed to initialize authentication.');
+                                showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
                             }
                         });
                         
@@ -1030,16 +1030,16 @@ gapi.client.init({
                         console.log('Token client initialized successfully');
                     } catch (tokenError) {
                         console.error('Error initializing token client:', tokenError);
-                        showNotification('error', 'Auth Error', 'Failed to initialize authentication client.');
+                        showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication client.');
                     }
                 } catch (initError) {
                     console.error('Error during API initialization:', initError);
-                    showNotification('error', 'API Error', 'Failed to initialize Google API. Using limited functionality.');
+                    showImprovedNotification('error', 'API Error', 'Failed to initialize Google API. Using limited functionality.');
                     updateAuthUI();
                 }
             }, (loadError) => {
                 console.error('Error loading GAPI client:', loadError);
-                showNotification('error', 'API Error', 'Failed to load Google API client. Using limited functionality.');
+                showImprovedNotification('error', 'API Error', 'Failed to load Google API client. Using limited functionality.');
                 updateAuthUI();
 				    if (isOnline) {
 						fetchAvailableCourses();
@@ -1051,69 +1051,75 @@ gapi.client.init({
          * Handle token response from Google OAuth.
          * @param {Object} resp - The token response object.
          */
-        function handleTokenResponse(resp) {
-            console.log('Received token response');
+// Update the handleTokenResponse function to load database for all signed-in users
+function handleTokenResponse(resp) {
+    console.log('Received token response');
+    
+    if (resp.error !== undefined) {
+        console.error('Token response error:', resp.error);
+        showImprovedNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
+        return;
+    }
+    
+    if (!resp.access_token) {
+        console.error('No access token in response');
+        showImprovedNotification('error', 'Auth Error', 'Did not receive access token');
+        return;
+    }
+    
+    console.log('Access token received, storing token');
+    
+    try {
+        // Store token in localStorage for session persistence
+        localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
+        
+        // User is signed in
+        isSignedIn = true;
+        
+        // Get user info and update UI
+        fetchUserInfo().then(() => {
+            // Check if user is admin
+            isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+            console.log('User is admin:', isAdmin);
             
-            if (resp.error !== undefined) {
-                console.error('Token response error:', resp.error);
-                showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
-                return;
+            // Update UI for admin/user
+            updateAuthUI();
+            
+            showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
+            
+            // Fetch course list and populate dropdown for all users
+            if (isOnline) {
+                // Always fetch courses first
+                fetchAvailableCourses()
+                    .then(() => {
+                        // Always fetch database for all signed-in users (even non-admins)
+                        return fetchDatabaseFromSheet();
+                    })
+                    .then(() => {
+                        // Auto-sync data if online and admin
+                        if (isAdmin) {
+                            return syncData();
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error after sign-in:', err);
+                    });
             }
+        }).catch(error => {
+            console.error('Error after token response:', error);
             
-            if (!resp.access_token) {
-                console.error('No access token in response');
-                showNotification('error', 'Auth Error', 'Did not receive access token');
-                return;
-            }
+            // Even if user info fetch fails, keep them signed in
+            isSignedIn = true;
+            isAdmin = false; // Default to non-admin if can't verify
+            updateAuthUI();
             
-            console.log('Access token received, storing token');
-            
-            try {
-                // Store token in localStorage for session persistence
-                localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
-                
-                // User is signed in
-                isSignedIn = true;
-                
-                // Get user info and update UI
-                fetchUserInfo().then(() => {
-                    // Check if user is admin
-                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-                    console.log('User is admin:', isAdmin);
-                    
-                    // Update UI for admin/user
-                    updateAuthUI();
-                    
-                    showNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
-                    
-                    // Fetch course list and populate dropdown
-                    if (isOnline) {
-                        fetchAvailableCourses()
-                            .then(() => {
-                                // Auto-sync data if online and admin
-                                if (isAdmin) {
-                                    return syncData();
-                                }
-                            })
-                            .catch(err => {
-                                console.error('Error after sign-in:', err);
-                            });
-                    }
-                }).catch(error => {
-                    console.error('Error after token response:', error);
-                    
-                    // Even if user info fetch fails, keep them signed in
-                    isSignedIn = true;
-                    isAdmin = false; // Default to non-admin if can't verify
-                    updateAuthUI();
-                    
-                    showNotification('warning', 'Limited Access', 'Signed in with limited access. Some features may not work.');
-                });
-            } catch (error) {
-                console.error('Error processing token:', error);
-                showNotification('error', 'Auth Error', 'Error during sign-in process');
-            }
-        }
+            showImprovedNotification('warning', 'Limited Access', 'Signed in with limited access');
+        });
+    } catch (error) {
+        console.error('Error processing token:', error);
+        showImprovedNotification('error', 'Auth Error', 'Error during sign-in process');
+    }
+}
         
         /**
          * Fetch user info (profile) from Google.
@@ -1159,7 +1165,7 @@ gapi.client.init({
                 return currentUser;
             } catch (error) {
                 console.error('Error fetching user info:', error);
-                showNotification('error', 'User Info Error', error.message || 'Failed to get user information');
+                showImprovedNotification('error', 'User Info Error', error.message || 'Failed to get user information');
                 throw error;
             }
         }
@@ -1170,7 +1176,7 @@ gapi.client.init({
         function handleAuthClick() {
             if (!tokenClient) {
                 console.error('Token client not initialized');
-                showNotification('error', 'Auth Error', 'Authentication is not available. Try refreshing the page.');
+                showImprovedNotification('error', 'Auth Error', 'Authentication is not available. Try refreshing the page.');
                 return;
             }
             console.log('Requesting access token...');
@@ -1180,7 +1186,7 @@ gapi.client.init({
                 tokenClient.requestAccessToken();
             } catch (e) {
                 console.error('Error requesting token:', e);
-                showNotification('error', 'Auth Error', 'Failed to start authentication process. Try refreshing the page.');
+                showImprovedNotification('error', 'Auth Error', 'Failed to start authentication process. Try refreshing the page.');
             }
         }
         
@@ -1199,7 +1205,7 @@ gapi.client.init({
                         logs = [];
                         uidToNameMap = {};
                         updateUI();
-                        showNotification('info', 'Signed Out', 'You have been successfully signed out');
+                        showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
                     });
                 } else {
                     // If no token, just clear the UI state
@@ -1234,22 +1240,35 @@ gapi.client.init({
 function updateAuthUI() {
     console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
 
+    // Hide all admin-only elements first
+    document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = 'none';
+    });
+
+    // Hide Database tab by default
+    const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+    if (databaseTab) {
+        databaseTab.style.display = 'none';
+    }
+
+    // For all users: hide/show UID column based on admin status
+    const uidColumns = document.querySelectorAll('.uid-column');
+    uidColumns.forEach(col => {
+        col.style.display = isAdmin ? 'table-cell' : 'none';
+    });
+
     // Guest Mode: Not signed in
     if (!isSignedIn) {
         loginContainer.style.display = 'flex';
         userContainer.style.display = 'none';
 
-        // Show scan button (for local NFC scanning)
-        startScanBtn.style.display = 'flex';
-        stopScanBtn.style.display = 'none';
-
-        // Hide all admin-only elements and the Database tab
-        document.querySelectorAll('.admin-only').forEach(el => {
-            el.style.display = 'none';
-        });
-        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-        if (databaseTab) {
-            databaseTab.style.display = 'none';
+        // Show scan buttons for NFC scanning (toy mode)
+        if (nfcSupported) {
+            startScanBtn.style.display = isScanning ? 'none' : 'flex';
+            stopScanBtn.style.display = isScanning ? 'flex' : 'none';
+        } else {
+            startScanBtn.style.display = 'none';
+            stopScanBtn.style.display = 'none';
         }
     }
     // Read-Only Mode: Signed in as non-admin
@@ -1260,30 +1279,26 @@ function updateAuthUI() {
         // Hide scan buttons in read-only mode
         startScanBtn.style.display = 'none';
         stopScanBtn.style.display = 'none';
-
-        // Hide admin-only elements and the Database tab
-        document.querySelectorAll('.admin-only').forEach(el => {
-            el.style.display = 'none';
-        });
-        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-        if (databaseTab) {
-            databaseTab.style.display = 'none';
-        }
     }
     // Admin Mode: Full access
     else if (isAdmin) {
         loginContainer.style.display = 'none';
         userContainer.style.display = 'flex';
 
-        // In admin mode, hide the scan button (admin doesn't use local scanning)
-        startScanBtn.style.display = isScanning ? 'none' : 'none'; // Always hide for admin
-        stopScanBtn.style.display = isScanning ? 'flex' : 'none';
+        // Show scan buttons for admins
+        if (nfcSupported) {
+            startScanBtn.style.display = isScanning ? 'none' : 'flex';
+            stopScanBtn.style.display = isScanning ? 'flex' : 'none';
+        } else {
+            startScanBtn.style.display = 'none';
+            stopScanBtn.style.display = 'none';
+        }
 
         // Show the Database tab and all admin-only elements
-        const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
         if (databaseTab) {
             databaseTab.style.display = 'flex';
         }
+        
         document.querySelectorAll('.admin-only').forEach(el => {
             // For table headers/cells, set display to table-cell; for others, inline-block
             if (el.tagName === 'TH' || el.tagName === 'TD') {
@@ -1294,8 +1309,8 @@ function updateAuthUI() {
         });
     }
 
-    // Update sync button: only visible for admin
-    syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+    // Update sync button: only visible and enabled for admin when online
+    syncBtn.disabled = !isOnline || !isSignedIn || !isAdmin || isSyncing;
     syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 
     // Update empty logs message based on course selection
@@ -1312,82 +1327,79 @@ function updateAuthUI() {
          * Handle course selection change.
          * Load logs for the selected course.
          */
+// Add this constant with your other constants at the top
 function handleCourseChange() {
     currentCourse = courseSelect.value;
+    logs = []; // Clear current logs before loading new ones
 
     if (!currentCourse) {
-        logs = [];
         updateUI();
         emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
         return;
     }
 
-    // Guest Mode: Not signed in – load logs from local storage only.
+    // Guest Mode: Load from local storage
     if (!isSignedIn) {
         const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
         if (storedLogs) {
             try {
                 logs = JSON.parse(storedLogs);
+                logs.sort((a, b) => b.timestamp - a.timestamp); // Sort newest first
             } catch (e) {
                 console.error('Error parsing stored logs:', e);
                 logs = [];
             }
-        } else {
-            logs = [];
         }
         updateUI();
-        showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (guest mode)`);
         return;
     }
 
-    // Read-Only Mode: Signed in as non-admin
-    if (isSignedIn && !isAdmin) {
-        updateUI();
-        if (isOnline) {
-            fetchLogsFromSheet()
-                .then(() => {
-                    showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse} (read-only)`);
-                })
-                .catch(error => {
-                    console.error('Error fetching logs:', error);
-                    showNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
-                });
-        } else {
-            // Offline: fallback to localStorage if available.
-            const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-            if (storedLogs) {
-                try {
-                    logs = JSON.parse(storedLogs);
-                } catch (e) {
-                    console.error('Error parsing stored logs:', e);
-                    logs = [];
+    // For both User and Admin modes, always load logs from spreadsheet when online
+    if (isOnline) {
+        fetchLogsFromSheet()
+            .then(() => {
+                if (isAdmin) {
+                    showImprovedNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse}`);
                 }
-            } else {
-                logs = [];
+            })
+            .catch(error => {
+                console.error('Error fetching logs:', error);
+                showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                
+                // Fallback to localStorage if available when offline
+                const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+                if (storedLogs) {
+                    try {
+                        logs = JSON.parse(storedLogs);
+                        logs.sort((a, b) => b.timestamp - a.timestamp);
+                    } catch (e) {
+                        console.error('Error parsing stored logs:', e);
+                    }
+                }
+                updateUI();
+            });
+    } else {
+        // Offline: fallback to localStorage
+        const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+        if (storedLogs) {
+            try {
+                logs = JSON.parse(storedLogs);
+                logs.sort((a, b) => b.timestamp - a.timestamp);
+            } catch (e) {
+                console.error('Error parsing stored logs:', e);
             }
-            updateUI();
-            showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse} (read-only, offline)`);
         }
-        return;
-    }
-
-    // Admin Mode: Signed in as admin
-    if (isSignedIn && isAdmin) {
         updateUI();
-        if (isOnline) {
-            fetchLogsFromSheet()
-                .then(() => {
-                    showNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse}`);
-                })
-                .catch(error => {
-                    console.error('Error fetching logs:', error);
-                    showNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
-                });
-        } else {
-            showNotification('info', 'Course Selected', `Viewing attendance for ${currentCourse}`);
-            if (logs.length === 0) {
-                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No scan logs yet for this course.';
-            }
+    }
+}
+
+// Add this helper function to save logs to localStorage
+function saveLogsToLocalStorage() {
+    if (currentCourse) {
+        try {
+            localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
+        } catch (e) {
+            console.error('Error saving logs to localStorage:', e);
         }
     }
 }
@@ -1452,7 +1464,7 @@ function handleCourseChange() {
             }
             syncBtn.disabled = true;
             
-            showNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
+            showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
             
             try {
                 // First sync database to get up-to-date UID-name mappings
@@ -1473,10 +1485,10 @@ function handleCourseChange() {
                     await fetchLogsFromSheet();
                 }
                 
-                showNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
+                showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
             } catch (error) {
                 console.error('Sync error:', error);
-                showNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+                showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
             } finally {
                 isSyncing = false;
                 
@@ -1520,7 +1532,7 @@ function handleCourseChange() {
         console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
     } catch (error) {
         console.error('Error fetching database:', error);
-        showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+        showImprovedNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
         throw error;
     }
 }
@@ -1566,7 +1578,7 @@ function handleCourseChange() {
                 availableCourses = [];
                 populateCourseDropdown();
                 
-                showNotification('warning', 'Courses Warning', 'Using default course list');
+                showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
                 throw error;
             }
         }
@@ -1609,7 +1621,7 @@ function handleCourseChange() {
                 console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
             } catch (error) {
                 console.error('Error fetching logs:', error);
-                showNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+                showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
                 throw error;
             }
         }
@@ -1689,7 +1701,7 @@ async function syncLogsWithSheet() {
         console.log(`Synced ${logs.length} logs with ${currentCourse} sheet`);
     } catch (error) {
         console.error('Error syncing logs:', error);
-        showNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+        showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
         throw error;
     }
 }
@@ -1697,10 +1709,11 @@ async function syncLogsWithSheet() {
         /**
          * Sync database (UID-name map) to Google Sheets.
          */
+// Update syncDatabaseToSheet to strictly check for admin rights
 async function syncDatabaseToSheet() {
     // Only allow sync if the user is signed in as admin.
-    if (!isSignedIn || !isAdmin) {
-        console.warn('Database sync aborted: Not signed in as admin.');
+    if (!isSignedIn || !isAdmin || !isOnline) {
+        console.warn('Database sync aborted: Not signed in as admin or not online.');
         return;
     }
     
@@ -1732,7 +1745,7 @@ async function syncDatabaseToSheet() {
         console.log(`Synced ${entries.length} database entries to sheet`);
     } catch (error) {
         console.error('Error syncing database:', error);
-        showNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
+        showImprovedNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
         throw error;
     }
 }
@@ -1767,7 +1780,7 @@ async function syncDatabaseToSheet() {
                 console.log('Log appended to Google Sheet');
             } catch (error) {
                 console.error('Error appending log:', error);
-                showNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
+                showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
             }
         }
         
@@ -1796,7 +1809,7 @@ async function syncDatabaseToSheet() {
          * @param {string} title - Notification title.
          * @param {string} message - Notification message.
          */
-        function showNotification(type, title, message) {
+        function showImprovedNotification(type, title, message) {
             // Clear any existing notifications of the same type
             const existingNotifications = notificationContainer.querySelectorAll(`.notification-${type}`);
             existingNotifications.forEach(notification => {
@@ -1917,7 +1930,7 @@ async function syncDatabaseToSheet() {
             }
             
             updateUI();
-            showNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
+            showImprovedNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
         }
         
         /**
@@ -1946,7 +1959,7 @@ async function syncDatabaseToSheet() {
             }
             
             updateUI();
-            showNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
+            showImprovedNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
         }
         
         /**
@@ -1968,7 +1981,7 @@ async function syncDatabaseToSheet() {
                 }
                 
                 updateUI();
-                showNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
+                showImprovedNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
             }
         }
         
@@ -1987,7 +2000,7 @@ async function syncDatabaseToSheet() {
                 }
                 
                 updateUI();
-                showNotification('success', 'Database Cleared', 'All database entries have been removed.');
+                showImprovedNotification('success', 'Database Cleared', 'All database entries have been removed.');
             }
         }
         
@@ -1998,7 +2011,7 @@ async function syncDatabaseToSheet() {
             if (!isAdmin) return;
             
             if (!currentCourse) {
-                showNotification('warning', 'No Course Selected', 'Please select a course before adding a log entry');
+                showImprovedNotification('warning', 'No Course Selected', 'Please select a course before adding a log entry');
                 return;
             }
             
@@ -2089,7 +2102,7 @@ async function syncDatabaseToSheet() {
                 updateUI();
                 
                 const name = uidToNameMap[selectedUid] || 'Unknown';
-                showNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate} ${manualTime}`);
+                showImprovedNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate} ${manualTime}`);
                 
                 document.body.removeChild(dialogBackdrop);
             });
@@ -2204,7 +2217,7 @@ async function syncDatabaseToSheet() {
                     
                     // Don't allow deleting the last timestamp
                     if (visibleGroups <= 1) {
-                        showNotification('warning', 'Cannot Delete', 'At least one timestamp must remain.');
+                        showImprovedNotification('warning', 'Cannot Delete', 'At least one timestamp must remain.');
                         return;
                     }
                     
@@ -2212,7 +2225,7 @@ async function syncDatabaseToSheet() {
                     logsToDelete.add(logId);
                     timestampGroup.classList.add('deleted');
                     
-                    showNotification('info', 'Timestamp Marked for Deletion', 'The timestamp will be deleted when you save changes.');
+                    showImprovedNotification('info', 'Timestamp Marked for Deletion', 'The timestamp will be deleted when you save changes.');
                 });
             });
             
@@ -2264,7 +2277,7 @@ async function syncDatabaseToSheet() {
                 
                 updateUI();
                 
-                showNotification('success', 'Log Updated', 'Log entry has been updated successfully.');
+                showImprovedNotification('success', 'Log Updated', 'Log entry has been updated successfully.');
                 document.body.removeChild(dialogBackdrop);
             });
             
@@ -2278,25 +2291,37 @@ async function syncDatabaseToSheet() {
          * Delete a log group.
          * @param {Object} group - The log group to delete.
          */
-        function confirmDeleteLog(group) {
-            if (!isAdmin) return;
-            
-            if (confirm(`Are you sure you want to delete all log entries for ${group.name} (${group.uid}) on ${group.date}?`)) {
-                // Get IDs of all logs in this group
-                const idsToRemove = group.originalLogs.map(log => log.id);
-                
-                // Remove logs with these IDs
-                logs = logs.filter(log => !idsToRemove.includes(log.id));
-                
-                // Sync with sheets if online
-                if (isOnline && isSignedIn) {
-                    syncLogsWithSheet().catch(err => console.error('Error syncing after delete:', err));
-                }
-                
-                updateUI();
-                showNotification('success', 'Log Deleted', `Removed all logs for ${group.name} on ${group.date}.`);
-            }
+function confirmDeleteLog(group) {
+    if (!isAdmin) return;
+    
+    if (confirm(`Are you sure you want to delete all log entries for ${group.name} on ${group.date}?`)) {
+        // Get IDs of all logs in this group
+        const idsToRemove = group.originalLogs.map(log => log.id);
+        
+        // Remove logs with these IDs
+        logs = logs.filter(log => !idsToRemove.includes(log.id));
+        
+        // Save to localStorage first
+        saveLogsToLocalStorage();
+        
+        // Update UI immediately
+        updateUI();
+        
+        // Sync with sheets if online and admin
+        if (isOnline && isSignedIn && isAdmin) {
+            syncLogsWithSheet()
+                .then(() => {
+                    showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
+                })
+                .catch(err => {
+                    console.error('Error syncing after delete:', err);
+                    showImprovedNotification('error', 'Sync Error', 'Changes saved locally but not synced to spreadsheet');
+                });
+        } else {
+            showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
         }
+    }
+}
         
         /**
          * Clear all logs for current course.
@@ -2308,12 +2333,12 @@ function clearLogs() {
     if (isOnline && isSignedIn) {
         syncLogsWithSheet()
             .then(() => {
-                showNotification('success', 'Logs Cleared', 'All logs have been removed from the spreadsheet.');
+                showImprovedNotification('success', 'Logs Cleared', 'All logs have been removed from the spreadsheet.');
                 updateUI();
             })
             .catch(err => {
                 console.error('Error clearing logs:', err);
-                showNotification('error', 'Clear Error', 'Failed to remove logs from the spreadsheet.');
+                showImprovedNotification('error', 'Clear Error', 'Failed to remove logs from the spreadsheet.');
             });
     } else {
         updateUI();
@@ -2328,12 +2353,12 @@ function deleteLogEntry(logId) {
     if (isOnline && isSignedIn) {
         syncLogsWithSheet()
             .then(() => {
-                showNotification('success', 'Log Deleted', 'Successfully removed the log from the spreadsheet.');
+                showImprovedNotification('success', 'Log Deleted', 'Successfully removed the log from the spreadsheet.');
                 updateUI();
             })
             .catch(err => {
                 console.error('Error deleting log:', err);
-                showNotification('error', 'Delete Error', 'Failed to remove the log from the spreadsheet.');
+                showImprovedNotification('error', 'Delete Error', 'Failed to remove the log from the spreadsheet.');
             });
     } else {
         updateUI();
@@ -2384,7 +2409,7 @@ function deleteLogEntry(logId) {
                     const excelCount = Object.keys(excelMappings).length;
                     
                     if (excelCount === 0) {
-                        showNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns.');
+                        showImprovedNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns.');
                         return;
                     }
                     
@@ -2392,12 +2417,12 @@ function deleteLogEntry(logId) {
                     showDatabaseImportDialog(excelMappings);
                 } catch (error) {
                     console.error('Excel import error:', error);
-                    showNotification('error', 'Import Failed', 'Could not process the Excel file.');
+                    showImprovedNotification('error', 'Import Failed', 'Could not process the Excel file.');
                 }
             };
             
             reader.onerror = function() {
-                showNotification('error', 'Import Failed', 'Failed to read the Excel file.');
+                showImprovedNotification('error', 'Import Failed', 'Failed to read the Excel file.');
             };
             
             reader.readAsArrayBuffer(file);
@@ -2449,7 +2474,7 @@ function deleteLogEntry(logId) {
                 }
                 
                 updateUI();
-                showNotification('success', 'Database Merged', `Added ${newCount} new entries to the database.`);
+                showImprovedNotification('success', 'Database Merged', `Added ${newCount} new entries to the database.`);
                 document.body.removeChild(dialogBackdrop);
             });
             
@@ -2463,7 +2488,7 @@ function deleteLogEntry(logId) {
                 }
                 
                 updateUI();
-                showNotification('success', 'Database Replaced', `Database now contains ${Object.keys(excelMappings).length} entries from Excel.`);
+                showImprovedNotification('success', 'Database Replaced', `Database now contains ${Object.keys(excelMappings).length} entries from Excel.`);
                 document.body.removeChild(dialogBackdrop);
             });
             
@@ -2481,7 +2506,7 @@ function deleteLogEntry(logId) {
             if (!isAdmin) return;
             
             if (!currentCourse) {
-                showNotification('warning', 'No Course Selected', 'Please select a course before importing logs');
+                showImprovedNotification('warning', 'No Course Selected', 'Please select a course before importing logs');
                 return;
             }
             
@@ -2525,13 +2550,13 @@ function deleteLogEntry(logId) {
                     // Show import dialog
                     showImportDialog(importedLogs);
                 } catch (error) {
-                    showNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
+                    showImprovedNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
                     console.error('Import error:', error);
                 }
             };
             
             reader.onerror = function() {
-                showNotification('error', 'Import Failed', 'Failed to read the file.');
+                showImprovedNotification('error', 'Import Failed', 'Failed to read the file.');
             };
             
             reader.readAsText(file);
@@ -2590,7 +2615,7 @@ function deleteLogEntry(logId) {
                 }
                 
                 updateUI();
-                showNotification('success', 'Import Complete', `Added ${newCount} new log entries.`);
+                showImprovedNotification('success', 'Import Complete', `Added ${newCount} new log entries.`);
                 document.body.removeChild(dialogBackdrop);
             });
             
@@ -2605,7 +2630,7 @@ function deleteLogEntry(logId) {
                 }
                 
                 updateUI();
-                showNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported entries.`);
+                showImprovedNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported entries.`);
                 document.body.removeChild(dialogBackdrop);
             });
             
@@ -2620,7 +2645,7 @@ function deleteLogEntry(logId) {
          */
         function exportLogs() {
             if (logs.length === 0) {
-                showNotification('warning', 'Export Failed', 'No logs to export');
+                showImprovedNotification('warning', 'Export Failed', 'No logs to export');
                 return;
             }
             
@@ -2641,7 +2666,7 @@ function deleteLogEntry(logId) {
             downloadAnchor.click();
             document.body.removeChild(downloadAnchor);
             
-            showNotification('success', 'Export Complete', 'Logs exported to JSON file');
+            showImprovedNotification('success', 'Export Complete', 'Logs exported to JSON file');
         }
         
         /**
@@ -2651,7 +2676,7 @@ function deleteLogEntry(logId) {
             const entries = Object.entries(uidToNameMap);
             
             if (entries.length === 0) {
-                showNotification('warning', 'Export Failed', 'No database entries to export');
+                showImprovedNotification('warning', 'Export Failed', 'No database entries to export');
                 return;
             }
             
@@ -2670,7 +2695,7 @@ function deleteLogEntry(logId) {
             // Generate Excel file
             XLSX.writeFile(workbook, "uid_database.xlsx");
             
-            showNotification('success', 'Export Complete', 'Database exported to Excel file');
+            showImprovedNotification('success', 'Export Complete', 'Database exported to Excel file');
         }
         
         /**
@@ -3030,107 +3055,120 @@ function deleteLogEntry(logId) {
         /**
          * Start NFC scanning.
          */
-        async function startScanning() {
-            if (!isAdmin || !nfcSupported) return;
-            
-            if (!currentCourse) {
-                showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
-                return;
-            }
-            
-            try {
-                // Clear previous notifications
-                const nfcNotifications = document.querySelectorAll('.notification-error, .notification-info');
-                nfcNotifications.forEach(n => {
-                    if (n.textContent.includes('NFC') || n.textContent.includes('scanner')) {
-                        n.remove();
-                    }
-                });
-                
-                // Show scanning notification
-                showNotification('info', 'Starting scanner', 'Requesting permission to use NFC...');
-                
-                // Create NFC reader
-                nfcReader = new NDEFReader();
-                
-                // Request permission and start scan
-                await nfcReader.scan();
-                
-                // Scan started successfully
-                isScanning = true;
-                updateScanButtons();
-                showNotification('success', 'Scanner active', 'Ready to scan NFC tags. Hold them near your device.');
-                
-                // Set up event listeners
-                nfcReader.addEventListener("reading", handleNfcReading);
-                nfcReader.addEventListener("error", handleNfcError);
-                
-            } catch (error) {
-                // Handle permission denied and other errors
-                let errorMessage = error.message;
-                let errorTitle = 'Scanner error';
-                
-                if (error.name === 'NotAllowedError' || errorMessage.includes('permission')) {
-                    errorTitle = 'Permission denied';
-                    errorMessage = 'You need to grant permission to use NFC. Please try again and select "Allow" when prompted.';
-                } else if (error.name === 'NotSupportedError') {
-                    errorTitle = 'NFC not supported';
-                    errorMessage = 'Your device doesn\'t support NFC or it\'s turned off. Please check your device settings.';
-                }
-                
-                showNotification('error', errorTitle, errorMessage);
-                stopScanning();
-            }
-        }
+	function startScanning() {
+    if (!nfcSupported) {
+        showImprovedNotification('error', 'NFC Not Supported', 'NFC scanning is only supported in Chrome on Android.');
+        return;
+    }
+    
+    if (!currentCourse) {
+        showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+        return;
+    }
+    
+    try {
+        // Show scanning notification
+        showImprovedNotification('info', 'Starting scanner', 'Requesting permission to use NFC...');
         
-		function saveLogsToLocalStorage() {
-			if (currentCourse) {
-				localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
-			}
-		}
+        // Create NFC reader
+        nfcReader = new NDEFReader();
+        
+        // Request permission and start scan
+        nfcReader.scan().then(() => {
+            // Scan started successfully
+            isScanning = true;
+            updateScanButtons();
+            showImprovedNotification('success', 'Scanner active', 'Ready to scan NFC tags');
+            
+            // Set up event listeners
+            nfcReader.addEventListener("reading", handleNfcReading);
+            nfcReader.addEventListener("error", handleNfcError);
+        }).catch(error => {
+            handleScanningError(error);
+        });
+    } catch (error) {
+        handleScanningError(error);
+    }
+}
+
+function handleScanningError(error) {
+    // Handle permission denied and other errors
+    let errorMessage = error.message;
+    let errorTitle = 'Scanner error';
+    
+    if (error.name === 'NotAllowedError' || errorMessage.includes('permission')) {
+        errorTitle = 'Permission denied';
+        errorMessage = 'You need to grant permission to use NFC. Please try again.';
+    } else if (error.name === 'NotSupportedError') {
+        errorTitle = 'NFC not supported';
+        errorMessage = 'Your device doesn\'t support NFC or it\'s turned off.';
+    }
+    
+    showImprovedNotification('error', errorTitle, errorMessage);
+    stopScanning();
+}
+
+function updateScanButtons() {
+    if (nfcSupported) {
+        if (isScanning) {
+            startScanBtn.style.display = 'none';
+            stopScanBtn.style.display = 'flex';
+        } else {
+            startScanBtn.style.display = (isSignedIn && !isAdmin) ? 'none' : 'flex';
+            stopScanBtn.style.display = 'none';
+        }
+    } else {
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+    }
+}
+ 
 		
         /**
          * Handle NFC reading.
          * @param {Object} event - The NFC reading event.
          */
-        function handleNfcReading({ serialNumber }) {
-            if (!currentCourse) {
-                showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
-                return;
-            }
-            
-            // Create log entry
-            const timestamp = new Date();
-            const newLog = {
-                uid: serialNumber,
-                timestamp: timestamp.getTime(),
-                id: Date.now() + Math.random().toString(36).substr(2, 9),
-                manual: false
-            };
-            
-            // Add to logs
-            logs.unshift(newLog);
-            saveLogsToLocalStorage();
-            // Update UI
-            updateUI();
-            
-            // Determine name for notification
-            const name = uidToNameMap[serialNumber] || 'Unknown';
-            
-            // Play success sound
-            playSound(true);
-            
-            // Show success notification
-            showNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
-            
-            // If online and signed in, append log to sheet
-            if (isOnline && isSignedIn) {
-                appendLogToSheet(newLog).catch(err => {
-                    console.error('Error appending log:', err);
-                    showNotification('warning', 'Sync Warning', 'Failed to sync immediately. Will sync on next full sync.');
-                });
-            }
-        }
+ function handleNfcReading({ serialNumber }) {
+    if (!currentCourse) {
+        showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+        return;
+    }
+    
+    // Create log entry
+    const timestamp = new Date();
+    const newLog = {
+        uid: serialNumber,
+        timestamp: timestamp.getTime(),
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        manual: false
+    };
+    
+    // Add to logs
+    logs.unshift(newLog);
+    
+    // Save to localStorage
+    saveLogsToLocalStorage();
+    
+    // Update UI
+    updateUI();
+    
+    // Determine name for notification
+    const name = uidToNameMap[serialNumber] || 'Unknown';
+    
+    // Play success sound
+    playSound(true);
+    
+    // Show success notification
+    showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
+    
+    // If online and signed in as admin, append log to sheet
+    if (isOnline && isSignedIn && isAdmin) {
+        appendLogToSheet(newLog).catch(err => {
+            console.error('Error appending log:', err);
+            showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
+        });
+    }
+}
         
         /**
          * Handle NFC error.
@@ -3140,7 +3178,7 @@ function deleteLogEntry(logId) {
             // Play error sound
             playSound(false);
             
-            showNotification('error', 'Scanner error', error.message);
+            showImprovedNotification('error', 'Scanner error', error.message);
             stopScanning();
         }
         
@@ -3158,28 +3196,8 @@ function deleteLogEntry(logId) {
                 nfcReader = null;
             }
             
-            showNotification('info', 'Scanner stopped', 'NFC scanning has been stopped.');
+            showImprovedNotification('info', 'Scanner stopped', 'NFC scanning has been stopped.');
         }
-        
-        /**
-         * Update scan buttons based on state.
-         */
-function updateScanButtons() {
-    if (!isSignedIn) {
-        // Guest mode: show start button; stop button hidden
-        startScanBtn.style.display = 'flex';
-        stopScanBtn.style.display = 'none';
-    } else if (isSignedIn && !isAdmin) {
-        // Read-only signed-in mode: hide both scan buttons
-        startScanBtn.style.display = 'none';
-        stopScanBtn.style.display = 'none';
-    } else if (isAdmin) {
-        // Admin mode: hide scan buttons regardless of scanning state
-        startScanBtn.style.display = 'none';
-        stopScanBtn.style.display = 'none';
-    }
-}
-
         
         /**
          * Play sound effect (success or error).
@@ -3210,6 +3228,66 @@ function updateScanButtons() {
                 yearElement.textContent = new Date().getFullYear();
             }
         }
+		
+		function showImprovedNotification(type, title, message) {
+    // Don't show default course notification
+    if (title === 'Courses Warning' && message === 'Using default course list') {
+        return;
+    }
+    
+    // Clear any existing notifications of the same type
+    const existingNotifications = notificationContainer.querySelectorAll(`.notification-${type}`);
+    existingNotifications.forEach(notification => {
+        notification.remove();
+    });
+    
+    // Limit total notifications to 2
+    const allNotifications = notificationContainer.querySelectorAll('.notification');
+    while (allNotifications.length >= 2) {
+        notificationContainer.removeChild(allNotifications[0]);
+    }
+    
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    
+    let icon;
+    switch(type) {
+        case 'success': icon = 'check-circle'; break;
+        case 'error': icon = 'times-circle'; break;
+        case 'warning': icon = 'exclamation-circle'; break;
+        default: icon = 'info-circle';
+    }
+    
+    notification.innerHTML = `
+        <i class="fas fa-${icon}"></i>
+        <div style="flex-grow:1;">
+            <strong>${title}</strong><br>
+            ${message}
+        </div>
+        <span class="notification-close" style="cursor:pointer; margin-left:10px;">&times;</span>
+    `;
+    
+    notificationContainer.appendChild(notification);
+    
+    // Add click handler to close button
+    const closeBtn = notification.querySelector('.notification-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            notification.remove();
+        });
+    }
+    
+    // Auto-remove all notifications after a few seconds (except errors)
+    if (type !== 'error') {
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 3000);
+    }
+}
+
+// Replace all calls to showImprovedNotification with showImprovedNotification
         
         // Initialize the application when window loads
         window.addEventListener('load', function() {
@@ -3221,7 +3299,7 @@ function updateScanButtons() {
                     initGoogleApi();
                 } else {
                     console.error('Google API objects not available');
-                    showNotification('error', 'API Error', 'Google API libraries not loaded. Using limited functionality.');
+                    showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Using limited functionality.');
                     // Still populate default courses
                     availableCourses = [];
                     populateCourseDropdown();
