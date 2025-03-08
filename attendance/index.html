@@ -684,13 +684,13 @@
                 <span class="info-item"><i class="fas fa-database"></i> Database: <span id="database-status">Not loaded</span></span>
                 <button id="toggle-sound-btn" class="info-item"><i class="fas fa-volume-up"></i></button>
             </div>
-			<div class="tabs admin-only">
-				<div class="tab active admin-only" data-tab="scanner-tab"> <!-- Added admin-only class -->
-					<i class="fas fa-wifi"></i> Scanner
-				</div>
-				<div class="tab admin-only" style="display: none;" data-tab="database-tab">
-					<i class="fas fa-database"></i> Database
-				</div>
+			<div class="tabs">
+			  <div class="tab active" data-tab="scanner-tab">
+				<i class="fas fa-wifi"></i> Scanner
+			  </div>
+			  <div class="tab admin-only" data-tab="database-tab">
+				<i class="fas fa-database"></i> Database
+			  </div>
 			</div>
         </div>
         
@@ -984,129 +984,96 @@
          * Initialize Google API client.
          * Set up auth token client and event listeners for login/logout.
          */
-        function initGoogleApi() {
-            console.log('Initializing Google API...');
-            
-            // Set default courses first (in case API fails)
-            availableCourses = [];
-            populateCourseDropdown();
-            
-            // Make sure gapi and google objects exist
-            if (typeof gapi === 'undefined') {
-                console.error('gapi object is undefined');
-                showImprovedNotification('error', 'API Error', 'Google API client not loaded. Using limited functionality.');
-                updateAuthUI();
-                return;
-            }
-            
-            if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
-                console.error('google.accounts object is undefined');
-                showImprovedNotification('error', 'API Error', 'Google Identity Services not loaded. Using limited functionality.');
-                updateAuthUI();
-                return;
-            }
-            
-            // Load the GAPI client
-            gapi.load('client', () => {
-                console.log('GAPI client library loaded');
-                
-                // Initialize GAPI client
-                try {
-                    console.log('Initializing GAPI client with API key:', API_KEY);
-                    
-gapi.client.init({
-    apiKey: API_KEY,
-    discoveryDocs: DISCOVERY_DOCS
-}).then(() => {
-    console.log('GAPI client initialized successfully');
+function initGoogleApi() {
+    console.log('Initializing Google API...');
     
-    const savedToken = localStorage.getItem('gapi_token');
-    if (savedToken) {
-        try {
-            console.log('Found saved token, attempting to restore session');
-            const tokenObj = JSON.parse(savedToken);
-            gapi.client.setToken(tokenObj);
-            isSignedIn = true;
-            
-            // Fetch user info and then update UI and load courses and database
-            return fetchUserInfo()
-                .then(() => {
-                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-                    updateAuthUI();
-                    if (isOnline) {
-                        // Always fetch courses
-                        fetchAvailableCourses();
-                        // Also fetch the database so it loads on refresh
-                        fetchDatabaseFromSheet().catch(err => console.error('Database load error:', err));
-                    }
-                })
-                .catch(e => {
-                    console.error('Error fetching user info:', e);
-                    isSignedIn = false;
-                    isAdmin = false;
-                    localStorage.removeItem('gapi_token');
-                    gapi.client.setToken('');
-                    updateAuthUI();
-                });
-        } catch (e) {
-            console.error('Error restoring token:', e);
-            isSignedIn = false;
-            isAdmin = false;
-            localStorage.removeItem('gapi_token');
-            updateAuthUI();
-        }
-    } else {
-        console.log('No saved token found, user needs to sign in');
+    // Set default courses
+    availableCourses = [];
+    populateCourseDropdown();
+    
+    // Check if APIs are loaded
+    if (typeof gapi === 'undefined') {
+        console.error('gapi object is undefined');
+        showImprovedNotification('error', 'API Error', 'Google API client not loaded.');
         updateAuthUI();
-        if (isOnline) {
-            fetchAvailableCourses();
-        }
+        return;
     }
-}).catch(error => {
-    console.error('gapi.client.init error:', error);
-    showImprovedNotification('error', 'API Error', 'Failed to initialize Google API client.');
-    updateAuthUI();
-});
-
-
+    
+    if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
+        console.error('google.accounts object is undefined');
+        showImprovedNotification('error', 'API Error', 'Google Identity Services not loaded.');
+        updateAuthUI();
+        return;
+    }
+    
+    // Load the GAPI client
+    gapi.load('client', () => {
+        gapi.client.init({
+            apiKey: API_KEY,
+            discoveryDocs: DISCOVERY_DOCS
+        }).then(() => {
+            console.log('GAPI client initialized successfully');
+            
+            // Initialize token client only once
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                prompt: '',  // '' gives a more seamless experience
+                callback: (resp) => {
+                    console.log('Token callback received with access token');
+                    handleTokenResponse(resp);
+                }
+            });
+            
+            // Try to restore saved session
+            const savedToken = localStorage.getItem('gapi_token');
+            if (savedToken) {
+                try {
+                    const tokenObj = JSON.parse(savedToken);
+                    gapi.client.setToken(tokenObj);
+                    isSignedIn = true;
                     
-                    // Initialize token client for auth
-                    try {
-                        console.log('Initializing token client with Client ID:', CLIENT_ID);
-                        tokenClient = google.accounts.oauth2.initTokenClient({
-                            client_id: CLIENT_ID,
-                            scope: SCOPES,
-                            callback: handleTokenResponse,
-							auto_select: true,
-                            error_callback: (err) => {
-                                console.error('Token client error:', err);
-                                showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
+                    fetchUserInfo()
+                        .then(() => {
+                            isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                            updateAuthUI();
+                            if (isOnline) {
+                                fetchAvailableCourses().catch(err => console.error('Error:', err));
+                                fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
                             }
+                        })
+                        .catch(e => {
+                            console.error('Error fetching user info:', e);
+                            isSignedIn = false;
+                            isAdmin = false;
+                            localStorage.removeItem('gapi_token');
+                            gapi.client.setToken('');
+                            updateAuthUI();
                         });
-                        
-                        // Add event listeners for login/logout buttons
-                        loginBtn.addEventListener('click', handleAuthClick);
-                        logoutBtn.addEventListener('click', handleSignoutClick);
-                        
-                        console.log('Token client initialized successfully');
-                    } catch (tokenError) {
-                        console.error('Error initializing token client:', tokenError);
-                        showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication client.');
-                    }
-                } catch (initError) {
-                    console.error('Error during API initialization:', initError);
-                    showImprovedNotification('error', 'API Error', 'Failed to initialize Google API. Using limited functionality.');
+                } catch (e) {
+                    console.error('Error restoring token:', e);
+                    isSignedIn = false;
+                    localStorage.removeItem('gapi_token');
                     updateAuthUI();
                 }
-            }, (loadError) => {
-                console.error('Error loading GAPI client:', loadError);
-                showImprovedNotification('error', 'API Error', 'Failed to load Google API client. Using limited functionality.');
+            } else {
                 updateAuthUI();
-				    if (isOnline) {
-						fetchAvailableCourses();
-					}
-            });
-        }
+                if (isOnline) {
+                    fetchAvailableCourses();
+                }
+            }
+            
+            // Set up auth buttons once we know tokenClient is initialized
+            loginBtn.addEventListener('click', handleAuthClick);
+            logoutBtn.addEventListener('click', handleSignoutClick);
+            
+        }).catch(error => {
+            console.error('Error initializing GAPI client:', error);
+            showImprovedNotification('error', 'API Error', 'Failed to initialize Google API.');
+            updateAuthUI();
+        });
+    });
+}
         
         /**
          * Handle token response from Google OAuth.
@@ -1238,45 +1205,18 @@ function handleAuthClick() {
     console.log('Auth button clicked');
     
     if (!tokenClient) {
-        console.error('Token client not initialized - attempting to reinitialize...');
-        
-        // Force reinitialization of token client
-        try {
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                callback: handleTokenResponse,
-                auto_select: true,
-                error_callback: (err) => {
-                    console.error('Token client error:', err);
-                    showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication. Check console.');
-                }
-            });
-            
-            // Now try again
-            setTimeout(() => {
-                console.log('Retrying token request...');
-                tokenClient.requestAccessToken();
-            }, 500);
-            
-        } catch (initError) {
-            console.error('Failed to reinitialize token client:', initError);
-            showImprovedNotification('error', 'Auth Error', 'Authentication unavailable. See console for details.');
-        }
+        showImprovedNotification('error', 'Auth Error', 'Authentication not ready. Please refresh the page.');
         return;
     }
     
-    // Try the normal flow if token client exists
-    console.log('Requesting access token...');
-    try {
-        tokenClient.requestAccessToken({
-            prompt: 'consent',  // Force consent screen to appear every time
-        });
-    } catch (e) {
-        console.error('Error requesting token:', e);
-        showImprovedNotification('error', 'Auth Error', 'Failed to start authentication process: ' + e.message);
-    }
+    showImprovedNotification('info', 'Signing In', 'Opening Google authentication...');
+    
+    // Use a small timeout to ensure UI updates before the popup
+    setTimeout(() => {
+        tokenClient.requestAccessToken();
+    }, 50);
 }
+
         
         function handleSignoutClick() {
             try {
@@ -1328,21 +1268,18 @@ function handleAuthClick() {
 function updateAuthUI() {
     console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
 
-    // Get the tabs container
+    // Always display the tabs container
     const tabsContainer = document.querySelector('.tabs');
-    
-    // EXPLICITLY hide or show the tabs container based on admin status
     if (tabsContainer) {
-        // Only show tabs for admin users, hide for everyone else
-        tabsContainer.style.display = isAdmin ? 'flex' : 'none';
+        tabsContainer.style.display = 'flex';
     }
-    
-    // Hide all admin-only elements first
-    document.querySelectorAll('.admin-only').forEach(el => {
-        el.style.display = 'none';
+
+    // Hide only the admin-only tabs (navigation buttons) from the tabs container
+    document.querySelectorAll('.tab.admin-only').forEach(tab => {
+        tab.style.display = isAdmin ? 'flex' : 'none';
     });
-    
-    // For all users: hide/show UID column based on admin status
+
+    // Set the visibility for UID columns based on admin status
     const uidColumns = document.querySelectorAll('.uid-column');
     uidColumns.forEach(col => {
         col.style.display = isAdmin ? 'table-cell' : 'none';
@@ -1352,8 +1289,6 @@ function updateAuthUI() {
     if (!isSignedIn) {
         loginContainer.style.display = 'flex';
         userContainer.style.display = 'none';
-
-        // Show scan button (for local NFC scanning)
         startScanBtn.style.display = nfcSupported ? 'flex' : 'none';
         stopScanBtn.style.display = 'none';
     }
@@ -1361,8 +1296,6 @@ function updateAuthUI() {
     else if (isSignedIn && !isAdmin) {
         loginContainer.style.display = 'none';
         userContainer.style.display = 'flex';
-
-        // Hide scan buttons in read-only mode
         startScanBtn.style.display = 'none';
         stopScanBtn.style.display = 'none';
     }
@@ -1370,8 +1303,6 @@ function updateAuthUI() {
     else if (isAdmin) {
         loginContainer.style.display = 'none';
         userContainer.style.display = 'flex';
-
-        // Show scan buttons for admins if scanning supported
         if (nfcSupported) {
             startScanBtn.style.display = isScanning ? 'none' : 'flex';
             stopScanBtn.style.display = isScanning ? 'flex' : 'none';
@@ -1379,10 +1310,9 @@ function updateAuthUI() {
             startScanBtn.style.display = 'none';
             stopScanBtn.style.display = 'none';
         }
-
-        // Show the Database tab and all admin-only elements
+        // Show all admin-only elements that are not navigation tabs
         document.querySelectorAll('.admin-only').forEach(el => {
-            // For table headers/cells, set display to table-cell; for others, inline-block
+            if (el.classList.contains('tab')) return; // already handled above
             if (el.tagName === 'TH' || el.tagName === 'TD') {
                 el.style.display = 'table-cell';
             } else {
@@ -1391,7 +1321,7 @@ function updateAuthUI() {
         });
     }
 
-    // Update sync button: only visible for admin
+    // Update the sync button: only visible for admins
     syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
     syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 
@@ -3389,38 +3319,28 @@ window.addEventListener('load', function() {
     // Initialize the app UI first
     init();
     
-    // Wait a bit before initializing Google API to ensure all scripts are loaded
+    // Wait longer before initializing Google API to ensure all scripts are loaded
     setTimeout(() => {
         if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
             initGoogleApi();
         } else {
-            console.error('Google API objects not available');
-            showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Using limited functionality.');
-            // Still populate default courses
-            availableCourses = [];
-            populateCourseDropdown();
-            updateAuthUI();
+            console.warn('Google API objects not available yet, waiting longer...');
+            
+            // Try again with a longer timeout
+            setTimeout(() => {
+                if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+                    console.log('Google API objects loaded after extended wait');
+                    initGoogleApi();
+                } else {
+                    console.error('Google API objects still not available after extended wait');
+                    showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Please check your internet connection or try using a different browser.');
+                    availableCourses = [];
+                    populateCourseDropdown();
+                    updateAuthUI();
+                }
+            }, 3000);
         }
-    }, 1000);
-});
-
-// Also, add this code at the end of your script to ensure the login button always works
-document.addEventListener('DOMContentLoaded', function() {
-    const loginButton = document.getElementById('login-btn');
-    if (loginButton) {
-        // Remove any previous event listeners
-        loginButton.replaceWith(loginButton.cloneNode(true));
-        
-        // Get the new button reference
-        const newLoginButton = document.getElementById('login-btn');
-        
-        // Add the event listener
-        newLoginButton.addEventListener('click', function(event) {
-            console.log('Login button clicked directly');
-            event.preventDefault();
-            handleAuthClick();
-        });
-    }
+    }, 2000);
 });
     </script>
 </body>
