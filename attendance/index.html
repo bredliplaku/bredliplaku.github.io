@@ -70,12 +70,16 @@
             margin-bottom: 5px;
             gap: 10px;
         }
-        .info-item {
-            background-color: rgba(255,255,255,0.1);
-            padding: 10px 15px;
-            border-radius: 10px;
-            font-size: 0.9em;
-        }
+		.info-item {
+			background-color: rgba(255,255,255,0.1);
+			padding: 10px 15px;
+			border-radius: 10px;
+			font-size: 0.9em;
+			display: flex;
+			align-items: center;
+			height: 40px; /* Fixed height for consistency */
+			box-sizing: border-box;
+		}
         .tabs {
             display: flex;
             margin-top: 20px;
@@ -1318,8 +1322,6 @@ function updateAuthUI() {
     uidColumns.forEach(col => {
         col.style.display = isAdmin ? 'table-cell' : 'none';
     });
-    
-}
 
     // Guest Mode: Not signed in
     if (!isSignedIn) {
@@ -1358,11 +1360,7 @@ function updateAuthUI() {
             stopScanBtn.style.display = 'none';
         }
 
-        // Show the Database tab and all admin-only elements
-        if (databaseTab) {
-            databaseTab.style.display = 'flex';
-        }
-        
+        // Show all admin-only elements
         document.querySelectorAll('.admin-only').forEach(el => {
             // For table headers/cells, set display to table-cell; for others, inline-block
             if (el.tagName === 'TH' || el.tagName === 'TD') {
@@ -1386,7 +1384,6 @@ function updateAuthUI() {
 }
 
 
-        
         /**
          * Handle course selection change.
          * Load logs for the selected course.
@@ -1871,14 +1868,13 @@ async function syncDatabaseToSheet() {
          * @param {string} title - Notification title.
          * @param {string} message - Notification message.
          */
-// Update the notification function
 function showImprovedNotification(type, title, message) {
     // Don't show default course notification
     if (title === 'Courses Warning' && message === 'Using default course list') {
         return;
     }
     
-    // Use the in-page notification area instead of floating notifications
+    // Use the in-page notification area
     const notificationArea = document.getElementById('in-page-notification-area');
     if (!notificationArea) return;
     
@@ -3216,7 +3212,7 @@ function updateScanButtons() {
          * Handle NFC reading.
          * @param {Object} event - The NFC reading event.
          */
- async function handleNfcReading({ serialNumber }) {
+async function handleNfcReading({ serialNumber }) {
     if (!currentCourse) {
         showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
         return;
@@ -3253,11 +3249,32 @@ function updateScanButtons() {
     if (isOnline && isSignedIn && isAdmin) {
         try {
             await appendLogToSheet(newLog);
+            console.log('Log synced successfully');
         } catch (err) {
             console.error('Error appending log:', err);
             showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
         }
     }
+}
+
+// Force an online status update
+function forceOnlineStatusUpdate() {
+    isOnline = navigator.onLine;
+    console.log('Force updating online status to:', isOnline);
+    
+    // Update UI elements
+    if (isOnline) {
+        syncStatus.className = 'sync-status online';
+        syncText.textContent = 'Online';
+    } else {
+        syncStatus.className = 'sync-status offline';
+        syncText.textContent = 'Offline';
+    }
+    
+    // Update sync button state
+    syncBtn.disabled = !isOnline || !isSignedIn || !isAdmin || isSyncing;
+    
+    return isOnline;
 }
         
         /**
@@ -3380,23 +3397,28 @@ function updateScanButtons() {
 // Replace all calls to showImprovedNotification with showImprovedNotification
         
         // Initialize the application when window loads
-        window.addEventListener('load', function() {
-            // Initialize the app UI first
-            init();
-            // Wait a bit before initializing Google API to ensure all scripts are loaded
-            setTimeout(() => {
-                if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-                    initGoogleApi();
-                } else {
-                    console.error('Google API objects not available');
-                    showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Using limited functionality.');
-                    // Still populate default courses
-                    availableCourses = [];
-                    populateCourseDropdown();
-                    updateAuthUI();
-                }
-            }, 1000);
-        });
+	window.addEventListener('load', function() {
+		// Initialize the app UI first
+		init();
+		// Force an online status update
+		forceOnlineStatusUpdate();
+		
+		// Wait a bit before initializing Google API to ensure all scripts are loaded
+		setTimeout(() => {
+			if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+				initGoogleApi();
+				// Force another update after API init
+				setTimeout(forceOnlineStatusUpdate, 1000);
+			} else {
+				console.error('Google API objects not available');
+				showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Using limited functionality.');
+				// Still populate default courses
+				availableCourses = [];
+				populateCourseDropdown();
+				updateAuthUI();
+			}
+		}, 1000);
+	});
     </script>
 </body>
 </html>
