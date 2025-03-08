@@ -75,10 +75,8 @@
 			padding: 10px 15px;
 			border-radius: 10px;
 			font-size: 0.9em;
-			display: flex;
-			align-items: center;
-			height: 40px; /* Fixed height for consistency */
-			box-sizing: border-box;
+			vertical-align: middle;
+			line-height: 30px; /* Adjust this to match your text height */
 		}
         .tabs {
             display: flex;
@@ -686,7 +684,7 @@
                 <span class="info-item"><i class="fas fa-database"></i> Database: <span id="database-status">Not loaded</span></span>
                 <button id="toggle-sound-btn" class="info-item"><i class="fas fa-volume-up"></i></button>
             </div>
-			<div class="tabs">
+			<div class="tabs admin-only">
 				<div class="tab active" data-tab="scanner-tab">
 					<i class="fas fa-wifi"></i> Scanner
 				</div>
@@ -1306,9 +1304,9 @@ function updateAuthUI() {
     // Get the tabs container
     const tabsContainer = document.querySelector('.tabs');
     
-    // Hide tabs for non-admins
+    // EXPLICITLY hide or show the tabs container based on admin status
     if (tabsContainer) {
-        // Important: Use 'display: none' to completely hide the container
+        // Only show tabs for admin users, hide for everyone else
         tabsContainer.style.display = isAdmin ? 'flex' : 'none';
     }
     
@@ -1328,14 +1326,9 @@ function updateAuthUI() {
         loginContainer.style.display = 'flex';
         userContainer.style.display = 'none';
 
-        // Show scan buttons for NFC scanning (toy mode)
-        if (nfcSupported) {
-            startScanBtn.style.display = isScanning ? 'none' : 'flex';
-            stopScanBtn.style.display = isScanning ? 'flex' : 'none';
-        } else {
-            startScanBtn.style.display = 'none';
-            stopScanBtn.style.display = 'none';
-        }
+        // Show scan button (for local NFC scanning)
+        startScanBtn.style.display = nfcSupported ? 'flex' : 'none';
+        stopScanBtn.style.display = 'none';
     }
     // Read-Only Mode: Signed in as non-admin
     else if (isSignedIn && !isAdmin) {
@@ -1351,7 +1344,7 @@ function updateAuthUI() {
         loginContainer.style.display = 'none';
         userContainer.style.display = 'flex';
 
-        // Show scan buttons for admins
+        // Show scan buttons for admins if scanning supported
         if (nfcSupported) {
             startScanBtn.style.display = isScanning ? 'none' : 'flex';
             stopScanBtn.style.display = isScanning ? 'flex' : 'none';
@@ -1360,7 +1353,7 @@ function updateAuthUI() {
             stopScanBtn.style.display = 'none';
         }
 
-        // Show all admin-only elements
+        // Show the Database tab and all admin-only elements
         document.querySelectorAll('.admin-only').forEach(el => {
             // For table headers/cells, set display to table-cell; for others, inline-block
             if (el.tagName === 'TH' || el.tagName === 'TD') {
@@ -1371,8 +1364,8 @@ function updateAuthUI() {
         });
     }
 
-    // Update sync button: only visible and enabled for admin when online
-    syncBtn.disabled = !isOnline || !isSignedIn || !isAdmin || isSyncing;
+    // Update sync button: only visible for admin
+    syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
     syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 
     // Update empty logs message based on course selection
@@ -1878,18 +1871,6 @@ function showImprovedNotification(type, title, message) {
     const notificationArea = document.getElementById('in-page-notification-area');
     if (!notificationArea) return;
     
-    // Clear any existing notifications of the same type
-    const existingNotifications = notificationArea.querySelectorAll(`.in-page-notification-${type}`);
-    existingNotifications.forEach(notification => {
-        notification.remove();
-    });
-    
-    // Limit total notifications to 2
-    const allNotifications = notificationArea.querySelectorAll('.in-page-notification');
-    while (allNotifications.length >= 2) {
-        notificationArea.removeChild(allNotifications[0]);
-    }
-    
     const notification = document.createElement('div');
     notification.className = `in-page-notification in-page-notification-${type}`;
     
@@ -1920,7 +1901,7 @@ function showImprovedNotification(type, title, message) {
         });
     }
     
-    // Auto-remove all notifications after a few seconds (except errors)
+    // Auto-remove non-error notifications
     if (type !== 'error') {
         setTimeout(() => {
             if (notification.parentNode) {
@@ -3256,26 +3237,6 @@ async function handleNfcReading({ serialNumber }) {
         }
     }
 }
-
-// Force an online status update
-function forceOnlineStatusUpdate() {
-    isOnline = navigator.onLine;
-    console.log('Force updating online status to:', isOnline);
-    
-    // Update UI elements
-    if (isOnline) {
-        syncStatus.className = 'sync-status online';
-        syncText.textContent = 'Online';
-    } else {
-        syncStatus.className = 'sync-status offline';
-        syncText.textContent = 'Offline';
-    }
-    
-    // Update sync button state
-    syncBtn.disabled = !isOnline || !isSignedIn || !isAdmin || isSyncing;
-    
-    return isOnline;
-}
         
         /**
          * Handle NFC error.
@@ -3396,29 +3357,25 @@ function forceOnlineStatusUpdate() {
 
 // Replace all calls to showImprovedNotification with showImprovedNotification
         
-        // Initialize the application when window loads
-	window.addEventListener('load', function() {
-		// Initialize the app UI first
-		init();
-		// Force an online status update
-		forceOnlineStatusUpdate();
-		
-		// Wait a bit before initializing Google API to ensure all scripts are loaded
-		setTimeout(() => {
-			if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-				initGoogleApi();
-				// Force another update after API init
-				setTimeout(forceOnlineStatusUpdate, 1000);
-			} else {
-				console.error('Google API objects not available');
-				showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Using limited functionality.');
-				// Still populate default courses
-				availableCourses = [];
-				populateCourseDropdown();
-				updateAuthUI();
-			}
-		}, 1000);
-	});
+// Initialize the application when window loads
+window.addEventListener('load', function() {
+    // Initialize the app UI first
+    init();
+    
+    // Wait a bit before initializing Google API to ensure all scripts are loaded
+    setTimeout(() => {
+        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+            initGoogleApi();
+        } else {
+            console.error('Google API objects not available');
+            showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Using limited functionality.');
+            // Still populate default courses
+            availableCourses = [];
+            populateCourseDropdown();
+            updateAuthUI();
+        }
+    }, 1000);
+});
     </script>
 </body>
 </html>
