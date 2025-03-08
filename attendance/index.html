@@ -221,6 +221,58 @@
 		.notification {
 		  margin-bottom: 10px; /* Reduced margin so new notifications don’t push content far down */
 		}
+		/* Add these styles */
+.in-page-notifications {
+    margin: 15px 0;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.in-page-notification {
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    animation: slide-in 0.3s ease-out;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+@keyframes slide-in {
+    from {
+        transform: translateY(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.in-page-notification i {
+    margin-right: 10px;
+    font-size: 1.2em;
+}
+
+.in-page-notification-info {
+    background-color: #e3f2fd;
+    color: #0d47a1;
+}
+
+.in-page-notification-warning {
+    background-color: #fff3e0;
+    color: #e65100;
+}
+
+.in-page-notification-error {
+    background-color: #ffebee;
+    color: #b71c1c;
+}
+
+.in-page-notification-success {
+    background-color: #e8f5e9;
+    color: #1b5e20;
+}
         .filter-container {
             margin-bottom: 15px;
             display: flex;
@@ -642,8 +694,9 @@
         
         
         <!-- Notification area -->
-        <div id="notification-container"></div>
-        
+        <!-- <div id="notification-container"></div> -->
+        <div id="in-page-notification-area" class="in-page-notifications"></div>
+
         <!-- Scanner & History Tab -->
         <div id="scanner-tab" class="tab-content active">
             <div class="scan-buttons">
@@ -846,8 +899,14 @@
             
             // Check online status and set up listeners for online/offline events
             updateOnlineStatus();
-            window.addEventListener('online', updateOnlineStatus);
-            window.addEventListener('offline', updateOnlineStatus);
+			window.addEventListener('online', function() {
+				console.log('You are online.');
+				updateOnlineStatus();
+			});
+			window.addEventListener('offline', function() {
+				console.log('You are offline.');
+				updateOnlineStatus();
+			});
             
             // Check if NFC is supported
 			if (!('NDEFReader' in window)) {
@@ -1240,29 +1299,26 @@ function handleTokenResponse(resp) {
 function updateAuthUI() {
     console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
 
+    // Get the tabs container
+    const tabsContainer = document.querySelector('.tabs');
+    
+    // Hide tabs for non-admins
+    if (tabsContainer) {
+        // Important: Use 'display: none' to completely hide the container
+        tabsContainer.style.display = isAdmin ? 'flex' : 'none';
+    }
+    
     // Hide all admin-only elements first
     document.querySelectorAll('.admin-only').forEach(el => {
         el.style.display = 'none';
     });
-
-    // Hide/show tabs based on admin status
-    const tabsContainer = document.querySelector('.tabs');
-    if (tabsContainer) {
-        tabsContainer.style.display = isAdmin ? 'flex' : 'none';
-    }
-
-    // Hide Database tab by default (only needed if we're showing tabs)
-    const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-    if (databaseTab) {
-        databaseTab.style.display = 'none';
-    }
-
+    
     // For all users: hide/show UID column based on admin status
     const uidColumns = document.querySelectorAll('.uid-column');
     uidColumns.forEach(col => {
         col.style.display = isAdmin ? 'table-cell' : 'none';
     });
-
+    
 }
 
     // Guest Mode: Not signed in
@@ -1440,19 +1496,20 @@ function saveLogsToLocalStorage() {
         /**
          * Update online/offline status indicator.
          */
-        function updateOnlineStatus() {
-            isOnline = navigator.onLine;
-            
-            if (isOnline) {
-                syncStatus.className = 'sync-status online';
-                syncText.textContent = 'Online';
-                syncBtn.disabled = !isSignedIn || isSyncing;
-            } else {
-                syncStatus.className = 'sync-status offline';
-                syncText.textContent = 'Offline';
-                syncBtn.disabled = true;
-            }
-        }
+function updateOnlineStatus() {
+    isOnline = navigator.onLine;
+    console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
+    
+    if (isOnline) {
+        syncStatus.className = 'sync-status online';
+        syncText.textContent = 'Online';
+        syncBtn.disabled = !isSignedIn || !isAdmin || isSyncing;
+    } else {
+        syncStatus.className = 'sync-status offline';
+        syncText.textContent = 'Offline';
+        syncBtn.disabled = true;
+    }
+}
         
         /**
          * Sync data with Google Sheets.
@@ -1594,45 +1651,48 @@ function saveLogsToLocalStorage() {
         /**
          * Fetch logs from Google Sheet for current course.
          */
-        async function fetchLogsFromSheet() {
-            if (!currentCourse) {
-                return;
+async function fetchLogsFromSheet() {
+    if (!currentCourse) {
+        return;
+    }
+    
+    try {
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: LOGS_SPREADSHEET_ID,
+            range: `${currentCourse}!A2:D`,
+        });
+        
+        const rows = response.result.values || [];
+        const sheetLogs = [];
+        
+        rows.forEach(row => {
+            if (row.length >= 3) {
+                const uid = String(row[0]);
+                const timestamp = new Date(row[1]).getTime();
+                const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+                const manual = row.length >= 4 ? row[3] === 'true' : false;
+                
+                if (uid && !isNaN(timestamp)) {
+                    sheetLogs.push({ uid, timestamp, id, manual });
+                }
             }
-            
-            try {
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${currentCourse}!A2:D`,
-                });
-                
-                const rows = response.result.values || [];
-                const sheetLogs = [];
-                
-                rows.forEach(row => {
-                    if (row.length >= 3) {
-                        const uid = String(row[0]);
-                        const timestamp = new Date(row[1]).getTime();
-                        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
-                        const manual = row.length >= 4 ? row[3] === 'true' : false;
-                        
-                        if (uid && !isNaN(timestamp)) {
-                            sheetLogs.push({ uid, timestamp, id, manual });
-                        }
-                    }
-                });
-                
-                // Sort logs by timestamp (newest first)
-                sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
-                logs = sheetLogs;
-                
-                updateUI();
-                console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
-            } catch (error) {
-                console.error('Error fetching logs:', error);
-                showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
-                throw error;
-            }
-        }
+        });
+        
+        // Sort logs by timestamp (newest first)
+        sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
+        logs = sheetLogs;
+        
+        // Also save to localStorage as backup
+        saveLogsToLocalStorage();
+        
+        updateUI();
+        console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
+    } catch (error) {
+        console.error('Error fetching logs:', error);
+        showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+        throw error;
+    }
+}
         
 // Helper function to merge local and remote logs.
 function mergeLogs(localLogs, remoteLogs) {
@@ -1653,35 +1713,20 @@ function mergeLogs(localLogs, remoteLogs) {
 
 
 async function syncLogsWithSheet() {
-    if (!currentCourse) {
+    if (!currentCourse || !isAdmin) {
         return;
     }
     
     try {
-        // Fetch remote logs from the spreadsheet.
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: LOGS_SPREADSHEET_ID,
-            range: `${currentCourse}!A2:D`,
-        });
-        const rows = response.result.values || [];
-        const remoteLogs = [];
+        console.log("Starting sync with spreadsheet...");
+        // Show syncing status
+        const syncIcon = syncBtn.querySelector('i');
+        if (syncIcon) {
+            syncIcon.classList.add('fa-spin');
+        }
+        isSyncing = true;
         
-        rows.forEach(row => {
-            if (row.length >= 3) {
-                const uid = String(row[0]);
-                const timestamp = new Date(row[1]).getTime();
-                const id = row[2] || (Date.now() + Math.random().toString(36).substr(2, 9));
-                const manual = row.length >= 4 ? row[3] === 'true' : false;
-                if (uid && !isNaN(timestamp)) {
-                    remoteLogs.push({ uid, timestamp, id, manual });
-                }
-            }
-        });
-        
-        // Merge local logs and remote logs.
-        logs = mergeLogs(logs, remoteLogs);
-        
-        // Prepare the data to write back (each row as [uid, ISO date, id, manual]).
+        // Prepare the data to write back (each row as [uid, ISO date, id, manual])
         const sheetData = logs.map(log => [
             log.uid,
             new Date(log.timestamp).toISOString(),
@@ -1689,13 +1734,15 @@ async function syncLogsWithSheet() {
             log.manual ? 'true' : 'false'
         ]);
         
-        // Clear the existing data in the spreadsheet.
+        console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
+        
+        // Clear the existing data in the spreadsheet
         await gapi.client.sheets.spreadsheets.values.clear({
             spreadsheetId: LOGS_SPREADSHEET_ID,
             range: `${currentCourse}!A2:D`,
         });
         
-        // Write the merged logs to the spreadsheet.
+        // Write the logs to the spreadsheet
         if (sheetData.length > 0) {
             await gapi.client.sheets.spreadsheets.values.update({
                 spreadsheetId: LOGS_SPREADSHEET_ID,
@@ -1705,12 +1752,19 @@ async function syncLogsWithSheet() {
             });
         }
         
-        updateUI();
-        console.log(`Synced ${logs.length} logs with ${currentCourse} sheet`);
+        console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
+        return true;
     } catch (error) {
         console.error('Error syncing logs:', error);
         showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
         throw error;
+    } finally {
+        // Reset syncing status
+        const syncIcon = syncBtn.querySelector('i');
+        if (syncIcon) {
+            syncIcon.classList.remove('fa-spin');
+        }
+        isSyncing = false;
     }
 }
         
@@ -1817,62 +1871,68 @@ async function syncDatabaseToSheet() {
          * @param {string} title - Notification title.
          * @param {string} message - Notification message.
          */
-        function showImprovedNotification(type, title, message) {
-            // Clear any existing notifications of the same type
-            const existingNotifications = notificationContainer.querySelectorAll(`.notification-${type}`);
-            existingNotifications.forEach(notification => {
+// Update the notification function
+function showImprovedNotification(type, title, message) {
+    // Don't show default course notification
+    if (title === 'Courses Warning' && message === 'Using default course list') {
+        return;
+    }
+    
+    // Use the in-page notification area instead of floating notifications
+    const notificationArea = document.getElementById('in-page-notification-area');
+    if (!notificationArea) return;
+    
+    // Clear any existing notifications of the same type
+    const existingNotifications = notificationArea.querySelectorAll(`.in-page-notification-${type}`);
+    existingNotifications.forEach(notification => {
+        notification.remove();
+    });
+    
+    // Limit total notifications to 2
+    const allNotifications = notificationArea.querySelectorAll('.in-page-notification');
+    while (allNotifications.length >= 2) {
+        notificationArea.removeChild(allNotifications[0]);
+    }
+    
+    const notification = document.createElement('div');
+    notification.className = `in-page-notification in-page-notification-${type}`;
+    
+    let icon;
+    switch(type) {
+        case 'success': icon = 'check-circle'; break;
+        case 'error': icon = 'times-circle'; break;
+        case 'warning': icon = 'exclamation-circle'; break;
+        default: icon = 'info-circle';
+    }
+    
+    notification.innerHTML = `
+        <i class="fas fa-${icon}"></i>
+        <div style="flex-grow:1;">
+            <strong>${title}</strong><br>
+            ${message}
+        </div>
+        <span class="notification-close" style="cursor:pointer; margin-left:10px;">&times;</span>
+    `;
+    
+    notificationArea.appendChild(notification);
+    
+    // Add click handler to close button
+    const closeBtn = notification.querySelector('.notification-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            notification.remove();
+        });
+    }
+    
+    // Auto-remove all notifications after a few seconds (except errors)
+    if (type !== 'error') {
+        setTimeout(() => {
+            if (notification.parentNode) {
                 notification.remove();
-            });
-            
-            // Limit total notifications to 3
-            const allNotifications = notificationContainer.querySelectorAll('.notification');
-            if (allNotifications.length >= 3) {
-                notificationContainer.removeChild(allNotifications[0]);
             }
-            
-            const notification = document.createElement('div');
-            notification.className = `notification notification-${type}`;
-            
-            let icon;
-            switch(type) {
-                case 'success': icon = 'check-circle'; break;
-                case 'error': icon = 'times-circle'; break;
-                case 'warning': icon = 'exclamation-circle'; break;
-                default: icon = 'info-circle';
-            }
-            
-            // Add close button for error notifications
-            const closeButton = type === 'error' || type === 'warning' ? 
-                '<span class="notification-close" style="cursor:pointer; margin-left:10px;">&times;</span>' : '';
-            
-            notification.innerHTML = `
-                <i class="fas fa-${icon}"></i>
-                <div style="flex-grow:1;">
-                    <strong>${title}</strong><br>
-                    ${message}
-                </div>
-                ${closeButton}
-            `;
-            
-            notificationContainer.appendChild(notification);
-            
-            // Add click handler to close button
-            const closeBtn = notification.querySelector('.notification-close');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', () => {
-                    notification.remove();
-                });
-            }
-            
-            // Auto-remove success and info notifications after a few seconds
-            if (type === 'success' || type === 'info') {
-                setTimeout(() => {
-                    if (notification.parentNode) {
-                        notification.remove();
-                    }
-                }, 4000);
-            }
-        }
+        }, 5000);
+    }
+}
         
         /**
          * Handle filter input change for logs.
@@ -2306,17 +2366,24 @@ function confirmDeleteLog(group) {
         // Get IDs of all logs in this group
         const idsToRemove = group.originalLogs.map(log => log.id);
         
-        // Remove logs with these IDs
+        // First remove the logs locally
         logs = logs.filter(log => !idsToRemove.includes(log.id));
         
-        // Save to localStorage first
+        // Save to localStorage
         saveLogsToLocalStorage();
         
         // Update UI immediately
         updateUI();
         
+        // Track deletion in progress to prevent refetching
+        const deletionInProgress = true;
+        
         // Sync with sheets if online and admin
         if (isOnline && isSignedIn && isAdmin) {
+            // Disable buttons during sync
+            clearBtn.disabled = true;
+            exportBtn.disabled = true;
+            
             syncLogsWithSheet()
                 .then(() => {
                     showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
@@ -2324,32 +2391,45 @@ function confirmDeleteLog(group) {
                 .catch(err => {
                     console.error('Error syncing after delete:', err);
                     showImprovedNotification('error', 'Sync Error', 'Changes saved locally but not synced to spreadsheet');
+                })
+                .finally(() => {
+                    // Re-enable buttons
+                    clearBtn.disabled = logs.length === 0;
+                    exportBtn.disabled = logs.length === 0;
                 });
         } else {
             showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
         }
     }
 }
-        
-        /**
-         * Clear all logs for current course.
-         */
+
 function clearLogs() {
     if (!isAdmin) return;
     if (!confirm('Are you sure you want to delete ALL logs?')) return;
+    
+    // First clear logs locally
     logs = [];
+    saveLogsToLocalStorage();
+    updateUI();
+    
     if (isOnline && isSignedIn) {
+        // Disable buttons during sync
+        clearBtn.disabled = true;
+        exportBtn.disabled = true;
+        
         syncLogsWithSheet()
             .then(() => {
                 showImprovedNotification('success', 'Logs Cleared', 'All logs have been removed from the spreadsheet.');
-                updateUI();
             })
             .catch(err => {
                 console.error('Error clearing logs:', err);
                 showImprovedNotification('error', 'Clear Error', 'Failed to remove logs from the spreadsheet.');
+            })
+            .finally(() => {
+                // Force UI update again to ensure logs stay cleared
+                logs = [];
+                updateUI();
             });
-    } else {
-        updateUI();
     }
 }
 
