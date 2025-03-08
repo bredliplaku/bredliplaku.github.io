@@ -1202,19 +1202,29 @@ function handleTokenResponse(resp) {
          * Handle auth button click to sign in.
          */
 function handleAuthClick() {
-    console.log('Auth button clicked');
+    console.log('Auth button clicked - popup version');
     
     if (!tokenClient) {
-        showImprovedNotification('error', 'Auth Error', 'Authentication not ready. Please refresh the page.');
+        console.error('Token client not initialized');
+        showImprovedNotification('error', 'Auth Error', 'Authentication not ready. Please try again in a moment.');
         return;
     }
     
-    showImprovedNotification('info', 'Signing In', 'Opening Google authentication...');
+    // Show notification that will help user understand if popup is blocked
+    showImprovedNotification('info', 'Authenticating', 'If prompted, please allow the popup to continue signing in.');
     
-    // Use a small timeout to ensure UI updates before the popup
-    setTimeout(() => {
-        tokenClient.requestAccessToken();
-    }, 50);
+    // Make sure the request happens in the direct event handler chain
+    // This is critical - browser security requires popup to open in direct response to user action
+    try {
+        tokenClient.requestAccessToken({
+            prompt: ''  // Use empty string for better user experience
+        });
+        console.log('Auth popup requested');
+    } catch (e) {
+        console.error('Error requesting token:', e);
+        showImprovedNotification('error', 'Auth Error', 
+            'Could not open sign-in popup. Please make sure popups are allowed for this site.');
+    }
 }
 
         
@@ -3247,12 +3257,21 @@ async function handleNfcReading({ serialNumber }) {
         /**
          * Update current year in footer.
          */
-        function updateYear() {
-            const yearElement = document.getElementById('currentYear');
-            if (yearElement) {
-                yearElement.textContent = new Date().getFullYear();
-            }
-        }
+	function updateYear() {
+		const yearElement = document.getElementById('currentYear');
+		if (yearElement) {
+			yearElement.textContent = new Date().getFullYear();
+		}
+	}
+	
+	function handlePopupInstructions(event) {
+    // Don't stop propagation - let the regular click handler work
+    console.log('Login button clicked - showing popup instructions');
+    
+    // Show instructions about popup permissions
+    showImprovedNotification('warning', 'Allow Popups', 
+        'Please allow popups for this site if prompted by your browser.');
+}
 		
 		function showImprovedNotification(type, title, message) {
     // Don't show default course notification
@@ -3312,11 +3331,18 @@ async function handleNfcReading({ serialNumber }) {
     }
 }
 
-// Replace all calls to showImprovedNotification with showImprovedNotification
         
 // Initialize the application when window loads
 window.addEventListener('load', function() {
-    // Initialize the app UI first
+    setTimeout(function() {
+        const loginBtn = document.getElementById('login-btn');
+        if (loginBtn) {
+            // Make sure we only attach this once
+            loginBtn.removeEventListener('click', handlePopupInstructions);
+            loginBtn.addEventListener('click', handlePopupInstructions, true);
+        }
+    }, 1000);
+	// Initialize the app UI first
     init();
     
     // Wait longer before initializing Google API to ensure all scripts are loaded
