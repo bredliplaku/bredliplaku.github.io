@@ -1006,6 +1006,30 @@ function initGoogleApi() {
         return;
     }
     
+    // *** FIX: Initialize token client before loading gapi.client ***
+    try {
+        console.log('Setting up token client first...');
+        tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CLIENT_ID,
+            scope: SCOPES,
+            callback: function(resp) {
+                console.log('Token response received:', resp);
+                // Only process if we have an access token
+                if (resp && resp.access_token) {
+                    handleTokenResponse(resp);
+                } else if (resp.error) {
+                    console.error('Token error:', resp.error);
+                    showImprovedNotification('error', 'Auth Error', 'Failed to obtain access token.');
+                }
+            }
+        });
+        console.log('Token client initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize token client:', error);
+        showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
+        // Continue anyway to try to load courses
+    }
+    
     // Load the GAPI client
     gapi.load('client', () => {
         gapi.client.init({
@@ -1013,17 +1037,6 @@ function initGoogleApi() {
             discoveryDocs: DISCOVERY_DOCS
         }).then(() => {
             console.log('GAPI client initialized successfully');
-            
-            // Initialize token client only once
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                prompt: '',  // '' gives a more seamless experience
-                callback: (resp) => {
-                    console.log('Token callback received with access token');
-                    handleTokenResponse(resp);
-                }
-            });
             
             // Try to restore saved session
             const savedToken = localStorage.getItem('gapi_token');
@@ -1063,7 +1076,7 @@ function initGoogleApi() {
                 }
             }
             
-            // Set up auth buttons once we know tokenClient is initialized
+            // *** FIX: Add event listener to login button here ***
             loginBtn.addEventListener('click', handleAuthClick);
             logoutBtn.addEventListener('click', handleSignoutClick);
             
@@ -1201,29 +1214,30 @@ function handleTokenResponse(resp) {
         /**
          * Handle auth button click to sign in.
          */
-function handleAuthClick() {
-    console.log('Auth button clicked - popup version');
+function handleAuthClick(e) {
+    // Prevent any default behavior and stop propagation
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    
+    console.log('Auth button clicked');
     
     if (!tokenClient) {
         console.error('Token client not initialized');
-        showImprovedNotification('error', 'Auth Error', 'Authentication not ready. Please try again in a moment.');
+        showImprovedNotification('error', 'Auth Error', 'Authentication not ready yet. Please try again in a moment.');
         return;
     }
     
-    // Show notification that will help user understand if popup is blocked
-    showImprovedNotification('info', 'Authenticating', 'If prompted, please allow the popup to continue signing in.');
+    showImprovedNotification('info', 'Signing In', 'Connecting to Google...');
     
-    // Make sure the request happens in the direct event handler chain
-    // This is critical - browser security requires popup to open in direct response to user action
+    // *** FIX: Simple, direct call with no extra parameters ***
     try {
-        tokenClient.requestAccessToken({
-            prompt: ''  // Use empty string for better user experience
-        });
-        console.log('Auth popup requested');
-    } catch (e) {
-        console.error('Error requesting token:', e);
-        showImprovedNotification('error', 'Auth Error', 
-            'Could not open sign-in popup. Please make sure popups are allowed for this site.');
+        console.log('Requesting token...');
+        tokenClient.requestAccessToken();
+    } catch (err) {
+        console.error('Error requesting token:', err);
+        showImprovedNotification('error', 'Auth Error', 'Failed to start authentication: ' + err.message);
     }
 }
 
@@ -3264,16 +3278,8 @@ async function handleNfcReading({ serialNumber }) {
 		}
 	}
 	
-	function handlePopupInstructions(event) {
-    // Don't stop propagation - let the regular click handler work
-    console.log('Login button clicked - showing popup instructions');
-    
-    // Show instructions about popup permissions
-    showImprovedNotification('warning', 'Allow Popups', 
-        'Please allow popups for this site if prompted by your browser.');
-}
 		
-		function showImprovedNotification(type, title, message) {
+	function showImprovedNotification(type, title, message) {
     // Don't show default course notification
     if (title === 'Courses Warning' && message === 'Using default course list') {
         return;
@@ -3334,14 +3340,6 @@ async function handleNfcReading({ serialNumber }) {
         
 // Initialize the application when window loads
 window.addEventListener('load', function() {
-    setTimeout(function() {
-        const loginBtn = document.getElementById('login-btn');
-        if (loginBtn) {
-            // Make sure we only attach this once
-            loginBtn.removeEventListener('click', handlePopupInstructions);
-            loginBtn.addEventListener('click', handlePopupInstructions, true);
-        }
-    }, 1000);
 	// Initialize the app UI first
     init();
     
