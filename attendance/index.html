@@ -1402,7 +1402,14 @@ function updateAuthUI() {
          */
 // Add this constant with your other constants at the top
 function handleCourseChange() {
-    currentCourse = courseSelect.value;
+    // If not signed in and no course is selected, set to 'Default'
+    if (!isSignedIn && (!courseSelect.value || courseSelect.value.trim() === '')) {
+        currentCourse = 'Default';
+        courseSelect.value = 'Default';
+    } else {
+        currentCourse = courseSelect.value;
+    }
+
     logs = []; // Clear current logs before loading new ones
 
     if (!currentCourse) {
@@ -1411,13 +1418,13 @@ function handleCourseChange() {
         return;
     }
 
-    // Guest Mode: Load from local storage
     if (!isSignedIn) {
+        // Load logs from local storage for the default course
         const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
         if (storedLogs) {
             try {
                 logs = JSON.parse(storedLogs);
-                logs.sort((a, b) => b.timestamp - a.timestamp); // Sort newest first
+                logs.sort((a, b) => b.timestamp - a.timestamp);
             } catch (e) {
                 console.error('Error parsing stored logs:', e);
                 logs = [];
@@ -1427,7 +1434,7 @@ function handleCourseChange() {
         return;
     }
 
-    // For both User and Admin modes, always load logs from spreadsheet when online
+    // When signed in, fetch logs from the spreadsheet
     if (isOnline) {
         fetchLogsFromSheet()
             .then(() => {
@@ -1438,8 +1445,7 @@ function handleCourseChange() {
             .catch(error => {
                 console.error('Error fetching logs:', error);
                 showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
-                
-                // Fallback to localStorage if available when offline
+                // Fallback to local storage
                 const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
                 if (storedLogs) {
                     try {
@@ -1452,7 +1458,7 @@ function handleCourseChange() {
                 updateUI();
             });
     } else {
-        // Offline: fallback to localStorage
+        // Offline: fallback to local storage
         const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
         if (storedLogs) {
             try {
@@ -1465,6 +1471,7 @@ function handleCourseChange() {
         updateUI();
     }
 }
+
 
 // Add this helper function to save logs to localStorage
 function saveLogsToLocalStorage() {
@@ -1482,25 +1489,36 @@ function saveLogsToLocalStorage() {
         /**
          * Populate course dropdown with available courses.
          */
-        function populateCourseDropdown() {
-            // Clear existing options (except first placeholder)
-            while (courseSelect.options.length > 1) {
-                courseSelect.remove(1);
-            }
-            
-            // Add available courses
-            availableCourses.forEach(course => {
-                const option = document.createElement('option');
-                option.value = course;
-                option.textContent = course.replace('_', ' ');
-                courseSelect.appendChild(option);
-            });
-            
-            // If we have a current course, select it
-            if (currentCourse && availableCourses.includes(currentCourse)) {
-                courseSelect.value = currentCourse;
-            }
-        }
+function populateCourseDropdown() {
+    // Clear existing options except the first placeholder
+    while (courseSelect.options.length > 1) {
+        courseSelect.remove(1);
+    }
+
+    if (!isSignedIn) {
+        // For signed-out mode, add only the "Default" course.
+        const defaultOption = document.createElement('option');
+        defaultOption.value = 'Default';
+        defaultOption.textContent = 'Default';
+        courseSelect.appendChild(defaultOption);
+        courseSelect.value = 'Default';
+        currentCourse = 'Default';
+        return;
+    }
+
+    // For signed-in users, populate from available courses (from the spreadsheet)
+    availableCourses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course;
+        option.textContent = course.replace('_', ' ');
+        courseSelect.appendChild(option);
+    });
+
+    if (currentCourse && availableCourses.includes(currentCourse)) {
+        courseSelect.value = currentCourse;
+    }
+}
+
         
         /**
          * Update online/offline status indicator.
@@ -2785,240 +2803,220 @@ function deleteLogEntry(logId) {
         /**
          * Update the filtered and sorted logs list in the UI.
          */
-        function updateLogsList() {
-            // If no course selected, show message
-            if (!currentCourse) {
-                emptyLogs.style.display = 'block';
-                filteredCount.textContent = '0';
-                logsTbody.innerHTML = '';
-                return;
+function updateLogsList() {
+    // If no course selected, show message
+    if (!currentCourse) {
+        emptyLogs.style.display = 'block';
+        filteredCount.textContent = '0';
+        logsTbody.innerHTML = '';
+        return;
+    }
+    
+    // Filter logs based on search input
+    const filteredLogs = filter 
+        ? logs.filter(log => {
+            // Match UID
+            if (log.uid.toLowerCase().includes(filter)) {
+                return true;
             }
-            
-            // Filter logs based on search input
-            const filteredLogs = filter 
-                ? logs.filter(log => {
-                    // Match UID
-                    if (log.uid.toLowerCase().includes(filter)) {
-                        return true;
-                    }
-                    
-                    // Match name if in database
-                    const name = uidToNameMap[log.uid];
-                    if (name && name.toLowerCase().includes(filter)) {
-                        return true;
-                    }
-                    
-                    return false;
-                })
-                : logs;
-            
-            // Group logs by date and UID
-            const grouped = {};
-            
-            filteredLogs.forEach(log => {
-                // Get date object
-                const dateObj = new Date(log.timestamp);
-                
-                if (isNaN(dateObj.getTime())) {
-                    console.warn('Invalid timestamp:', log.timestamp);
-                    return;
-                }
-                
-                // Format date for display (DD-MM-YYYY)
-                const day = String(dateObj.getDate()).padStart(2, '0');
-                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-                const year = dateObj.getFullYear();
-                const date = `${day}-${month}-${year}`;
-                
-                const uid = log.uid;
-                const time = dateObj.toLocaleTimeString();
-                const name = uidToNameMap[uid] || 'Unknown';
-                
-                // Create key for date and UID combination
-                const key = `${date}_${uid}`;
-                
-                if (!grouped[key]) {
-                    grouped[key] = {
-                        date,
-                        dateObj: new Date(year, month - 1, day), // For sorting
-                        uid,
-                        name,
-                        times: [],
-                        timeObjs: [], // Store time objects for sorting
-                        originalLogs: [] // Store original log references for edit/delete
-                    };
-                }
-                
-                grouped[key].times.push(time);
-                grouped[key].timeObjs.push(dateObj.getTime());
-                grouped[key].originalLogs.push(log);
-            });
-            
-            // Convert to array
-            let result = Object.values(grouped);
-            
-            // Apply sort based on currentSort value
-            const [field, direction] = currentSort.split('-');
-            const sortMultiplier = direction === 'asc' ? 1 : -1;
-            
-            switch (field) {
-                case 'date':
-                    // First sort by date
-                    result.sort((a, b) => sortMultiplier * (a.dateObj - b.dateObj));
-                    
-                    // Now we need to group entries by date
-                    const dateGroups = {};
-                    result.forEach(entry => {
-                        const dateStr = entry.date;
-                        if (!dateGroups[dateStr]) {
-                            dateGroups[dateStr] = [];
-                        }
-                        dateGroups[dateStr].push(entry);
-                    });
-                    
-                    // Sort each date group by name and then by earliest time
-                    Object.keys(dateGroups).forEach(dateStr => {
-                        dateGroups[dateStr].sort((a, b) => {
-                            // Primary sort by name
-                            const nameCompare = a.name.localeCompare(b.name);
-                            if (nameCompare !== 0) return nameCompare;
-                            
-                            // Secondary sort by earliest time in the day
-                            const aEarliestTime = Math.min(...a.timeObjs);
-                            const bEarliestTime = Math.min(...b.timeObjs);
-                            return aEarliestTime - bEarliestTime;
-                        });
-                    });
-                    
-                    // Reconstruct the result array based on the original sort order of dates
-                    result = [];
-                    const dates = Object.keys(dateGroups).sort((a, b) => {
-                        const dateA = new Date(a.split('-').reverse().join('-'));
-                        const dateB = new Date(b.split('-').reverse().join('-'));
-                        return sortMultiplier * (dateA - dateB);
-                    });
-                    
-                    dates.forEach(dateStr => {
-                        result = result.concat(dateGroups[dateStr]);
-                    });
-                    break;
-                    
-                case 'name':
-                    result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
-                    break;
-                case 'uid':
-                    result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
-                    break;
-                default:
-                    // Default sort by date desc
-                    result.sort((a, b) => -1 * (a.dateObj - b.dateObj));
+            // Match name if in database
+            const name = uidToNameMap[log.uid];
+            if (name && name.toLowerCase().includes(filter)) {
+                return true;
             }
-            
-            // Update filtered count
-            filteredCount.textContent = filteredLogs.length;
-            
-            // Show/hide empty message
-            emptyLogs.style.display = filteredLogs.length > 0 ? 'none' : 'block';
-            
-            // Clear table
-            logsTbody.innerHTML = '';
-            
-            // Track the current day for separators
-            let currentDay = null;
-            
-            // Add grouped logs to table with day separators
-            result.forEach((group) => {
-                // Check if we need a day separator (if sorting by date)
-                if (currentSort.startsWith('date')) {
-                    const thisDay = group.date;
-                    
-                    // If this is a new day, add a separator
-                    if (thisDay !== currentDay) {
-                        currentDay = thisDay;
-                        
-                        // Create day separator row
-                        const separatorRow = document.createElement('tr');
-                        separatorRow.className = 'day-separator';
-                        
-                        const separatorCell = document.createElement('td');
-                        separatorCell.colSpan = isAdmin ? 5 : 4; // Span all columns
-                        separatorCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                        
-                        separatorRow.appendChild(separatorCell);
-                        logsTbody.appendChild(separatorRow);
-                    }
-                }
-                
-                // Create log entry row
-                const row = document.createElement('tr');
-                
-                // Name cell
-                const nameCell = document.createElement('td');
-                nameCell.className = 'name-cell';
-                nameCell.textContent = group.name;
-                if (group.originalLogs.some(log => log.manual)) {
-                    nameCell.innerHTML += ' <i class="fas fa-user-edit" title="Manually added"></i>';
-                }
-                
-                // UID cell
-                const uidCell = document.createElement('td');
-                uidCell.className = 'uid-cell';
-                uidCell.textContent = group.uid;
-                
-                // Date cell
-                const dateCell = document.createElement('td');
-                dateCell.className = 'date-cell';
-                dateCell.textContent = group.date;
-                
-                // Times cell
-                const timesCell = document.createElement('td');
-                timesCell.className = 'times-cell';
-                
-                // Sort timeObjs in ascending order (oldest to newest)
-                const sortedIndices = group.timeObjs
-                    .map((timeObj, index) => ({ timeObj, index }))
-                    .sort((a, b) => a.timeObj - b.timeObj)
-                    .map(item => item.index);
-                
-                // Add time tags in chronological order
-                sortedIndices.forEach(index => {
-                    const timeTag = document.createElement('span');
-                    timeTag.className = 'time-tag';
-                    timeTag.textContent = group.times[index];
-                    timesCell.appendChild(timeTag);
-                });
-                
-                // Add cells to row
-                row.appendChild(nameCell);
-                row.appendChild(uidCell);
-                row.appendChild(dateCell);
-                row.appendChild(timesCell);
-                
-                // Actions cell (admin only)
-                if (isAdmin) {
-                    const actionsCell = document.createElement('td');
-                    actionsCell.className = 'actions-cell';
-                    
-                    // Edit button
-                    const editIcon = document.createElement('i');
-                    editIcon.className = 'fas fa-edit action-icon edit-icon';
-                    editIcon.title = 'Edit';
-                    editIcon.addEventListener('click', () => showEditLogDialog(group));
-                    
-                    // Delete button
-                    const deleteIcon = document.createElement('i');
-                    deleteIcon.className = 'fas fa-trash-alt action-icon delete-icon';
-                    deleteIcon.title = 'Delete';
-                    deleteIcon.addEventListener('click', () => confirmDeleteLog(group));
-                    
-                    actionsCell.appendChild(editIcon);
-                    actionsCell.appendChild(deleteIcon);
-                    row.appendChild(actionsCell);
-                }
-                
-                logsTbody.appendChild(row);
-            });
+            return false;
+        })
+        : logs;
+    
+    // Group logs by date and UID
+    const grouped = {};
+    
+    filteredLogs.forEach(log => {
+        // Get date object
+        const dateObj = new Date(log.timestamp);
+        
+        if (isNaN(dateObj.getTime())) {
+            console.warn('Invalid timestamp:', log.timestamp);
+            return;
         }
+        
+        // Format date for display (DD-MM-YYYY)
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const year = dateObj.getFullYear();
+        const date = `${day}-${month}-${year}`;
+        
+        const uid = log.uid;
+        const time = dateObj.toLocaleTimeString();
+        const name = uidToNameMap[uid] || 'Unknown';
+        
+        // Create key for date and UID combination
+        const key = `${date}_${uid}`;
+        
+        if (!grouped[key]) {
+            grouped[key] = {
+                date,
+                dateObj: new Date(year, month - 1, day), // For sorting
+                uid,
+                name,
+                times: [],
+                timeObjs: [], // Store time objects for sorting
+                originalLogs: [] // Store original log references for edit/delete
+            };
+        }
+        
+        grouped[key].times.push(time);
+        grouped[key].timeObjs.push(dateObj.getTime());
+        grouped[key].originalLogs.push(log);
+    });
+    
+    // Convert to array
+    let result = Object.values(grouped);
+    
+    // Apply sort based on currentSort value
+    const [field, direction] = currentSort.split('-');
+    const sortMultiplier = direction === 'asc' ? 1 : -1;
+    
+    switch (field) {
+        case 'date':
+            // First sort by date
+            result.sort((a, b) => sortMultiplier * (a.dateObj - b.dateObj));
+            
+            // Now group entries by date
+            const dateGroups = {};
+            result.forEach(entry => {
+                const dateStr = entry.date;
+                if (!dateGroups[dateStr]) {
+                    dateGroups[dateStr] = [];
+                }
+                dateGroups[dateStr].push(entry);
+            });
+            
+            // Sort each date group by name and then by earliest time
+            Object.keys(dateGroups).forEach(dateStr => {
+                dateGroups[dateStr].sort((a, b) => {
+                    const nameCompare = a.name.localeCompare(b.name);
+                    if (nameCompare !== 0) return nameCompare;
+                    const aEarliestTime = Math.min(...a.timeObjs);
+                    const bEarliestTime = Math.min(...b.timeObjs);
+                    return aEarliestTime - bEarliestTime;
+                });
+            });
+            
+            // Reconstruct result based on sorted dates
+            result = [];
+            const dates = Object.keys(dateGroups).sort((a, b) => {
+                const dateA = new Date(a.split('-').reverse().join('-'));
+                const dateB = new Date(b.split('-').reverse().join('-'));
+                return sortMultiplier * (dateA - dateB);
+            });
+            
+            dates.forEach(dateStr => {
+                result = result.concat(dateGroups[dateStr]);
+            });
+            break;
+            
+        case 'name':
+            result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
+            break;
+        case 'uid':
+            result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
+            break;
+        default:
+            result.sort((a, b) => -1 * (a.dateObj - b.dateObj));
+    }
+    
+    // Update filtered count
+    filteredCount.textContent = filteredLogs.length;
+    
+    // Show/hide empty message
+    emptyLogs.style.display = filteredLogs.length > 0 ? 'none' : 'block';
+    
+    // Clear the table body
+    logsTbody.innerHTML = '';
+    
+    // Track current day for separators
+    let currentDay = null;
+    
+    // Add grouped logs to table with day separators
+    result.forEach((group) => {
+        if (currentSort.startsWith('date')) {
+            const thisDay = group.date;
+            if (thisDay !== currentDay) {
+                currentDay = thisDay;
+                const separatorRow = document.createElement('tr');
+                separatorRow.className = 'day-separator';
+                const separatorCell = document.createElement('td');
+                // Span all columns: if admin, assume 5; if not, 4
+                separatorCell.colSpan = isAdmin ? 5 : 4;
+                separatorCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                separatorRow.appendChild(separatorCell);
+                logsTbody.appendChild(separatorRow);
+            }
+        }
+        
+        // Create log entry row
+        const row = document.createElement('tr');
+        
+        // Name cell
+        const nameCell = document.createElement('td');
+        nameCell.className = 'name-cell';
+        nameCell.textContent = group.name;
+        if (group.originalLogs.some(log => log.manual)) {
+            nameCell.innerHTML += ' <i class="fas fa-user-edit" title="Manually added"></i>';
+        }
+        
+        // UID cell with class and visibility controlled by admin status
+        const uidCell = document.createElement('td');
+        uidCell.className = 'uid-cell';
+        uidCell.textContent = group.uid;
+        uidCell.style.display = isAdmin ? 'table-cell' : 'none';
+        
+        // Date cell
+        const dateCell = document.createElement('td');
+        dateCell.className = 'date-cell';
+        dateCell.textContent = group.date;
+        
+        // Times cell
+        const timesCell = document.createElement('td');
+        timesCell.className = 'times-cell';
+        const sortedIndices = group.timeObjs
+            .map((timeObj, index) => ({ timeObj, index }))
+            .sort((a, b) => a.timeObj - b.timeObj)
+            .map(item => item.index);
+        sortedIndices.forEach(index => {
+            const timeTag = document.createElement('span');
+            timeTag.className = 'time-tag';
+            timeTag.textContent = group.times[index];
+            timesCell.appendChild(timeTag);
+        });
+        
+        // Append cells to the row
+        row.appendChild(nameCell);
+        row.appendChild(uidCell);
+        row.appendChild(dateCell);
+        row.appendChild(timesCell);
+        
+        // Actions cell for admin users
+        if (isAdmin) {
+            const actionsCell = document.createElement('td');
+            actionsCell.className = 'actions-cell';
+            const editIcon = document.createElement('i');
+            editIcon.className = 'fas fa-edit action-icon edit-icon';
+            editIcon.title = 'Edit';
+            editIcon.addEventListener('click', () => showEditLogDialog(group));
+            const deleteIcon = document.createElement('i');
+            deleteIcon.className = 'fas fa-trash-alt action-icon delete-icon';
+            deleteIcon.title = 'Delete';
+            deleteIcon.addEventListener('click', () => confirmDeleteLog(group));
+            actionsCell.appendChild(editIcon);
+            actionsCell.appendChild(deleteIcon);
+            row.appendChild(actionsCell);
+        }
+        
+        logsTbody.appendChild(row);
+    });
+}
         
         /**
          * Update the database list in the UI.
