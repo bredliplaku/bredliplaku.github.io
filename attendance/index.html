@@ -1739,6 +1739,19 @@ function mergeLogs(localLogs, remoteLogs) {
 }
 
 
+// Helper function to convert a timestamp to a local ISO-like string (without timezone info)
+function convertTimestampToLocalISOString(timestamp) {
+    const date = new Date(timestamp);
+    const pad = (num) => String(num).padStart(2, '0');
+    // Build a string like "YYYY-MM-DDTHH:MM:SS"
+    return date.getFullYear() + '-' +
+           pad(date.getMonth() + 1) + '-' +
+           pad(date.getDate()) + 'T' +
+           pad(date.getHours()) + ':' +
+           pad(date.getMinutes()) + ':' +
+           pad(date.getSeconds());
+}
+
 async function syncLogsWithSheet() {
     if (!currentCourse || !isAdmin) {
         return;
@@ -1746,30 +1759,30 @@ async function syncLogsWithSheet() {
     
     try {
         console.log("Starting sync with spreadsheet...");
-        // Show syncing status
+        // Show syncing indicator on the sync button
         const syncIcon = syncBtn.querySelector('i');
         if (syncIcon) {
             syncIcon.classList.add('fa-spin');
         }
         isSyncing = true;
         
-        // Prepare the data to write back (each row as [uid, ISO date, id, manual])
+        // Prepare the data for the spreadsheet using the universal timestamp conversion.
         const sheetData = logs.map(log => [
             log.uid,
-            new Date(log.timestamp).toISOString(),
+            convertTimestampToLocalISOString(log.timestamp),
             log.id,
             log.manual ? 'true' : 'false'
         ]);
         
         console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
         
-        // Clear the existing data in the spreadsheet
+        // Clear existing data in the target range
         await gapi.client.sheets.spreadsheets.values.clear({
             spreadsheetId: LOGS_SPREADSHEET_ID,
             range: `${currentCourse}!A2:D`,
         });
         
-        // Write the logs to the spreadsheet
+        // Write the new data if there is any
         if (sheetData.length > 0) {
             await gapi.client.sheets.spreadsheets.values.update({
                 spreadsheetId: LOGS_SPREADSHEET_ID,
@@ -1780,13 +1793,12 @@ async function syncLogsWithSheet() {
         }
         
         console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
-        return true;
     } catch (error) {
         console.error('Error syncing logs:', error);
         showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
         throw error;
     } finally {
-        // Reset syncing status
+        // Remove syncing indicator
         const syncIcon = syncBtn.querySelector('i');
         if (syncIcon) {
             syncIcon.classList.remove('fa-spin');
@@ -1794,6 +1806,7 @@ async function syncLogsWithSheet() {
         isSyncing = false;
     }
 }
+
         
         /**
          * Sync database (UID-name map) to Google Sheets.
@@ -3137,11 +3150,15 @@ function updateLogsList() {
         /**
          * Start NFC scanning.
          */
-	async function startScanning() {
-    if (!nfcSupported) {
+async function startScanning() {
+if (!nfcSupported) {
+    // Only show the notification if the user is on a mobile device.
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
         showImprovedNotification('error', 'NFC Not Supported', 'NFC scanning is only supported in Chrome on Android.');
-        return;
     }
+    return;
+}
+
     
     if (!currentCourse) {
         showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
