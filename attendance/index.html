@@ -685,7 +685,7 @@
                 <button id="toggle-sound-btn" class="info-item"><i class="fas fa-volume-up"></i></button>
             </div>
 			<div class="tabs admin-only">
-				<div class="tab active" data-tab="scanner-tab">
+				<div class="tab active admin-only" data-tab="scanner-tab"> <!-- Added admin-only class -->
 					<i class="fas fa-wifi"></i> Scanner
 				</div>
 				<div class="tab admin-only" style="display: none;" data-tab="database-tab">
@@ -1234,22 +1234,49 @@ function handleTokenResponse(resp) {
         /**
          * Handle auth button click to sign in.
          */
-        function handleAuthClick() {
-            if (!tokenClient) {
-                console.error('Token client not initialized');
-                showImprovedNotification('error', 'Auth Error', 'Authentication is not available. Try refreshing the page.');
-                return;
-            }
-            console.log('Requesting access token...');
+function handleAuthClick() {
+    console.log('Auth button clicked');
+    
+    if (!tokenClient) {
+        console.error('Token client not initialized - attempting to reinitialize...');
+        
+        // Force reinitialization of token client
+        try {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: handleTokenResponse,
+                auto_select: true,
+                error_callback: (err) => {
+                    console.error('Token client error:', err);
+                    showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication. Check console.');
+                }
+            });
             
-            // In case of failure, show a friendly message
-            try {
+            // Now try again
+            setTimeout(() => {
+                console.log('Retrying token request...');
                 tokenClient.requestAccessToken();
-            } catch (e) {
-                console.error('Error requesting token:', e);
-                showImprovedNotification('error', 'Auth Error', 'Failed to start authentication process. Try refreshing the page.');
-            }
+            }, 500);
+            
+        } catch (initError) {
+            console.error('Failed to reinitialize token client:', initError);
+            showImprovedNotification('error', 'Auth Error', 'Authentication unavailable. See console for details.');
         }
+        return;
+    }
+    
+    // Try the normal flow if token client exists
+    console.log('Requesting access token...');
+    try {
+        tokenClient.requestAccessToken({
+            prompt: 'consent',  // Force consent screen to appear every time
+        });
+    } catch (e) {
+        console.error('Error requesting token:', e);
+        showImprovedNotification('error', 'Auth Error', 'Failed to start authentication process: ' + e.message);
+    }
+}
         
         function handleSignoutClick() {
             try {
@@ -3375,6 +3402,25 @@ window.addEventListener('load', function() {
             updateAuthUI();
         }
     }, 1000);
+});
+
+// Also, add this code at the end of your script to ensure the login button always works
+document.addEventListener('DOMContentLoaded', function() {
+    const loginButton = document.getElementById('login-btn');
+    if (loginButton) {
+        // Remove any previous event listeners
+        loginButton.replaceWith(loginButton.cloneNode(true));
+        
+        // Get the new button reference
+        const newLoginButton = document.getElementById('login-btn');
+        
+        // Add the event listener
+        newLoginButton.addEventListener('click', function(event) {
+            console.log('Login button clicked directly');
+            event.preventDefault();
+            handleAuthClick();
+        });
+    }
 });
     </script>
 </body>
