@@ -24,6 +24,10 @@
         --info-color: #2196F3;
         --danger-color: #f44336;
     }
+	
+	*, *::before, *::after {
+		transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease;
+	}
     
     body, html {
         margin: 0;
@@ -215,6 +219,12 @@
         transform: translateY(-2px);
     }
     
+    button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
     .btn-green { background-color: #43a047; }
     .btn-green:hover { background-color: #2e7d32; }
     .btn-orange { background-color: #fb8c00; }
@@ -308,6 +318,7 @@
         box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }
     
+    /* Loading spinner */
     .loading-spinner {
         border: 5px solid rgba(57, 73, 171, 0.2);
         border-top: 5px solid #3949ab;
@@ -430,6 +441,26 @@
         box-shadow: none;
     }
     
+    /* Main loading screen styles */
+    .app-loading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #f4f4f4;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        transition: opacity 0.5s;
+    }
+    
+    .content-hidden {
+        visibility: hidden;
+    }
+    
     @media (max-width: 500px) {
         .module-header {
             flex-direction: column;
@@ -446,7 +477,12 @@
 </style>
 </head>
 <body>
-    <div class="container">
+    <div id="app-loading" class="app-loading">
+        <img src="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/loading.gif" alt="Loading Cat" style="width: 200px; height: 200px;">
+        <div style="margin-top: 10px; font-size: 14px; color: #666;">Meow loading...</div>
+    </div>
+
+    <div class="container content-hidden" id="main-container">
         <div class="course-actions">
             <button id="all-courses-btn" style="margin-bottom: 10px;" onclick="window.open('https://teaching.bredliplaku.com/', '_self', 'noopener,noreferrer')">
                 <i class="fas fa-chevron-left"></i> All Courses
@@ -456,6 +492,9 @@
             </button>
             <button id="sign-in-btn" style="display: none; margin-bottom: 10px;" onclick="handleAuthClick()" class="btn-blue">
                 <i class="fas fa-sign-in-alt"></i> Sign in
+            </button>
+            <button id="sign-out-btn" style="display: none; margin-bottom: 10px;" onclick="handleSignoutClick()" class="btn-orange">
+                <i class="fas fa-sign-out-alt"></i> Sign out
             </button>
         </div>
         
@@ -484,8 +523,7 @@
         <div id="notification-area" class="in-page-notifications"></div>
         
         <div id="course-content">
-            <div class="loading-spinner"></div>
-            <div class="loading-text">Loading course materials...</div>
+            <!-- Course content will be loaded here -->
         </div>
     </div>
 
@@ -501,7 +539,7 @@
 // Configuration
 const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
 const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
-const COURSE_MATERIALS_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw'; // Replace with your actual spreadsheet ID
+const COURSE_MATERIALS_SPREADSHEET_ID = '1y4uuRPVHvPgqsOXcAeWC2W2S94qp1kgm9oWiXR94W18'; // Replace with your actual spreadsheet ID
 
 // API client configuration
 const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -512,6 +550,7 @@ let tokenClient = null;
 let isSignedIn = false;
 let availableCourses = [];
 let currentCourse = '';
+let courseMap = {}; // Maps course codes to sheet names
 let pendingNotifications = [];
 let isInitializing = true;
 let criticalErrorsOnly = true;
@@ -527,7 +566,10 @@ const courseData = {
  */
 function init() {
     updateYear();
-    updateWeekProgress();
+    
+    // Show loading screen
+    const loadingIndicator = document.getElementById('app-loading');
+    loadingIndicator.style.display = 'flex';
     
     // Check for auth redirect
     checkAuthRedirect();
@@ -546,6 +588,7 @@ function init() {
                     console.error('Google API objects still not available after extended wait');
                     showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Check your internet connection or try using a different browser.');
                     document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>Failed to load course materials.<br>Please try refreshing the page.</div>';
+                    showMainContent();
                 }
             }, 3000);
         }
@@ -553,10 +596,30 @@ function init() {
     
     // Show content after a timeout even if auth fails
     setTimeout(() => {
+        showMainContent();
         isInitializing = false;
         criticalErrorsOnly = false;
         processPendingNotifications();
     }, 3000);
+}
+
+/**
+ * Show the main content when ready
+ */
+function showMainContent() {
+    const loadingIndicator = document.getElementById('app-loading');
+    const mainContainer = document.getElementById('main-container');
+    
+    if (loadingIndicator) {
+        loadingIndicator.style.opacity = '0';
+        setTimeout(() => {
+            loadingIndicator.style.display = 'none';
+        }, 500);
+    }
+    
+    if (mainContainer) {
+        mainContainer.classList.remove('content-hidden');
+    }
 }
 
 /**
@@ -620,16 +683,18 @@ function initGoogleApi() {
     if (typeof gapi === 'undefined') {
         console.error('gapi object is undefined');
         showImprovedNotification('error', 'API Error', 'Google API client not loaded.');
+        showMainContent();
         return;
     }
     
     if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
         console.error('google.accounts object is undefined');
         showImprovedNotification('error', 'API Error', 'Google Identity Services not loaded.');
+        showMainContent();
         return;
     }
     
-    // Set up token client
+    // Set up token client for auth
     try {
         tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: CLIENT_ID,
@@ -649,40 +714,119 @@ function initGoogleApi() {
         }).then(() => {
             console.log('GAPI client initialized successfully');
             
-            // Try to restore saved session
-            const savedToken = localStorage.getItem('gapi_token');
-            if (savedToken) {
-                try {
-                    const tokenObj = JSON.parse(savedToken);
-                    gapi.client.setToken(tokenObj);
-                    isSignedIn = true;
-                    document.getElementById('sign-in-btn').style.display = 'none';
-                    
-                    fetchAvailableCourses()
-                        .then(() => {
-                            if (availableCourses.length > 0) {
-                                selectCourse(availableCourses[0]);
+            // Try to access the spreadsheet without authentication first
+            tryPublicAccess()
+                .then(success => {
+                    if (success) {
+                        // Public access worked, hide sign-in button
+                        document.getElementById('sign-in-btn').style.display = 'none';
+                        showMainContent();
+                    } else {
+                        // Public access failed, try to restore saved session
+                        const savedToken = localStorage.getItem('gapi_token');
+                        if (savedToken) {
+                            try {
+                                const tokenObj = JSON.parse(savedToken);
+                                gapi.client.setToken(tokenObj);
+                                isSignedIn = true;
+                                
+                                // Update auth buttons
+                                document.getElementById('sign-in-btn').style.display = 'none';
+                                document.getElementById('sign-out-btn').style.display = 'inline-block';
+                                
+                                fetchAvailableCourses()
+                                    .then(() => {
+                                        if (availableCourses.length > 0) {
+                                            selectCourse(availableCourses[0]);
+                                        }
+                                        showMainContent();
+                                    })
+                                    .catch(err => {
+                                        console.error('Error fetching courses with saved token:', err);
+                                        document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>Failed to load courses.<br>Please try refreshing the page.</div>';
+                                        showMainContent();
+                                    });
+                            } catch (e) {
+                                console.error('Error restoring token:', e);
+                                isSignedIn = false;
+                                localStorage.removeItem('gapi_token');
+                                document.getElementById('sign-in-btn').style.display = 'inline-block';
+                                document.getElementById('sign-out-btn').style.display = 'none';
+                                showMainContent();
                             }
-                        })
-                        .catch(err => {
-                            console.error('Error fetching courses:', err);
-                            document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>Failed to load courses.<br>Please try refreshing the page.</div>';
-                        });
-                } catch (e) {
-                    console.error('Error restoring token:', e);
-                    isSignedIn = false;
-                    localStorage.removeItem('gapi_token');
+                        } else {
+                            // Not signed in, show sign-in button
+                            document.getElementById('sign-in-btn').style.display = 'inline-block';
+                            document.getElementById('sign-out-btn').style.display = 'none';
+                            showMainContent();
+                        }
+                    }
+                })
+                .catch(() => {
                     document.getElementById('sign-in-btn').style.display = 'inline-block';
-                }
-            } else {
-                // Not signed in, show sign-in button
-                document.getElementById('sign-in-btn').style.display = 'inline-block';
-            }
+                    document.getElementById('sign-out-btn').style.display = 'none';
+                    showMainContent();
+                });
         }).catch(error => {
             console.error('Error initializing GAPI client:', error);
             showImprovedNotification('error', 'API Error', 'Failed to initialize Google API.');
+            showMainContent();
         });
     });
+}
+
+/**
+ * Try to access the spreadsheet without authentication first
+ */
+async function tryPublicAccess() {
+    try {
+        console.log('Trying to access spreadsheet without authentication...');
+        const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${COURSE_MATERIALS_SPREADSHEET_ID}?key=${API_KEY}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('Public access successful');
+            
+            // Process sheet names
+            if (data.sheets && data.sheets.length > 0) {
+                availableCourses = data.sheets.map(sheet => sheet.properties.title);
+                populateCourseButtons();
+                
+                // Load first course
+                if (availableCourses.length > 0) {
+                    selectCourse(availableCourses[0]);
+                }
+                
+                return true;
+            }
+        }
+        
+        console.log('Public access failed or no data');
+        return false;
+    } catch (error) {
+        console.error('Error during public access attempt:', error);
+        return false;
+    }
+}
+
+/**
+ * Fetch public spreadsheet data without authentication
+ */
+async function fetchPublicSheetData(sheetName, range) {
+    try {
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${COURSE_MATERIALS_SPREADSHEET_ID}/values/${sheetName}!${range}?key=${API_KEY}`;
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data.values || [];
+    } catch (error) {
+        console.error('Error fetching public sheet data:', error);
+        throw error;
+    }
 }
 
 /**
@@ -710,8 +854,9 @@ function handleTokenResponse(resp) {
         // User is signed in
         isSignedIn = true;
         
-        // Hide sign-in button
+        // Update auth buttons
         document.getElementById('sign-in-btn').style.display = 'none';
+        document.getElementById('sign-out-btn').style.display = 'inline-block';
         
         // Fetch available courses and select the first one
         fetchAvailableCourses()
@@ -759,18 +904,74 @@ function handleAuthClick() {
 }
 
 /**
+ * Handle sign out button click
+ */
+function handleSignoutClick() {
+    try {
+        const token = gapi.client.getToken();
+        if (token !== null) {
+            console.log('Revoking token and signing out');
+            google.accounts.oauth2.revoke(token.access_token, () => {
+                gapi.client.setToken('');
+                localStorage.removeItem('gapi_token');
+                isSignedIn = false;
+                
+                // Update UI elements
+                document.getElementById('sign-in-btn').style.display = 'inline-block';
+                document.getElementById('sign-out-btn').style.display = 'none';
+                
+                showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
+                
+                // Try to continue with public access
+                tryPublicAccess()
+                    .catch(() => {
+                        document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-user-circle"></i><br>Please sign in to view course materials.</div>';
+                    });
+            });
+        }
+    } catch (error) {
+        console.error('Error during sign out:', error);
+        
+        // Force sign-out even if there's an error
+        localStorage.removeItem('gapi_token');
+        isSignedIn = false;
+        
+        document.getElementById('sign-in-btn').style.display = 'inline-block';
+        document.getElementById('sign-out-btn').style.display = 'none';
+        
+        document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-user-circle"></i><br>Please sign in to view course materials.</div>';
+    }
+}
+
+/**
  * Fetch available courses (sheet names) from spreadsheet.
  */
 async function fetchAvailableCourses() {
     try {
         console.log('Fetching available courses from spreadsheet...');
         
-        const response = await gapi.client.sheets.spreadsheets.get({
-            spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID
-        });
+        let response;
         
-        const sheets = response.result.sheets || [];
-        availableCourses = sheets.map(sheet => sheet.properties.title);
+        if (isSignedIn) {
+            // Use authenticated client
+            response = await gapi.client.sheets.spreadsheets.get({
+                spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID
+            });
+            
+            const sheets = response.result.sheets || [];
+            availableCourses = sheets.map(sheet => sheet.properties.title);
+        } else {
+            // Use public access
+            const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${COURSE_MATERIALS_SPREADSHEET_ID}?key=${API_KEY}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error ${response.status}`);
+            }
+            
+            const data = await response.json();
+            const sheets = data.sheets || [];
+            availableCourses = sheets.map(sheet => sheet.properties.title);
+        }
         
         console.log('Fetched courses:', availableCourses);
         
@@ -796,28 +997,93 @@ function populateCourseButtons() {
     // Clear existing buttons
     courseButtonsContainer.innerHTML = '';
     
-    // Add buttons for all available courses
-    availableCourses.forEach(course => {
-        const button = document.createElement('div');
-        button.className = 'course-button' + (currentCourse === course ? ' active' : '');
-        button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course}`;
-        button.addEventListener('click', () => {
-            selectCourse(course);
+    // Fetch course codes for each sheet
+    fetchCourseCodes()
+        .then(() => {
+            // Add buttons for all available courses
+            availableCourses.forEach(sheetName => {
+                const courseCode = courseMap[sheetName] || sheetName;
+                
+                const button = document.createElement('div');
+                button.className = 'course-button' + (currentCourse === sheetName ? ' active' : '');
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${courseCode}`;
+                button.setAttribute('data-sheet', sheetName);
+                button.addEventListener('click', () => {
+                    selectCourse(sheetName);
+                });
+                courseButtonsContainer.appendChild(button);
+            });
+        })
+        .catch(err => {
+            console.error('Error fetching course codes:', err);
+            
+            // Fallback to sheet names if course codes are unavailable
+            availableCourses.forEach(sheetName => {
+                const button = document.createElement('div');
+                button.className = 'course-button' + (currentCourse === sheetName ? ' active' : '');
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${sheetName}`;
+                button.setAttribute('data-sheet', sheetName);
+                button.addEventListener('click', () => {
+                    selectCourse(sheetName);
+                });
+                courseButtonsContainer.appendChild(button);
+            });
         });
-        courseButtonsContainer.appendChild(button);
-    });
+}
+
+/**
+ * Fetch course codes from each sheet's metadata.
+ */
+async function fetchCourseCodes() {
+    try {
+        const promises = availableCourses.map(async (sheetName) => {
+            try {
+                let rows;
+                
+                if (isSignedIn) {
+                    // Use authenticated client
+                    const response = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                        range: `${sheetName}!A2:C10` // Get metadata rows
+                    });
+                    rows = response.result.values || [];
+                } else {
+                    // Use public access
+                    rows = await fetchPublicSheetData(sheetName, 'A2:C10');
+                }
+                
+                // Look for "metadata" type rows with key "code"
+                for (const row of rows) {
+                    if (row[0]?.toLowerCase() === 'metadata' && row[1]?.toLowerCase() === 'code') {
+                        courseMap[sheetName] = row[2] || sheetName;
+                        break;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error fetching metadata for ${sheetName}:`, error);
+                // Use sheetName as fallback
+                courseMap[sheetName] = sheetName;
+            }
+        });
+        
+        await Promise.all(promises);
+        return courseMap;
+    } catch (error) {
+        console.error('Error fetching course codes:', error);
+        throw error;
+    }
 }
 
 /**
  * Select a course and load its materials.
  */
-function selectCourse(course) {
-    currentCourse = course;
+function selectCourse(sheetName) {
+    currentCourse = sheetName;
     
     // Update active button visually
     document.querySelectorAll('.course-button').forEach(btn => {
         btn.classList.remove('active');
-        if (btn.textContent.includes(course)) {
+        if (btn.getAttribute('data-sheet') === sheetName) {
             btn.classList.add('active');
         }
     });
@@ -825,13 +1091,16 @@ function selectCourse(course) {
     // Show loading state
     document.getElementById('course-content').innerHTML = `
         <div class="loading-spinner"></div>
-        <div class="loading-text">Loading ${course} materials...</div>
+        <div class="loading-text">Loading materials...</div>
     `;
     
     // Load course data
-    fetchCourseData(course)
+    fetchCourseData(sheetName)
         .then(data => {
             if (data) {
+                // Update document title with course code
+                document.title = data.metadata.code ? `${data.metadata.code} | Course Materials` : 'Course Materials';
+                
                 // Update course metadata
                 updateCourseMetadata(data.metadata);
                 
@@ -839,42 +1108,55 @@ function selectCourse(course) {
                 const contentHtml = generateCourseContentHtml(data.modules);
                 document.getElementById('course-content').innerHTML = contentHtml;
                 
-                showImprovedNotification('success', 'Course Loaded', `${course} materials loaded successfully`);
+                // Attach event listeners to module headers
+                document.querySelectorAll('.module-header').forEach(header => {
+                    header.addEventListener('click', () => toggleModule(header.parentNode));
+                });
+                
+                showImprovedNotification('success', 'Course Loaded', `${data.metadata.code || sheetName} materials loaded successfully`);
             } else {
                 document.getElementById('course-content').innerHTML = `
                     <div class="empty-content">
                         <i class="fas fa-exclamation-triangle"></i><br>
-                        No materials found for ${course}.<br>
+                        No materials found for this course.<br>
                         Please select another course.
                     </div>
                 `;
             }
         })
         .catch(error => {
-            console.error(`Error loading ${course} materials:`, error);
+            console.error(`Error loading ${sheetName} materials:`, error);
             document.getElementById('course-content').innerHTML = `
                 <div class="empty-content">
                     <i class="fas fa-exclamation-triangle"></i><br>
-                    Error loading ${course} materials.<br>
+                    Error loading course materials.<br>
                     Please try again later.
                 </div>
             `;
-            showImprovedNotification('error', 'Load Error', `Failed to load ${course} materials`);
+            showImprovedNotification('error', 'Load Error', `Failed to load course materials`);
         });
 }
 
 /**
  * Fetch course data from spreadsheet.
  */
-async function fetchCourseData(courseId) {
+async function fetchCourseData(sheetName) {
     try {
-        // Fetch the metadata and content for this course
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
-            range: `${courseId}!A2:J`
-        });
+        let rows;
         
-        const rows = response.result.values || [];
+        if (isSignedIn) {
+            // Use authenticated client
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                range: `${sheetName}!A2:J`
+            });
+            
+            rows = response.result.values || [];
+        } else {
+            // Use public access
+            rows = await fetchPublicSheetData(sheetName, 'A2:J');
+        }
+        
         if (rows.length === 0) {
             return null;
         }
@@ -901,7 +1183,7 @@ function processCourseData(rows) {
     rows.forEach(row => {
         if (!row || row.length === 0) return;
         
-        const type = row[0].toLowerCase();
+        const type = row[0]?.toLowerCase();
         
         if (type === 'metadata') {
             // Process metadata row
@@ -947,7 +1229,7 @@ function processCourseData(rows) {
  * Update the course metadata in the UI.
  */
 function updateCourseMetadata(metadata) {
-    document.getElementById('course-code').textContent = metadata.code || currentCourse;
+    document.getElementById('course-code').textContent = metadata.code || 'Course Code';
     document.getElementById('course-title').textContent = metadata.title || 'Course Title';
     document.getElementById('course-semester').textContent = metadata.semester || 'Unknown Semester';
     document.getElementById('course-level').textContent = metadata.level || 'Undergraduate';
@@ -955,9 +1237,12 @@ function updateCourseMetadata(metadata) {
     document.getElementById('course-credits').textContent = metadata.credits || '5 ECTS';
     document.getElementById('course-duration').textContent = metadata.duration || '16 weeks';
     
-    // Update the week counter and progress bar if we have start/end dates
+    // Update week counter and progress bar if dates provided
     if (metadata.startdate && metadata.enddate) {
         updateWeekProgress(metadata.startdate, metadata.enddate, metadata.holidayweeks);
+    } else {
+        // Default values if not provided
+        updateWeekProgress();
     }
 }
 
@@ -974,7 +1259,7 @@ function generateCourseContentHtml(modules) {
     modules.forEach(module => {
         html += `
         <div class="module${module.isActive ? ' active' : ''}">
-            <div class="module-header" onclick="toggleModule(this.parentNode)">
+            <div class="module-header">
                 <span class="module-title"><i class="${module.icon}"></i>&nbsp;&nbsp;${module.title}</span>
                 <span class="module-chapter">${module.moduleNumber ? 'Module ' + module.moduleNumber : ''}&nbsp;&nbsp;<i class="fas fa-chevron-down"></i></span>
             </div>
@@ -991,8 +1276,19 @@ function generateCourseContentHtml(modules) {
                         <div class="material-description">${material.description}</div>
                     </div>
                     <div class="course-actions">
-                        <button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i> View</button>
-                        ${material.downloadLink ? `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-download btn-green"><i class="far fa-save"></i> Download</button>` : ''}
+            `;
+            
+            // Only add View button if link is provided and not '#'
+            if (material.viewLink && material.viewLink !== '#') {
+                html += `<button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i> View</button>`;
+            }
+            
+            // Only add Download button if link is provided
+            if (material.downloadLink && material.downloadLink !== '#') {
+                html += `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-download btn-green"><i class="far fa-save"></i> Download</button>`;
+            }
+            
+            html += `
                     </div>
                 </div>
             `;
