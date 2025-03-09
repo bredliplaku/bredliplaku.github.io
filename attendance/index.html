@@ -125,7 +125,7 @@
 		/* ===== Course button styles ===== */
 .course-buttons-container {
         padding: 5px;
-        display: flex;
+        display: none;
         justify-content: flex-start;
         flex-wrap: wrap;
         gap: 10px;
@@ -202,14 +202,25 @@
         .module-content {
             padding: 15px;
         }
+		.not-signed-in-message {
+			text-align: center;
+			padding: 20px;
+			margin-top: 15px;
+			border-radius: 15px;
+			background-color: rgba(57, 73, 171, 0.1);
+			color: #333;
+		}
         .scan-buttons {
             display: flex;
             justify-content: center;
 			margin-top: 15px;
             margin-bottom: 25px;
         }
+		#scanner-module {
+			display: none;
+		}
         .big-scan-button {
-            display: block;
+            display: flex;
             background-color: var(--primary-color);
             color: var(--text-light);
             padding: 15px 30px;
@@ -218,6 +229,8 @@
             font-size: 1.2em;
             transition: background-color 0.3s, transform 0.3s;
             text-align: center;
+			justify-content: center;
+			align-items: center;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             border: 0;
             -webkit-user-select: none;
@@ -1554,151 +1567,13 @@ function handleAuthClick(e) {
          * Update authentication-dependent UI elements.
          * Show/hide elements based on sign-in status and admin privileges.
          */
-function updateAuthUI() {
-    console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
-
-    // Get the tabs container
-    const tabsContainer = document.querySelector('.tabs');
-    if (tabsContainer) {
-        // Show tabs only for admin
-        tabsContainer.style.display = isAdmin ? 'flex' : 'none';
-    }
-
-    // Hide admin-only tabs
-    document.querySelectorAll('.tab.admin-only').forEach(tab => {
-        tab.style.display = isAdmin ? 'flex' : 'none';
-    });
-
-    // Show login/logout controls for all users
-    loginContainer.style.display = isSignedIn ? 'none' : 'flex';
-    userContainer.style.display = isSignedIn ? 'flex' : 'none';
-
-    // Guest Mode (Not signed in)
-    if (!isSignedIn) {
-        // Hide most UI elements except scan button
-        document.querySelector('.logs-header').style.display = 'none';
-        document.querySelector('.filter-container').style.display = 'none';
-        document.querySelector('.table-container').style.display = 'none';
-        
-        // Show scan button, but nothing else
-        if (nfcSupported) {
-            startScanBtn.style.display = isScanning ? 'none' : 'flex';
-            stopScanBtn.style.display = isScanning ? 'flex' : 'none';
-        } else {
-            startScanBtn.style.display = 'none';
-            stopScanBtn.style.display = 'none';
-        }
-        
-        // Update empty logs message
-        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please scan your Student ID card and send the UID to bplaku@epoka.edu.al to register. <br> If you are already registered, sign in with your EPOKA Account to track your attendance.';
-        emptyLogs.style.display = 'block';
-    }
-    // Read-Only Mode (Signed in as non-admin)
-    else if (isSignedIn && !isAdmin) {
-        // Show UI elements for non-admin users
-        document.querySelector('.logs-header').style.display = 'flex';
-        document.querySelector('.filter-container').style.display = 'flex';
-        document.querySelector('.table-container').style.display = 'block';
-        
-        // Hide scan button for non-admin users
-        startScanBtn.style.display = 'none';
-        stopScanBtn.style.display = 'none';
-        
-        // Hide Export button for non-admin users
-        exportBtn.style.display = 'none';
-        
-        // Hide date column & date cells for non-admin users (since sorted by date)
-        document.querySelectorAll('.date-column').forEach(col => {
-            col.style.display = 'none';
-        });
-        document.querySelectorAll('.date-cell').forEach(col => {
-            col.style.display = 'none';
-        });
-        
-        // Modify sort dropdown to only show needed options
-        updateSortOptions(true, false);
-    }
-    // Admin Mode (Signed in as admin)
-    else if (isAdmin) {
-        // Show all UI elements for admin users
-        document.querySelector('.logs-header').style.display = 'flex';
-        document.querySelector('.filter-container').style.display = 'flex';
-        document.querySelector('.table-container').style.display = 'block';
-        
-        // Show scan buttons if NFC is supported
-        if (nfcSupported) {
-            startScanBtn.style.display = isScanning ? 'none' : 'flex';
-            stopScanBtn.style.display = isScanning ? 'flex' : 'none';
-        } else {
-            startScanBtn.style.display = 'none';
-            stopScanBtn.style.display = 'none';
-        }
-        
-        // Show Export button for admin users
-        exportBtn.style.display = 'inline-block';
-        
-        // Show all columns for admin users, including date
-        document.querySelectorAll('.date-column').forEach(col => {
-            col.style.display = 'table-cell';
-        });
-        document.querySelectorAll('.date-cell').forEach(col => {
-            col.style.display = 'table-cell';
-        });
-        
-        // Show all sort options for admin users
-        updateSortOptions(true, true);
-        
-        // Show all admin-only elements
-        document.querySelectorAll('.admin-only').forEach(el => {
-            if (el.classList.contains('tab')) return; // already handled above
-            if (el.tagName === 'TH' || el.tagName === 'TD') {
-                el.style.display = 'table-cell';
-            } else {
-                el.style.display = 'inline-block';
-            }
-        });
-    }
-
-    // Update sync button visibility (admin only)
-    syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
-    syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
-
-    // Update empty logs message for signed-in users
-    if (isSignedIn) {
-        if (!currentCourse) {
-            emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
-        } else if (logs.length === 0) {
-            emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
-        }
-    }
-}
-
-// Function to update sort options based on user role
 function updateSortOptions(showName, showDate) {
     // Clear existing options
     while (sortSelect.options.length > 0) {
         sortSelect.remove(0);
     }
     
-    // For non-admin signed-in users, only show name sorting options
-    if (showName && !showDate) {
-        const nameAscOption = document.createElement('option');
-        nameAscOption.value = 'name-asc';
-        nameAscOption.textContent = 'Name (A-Z)';
-        sortSelect.appendChild(nameAscOption);
-        
-        const nameDescOption = document.createElement('option');
-        nameDescOption.value = 'name-desc';
-        nameDescOption.textContent = 'Name (Z-A)';
-        sortSelect.appendChild(nameDescOption);
-        
-        // Set default sort
-        sortSelect.value = 'name-asc';
-        currentSort = 'name-asc';
-        return;
-    }
-    
-    // For admin users, show all options
+    // Date options are always available
     const dateDescOption = document.createElement('option');
     dateDescOption.value = 'date-desc';
     dateDescOption.textContent = 'Date (Newest First)';
@@ -1709,7 +1584,8 @@ function updateSortOptions(showName, showDate) {
     dateAscOption.textContent = 'Date (Oldest First)';
     sortSelect.appendChild(dateAscOption);
     
-    if (showName) {
+    // Add name options only if specified and admin
+    if (showName && isAdmin) {
         const nameAscOption = document.createElement('option');
         nameAscOption.value = 'name-asc';
         nameAscOption.textContent = 'Name (A-Z)';
@@ -1721,27 +1597,26 @@ function updateSortOptions(showName, showDate) {
         sortSelect.appendChild(nameDescOption);
     }
     
-    const uidAscOption = document.createElement('option');
-    uidAscOption.value = 'uid-asc';
-    uidAscOption.textContent = 'UID (A-Z)';
-    sortSelect.appendChild(uidAscOption);
+    // Add UID options only for admin
+    if (isAdmin) {
+        const uidAscOption = document.createElement('option');
+        uidAscOption.value = 'uid-asc';
+        uidAscOption.textContent = 'UID (A-Z)';
+        sortSelect.appendChild(uidAscOption);
+        
+        const uidDescOption = document.createElement('option');
+        uidDescOption.value = 'uid-desc';
+        uidDescOption.textContent = 'UID (Z-A)';
+        sortSelect.appendChild(uidDescOption);
+    }
     
-    const uidDescOption = document.createElement('option');
-    uidDescOption.value = 'uid-desc';
-    uidDescOption.textContent = 'UID (Z-A)';
-    sortSelect.appendChild(uidDescOption);
-    
-    // Set default sort to date desc for admin
+    // Set default sort
     sortSelect.value = 'date-desc';
     currentSort = 'date-desc';
 }
 
-        /**
-         * Handle course selection change.
-         * Load logs for the selected course.
-         */
+// Updated function to handle course selection and update title
 function handleCourseChange() {
-    // Now course selection comes from currentCourse variable, not from dropdown
     logs = []; // Clear current logs before loading new ones
 
     if (!currentCourse) {
@@ -1749,6 +1624,9 @@ function handleCourseChange() {
         emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
         return;
     }
+
+    // Always update the title when a course is selected
+    updatePageTitle(); 
 
     if (!isSignedIn) {
         // Load logs from local storage for the course
@@ -1770,11 +1648,17 @@ function handleCourseChange() {
     if (isOnline) {
         fetchLogsFromSheet()
             .then(() => {
-                // Remove the success notification for course loading
-                // Don't show any notification for successful loading
+                // Success - title should stay as is with the course name
             })
             .catch(error => {
                 console.error('Error fetching logs:', error);
+                
+                // On error, reset title back to default
+                const titleElement = document.querySelector('h1');
+                if (titleElement) {
+                    titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
+                }
+                
                 // Only show error if we're past initialization
                 if (!isInitializing) {
                     showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
@@ -1986,7 +1870,12 @@ function updatePageTitle() {
     if (!titleElement) return;
     
     if (currentCourse && currentCourse !== 'Default') {
-        titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> ${currentCourse.replace('_', ' ')} Attendance`;
+        // Format nicely - replace underscores and capitalize
+        const formattedCourse = currentCourse
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+        
+        titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> ${formattedCourse} Attendance`;
     } else {
         titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
     }
@@ -2074,11 +1963,23 @@ async function fetchLogsFromSheet() {
         // Also save to localStorage as backup
         saveLogsToLocalStorage();
         
+        // Update UI and keep the course title
         updateUI();
+        
         console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
+        return true;
     } catch (error) {
         console.error('Error fetching logs:', error);
-        showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+        
+        // Reset title back to default on error
+        const titleElement = document.querySelector('h1');
+        if (titleElement) {
+            titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
+        }
+        
+        if (!isInitializing) {
+            showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+        }
         throw error;
     }
 }
@@ -3140,12 +3041,10 @@ function updateLogsList() {
             if (log.uid.toLowerCase().includes(filter)) {
                 return true;
             }
-            // Match name if in database and user is allowed to see names
-            if (isSignedIn || isAdmin) {
-                const name = uidToNameMap[log.uid];
-                if (name && name.toLowerCase().includes(filter)) {
-                    return true;
-                }
+            // Match name if in database
+            const name = uidToNameMap[log.uid];
+            if (name && name.toLowerCase().includes(filter)) {
+                return true;
             }
             return false;
         })
@@ -3276,44 +3175,73 @@ function updateLogsList() {
             const thisDay = group.date;
             if (thisDay !== currentDay) {
                 currentDay = thisDay;
-                const separatorRow = document.createElement('tr');
-                separatorRow.className = 'day-separator';
-                const separatorCell = document.createElement('td');
-                // Span all columns based on visibility
-                let colSpan = 0;
-                if (isAdmin) colSpan = 5;  // All columns visible
-                else if (isSignedIn) colSpan = 3;  // No UID, No Actions
-                else colSpan = 3;  // No Name, No Actions
-                separatorCell.colSpan = colSpan;
-                separatorCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                separatorRow.appendChild(separatorCell);
-                logsTbody.appendChild(separatorRow);
+                // Only show day separators for admin users
+                if (isAdmin) {
+                    const separatorRow = document.createElement('tr');
+                    separatorRow.className = 'day-separator';
+                    const separatorCell = document.createElement('td');
+                    separatorCell.colSpan = 5; // All admin columns
+                    separatorCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                    separatorRow.appendChild(separatorCell);
+                    logsTbody.appendChild(separatorRow);
+                }
             }
         }
         
         // Create log entry row
         const row = document.createElement('tr');
         
-        // Name cell - only visible for signed-in users
+        // For non-signed-in users, we only show UID and Time
+        if (!isSignedIn) {
+            // UID cell
+            const uidCell = document.createElement('td');
+            uidCell.className = 'uid-cell uid-column';
+            uidCell.textContent = group.uid;
+            row.appendChild(uidCell);
+            
+            // Skip date for better readability
+            
+            // Time cell
+            const timesCell = document.createElement('td');
+            timesCell.className = 'times-cell';
+            const sortedIndices = group.timeObjs
+                .map((timeObj, index) => ({ timeObj, index }))
+                .sort((a, b) => a.timeObj - b.timeObj)
+                .map(item => item.index);
+            sortedIndices.forEach(index => {
+                const timeTag = document.createElement('span');
+                timeTag.className = 'time-tag';
+                timeTag.textContent = group.times[index];
+                timesCell.appendChild(timeTag);
+            });
+            row.appendChild(timesCell);
+            
+            logsTbody.appendChild(row);
+            continue; // Skip the rest of the loop
+        }
+        
+        // Name cell - only for signed-in users
         const nameCell = document.createElement('td');
         nameCell.className = 'name-cell name-column';
         nameCell.textContent = group.name;
         if (group.originalLogs.some(log => log.manual)) {
             nameCell.innerHTML += ' <i class="fas fa-user-edit" title="Manually added"></i>';
         }
-        // Hide name for non-signed-in users
-        nameCell.style.display = !isSignedIn ? 'none' : 'table-cell';
+        row.appendChild(nameCell);
         
-        // UID cell - only visible for non-signed in or admin users
-        const uidCell = document.createElement('td');
-        uidCell.className = 'uid-cell uid-column';
-        uidCell.textContent = group.uid;
-        uidCell.style.display = (!isSignedIn || isAdmin) ? 'table-cell' : 'none';
-        
-        // Date cell
-        const dateCell = document.createElement('td');
-        dateCell.className = 'date-cell';
-        dateCell.textContent = group.date;
+        // UID cell - only for admin
+        if (isAdmin) {
+            const uidCell = document.createElement('td');
+            uidCell.className = 'uid-cell uid-column';
+            uidCell.textContent = group.uid;
+            row.appendChild(uidCell);
+            
+            // Date cell - only for admin
+            const dateCell = document.createElement('td');
+            dateCell.className = 'date-cell date-column';
+            dateCell.textContent = group.date;
+            row.appendChild(dateCell);
+        }
         
         // Times cell
         const timesCell = document.createElement('td');
@@ -3328,15 +3256,6 @@ function updateLogsList() {
             timeTag.textContent = group.times[index];
             timesCell.appendChild(timeTag);
         });
-        
-        // Add cells based on visibility rules
-        if (isSignedIn) {
-            row.appendChild(nameCell); // Show name for signed-in users
-        }
-        if (!isSignedIn || isAdmin) {
-            row.appendChild(uidCell); // Show UID for non-signed-in or admin
-        }
-        row.appendChild(dateCell);
         row.appendChild(timesCell);
         
         // Actions cell for admin users only
@@ -3562,18 +3481,20 @@ function updateScanButtons() {
          * @param {Object} event - The NFC reading event.
          */
 async function handleNfcReading({ serialNumber }) {
-    // For non-signed-in users, only show UID without saving
+    // For non-signed-in users, only show UID without saving anything
     if (!isSignedIn) {
         // Play success sound
         playSound(true);
         
-        // Show success notification with UID
+        // Show success notification with clear instructions
         showImprovedNotification('success', 'Tag scanned', 
-            `UID: ${serialNumber}<br><b>Please sign in to track attendance.</b>`);
+            `<b>UID:</b> ${serialNumber}<br><br>` +
+            `<b>Please send this UID to bplaku@epoka.edu.al</b><br>` +
+            `Sign in with your EPOKA account to track attendance.`);
         return;
     }
     
-    // For signed-in users, proceed with normal flow
+    // Standard flow for signed-in users
     if (!currentCourse) {
         showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
         return;
@@ -3782,25 +3703,16 @@ function populateCourseButtons() {
     const courseButtonsContainer = document.getElementById('course-buttons-container');
     if (!courseButtonsContainer) return;
     
+    // Hide the whole container if not signed in
+    if (!isSignedIn) {
+        courseButtonsContainer.style.display = 'none';
+        return;
+    } else {
+        courseButtonsContainer.style.display = 'flex';
+    }
+    
     // Clear existing buttons
     courseButtonsContainer.innerHTML = '';
-    
-    if (!isSignedIn) {
-        // For signed-out mode, add just the "Default" course button
-        const defaultButton = document.createElement('div');
-        defaultButton.className = 'course-button' + (currentCourse === 'Default' ? ' active' : '');
-        defaultButton.textContent = 'Default';
-        defaultButton.addEventListener('click', () => {
-            selectCourseButton('Default');
-        });
-        courseButtonsContainer.appendChild(defaultButton);
-        
-        // Set default course if none selected
-        if (!currentCourse) {
-            selectCourseButton('Default');
-        }
-        return;
-    }
     
     // For signed-in users, add buttons for all available courses
     availableCourses.forEach(course => {
