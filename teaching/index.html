@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Course Materials</title>
+    <title>Courses</title>
     <link rel="icon" type="image/png" href="https://bredliplaku.github.io/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
@@ -470,6 +470,127 @@
         animation: spin 1s linear infinite;
         margin-bottom: 20px;
     }
+	
+	/* Timetable styles */
+.iframe-container {
+    width: 100%;
+    height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.5s ease-out, height 0.5s ease-out;
+    position: relative;
+    pointer-events: none;
+}
+
+.iframe-container.visible {
+    height: 310px;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+iframe {
+    width: 106.4%;
+    height: 1440px;
+    border: none;
+    position: absolute;
+    top: -335px;
+    left: -64px;
+}
+
+.iframe-container:not(.visible) {
+    height: 0 !important;
+}
+
+/* Grade distribution styles */
+.grade-distribution-container {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.5s ease-out;
+}
+.grade-distribution-content {
+    padding: 5px;
+}
+.distribution-wrapper {
+    margin-top: 15px;
+    position: relative;
+}
+
+.distribution-bar {
+    height: 15px;
+    border-radius: 50px;
+    overflow: hidden;
+    display: flex;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    position: relative;
+}
+.distribution-segment {
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: scale(1);
+    transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), width 1s ease;
+}
+
+.distribution-segment:hover {
+    transform: scale(1.05);
+    transition: transform 0.3s ease-in-out;
+}
+
+.segment-percentage {
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.8em;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+    padding-left: 5px;
+    padding-right: 5px;
+    z-index: 1;
+}
+.distribution-legend {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
+}
+
+.legend-item {
+    width: auto;
+    text-align: center;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 2px;
+    white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+    .iframe-container.visible {
+        height: 310px;
+    }
+    iframe {
+        top: -395px;
+        left: -58px;
+    }
+}
+@media (max-width: 768px) {
+    .iframe-container.visible {
+        height: 260px;
+        padding-left: 5%;
+    }
+    iframe {
+        top: -460px;
+        left: -53px;
+    }
+    .segment-percentage {
+        font-size: 0.45em;
+    }
+    .legend-item {
+        font-size: 0.5em;
+        font-weight: 500;
+        letter-spacing: -0.5px;
+        margin-bottom: 0px;
+    }
+}
     
     @media (max-width: 500px) {
         .module-header {
@@ -526,9 +647,40 @@
             </div>
         </div>
         
-        <div id="course-buttons-container" class="course-buttons-container">
-            <!-- Course buttons will be added here dynamically -->
+<div id="course-buttons-container" class="course-buttons-container">
+    <!-- Course buttons will be added here dynamically -->
+</div>
+
+<div class="course-actions" id="course-action-buttons">
+    <button id="announcements-btn" style="display: none;" class="btn-orange"><i class="fas fa-bullhorn"></i> Announcements</button>
+    <button id="timetable-btn" style="display: none;"><i class="fas fa-calendar-alt"></i> Timetable</button>
+    <button id="evaluation-btn" style="display: none;" class="btn-green"><i class="fas fa-chart-pie"></i> Evaluation Criteria</button>
+</div>
+
+<!-- Timetable form and iframe -->
+<div class="course-schedule" id="timetable-container" style="display: none;">
+    <!-- Form that will be submitted via the buttons -->
+    <form id="timetable-form" action="https://eis.epoka.edu.al/publictimetable" method="POST" target="timetable-iframe">
+        <input type="hidden" name="form[timetable]" id="timetable-id-input" value="161">
+        <input type="hidden" id="class-select" name="form[programGrade]" value="27">
+        <input type="hidden" name="form[_token]" value="your_csrf_token_here">
+    </form>
+
+    <!-- Iframe to load the timetable -->
+    <div class="iframe-container" id="iframe-container">    
+        <iframe id="timetable-iframe" name="timetable-iframe"></iframe>
+    </div>
+</div>
+
+<!-- Evaluation criteria container -->
+<div id="gradeDistributionContainer" class="grade-distribution-container" style="max-height: 0; overflow: hidden; transition: max-height 0.5s ease-out;">
+    <div class="grade-distribution-content">
+        <div class="distribution-wrapper">
+            <div id="distribution-legend" class="distribution-legend"></div>
+            <div id="distribution-bar" class="distribution-bar"></div>
         </div>
+    </div>
+</div>
         
         <div id="notification-area" class="in-page-notifications"></div>
         
@@ -1283,6 +1435,47 @@ function updateCourseMetadata(metadata) {
         // Default values if not provided
         updateWeekProgress();
     }
+	// Update announcements button
+const announcementsBtn = document.getElementById('announcements-btn');
+if (metadata.chat_link) {
+    announcementsBtn.style.display = 'inline-block';
+    announcementsBtn.onclick = function() {
+        window.open(metadata.chat_link, '_blank', 'noopener,noreferrer');
+    };
+} else {
+    announcementsBtn.style.display = 'none';
+}
+
+// Update timetable button
+const timetableBtn = document.getElementById('timetable-btn');
+const timetableContainer = document.getElementById('timetable-container');
+if (metadata.timetable_enabled === 'true') {
+    // Update timetable form inputs
+    if (metadata.timetable_id) {
+        document.getElementById('timetable-id-input').value = metadata.timetable_id;
+    }
+    if (metadata.class_id) {
+        document.getElementById('class-select').value = metadata.class_id;
+    }
+    
+    timetableBtn.style.display = 'inline-block';
+    timetableBtn.onclick = toggleTimetable;
+} else {
+    timetableBtn.style.display = 'none';
+    timetableContainer.style.display = 'none';
+}
+
+// Update evaluation criteria button
+const evaluationBtn = document.getElementById('evaluation-btn');
+if (hasEvaluationData(metadata)) {
+    evaluationBtn.style.display = 'inline-block';
+    evaluationBtn.onclick = toggleGradeDistribution;
+    
+    // Pre-generate the grade distribution
+    generateGradeDistribution(metadata);
+} else {
+    evaluationBtn.style.display = 'none';
+}
 }
 
 /**
@@ -1296,11 +1489,7 @@ function generateCourseContentHtml(modules) {
     let html = '';
     
     modules.forEach(module => {
-        const moduleLabel = module.moduleNumber ? 
-            (module.moduleNumber.toString().toLowerCase().includes('chapter') ? 
-                `Chapter ${module.moduleNumber.replace(/chapter/i, '').trim()}` : 
-                `Module ${module.moduleNumber}`) : 
-            '';
+        const moduleLabel = module.moduleNumber || '';
             
         html += `
         <div class="module${module.isActive ? ' active' : ''}">
@@ -1397,6 +1586,161 @@ function updateWeekProgress(startDate = "2025-02-24", endDate = "2025-06-14", ho
 
     const progress = document.getElementById('progress-bar');
     progress.style.width = progressPercentage + '%';
+}
+
+/**
+ * Toggle timetable display
+ */
+function toggleTimetable() {
+    var iframeContainer = document.getElementById("iframe-container");
+    var button = document.getElementById("timetable-btn");
+    var timetableContainer = document.getElementById("timetable-container");
+
+    if (!timetableContainer.style.display || timetableContainer.style.display === 'none') {
+        // First time showing
+        timetableContainer.style.display = 'block';
+        document.getElementById('timetable-form').submit();
+    }
+
+    if (iframeContainer.classList.contains('visible')) {
+        iframeContainer.classList.remove('visible');
+        button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
+    } else {
+        iframeContainer.classList.add('visible');
+        button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Timetable';
+    }
+}
+
+/**
+ * Check if metadata contains evaluation data
+ */
+function hasEvaluationData(metadata) {
+    return metadata.midterm_percentage || 
+           metadata.final_percentage || 
+           metadata.hw1_percentage || 
+           metadata.hw2_percentage || 
+           metadata.quiz1_percentage;
+}
+
+/**
+ * Toggle grade distribution display
+ */
+function toggleGradeDistribution() {
+    const container = document.getElementById('gradeDistributionContainer');
+    const button = document.getElementById('evaluation-btn');
+    
+    if (container.style.maxHeight && container.style.maxHeight !== '0px') {
+        container.style.maxHeight = null;
+        button.innerHTML = '<i class="fas fa-chart-pie"></i> Evaluation Criteria';
+    } else {
+        container.style.maxHeight = container.scrollHeight + "px";
+        button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Evaluation Criteria';
+    }
+}
+
+/**
+ * Generate grade distribution visualization
+ */
+function generateGradeDistribution(metadata) {
+    const barContainer = document.getElementById('distribution-bar');
+    const legendContainer = document.getElementById('distribution-legend');
+    
+    barContainer.innerHTML = '';
+    legendContainer.innerHTML = '';
+    
+    let cumulativeWidth = 0;
+    
+    // Define assessment categories
+    const assessments = [
+        {
+            name: 'Homework',
+            colors: ['#81c784', '#66bb6a', '#4caf50', '#43a047'],
+            items: [
+                { key: 'hw1_percentage', label: 'HW 1' },
+                { key: 'hw2_percentage', label: 'HW 2' },
+                { key: 'hw3_percentage', label: 'HW 3' },
+                { key: 'hw4_percentage', label: 'HW 4' }
+            ]
+        },
+        {
+            name: 'Quizzes',
+            colors: ['#64b5f6', '#42a5f5', '#2196f3', '#1e88e5'],
+            items: [
+                { key: 'quiz1_percentage', label: 'Quiz 1' },
+                { key: 'quiz2_percentage', label: 'Quiz 2' },
+                { key: 'quiz3_percentage', label: 'Quiz 3' },
+                { key: 'quiz4_percentage', label: 'Quiz 4' }
+            ]
+        },
+        {
+            name: 'Project',
+            colors: ['#4caf50'],
+            items: [
+                { key: 'project_percentage', label: 'Project' }
+            ]
+        },
+        {
+            name: 'Midterm',
+            colors: ['#fbc02d'],
+            items: [
+                { key: 'midterm_percentage', label: 'Midterm' }
+            ]
+        },
+        {
+            name: 'Final',
+            colors: ['#ff9800'],
+            items: [
+                { key: 'final_percentage', label: 'Final' }
+            ]
+        }
+    ];
+    
+    assessments.forEach(assessment => {
+        const colors = assessment.colors;
+        let totalPercentage = 0;
+        let colorIndex = 0;
+        
+        assessment.items.forEach((item, index) => {
+            const percentage = parseInt(metadata[item.key]) || 0;
+            
+            if (percentage > 0) {
+                const color = colors[colorIndex % colors.length];
+                
+                // Create bar segment
+                const segment = document.createElement('div');
+                segment.className = 'distribution-segment';
+                segment.style.width = `${percentage}%`;
+                segment.style.backgroundColor = color;
+                
+                // Add percentage inside the bar
+                const percentageElement = document.createElement('div');
+                percentageElement.className = 'segment-percentage';
+                percentageElement.textContent = `${percentage}%`;
+                segment.appendChild(percentageElement);
+                
+                barContainer.appendChild(segment);
+                
+                totalPercentage += percentage;
+                colorIndex++;
+            }
+        });
+        
+        if (totalPercentage > 0) {
+            // Create legend item
+            const legendItem = document.createElement('div');
+            legendItem.className = 'legend-item';
+            legendItem.style.left = `${cumulativeWidth}%`;
+            legendItem.style.width = `${totalPercentage}%`;
+            legendItem.textContent = assessment.name;
+            
+            // Set the text color to match the first color in the assessment's color scheme
+            legendItem.style.color = colors[0];
+            
+            legendContainer.appendChild(legendItem);
+            
+            cumulativeWidth += totalPercentage;
+        }
+    });
 }
 
 /**
