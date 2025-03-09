@@ -80,6 +80,8 @@
 		}
         .tabs {
 			display: none; /* Hidden by default */
+			margin-top: 20px;
+            border-radius: 10px;
 		}
 		.tabs.tabs-ready {
             display: flex;
@@ -226,13 +228,37 @@
 		.notification {
 		  margin-bottom: 10px; /* Reduced margin so new notifications don’t push content far down */
 		}
+.notification-close {
+    background: none; 
+    border: none; 
+    border-radius: 0; 
+	box-shadow: none;
+    cursor: pointer;
+    font-size: 18px;
+    color: inherit; 
+    opacity: 0.7;
+    padding: 0;
+    margin-left: 8px;
+    transition: none;
+    width: auto;
+    height: auto;
+    display: inline-block;
+}
+
+.notification-close:hover {
+    opacity: 1;
+	background: none;
+	color: inherit;
+	box-shadow: none;
+}
+
 .in-page-notifications {
     position: fixed;
-    bottom: 20px;
+    top: 20px;
     right: 20px;
     z-index: 10000;
-    width: 300px;
-    max-width: 90%;
+    width: 350px;
+    max-width: 70%;
     pointer-events: auto;
 }
 
@@ -245,9 +271,9 @@
     animation: slide-in 0.3s ease-out forwards;
     overflow: hidden;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     opacity: 1;
-    transition: opacity 0.3s, transform 0.3s;
+    transition: transform 0.3s ease-in, opacity 0.3s ease-in;
 }
 
 .in-page-notification.removing {
@@ -271,6 +297,11 @@
     font-size: 1.2em;
 }
 
+/* Make icon properly aligned */
+.in-page-notification i:first-child {
+    margin-top: 1px; /* Fine-tune vertical alignment */
+}
+
 .in-page-notification-info {
     background-color: #e3f2fd;
     color: #0d47a1;
@@ -292,7 +323,7 @@
 }
 
 /* Mobile adjustments */
-@media (max-width: 600px) {
+@media (max-width: 700px) {
     .in-page-notifications {
         bottom: 10px;
         left: 50%;
@@ -303,7 +334,9 @@
     }
     
     .in-page-notification.removing {
-        transform: translateY(100%);
+    opacity: 0;
+    transform: translateX(100%);
+    transition: opacity 0.3s ease, transform 0.3s ease;
     }
     
     @keyframes slide-in {
@@ -892,6 +925,7 @@
         let availableCourses = []; // Will be populated from spreadsheet
         let isOnline = navigator.onLine;
         let isSyncing = false;
+		let isInitializing = true;
         
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -942,7 +976,7 @@
          * Sets up event listeners, checks NFC support, and prepares the UI.
          */
 function init() {
-
+	isInitializing = true;
     // Re-assign DOM elements
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
@@ -1103,6 +1137,9 @@ function init() {
 
     // Update UI to show the initial state
     updateUI();
+	setTimeout(() => {
+	isInitializing = false;
+	}, 2000); // Wait 2 seconds before showing non-critical errors
 }
         
         /**
@@ -1733,7 +1770,7 @@ function updateOnlineStatus() {
          * Fetch database entries from Google Sheet.
          * Updates uidToNameMap with the latest data.
          */
-        async function fetchDatabaseFromSheet() {
+async function fetchDatabaseFromSheet() {
     try {
         const response = await gapi.client.sheets.spreadsheets.values.get({
             spreadsheetId: DATABASE_SPREADSHEET_ID,
@@ -1760,7 +1797,9 @@ function updateOnlineStatus() {
         console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
     } catch (error) {
         console.error('Error fetching database:', error);
-        showImprovedNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+        if (!isInitializing) {
+            showImprovedNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+        }
         throw error;
     }
 }
@@ -3414,26 +3453,42 @@ async function handleNfcReading({ serialNumber }) {
 	}
 	
 		
-	function showImprovedNotification(type, title, message) {
+// Replace the showImprovedNotification function with this improved version
+function showImprovedNotification(type, title, message, duration) {
     // Don't show default course notification
     if (title === 'Courses Warning' && message === 'Using default course list') {
         return;
     }
     
-    // Clear any existing notifications of the same type
-    const existingNotifications = notificationArea.querySelectorAll(`.notification-${type}`);
+    // Safely remove notifications
+    const safeRemove = (element) => {
+        try {
+            if (element && element.parentNode) {
+                element.parentNode.removeChild(element);
+            }
+        } catch (e) {
+            console.log('Error removing notification:', e);
+        }
+    };
+    
+    // Clear existing notifications of the same type
+    const existingNotifications = notificationArea.querySelectorAll(`.in-page-notification-${type}`);
     existingNotifications.forEach(notification => {
-        notification.remove();
+        notification.classList.add('removing');
+        setTimeout(() => safeRemove(notification), 300);
     });
     
     // Limit total notifications to 2
-    const allNotifications = notificationArea.querySelectorAll('.notification');
-    while (allNotifications.length >= 2) {
-        notificationArea.removeChild(allNotifications[0]);
+    const allNotifications = notificationArea.querySelectorAll('.in-page-notification');
+    if (allNotifications.length >= 2) {
+        const oldest = allNotifications[0];
+        oldest.classList.add('removing');
+        setTimeout(() => safeRemove(oldest), 300);
     }
     
+    // Create the new notification
     const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
+    notification.className = `in-page-notification in-page-notification-${type}`;
     
     let icon;
     switch(type) {
@@ -3443,32 +3498,39 @@ async function handleNfcReading({ serialNumber }) {
         default: icon = 'info-circle';
     }
     
-    notification.innerHTML = `
-        <i class="fas fa-${icon}"></i>
-        <div style="flex-grow:1;">
-            <strong>${title}</strong><br>
-            ${message}
-        </div>
-        <span class="notification-close" style="cursor:pointer; margin-left:10px;">&times;</span>
-    `;
+	notification.innerHTML = `
+		<i class="fas fa-${icon}"></i>
+		<div style="flex-grow:1;">
+			<strong>${title}</strong><br>
+			${message}
+		</div>
+		<button class="notification-close">&times;</button>
+	`;
     
     notificationArea.appendChild(notification);
     
     // Add click handler to close button
-    const closeBtn = notification.querySelector('.notification-close');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            notification.remove();
-        });
-    }
-    
-    // Auto-remove all notifications after a few seconds (except errors)
-    if (type !== 'error') {
+const closeBtn = notification.querySelector('.notification-close');
+if (closeBtn) {
+    closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        notification.classList.add('removing');
+        
+        // Wait for animation to complete before removing
         setTimeout(() => {
             if (notification.parentNode) {
-                notification.remove();
+                notification.parentNode.removeChild(notification);
             }
-        }, 3000);
+        }, 300); // Match this to your CSS transition duration
+    });
+}
+    
+    // Auto-remove non-error notifications
+    if (type !== 'error') {
+        setTimeout(() => {
+            notification.classList.add('removing');
+            setTimeout(() => safeRemove(notification), 300);
+        }, duration || 5000);
     }
 }
 
