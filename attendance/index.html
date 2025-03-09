@@ -6,11 +6,11 @@
     <title>Attendance</title>
 	<link rel="icon" href="https://bredliplaku.github.io/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js"></script>
+	<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js"></script>
     <!-- Google API client library -->
-    <script src="https://apis.google.com/js/api.js" defer></script>
-    <script src="https://accounts.google.com/gsi/client" defer></script>
+	<script src="https://apis.google.com/js/api.js" async defer></script>
+	<script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         :root {
             --primary-color: #3949ab;
@@ -28,6 +28,56 @@
 		*, *::before, *::after {
 			transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s ease;
 		}
+		/* Add these rules to your existing <style> section */
+.admin-only {
+    display: none !important;
+}
+
+body.is-admin .admin-only {
+    display: block !important;
+}
+
+body.is-admin .admin-only.inline-block {
+    display: inline-block !important;
+}
+
+body.is-admin th.admin-only,
+body.is-admin td.admin-only {
+    display: table-cell !important;
+}
+
+.content-hidden {
+    visibility: hidden;
+}
+
+.app-loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #f4f4f4;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.loading-spinner {
+    border: 5px solid rgba(57, 73, 171, 0.2);
+    border-top: 5px solid #3949ab;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
         body, html {
             margin: 0;
             padding: 0;
@@ -777,7 +827,11 @@
     </style>
 </head>
 <body>
-    <div class="container">
+<div id="app-loading" class="app-loading">
+    <div class="loading-spinner"></div>
+    <div>Calculating excuses per minute...</div>
+</div>
+    <div class="container content-hidden" id="main-container">
         <!-- Audio elements for scan sounds -->
         <audio id="success-sound" preload="auto">
             <source src="https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3?filename=right-answer-sound-effect-21301.mp3" type="audio/mpeg">
@@ -816,7 +870,7 @@
 
         
         <div class="app-header">
-            <h1><i class="fas fa-clipboard-list"></i> Attendance</h1>
+            <h1><i class="fa-solid fa-clipboard-user"></i> Attendance</h1>
             <h2>Track your attendance</h2>
             <div class="app-info">
                 <span class="info-item"><i class="fas fa-sync-alt"></i> <span id="total-scans">0</span> scans </span>
@@ -1048,175 +1102,225 @@
 	
 	let currentScopes = READONLY_SCOPE; // Initial scope (will be updated based on user role)
 	
+// Setup all event listeners in one place
+function setupEventListeners() {
+    // Set up tab navigation
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Prevent non-admin users from accessing the database tab
+            if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
+                return;
+            }
+            // Remove active class from all tabs and tab contents
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            // Add active class to clicked tab and corresponding content
+            tab.classList.add('active');
+            const tabId = tab.getAttribute('data-tab');
+            document.getElementById(tabId).classList.add('active');
+        });
+    });
+
+    // Button event listeners
+    const startScanBtn = document.getElementById('start-scan-btn');
+    const stopScanBtn = document.getElementById('stop-scan-btn');
+    const importExcelBtn = document.getElementById('import-excel-btn');
+    const excelInput = document.getElementById('excel-input');
+    const filterInput = document.getElementById('filter-input');
+    const sortSelect = document.getElementById('sort-select');
+    const dbFilterInput = document.getElementById('db-filter-input');
+    const importBtn = document.getElementById('import-btn');
+    const importInput = document.getElementById('import-input');
+    const exportBtn = document.getElementById('export-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const addLogBtn = document.getElementById('add-log-btn');
+    const addEntryBtn = document.getElementById('add-entry-btn');
+    const exportExcelBtn = document.getElementById('export-excel-btn');
+    const clearDbBtn = document.getElementById('clear-db-btn');
+    const syncBtn = document.getElementById('sync-btn');
+    const courseSelect = document.getElementById('course-select');
+    const toggleSoundBtn = document.getElementById('toggle-sound-btn');
+    
+    if (startScanBtn) startScanBtn.addEventListener('click', startScanning);
+    if (stopScanBtn) stopScanBtn.addEventListener('click', stopScanning);
+    if (importExcelBtn) importExcelBtn.addEventListener('click', () => excelInput.click());
+    if (excelInput) excelInput.addEventListener('change', handleExcelFile);
+    if (filterInput) filterInput.addEventListener('input', handleFilterChange);
+    if (sortSelect) sortSelect.addEventListener('change', handleSortChange);
+    if (dbFilterInput) dbFilterInput.addEventListener('input', handleDbFilterChange);
+    if (importBtn) importBtn.addEventListener('click', () => importInput.click());
+    if (importInput) importInput.addEventListener('change', handleImportFile);
+    if (exportBtn) exportBtn.addEventListener('click', exportLogs);
+    if (clearBtn) clearBtn.addEventListener('click', clearLogs);
+    if (addLogBtn) addLogBtn.addEventListener('click', showAddLogEntryDialog);
+    if (addEntryBtn) addEntryBtn.addEventListener('click', showAddEntryDialog);
+    if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportDatabaseToExcel);
+    if (clearDbBtn) clearDbBtn.addEventListener('click', clearDatabase);
+    if (syncBtn) syncBtn.addEventListener('click', syncData);
+    if (courseSelect) courseSelect.addEventListener('change', handleCourseChange);
+    
+    // Table header sort listeners
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.addEventListener('click', () => {
+            const sortKey = header.getAttribute('data-sort');
+            currentSort = (currentSort === `${sortKey}-asc`) ? `${sortKey}-desc` : `${sortKey}-asc`;
+            // Update sort dropdown to match
+            sortSelect.value = currentSort;
+            updateSortIcons();
+            updateLogsList();
+        });
+    });
+    
+    // Toggle sound button event
+    if (toggleSoundBtn) {
+        toggleSoundBtn.addEventListener('click', function() {
+            soundEnabled = !soundEnabled;
+            toggleSoundBtn.innerHTML = soundEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
+        });
+    }
+}
+
+// Function to show the main content when ready
+function showMainContent() {
+    const loadingIndicator = document.getElementById('app-loading');
+    const mainContainer = document.getElementById('main-container');
+    
+    if (loadingIndicator) {
+        loadingIndicator.style.opacity = '0';
+        loadingIndicator.style.transition = 'opacity 0.5s';
+        setTimeout(() => {
+            loadingIndicator.style.display = 'none';
+        }, 500);
+    }
+    
+    if (mainContainer) {
+        mainContainer.classList.remove('content-hidden');
+    }
+}
+
+// Check for auth redirect
+function checkAuthRedirect() {
+    // Handle auth redirect token at the very start
+    if (window.location.hash && window.location.hash.includes('access_token=')) {
+        console.log('Detected auth redirect with token');
+        
+        // Parse the hash parameters
+        const params = {};
+        window.location.hash.substring(1).split('&').forEach(pair => {
+            const [key, value] = pair.split('=');
+            params[key] = decodeURIComponent(value);
+        });
+        
+        if (params.access_token) {
+            console.log('Successfully extracted access token');
+            
+            // Set the token in gapi client (will happen after gapi is loaded)
+            const processToken = () => {
+                if (typeof gapi !== 'undefined' && gapi.client) {
+                    gapi.client.setToken({ access_token: params.access_token });
+                    localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
+                    isSignedIn = true;
+                    
+                    // Get user info and update UI
+                    fetchUserInfo()
+                        .then(() => {
+                            isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                            updateAuthUI();
+                            if (isOnline) {
+                                fetchAvailableCourses().catch(err => console.error('Error:', err));
+                                fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
+                            }
+                            showMainContent();
+                        })
+                        .catch(e => {
+                            console.error('Error fetching user info after redirect:', e);
+                            showMainContent();
+                        });
+                } else {
+                    // If gapi isn't loaded yet, try again shortly
+                    setTimeout(processToken, 100);
+                }
+            };
+            
+            // Start the token processing
+            processToken();
+            
+            // Clean up the URL to remove the token (for security)
+            if (history.replaceState) {
+                history.replaceState(null, null, window.location.pathname);
+            } else {
+                window.location.hash = '';
+            }
+        }
+    }
+}
+	
 	/**
 	 * Initialize the application.
 	 * Sets up event listeners, checks NFC support, and prepares the UI.
 	 */
 function init() {
-isInitializing = true;
-
-// Re-assign DOM elements
-const loginBtn = document.getElementById('login-btn');
-const logoutBtn = document.getElementById('logout-btn');
-const startScanBtn = document.getElementById('start-scan-btn');
-const stopScanBtn = document.getElementById('stop-scan-btn');
-const importExcelBtn = document.getElementById('import-excel-btn');
-const excelInput = document.getElementById('excel-input');
-const filterInput = document.getElementById('filter-input');
-const sortSelect = document.getElementById('sort-select');
-const dbFilterInput = document.getElementById('db-filter-input');
-const importBtn = document.getElementById('import-btn');
-const importInput = document.getElementById('import-input');
-const exportBtn = document.getElementById('export-btn');
-const clearBtn = document.getElementById('clear-btn');
-const addLogBtn = document.getElementById('add-log-btn');
-const addEntryBtn = document.getElementById('add-entry-btn');
-const exportExcelBtn = document.getElementById('export-excel-btn');
-const clearDbBtn = document.getElementById('clear-db-btn');
-const syncBtn = document.getElementById('sync-btn');
-const courseSelect = document.getElementById('course-select');
-const toggleSoundBtn = document.getElementById('toggle-sound-btn');
-
-// Update current year in footer
-updateYear();
-
-// Set up online/offline listeners
-updateOnlineStatus();
-window.addEventListener('online', updateOnlineStatus);
-window.addEventListener('offline', updateOnlineStatus);
-
-// HANDLE AUTH REDIRECT FIRST - Check if this is a return from authentication
-if (window.location.hash && window.location.hash.includes('access_token=')) {
-	console.log('Detected auth redirect with token');
-	
-	// Parse the hash parameters
-	const params = {};
-	window.location.hash.substring(1).split('&').forEach(pair => {
-		const [key, value] = pair.split('=');
-		params[key] = decodeURIComponent(value);
-	});
-	
-	if (params.access_token) {
-		console.log('Successfully extracted access token');
-		
-		// Set the token in gapi client (will happen after gapi is loaded)
-		const processToken = () => {
-			if (typeof gapi !== 'undefined' && gapi.client) {
-				gapi.client.setToken({ access_token: params.access_token });
-				localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-				isSignedIn = true;
-				
-				// Get user info and update UI
-				fetchUserInfo()
-					.then(() => {
-						isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-						updateAuthUI();
-						if (isOnline) {
-							fetchAvailableCourses().catch(err => console.error('Error:', err));
-							fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
-						}
-					})
-					.catch(e => {
-						console.error('Error fetching user info after redirect:', e);
-					});
-			} else {
-				// If gapi isn't loaded yet, try again shortly
-				setTimeout(processToken, 100);
-			}
-		};
-		
-		// Start the token processing
-		processToken();
-		
-		// Clean up the URL to remove the token (for security)
-		if (history.replaceState) {
-			history.replaceState(null, null, window.location.pathname);
-		} else {
-			window.location.hash = '';
-		}
-	}
-}
-
-// Check if NFC is supported
-if (!('NDEFReader' in window)) {
-	nfcSupported = false;
-	// Only show notification on mobile devices where NFC might be expected
-	const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-	if (isMobile) {
-		showImprovedNotification('warning', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
-	}
-	startScanBtn.style.display = 'none';
-	stopScanBtn.style.display = 'none';
-}
-
-// Set up tab navigation
-tabs.forEach(tab => {
-	tab.addEventListener('click', () => {
-		// Prevent non-admin users from accessing the database tab
-		if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
-			return;
-		}
-		// Remove active class from all tabs and tab contents
-		tabs.forEach(t => t.classList.remove('active'));
-		tabContents.forEach(c => c.classList.remove('active'));
-		// Add active class to clicked tab and corresponding content
-		tab.classList.add('active');
-		const tabId = tab.getAttribute('data-tab');
-		document.getElementById(tabId).classList.add('active');
-	});
-});
-
-// Add event listeners for buttons and inputs
-startScanBtn.addEventListener('click', startScanning);
-stopScanBtn.addEventListener('click', stopScanning);
-importExcelBtn.addEventListener('click', () => excelInput.click());
-excelInput.addEventListener('change', handleExcelFile);
-filterInput.addEventListener('input', handleFilterChange);
-sortSelect.addEventListener('change', handleSortChange);
-dbFilterInput.addEventListener('input', handleDbFilterChange);
-importBtn.addEventListener('click', () => importInput.click());
-importInput.addEventListener('change', handleImportFile);
-exportBtn.addEventListener('click', exportLogs);
-clearBtn.addEventListener('click', clearLogs);
-addLogBtn.addEventListener('click', showAddLogEntryDialog);
-addEntryBtn.addEventListener('click', showAddEntryDialog);
-exportExcelBtn.addEventListener('click', exportDatabaseToExcel);
-clearDbBtn.addEventListener('click', clearDatabase);
-syncBtn.addEventListener('click', syncData);
-courseSelect.addEventListener('change', handleCourseChange);
-
-// Set up sortable table headers
-document.querySelectorAll('.sortable').forEach(header => {
-	header.addEventListener('click', () => {
-		const sortKey = header.getAttribute('data-sort');
-		currentSort = (currentSort === `${sortKey}-asc`) ? `${sortKey}-desc` : `${sortKey}-asc`;
-		// Update sort dropdown to match
-		sortSelect.value = currentSort;
-		updateSortIcons();
-		updateLogsList();
-	});
-});
-
-// Toggle sound button event
-toggleSoundBtn.addEventListener('click', function() {
-	soundEnabled = !soundEnabled;
-	toggleSoundBtn.innerHTML = soundEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
-});
-
-// Add event listeners for authentication buttons
-loginBtn.addEventListener('click', handleAuthClick);
-logoutBtn.addEventListener('click', handleSignoutClick);
-
-// Update UI to show the initial state
-updateUI();
-
-// Wait a reasonable time before showing non-critical errors
-setTimeout(() => {
-	isInitializing = false;
-	criticalErrorsOnly = false;
-	// Process any pending notifications
-	processPendingNotifications();
-}, 3000);
+    isInitializing = true;
+    
+    // Update current year in footer
+    updateYear();
+    
+    // Set up online/offline listeners
+    updateOnlineStatus();
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    
+    // Check if NFC is supported
+    nfcSupported = 'NDEFReader' in window;
+    if (!nfcSupported) {
+        // Only show notification on mobile devices where NFC might be expected
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+            pendingNotifications.push({
+                type: 'warning',
+                title: 'NFC Unsupported',
+                message: 'NFC scanning is only supported in Chrome on Android.'
+            });
+        }
+    }
+    
+    // Set up event listeners
+    setupEventListeners();
+    
+    // Handle auth redirect
+    checkAuthRedirect();
+    
+    // Initialize Google API with shorter timeout
+    setTimeout(() => {
+        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+            initGoogleApi();
+        } else {
+            console.warn('Google API objects not available yet, waiting longer...');
+            
+            // Try again with a shorter timeout
+            setTimeout(() => {
+                if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+                    console.log('Google API objects loaded after extended wait');
+                    initGoogleApi();
+                } else {
+                    console.error('Google API objects still not available after extended wait');
+                    showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Please check your internet connection or try using a different browser.');
+                    availableCourses = [];
+                    populateCourseDropdown();
+                    updateAuthUI();
+                    showMainContent();
+                }
+            }, 1000);
+        }
+    }, 500);
+    
+    // Show content after a reasonable timeout even if auth fails
+    setTimeout(() => {
+        showMainContent();
+        isInitializing = false;
+        criticalErrorsOnly = false;
+        processPendingNotifications();
+    }, 2000);
 }
 
 function processPendingNotifications() {
@@ -1568,177 +1672,121 @@ try {
 }
 
 function updateAuthUI() {
-console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
-
-// Hide everything by default - prevent flash of content
-document.querySelector('.course-buttons-container').style.display = 'none';
-const scannerModule = document.querySelector('.module');
-if (scannerModule) {
-	scannerModule.id = 'scanner-module';
-	scannerModule.style.display = 'none';
-}
-
-// Get the tabs container
-const tabsContainer = document.querySelector('.tabs');
-if (tabsContainer) {
-	// Show tabs only for admin
-	tabsContainer.style.display = isAdmin ? 'flex' : 'none';
-}
-
-// Show login/logout controls for all users
-loginContainer.style.display = isSignedIn ? 'none' : 'flex';
-userContainer.style.display = isSignedIn ? 'flex' : 'none';
-
-// Show content based on authentication state
-if (isSignedIn) {
-	// Show course buttons for signed-in users
-	document.querySelector('.course-buttons-container').style.display = 'flex';
-	
-	// Show scanner module for signed-in users
-	if (scannerModule) {
-		scannerModule.style.display = 'block';
-	}
-}
-
-// Guest Mode (Not signed in)
-if (!isSignedIn) {
-	// Create or update the not-signed-in message
-	let notSignedInMsg = document.getElementById('not-signed-in-message');
-	if (!notSignedInMsg) {
-		notSignedInMsg = document.createElement('div');
-		notSignedInMsg.id = 'not-signed-in-message';
-		notSignedInMsg.className = 'not-signed-in-message';
-		
-		// Insert after the app header
-		const appHeader = document.querySelector('.app-header');
-		if (appHeader && appHeader.nextSibling) {
-			appHeader.parentNode.insertBefore(notSignedInMsg, appHeader.nextSibling.nextSibling);
-		} else if (appHeader) {
-			appHeader.parentNode.appendChild(notSignedInMsg);
-		}
-	}
-	
-	if (lastScannedUID) {
-		// Show last scanned UID
-		notSignedInMsg.innerHTML = `
-			<h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
-			<h3 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h3>
-		`;
-	} else {
-		// Default welcome message
-		notSignedInMsg.innerHTML = `
-			<h3><i class="fas fa-info-circle"></i> Welcome to Attendance Tracker</h3>
-			<p>Please sign in with your <b>EPOKA Mail</b> to track your attendance.</p>
-		`;
-	}
-	
-	// Hide UI elements except scan button
-	document.querySelector('.logs-header').style.display = 'none';
-	document.querySelector('.filter-container').style.display = 'none';
-	document.querySelector('.table-container').style.display = 'none';
-	
-	// Show scan button, but nothing else
-	if (nfcSupported) {
-		startScanBtn.style.display = isScanning ? 'none' : 'flex';
-		stopScanBtn.style.display = isScanning ? 'flex' : 'none';
-	} else {
-		startScanBtn.style.display = 'none';
-		stopScanBtn.style.display = 'none';
-	}
-}
-// Read-Only Mode (Signed in as non-admin)
-// Read-Only Mode (Signed in as non-admin)
-else if (isSignedIn && !isAdmin) {
-// Show UI elements for non-admin users
-document.querySelector('.logs-header').style.display = 'flex';
-document.querySelector('.filter-container').style.display = 'flex';
-document.querySelector('.table-container').style.display = 'block';
-
-// Hide scan button for non-admin users
-startScanBtn.style.display = 'none';
-stopScanBtn.style.display = 'none';
-
-// Hide Export button for non-admin users
-exportBtn.style.display = 'none';
-
-// Hide UID column but keep date column
-document.querySelectorAll('.uid-column').forEach(col => {
-	col.style.display = 'none';
-});
-
-// Keep date column visible for better grouping
-document.querySelectorAll('.date-column').forEach(col => {
-	col.style.display = 'table-cell';
-});
-
-// Modify sort dropdown to show date and name options
-updateSortOptions(true, true);
-
-// Remove any not-signed-in message if it exists
-const notSignedInMsg = document.getElementById('not-signed-in-message');
-if (notSignedInMsg) {
-	notSignedInMsg.remove();
-}
-}
-// Admin Mode (Signed in as admin)
-else if (isAdmin) {
-	// Show all UI elements for admin users
-	document.querySelector('.logs-header').style.display = 'flex';
-	document.querySelector('.filter-container').style.display = 'flex';
-	document.querySelector('.table-container').style.display = 'block';
-	
-	// Show scan buttons only if NFC is supported
-	if (nfcSupported) {
-		startScanBtn.style.display = isScanning ? 'none' : 'flex';
-		stopScanBtn.style.display = isScanning ? 'flex' : 'none';
-	} else {
-		startScanBtn.style.display = 'none';
-		stopScanBtn.style.display = 'none';
-	}
-	
-	// Show Export button for admin users
-	exportBtn.style.display = 'inline-block';
-	
-	// Show all columns for admin users
-	document.querySelectorAll('.uid-column').forEach(col => {
-		col.style.display = 'table-cell';
-	});
-	document.querySelectorAll('.date-column').forEach(col => {
-		col.style.display = 'table-cell';
-	});
-	
-	// Show all sort options for admin users
-	updateSortOptions(true, true);
-	
-	// Show all admin-only elements
-	document.querySelectorAll('.admin-only').forEach(el => {
-		if (el.classList.contains('tab')) return; // already handled above
-		if (el.tagName === 'TH' || el.tagName === 'TD') {
-			el.style.display = 'table-cell';
-		} else {
-			el.style.display = 'inline-block';
-		}
-	});
-	
-	// Remove any not-signed-in message if it exists
-	const notSignedInMsg = document.getElementById('not-signed-in-message');
-	if (notSignedInMsg) {
-		notSignedInMsg.remove();
-	}
-}
-
-// Update sync button visibility (admin only)
-syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
-syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
-
-// Update empty logs message for signed-in users
-if (isSignedIn) {
-	if (!currentCourse) {
-		emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
-	} else if (logs.length === 0) {
-		emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
-	}
-}
+    console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
+    
+    // Add class to body to trigger CSS display rules
+    document.body.classList.toggle('is-admin', isAdmin);
+    
+    // Get elements that need direct manipulation
+    const loginContainer = document.getElementById('login-container');
+    const userContainer = document.getElementById('user-container');
+    const tabsContainer = document.querySelector('.tabs');
+    const courseButtonsContainer = document.querySelector('.course-buttons-container');
+    const scannerModule = document.querySelector('.module');
+    
+    // Show/hide main containers based on auth state
+    if (loginContainer) loginContainer.style.display = isSignedIn ? 'none' : 'flex';
+    if (userContainer) userContainer.style.display = isSignedIn ? 'flex' : 'none';
+    if (tabsContainer) tabsContainer.style.display = isAdmin ? 'flex' : 'none';
+    if (courseButtonsContainer) courseButtonsContainer.style.display = isSignedIn ? 'flex' : 'none';
+    
+    // Handle scanner and scan buttons
+    if (scannerModule) {
+        scannerModule.style.display = isSignedIn ? 'block' : 'none';
+    }
+    
+    // Handle scan buttons based on NFC support and admin status
+    const startScanBtn = document.getElementById('start-scan-btn');
+    const stopScanBtn = document.getElementById('stop-scan-btn');
+    
+    if (startScanBtn && stopScanBtn) {
+        if (nfcSupported && isSignedIn && isAdmin) {
+            startScanBtn.style.display = isScanning ? 'none' : 'flex';
+            stopScanBtn.style.display = isScanning ? 'flex' : 'none';
+        } else {
+            startScanBtn.style.display = 'none';
+            stopScanBtn.style.display = 'none';
+        }
+    }
+    
+    // Handle guest mode UI
+    if (!isSignedIn) {
+        // Create or update the not-signed-in message
+        let notSignedInMsg = document.getElementById('not-signed-in-message');
+        if (!notSignedInMsg) {
+            notSignedInMsg = document.createElement('div');
+            notSignedInMsg.id = 'not-signed-in-message';
+            notSignedInMsg.className = 'not-signed-in-message';
+            
+            // Insert after the app header
+            const appHeader = document.querySelector('.app-header');
+            if (appHeader && appHeader.nextSibling) {
+                appHeader.parentNode.insertBefore(notSignedInMsg, appHeader.nextSibling.nextSibling);
+            } else if (appHeader) {
+                appHeader.parentNode.appendChild(notSignedInMsg);
+            }
+        }
+        
+        if (lastScannedUID) {
+            // Show last scanned UID
+            notSignedInMsg.innerHTML = `
+                <h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
+                <h3 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h3>
+            `;
+        } else {
+            // Default welcome message
+            notSignedInMsg.innerHTML = `
+                <h3><i class="fas fa-info-circle"></i> Welcome to Attendance Tracker</h3>
+                <p>Please sign in with your <b>EPOKA Mail</b> to track your attendance.</p>
+            `;
+        }
+        
+        // Hide UI elements except scan button
+        const logsHeader = document.querySelector('.logs-header');
+        const filterContainer = document.querySelector('.filter-container');
+        const tableContainer = document.querySelector('.table-container');
+        
+        if (logsHeader) logsHeader.style.display = 'none';
+        if (filterContainer) filterContainer.style.display = 'none';
+        if (tableContainer) tableContainer.style.display = 'none';
+    } else {
+        // Remove not-signed-in message if exists
+        const notSignedInMsg = document.getElementById('not-signed-in-message');
+        if (notSignedInMsg) {
+            notSignedInMsg.remove();
+        }
+        
+        // Show UI elements for signed-in users
+        const logsHeader = document.querySelector('.logs-header');
+        const filterContainer = document.querySelector('.filter-container');
+        const tableContainer = document.querySelector('.table-container');
+        
+        if (logsHeader) logsHeader.style.display = 'flex';
+        if (filterContainer) filterContainer.style.display = 'flex';
+        if (tableContainer) tableContainer.style.display = 'block';
+        
+        // Show/hide UID columns based on admin status
+        document.querySelectorAll('.uid-column').forEach(col => {
+            col.style.display = isAdmin ? 'table-cell' : 'none';
+        });
+    }
+    
+    // Update sync button visibility (admin only)
+    const syncBtn = document.getElementById('sync-btn');
+    if (syncBtn) {
+        syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+        syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    }
+    
+    // Update empty logs message for signed-in users
+    const emptyLogs = document.getElementById('empty-logs');
+    if (emptyLogs && isSignedIn) {
+        if (!currentCourse) {
+            emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+        } else if (logs.length === 0) {
+            emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
+        }
+    }
 }
 
 	/**
@@ -1839,7 +1887,7 @@ if (isOnline) {
 			// On error, reset title back to default
 			const titleElement = document.querySelector('h1');
 			if (titleElement) {
-				titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
+				titleElement.innerHTML = `<i class="fa-solid fa-clipboard-user"></i> Attendance`;
 			}
 			
 			// Only show error if we're past initialization
@@ -2058,9 +2106,9 @@ if (currentCourse && currentCourse !== 'Default') {
 		.replace(/_/g, ' ')
 		.replace(/\b\w/g, l => l.toUpperCase());
 	
-	titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> ${formattedCourse} Attendance`;
+	titleElement.innerHTML = `<i class="fa-solid fa-clipboard-user"></i> ${formattedCourse} Attendance`;
 } else {
-	titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
+	titleElement.innerHTML = `<i class="fa-solid fa-clipboard-user"></i> Attendance`;
 }
 }
 	
