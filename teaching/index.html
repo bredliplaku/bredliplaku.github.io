@@ -460,6 +460,16 @@
     .content-hidden {
         visibility: hidden;
     }
+
+    .main-loading-spinner {
+        border: 8px solid rgba(57, 73, 171, 0.2);
+        border-top: 8px solid #3949ab;
+        border-radius: 50%;
+        width: 80px;
+        height: 80px;
+        animation: spin 1s linear infinite;
+        margin-bottom: 20px;
+    }
     
     @media (max-width: 500px) {
         .module-header {
@@ -478,8 +488,8 @@
 </head>
 <body>
     <div id="app-loading" class="app-loading">
-        <img src="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/loading.gif" alt="Loading Cat" style="width: 200px; height: 200px;">
-        <div style="margin-top: 10px; font-size: 14px; color: #666;">Meow loading...</div>
+        <div class="main-loading-spinner"></div>
+        <div style="margin-top: 10px; font-size: 16px; color: #666;">Loading course materials...</div>
     </div>
 
     <div class="container content-hidden" id="main-container">
@@ -505,7 +515,7 @@
                 <span class="info-item"><i class="fas fa-user-circle"></i> Mr. Bredli Plaku</span>
                 <span class="info-item"><i class="fas fa-calendar-check"></i> <span id="course-semester">Loading...</span></span>
                 <span class="info-item"><i class="fas fa-graduation-cap"></i> <span id="course-level">Loading...</span></span>
-                <span class="info-item"><i class="fas fa-exclamation-circle"></i> <span id="course-type">Loading...</span></span>
+                <span id="course-type-container" class="info-item"><i class="fas fa-exclamation-circle"></i> <span id="course-type">Loading...</span></span>
                 <span class="info-item"><i class="fas fa-trophy"></i> <span id="course-credits">Loading...</span></span>
                 <span class="info-item"><i class="fas fa-calendar"></i> <span id="course-duration">Loading...</span></span>
             </div>
@@ -594,13 +604,13 @@ function init() {
         }
     }, 1000);
     
-    // Show content after a timeout even if auth fails
+    // Show content after a longer timeout to ensure resources are loaded
     setTimeout(() => {
         showMainContent();
         isInitializing = false;
         criticalErrorsOnly = false;
         processPendingNotifications();
-    }, 3000);
+    }, 5000);
 }
 
 /**
@@ -987,6 +997,13 @@ async function fetchAvailableCourses() {
 }
 
 /**
+ * Format course code for display (replace underscores with spaces)
+ */
+function formatCourseCode(code) {
+    return code.replace(/_/g, ' ');
+}
+
+/**
  * Populate course buttons for course selection.
  */
 function populateCourseButtons() {
@@ -1003,10 +1020,11 @@ function populateCourseButtons() {
             // Add buttons for all available courses
             availableCourses.forEach(sheetName => {
                 const courseCode = courseMap[sheetName] || sheetName;
+                const formattedCode = formatCourseCode(courseCode);
                 
                 const button = document.createElement('div');
                 button.className = 'course-button' + (currentCourse === sheetName ? ' active' : '');
-                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${courseCode}`;
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${formattedCode}`;
                 button.setAttribute('data-sheet', sheetName);
                 button.addEventListener('click', () => {
                     selectCourse(sheetName);
@@ -1019,9 +1037,11 @@ function populateCourseButtons() {
             
             // Fallback to sheet names if course codes are unavailable
             availableCourses.forEach(sheetName => {
+                const formattedName = formatCourseCode(sheetName);
+                
                 const button = document.createElement('div');
                 button.className = 'course-button' + (currentCourse === sheetName ? ' active' : '');
-                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${sheetName}`;
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${formattedName}`;
                 button.setAttribute('data-sheet', sheetName);
                 button.addEventListener('click', () => {
                     selectCourse(sheetName);
@@ -1099,7 +1119,7 @@ function selectCourse(sheetName) {
         .then(data => {
             if (data) {
                 // Update document title with course code
-                document.title = data.metadata.code ? `${data.metadata.code} | Course Materials` : 'Course Materials';
+                document.title = data.metadata.code ? `${formatCourseCode(data.metadata.code)} | Course Materials` : 'Course Materials';
                 
                 // Update course metadata
                 updateCourseMetadata(data.metadata);
@@ -1113,7 +1133,7 @@ function selectCourse(sheetName) {
                     header.addEventListener('click', () => toggleModule(header.parentNode));
                 });
                 
-                showImprovedNotification('success', 'Course Loaded', `${data.metadata.code || sheetName} materials loaded successfully`);
+                showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
             } else {
                 document.getElementById('course-content').innerHTML = `
                     <div class="empty-content">
@@ -1211,8 +1231,9 @@ function processCourseData(rows) {
                 icon: row[1] || 'far fa-file',
                 title: row[2] || 'Untitled Material',
                 description: row[3] || '',
-                viewLink: row[4] || '#',
-                downloadLink: row[5] || ''
+                viewLink: row[4] || '',
+                downloadLink: row[5] || '',
+                openLink: row[6] || ''
             });
         } else if (type === 'funfact' && currentModule) {
             // Add fun fact to current module
@@ -1229,13 +1250,31 @@ function processCourseData(rows) {
  * Update the course metadata in the UI.
  */
 function updateCourseMetadata(metadata) {
-    document.getElementById('course-code').textContent = metadata.code || 'Course Code';
+    // Update course code - make sure to format it by replacing underscores with spaces
+    const formattedCode = metadata.code ? formatCourseCode(metadata.code) : 'Course Code';
+    document.getElementById('course-code').textContent = formattedCode;
+    
+    // Update other metadata fields
     document.getElementById('course-title').textContent = metadata.title || 'Course Title';
     document.getElementById('course-semester').textContent = metadata.semester || 'Unknown Semester';
     document.getElementById('course-level').textContent = metadata.level || 'Undergraduate';
-    document.getElementById('course-type').textContent = metadata.type || 'Compulsory';
     document.getElementById('course-credits').textContent = metadata.credits || '5 ECTS';
     document.getElementById('course-duration').textContent = metadata.duration || '16 weeks';
+    
+    // Update course type and icon
+    const courseType = metadata.type || 'Compulsory';
+    document.getElementById('course-type').textContent = courseType;
+    
+    // Change icon if course is elective
+    const courseTypeContainer = document.getElementById('course-type-container');
+    if (courseTypeContainer) {
+        // Update the icon based on course type
+        if (courseType.toLowerCase() === 'elective') {
+            courseTypeContainer.innerHTML = '<i class="far fa-circle"></i> <span id="course-type">Elective</span>';
+        } else {
+            courseTypeContainer.innerHTML = '<i class="fas fa-exclamation-circle"></i> <span id="course-type">Compulsory</span>';
+        }
+    }
     
     // Update week counter and progress bar if dates provided
     if (metadata.startdate && metadata.enddate) {
@@ -1257,11 +1296,17 @@ function generateCourseContentHtml(modules) {
     let html = '';
     
     modules.forEach(module => {
+        const moduleLabel = module.moduleNumber ? 
+            (module.moduleNumber.toString().toLowerCase().includes('chapter') ? 
+                `Chapter ${module.moduleNumber.replace(/chapter/i, '').trim()}` : 
+                `Module ${module.moduleNumber}`) : 
+            '';
+            
         html += `
         <div class="module${module.isActive ? ' active' : ''}">
             <div class="module-header">
                 <span class="module-title"><i class="${module.icon}"></i>&nbsp;&nbsp;${module.title}</span>
-                <span class="module-chapter">${module.moduleNumber ? 'Module ' + module.moduleNumber : ''}&nbsp;&nbsp;<i class="fas fa-chevron-down"></i></span>
+                <span class="module-chapter">${moduleLabel}&nbsp;&nbsp;<i class="fas fa-chevron-down"></i></span>
             </div>
             <div class="module-content">
         `;
@@ -1278,14 +1323,19 @@ function generateCourseContentHtml(modules) {
                     <div class="course-actions">
             `;
             
-            // Only add View button if link is provided and not '#'
-            if (material.viewLink && material.viewLink !== '#') {
+            // Add View button if link is provided
+            if (material.viewLink && material.viewLink.trim() !== '') {
                 html += `<button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i> View</button>`;
             }
             
-            // Only add Download button if link is provided
-            if (material.downloadLink && material.downloadLink !== '#') {
+            // Add Download button if link is provided
+            if (material.downloadLink && material.downloadLink.trim() !== '') {
                 html += `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-download btn-green"><i class="far fa-save"></i> Download</button>`;
+            }
+            
+            // Add Open button if link is provided
+            if (material.openLink && material.openLink.trim() !== '') {
+                html += `<button onclick="window.open('${material.openLink}', '_blank', 'noopener,noreferrer')" class="btn-orange"><i class="fas fa-external-link-alt"></i> Open</button>`;
             }
             
             html += `
