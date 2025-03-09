@@ -645,6 +645,14 @@ iframe {
             <div class="progress-bar">
                 <div class="progress" id="progress-bar"></div>
             </div>
+<div id="gradeDistributionContainer" class="grade-distribution-container">
+    <div class="grade-distribution-content">
+        <div class="distribution-wrapper">
+            <div id="distribution-legend" class="distribution-legend"></div>
+            <div id="distribution-bar" class="distribution-bar"></div>
+        </div>
+    </div>
+</div>
         </div>
         
 <div id="course-buttons-container" class="course-buttons-container">
@@ -657,28 +665,15 @@ iframe {
     <button id="evaluation-btn" style="display: none;" class="btn-green"><i class="fas fa-chart-pie"></i> Evaluation Criteria</button>
 </div>
 
-<!-- Timetable form and iframe -->
-<div class="course-schedule" id="timetable-container" style="display: none;">
-    <!-- Form that will be submitted via the buttons -->
+<div class="course-schedule" id="timetable-container">
     <form id="timetable-form" action="https://eis.epoka.edu.al/publictimetable" method="POST" target="timetable-iframe">
         <input type="hidden" name="form[timetable]" id="timetable-id-input" value="161">
         <input type="hidden" id="class-select" name="form[programGrade]" value="27">
         <input type="hidden" name="form[_token]" value="your_csrf_token_here">
     </form>
 
-    <!-- Iframe to load the timetable -->
     <div class="iframe-container" id="iframe-container">    
         <iframe id="timetable-iframe" name="timetable-iframe"></iframe>
-    </div>
-</div>
-
-<!-- Evaluation criteria container -->
-<div id="gradeDistributionContainer" class="grade-distribution-container" style="max-height: 0; overflow: hidden; transition: max-height 0.5s ease-out;">
-    <div class="grade-distribution-content">
-        <div class="distribution-wrapper">
-            <div id="distribution-legend" class="distribution-legend"></div>
-            <div id="distribution-bar" class="distribution-bar"></div>
-        </div>
     </div>
 </div>
         
@@ -1148,6 +1143,8 @@ async function fetchAvailableCourses() {
     }
 }
 
+
+
 /**
  * Format course code for display (replace underscores with spaces)
  */
@@ -1476,6 +1473,18 @@ if (hasEvaluationData(metadata)) {
 } else {
     evaluationBtn.style.display = 'none';
 }
+// Update form values from metadata
+if (metadata.timetable_id) {
+    document.getElementById('timetable-id-input').value = metadata.timetable_id;
+}
+if (metadata.class_id) {
+    document.getElementById('class-select').value = metadata.class_id;
+}
+
+// Update UI for buttons based on available metadata
+document.getElementById('announcements-btn').style.display = metadata.chat_link ? 'inline-block' : 'none';
+document.getElementById('timetable-btn').style.display = metadata.timetable_enabled === 'true' ? 'inline-block' : 'none';
+document.getElementById('evaluation-btn').style.display = hasEvaluationData(metadata) ? 'inline-block' : 'none';
 }
 
 /**
@@ -1592,34 +1601,42 @@ function updateWeekProgress(startDate = "2025-02-24", endDate = "2025-06-14", ho
  * Toggle timetable display
  */
 function toggleTimetable() {
-    var iframeContainer = document.getElementById("iframe-container");
-    var button = document.getElementById("timetable-btn");
-    var timetableContainer = document.getElementById("timetable-container");
-
-    if (!timetableContainer.style.display || timetableContainer.style.display === 'none') {
-        // First time showing
-        timetableContainer.style.display = 'block';
+    const iframeContainer = document.getElementById("iframe-container");
+    const button = document.getElementById("timetable-btn");
+    
+    if (!iframeContainer.classList.contains('visible')) {
         document.getElementById('timetable-form').submit();
-    }
-
-    if (iframeContainer.classList.contains('visible')) {
-        iframeContainer.classList.remove('visible');
-        button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
-    } else {
         iframeContainer.classList.add('visible');
         button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Timetable';
+    } else {
+        iframeContainer.classList.remove('visible');
+        button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
     }
 }
 
 /**
- * Check if metadata contains evaluation data
+ * Check if metadata contains any evaluation data
  */
 function hasEvaluationData(metadata) {
-    return metadata.midterm_percentage || 
-           metadata.final_percentage || 
-           metadata.hw1_percentage || 
-           metadata.hw2_percentage || 
-           metadata.quiz1_percentage;
+    const evaluationKeys = [
+        'midterm_percentage', 'final_percentage', 
+        'hw1_percentage', 'hw2_percentage', 'hw3_percentage', 'hw4_percentage',
+        'quiz1_percentage', 'quiz2_percentage', 'quiz3_percentage', 'quiz4_percentage',
+        'term_project_percentage', 'project1_percentage', 'project2_percentage',
+        'attendance_percentage'
+    ];
+    
+    return evaluationKeys.some(key => parseInt(metadata[key]) > 0);
+}
+
+/**
+ * Open announcements link in new tab
+ */
+function openAnnouncements() {
+    const metadata = courseData.metadata || {};
+    if (metadata.chat_link) {
+        window.open(metadata.chat_link, '_blank', 'noopener,noreferrer');
+    }
 }
 
 /**
@@ -1629,10 +1646,11 @@ function toggleGradeDistribution() {
     const container = document.getElementById('gradeDistributionContainer');
     const button = document.getElementById('evaluation-btn');
     
-    if (container.style.maxHeight && container.style.maxHeight !== '0px') {
+    if (container.style.maxHeight) {
         container.style.maxHeight = null;
         button.innerHTML = '<i class="fas fa-chart-pie"></i> Evaluation Criteria';
     } else {
+        generateGradeDistribution(courseData.metadata);
         container.style.maxHeight = container.scrollHeight + "px";
         button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Evaluation Criteria';
     }
@@ -1650,7 +1668,7 @@ function generateGradeDistribution(metadata) {
     
     let cumulativeWidth = 0;
     
-    // Define assessment categories
+    // Define assessment categories with all possible placeholders
     const assessments = [
         {
             name: 'Homework',
@@ -1673,10 +1691,25 @@ function generateGradeDistribution(metadata) {
             ]
         },
         {
-            name: 'Project',
+            name: 'Term Project',
             colors: ['#4caf50'],
             items: [
-                { key: 'project_percentage', label: 'Project' }
+                { key: 'term_project_percentage', label: 'Term Project' }
+            ]
+        },
+        {
+            name: 'Projects',
+            colors: ['#9c27b0', '#8e24aa'],
+            items: [
+                { key: 'project1_percentage', label: 'Project 1' },
+                { key: 'project2_percentage', label: 'Project 2' }
+            ]
+        },
+        {
+            name: 'Attendance',
+            colors: ['#26a69a'],
+            items: [
+                { key: 'attendance_percentage', label: 'Attendance' }
             ]
         },
         {
@@ -1703,6 +1736,7 @@ function generateGradeDistribution(metadata) {
         assessment.items.forEach((item, index) => {
             const percentage = parseInt(metadata[item.key]) || 0;
             
+            // Only create segments for items with percentage > 0
             if (percentage > 0) {
                 const color = colors[colorIndex % colors.length];
                 
@@ -1725,6 +1759,7 @@ function generateGradeDistribution(metadata) {
             }
         });
         
+        // Only create legend item if this assessment type has any values > 0
         if (totalPercentage > 0) {
             // Create legend item
             const legendItem = document.createElement('div');
