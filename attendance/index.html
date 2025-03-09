@@ -892,9 +892,6 @@
         let availableCourses = []; // Will be populated from spreadsheet
         let isOnline = navigator.onLine;
         let isSyncing = false;
-		let pendingRequests = [];
-		let initialSignIn = true;
-		let currentScopes = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
         
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -936,9 +933,9 @@
         const userContainer = document.getElementById('user-container');
         const userName = document.getElementById('user-name');
         const userAvatar = document.getElementById('user-avatar');
-		const READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 		const ADMIN_SCOPE = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 		const TOKEN_SCOPE_KEY = 'token_scope_granted';
+		const AUTO_SIGNIN_KEY = 'prevent_auto_signin';
         
         /**
          * Initialize the application.
@@ -968,13 +965,10 @@ function init() {
     const courseSelect = document.getElementById('course-select');
     const toggleSoundBtn = document.getElementById('toggle-sound-btn');
 
-	handleAuthRedirect();
-	addNotificationStyles();
-
     // Update current year in footer
     updateYear();
 
-    // Set up online/offline listeners
+   // Set up online/offline listeners
     updateOnlineStatus();
     window.addEventListener('online', function() {
         console.log('You are online.');
@@ -984,46 +978,87 @@ function init() {
         console.log('You are offline.');
         updateOnlineStatus();
     });
-
-// Check if NFC is supported
-if (!('NDEFReader' in window)) {
-    nfcSupported = false;
     
-    // Only show notification on mobile devices where NFC might be expected
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isMobile) {
-        showImprovedNotification('warning', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
-    }
-    
-    // Hide scan buttons regardless
-    startScanBtn.style.display = 'none';
-    stopScanBtn.style.display = 'none';
-}
-
-// Modify your tab click handler
-tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        // Cancel any pending requests when switching tabs
-        pendingRequests.forEach(controller => {
-            try {
-                controller.abort();
-            } catch (e) {
-                console.log('Error aborting request:', e);
-            }
-        });
-        pendingRequests = [];
+    // HANDLE AUTH REDIRECT FIRST - Check if this is a return from authentication
+    if (window.location.hash && window.location.hash.includes('access_token=')) {
+        console.log('Detected auth redirect with token');
         
-        // Rest of your existing tab switching code...
-        if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
-            return;
+        // Parse the hash parameters
+        const params = {};
+        window.location.hash.substring(1).split('&').forEach(pair => {
+            const [key, value] = pair.split('=');
+            params[key] = decodeURIComponent(value);
+        });
+        
+        if (params.access_token) {
+            console.log('Successfully extracted access token');
+            
+            // Set the token in gapi client (will happen after gapi is loaded)
+            const processToken = () => {
+                if (typeof gapi !== 'undefined' && gapi.client) {
+                    gapi.client.setToken({ access_token: params.access_token });
+                    localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
+                    isSignedIn = true;
+                    
+                    // Get user info and update UI
+                    fetchUserInfo()
+                        .then(() => {
+                            isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                            updateAuthUI();
+                            if (isOnline) {
+                                fetchAvailableCourses().catch(err => console.error('Error:', err));
+                                fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
+                            }
+                        })
+                        .catch(e => {
+                            console.error('Error fetching user info after redirect:', e);
+                        });
+                } else {
+                    // If gapi isn't loaded yet, try again shortly
+                    setTimeout(processToken, 100);
+                }
+            };
+            
+            // Start the token processing
+            processToken();
+            
+            // Clean up the URL to remove the token (for security)
+            if (history.replaceState) {
+                history.replaceState(null, null, window.location.pathname);
+            } else {
+                window.location.hash = '';
+            }
         }
-        tabs.forEach(t => t.classList.remove('active'));
-        tabContents.forEach(c => c.classList.remove('active'));
-        tab.classList.add('active');
-        const tabId = tab.getAttribute('data-tab');
-        document.getElementById(tabId).classList.add('active');
+    }
+
+    // Check if NFC is supported
+    if (!('NDEFReader' in window)) {
+        nfcSupported = false;
+        // Only show notification on mobile devices where NFC might be expected
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+            showImprovedNotification('warning', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
+        }
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+    }
+
+    // Set up tab navigation
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Prevent non-admin users from accessing the database tab
+            if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
+                return;
+            }
+            // Remove active class from all tabs and tab contents
+            tabs.forEach(t => t.classList.remove('active'));
+            tabContents.forEach(c => c.classList.remove('active'));
+            // Add active class to clicked tab and corresponding content
+            tab.classList.add('active');
+            const tabId = tab.getAttribute('data-tab');
+            document.getElementById(tabId).classList.add('active');
+        });
     });
-});
 
     // Add event listeners for buttons and inputs
     startScanBtn.addEventListener('click', startScanning);
@@ -1069,14 +1104,32 @@ tabs.forEach(tab => {
     // Update UI to show the initial state
     updateUI();
 }
-
         
         /**
          * Initialize Google API client.
          * Set up auth token client and event listeners for login/logout.
          */
 function initGoogleApi() {
-    console.log('Initializing Google API...');
+ console.log('Initializing Google API...');
+    
+    // Handle auth redirect token at the very start
+    if (window.location.hash.includes('access_token=')) {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const token = params.get('access_token');
+        
+        if (token) {
+            console.log('Found token in URL, processing...');
+            localStorage.setItem('gapi_token', JSON.stringify({access_token: token}));
+            isSignedIn = true;
+            
+            // IMPORTANT: Force online status check after redirect
+            setTimeout(forceOnlineCheck, 500);
+            
+            // Clean URL
+            history.replaceState(null, null, window.location.pathname);
+        }
+    }
     
     // Set default courses
     availableCourses = [];
@@ -1321,87 +1374,20 @@ function handleTokenResponse(resp) {
          * Handle auth button click to sign in.
          */
 function handleAuthClick(e) {
-    if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
+    if (e) e.preventDefault();
     
     console.log('Auth button clicked');
+    showImprovedNotification('info', 'Signing In', 'Redirecting to Google...');
     
-    if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
-        console.error('Google Identity Services not loaded');
-        showImprovedNotification('error', 'Auth Error', 'Authentication not ready yet.');
-        return;
-    }
-    
-    // Store current URL to return to after auth
-    localStorage.setItem('auth_redirect_url', window.location.href);
-    
-    // Create OAuth URL with all required scopes
+    // Get redirect URI - use exact current page URL
     const redirectUri = window.location.origin + window.location.pathname;
-    const scopes = encodeURIComponent(ADMIN_SCOPE); // Use the broadest scope since we'll need it for admins
     
-    // Redirect to Google OAuth page (without forcing consent prompt)
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scopes}`;
-}
-
-// Add this function to handle the redirect back from Google
-function handleAuthRedirect() {
-    // Check if we have a token in the URL fragment
-    if (window.location.hash.includes('access_token=')) {
-        const params = new URLSearchParams(window.location.hash.substring(1));
-        const accessToken = params.get('access_token');
-        
-        if (accessToken) {
-            console.log('Received access token from redirect');
-            
-            // Set the token in gapi client
-            gapi.client.setToken({ access_token: accessToken });
-            
-            // Process authentication
-            isSignedIn = true;
-            localStorage.setItem('gapi_token', JSON.stringify({ access_token: accessToken }));
-            
-            // Get user info and continue the flow
-            fetchUserInfo()
-                .then(() => {
-                    // Check if user is admin
-                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-                    
-                    // Update UI and fetch data
-                    updateAuthUI();
-                    if (isOnline) {
-                        fetchAvailableCourses()
-                            .then(() => fetchDatabaseFromSheet())
-                            .then(() => {
-                                if (isAdmin) return syncData();
-                            })
-                            .catch(err => console.error('Error after sign-in:', err));
-                    }
-                    
-                    showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
-                })
-                .catch(error => {
-                    console.error('Error after redirect auth:', error);
-                    isSignedIn = false;
-                    localStorage.removeItem('gapi_token');
-                    updateAuthUI();
-                });
-            
-            // Clear the URL hash to remove the token
-            if (history.replaceState) {
-                history.replaceState(null, null, window.location.pathname);
-            } else {
-                window.location.hash = '';
-            }
-        }
-    }
-	// Set the exact redirect URI that matches what you added in Google Cloud Console
-    const redirectUri = "https://bredliplaku.com/attendance/";
+    // Create Google OAuth URL with scopes
+    const scopes = 'openid email profile https://www.googleapis.com/auth/spreadsheets';
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes)}`;
     
-    // Create OAuth URL
-    const scopes = encodeURIComponent(ADMIN_SCOPE);
-    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scopes}`;
+    // Redirect to Google login
+    window.location.href = authUrl;
 }
 
         
@@ -2056,153 +2042,6 @@ async function syncDatabaseToSheet() {
         }
         
 
-
-	function addNotificationStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
-        .in-page-notifications {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 10000;
-            width: 300px;
-            max-width: 90%;
-            pointer-events: auto; /* Changed from none */
-        }
-        
-        .in-page-notification {
-            background-color: white;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            animation: slide-in 0.3s ease-out forwards;
-            overflow: hidden;
-            display: flex;
-            align-items: flex-start;
-            opacity: 1;
-            transition: opacity 0.3s, transform 0.3s;
-        }
-        
-        .in-page-notification.removing {
-            opacity: 0;
-            transform: translateX(100%);
-        }
-        
-        @keyframes slide-in {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-        
-        /* Mobile adjustments */
-        @media (max-width: 600px) {
-            .in-page-notifications {
-                bottom: 10px;
-                left: 50%;
-                right: auto;
-                transform: translateX(-50%);
-                width: 90%;
-                max-width: 90%;
-            }
-            
-            .in-page-notification.removing {
-                transform: translateY(100%);
-            }
-            
-            @keyframes slide-in {
-                from {
-                    transform: translateY(100%);
-                    opacity: 0;
-                }
-                to {
-                    transform: translateY(0);
-                    opacity: 1;
-                }
-            }
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-
-
-        /**
-         * Show notification message.
-         * @param {string} type - Type of notification (success, error, warning, info).
-         * @param {string} title - Notification title.
-         * @param {string} message - Notification message.
-         */
-function showImprovedNotification(type, title, message, duration) {
-    // Don't show certain notifications
-    if (title === 'Courses Warning' && message === 'Using default course list') {
-        return;
-    }
-    
-    const notificationArea = document.getElementById('in-page-notification-area');
-    if (!notificationArea) return;
-    
-    // Limit to max 2 notifications at once
-    const existingNotifications = notificationArea.querySelectorAll('.in-page-notification');
-    if (existingNotifications.length >= 2) {
-        const oldest = existingNotifications[0];
-        oldest.classList.add('removing');
-        setTimeout(() => {
-            if (oldest.parentNode) oldest.parentNode.removeChild(oldest);
-        }, 300);
-    }
-    
-    const notification = document.createElement('div');
-    notification.className = `in-page-notification in-page-notification-${type}`;
-    
-    let icon;
-    switch(type) {
-        case 'success': icon = 'check-circle'; break;
-        case 'error': icon = 'times-circle'; break;
-        case 'warning': icon = 'exclamation-circle'; break;
-        default: icon = 'info-circle';
-    }
-    
-    notification.innerHTML = `
-        <i class="fas fa-${icon}"></i>
-        <div style="flex-grow:1;">
-            <strong>${title}</strong><br>
-            ${message}
-        </div>
-        <button class="notification-close" style="background: none; border: none; cursor: pointer; padding: 0 5px; font-size: 18px;">&times;</button>
-    `;
-    
-    notificationArea.appendChild(notification);
-    
-    // Add click handler to close button
-    const closeBtn = notification.querySelector('.notification-close');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent event from bubbling
-            notification.classList.add('removing');
-            setTimeout(() => {
-                if (notification.parentNode) notification.parentNode.removeChild(notification);
-            }, 300);
-        });
-    }
-    
-    // Auto-remove non-error notifications
-    if (type !== 'error') {
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.classList.add('removing');
-                setTimeout(() => {
-                    if (notification.parentNode) notification.parentNode.removeChild(notification);
-                }, 300);
-            }
-        }, duration || 5000);
-    }
-}
         
         /**
          * Handle filter input change for logs.
