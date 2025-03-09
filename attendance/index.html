@@ -1275,6 +1275,9 @@ function checkAuthRedirect() {
 function init() {
     isInitializing = true;
     
+	//Start with nfcSupported as false
+    nfcSupported = false;
+	
     // Update current year in footer
     updateYear();
     
@@ -1283,21 +1286,31 @@ function init() {
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
     
-// Check if NFC is supported
-nfcSupported = 'NDEFReader' in window;
-if (!nfcSupported) {
-    // Only show notification on mobile devices where NFC might be expected
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isMobile) {
-        pendingNotifications.push({
-            type: 'warning',
-            title: 'NFC Unsupported',
-            message: 'NFC scanning is only supported in Chrome on Android.'
-        });
-    }
-}
+    // Check if NFC is supported - ONLY in Chrome on Android
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const isChrome = /Chrome/i.test(navigator.userAgent);
     
-    // Set up event listeners
+    if (isAndroid && isChrome && 'NDEFReader' in window) {
+        console.log('NFC support detected (Android + Chrome + NDEFReader)');
+        nfcSupported = true;
+    } else {
+        console.log('NFC not supported on this device/browser');
+        nfcSupported = false;
+        
+        // Only show notification on mobile devices where NFC might be expected
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+            pendingNotifications.push({
+                type: 'warning',
+                title: 'NFC Unsupported',
+                message: 'NFC scanning is only supported in Chrome on Android.'
+            });
+        }
+    }
+    
+    updateScanButtons();
+	
+	// Set up event listeners
     setupEventListeners();
     
     // Handle auth redirect
@@ -1717,9 +1730,9 @@ function updateAuthUI() {
         scannerModule.style.display = isSignedIn ? 'block' : 'none';
     }
     
-// Handle scan buttons based on NFC support and user status
-const startScanBtn = document.getElementById('start-scan-btn');
-const stopScanBtn = document.getElementById('stop-scan-btn');
+	// Handle scan buttons based on NFC support and user status
+	const startScanBtn = document.getElementById('start-scan-btn');
+	const stopScanBtn = document.getElementById('stop-scan-btn');
 
 if (startScanBtn && stopScanBtn) {
     // Only show scan buttons if NFC is supported
@@ -1738,6 +1751,7 @@ if (startScanBtn && stopScanBtn) {
         startScanBtn.style.display = 'none';
         stopScanBtn.style.display = 'none';
     }
+	updateScanButtons();
 }
     
     // Handle guest mode UI
@@ -1761,8 +1775,8 @@ if (startScanBtn && stopScanBtn) {
         if (lastScannedUID) {
             // Show last scanned UID
             notSignedInMsg.innerHTML = `
-                <h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
-                <h3 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h3>
+                <p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
+                <h3 style="margin-top: 10px; font-weight: bold; text-transform: uppercase;">${lastScannedUID}</h3>
             `;
         } else {
             // Default welcome message
@@ -3718,19 +3732,35 @@ stopScanning();
 }
 
 function updateScanButtons() {
-    // Return early if NFC isn't supported - don't show any scan buttons
-    if (!nfcSupported) {
-        if (startScanBtn) startScanBtn.style.display = 'none';
-        if (stopScanBtn) stopScanBtn.style.display = 'none';
+    console.log('Updating scan buttons - NFC supported:', nfcSupported);
+    
+    // Get references to buttons to ensure we have the latest elements
+    const startScanBtn = document.getElementById('start-scan-btn');
+    const stopScanBtn = document.getElementById('stop-scan-btn');
+    
+    if (!startScanBtn || !stopScanBtn) {
+        console.warn('Scan buttons not found in the DOM');
         return;
     }
-
-    // If NFC is supported, continue with user role logic
+    
+    // Always hide buttons first if NFC is not supported
+    if (!nfcSupported) {
+        console.log('NFC not supported - hiding all scan buttons');
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+        return;
+    }
+    
+    // If NFC is supported, handle button visibility based on user role
+    console.log('NFC supported - updating buttons based on user role');
+    console.log('isSignedIn:', isSignedIn, 'isAdmin:', isAdmin, 'isScanning:', isScanning);
+    
     if (isScanning) {
+        // When scanning, only show stop button
         startScanBtn.style.display = 'none';
         stopScanBtn.style.display = 'flex';
     } else {
-        // Show start scan button for: non-signed in users OR admin users
+        // Only show START button for non-signed-in users OR admin users
         if (!isSignedIn || (isSignedIn && isAdmin)) {
             startScanBtn.style.display = 'flex';
         } else {
