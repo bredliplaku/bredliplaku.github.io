@@ -828,7 +828,7 @@ body.is-admin td.admin-only {
 </head>
 <body>
 <div id="app-loading" class="app-loading">
-    <img src="https://i.pinimg.com/originals/30/c2/10/30c210344bbbcde4d5542c02a0cb908b.gif" alt="Loading Cat" style="width: 200px; height: 200px;">
+    <img src="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/loading.gif" alt="Loading Cat" style="width: 200px; height: 200px;">
     <div style="margin-top: 10px; font-size: 14px; color: #666;">Meow loading...</div>
 </div>
     <div class="container content-hidden" id="main-container">
@@ -853,9 +853,9 @@ body.is-admin td.admin-only {
   <!-- Right: Auth container -->
   <div class="auth-container">
     <div id="login-container">
-      <button id="login-btn" class="btn-blue">
-        <i class="fas fa-sign-in-alt"></i> Sign in with Google
-      </button>
+<button id="login-btn" class="btn-blue">
+    <i class="fas fa-sign-in-alt"></i> Sign in
+</button>
     </div>
     <div id="user-container" style="display: none">
       <div class="user-info">
@@ -1034,7 +1034,7 @@ body.is-admin td.admin-only {
 	// App state
 	let logs = [];
 	let isScanning = false;
-	let nfcSupported = true;
+	let nfcSupported = false;
 	let nfcReader = null;
 	let filter = '';
 	let dbFilter = '';
@@ -1140,6 +1140,8 @@ function setupEventListeners() {
     const syncBtn = document.getElementById('sync-btn');
     const courseSelect = document.getElementById('course-select');
     const toggleSoundBtn = document.getElementById('toggle-sound-btn');
+	const loginBtn = document.getElementById('login-btn');
+    const logoutBtn = document.getElementById('logout-btn');
     
     if (startScanBtn) startScanBtn.addEventListener('click', startScanning);
     if (stopScanBtn) stopScanBtn.addEventListener('click', stopScanning);
@@ -1158,6 +1160,17 @@ function setupEventListeners() {
     if (clearDbBtn) clearDbBtn.addEventListener('click', clearDatabase);
     if (syncBtn) syncBtn.addEventListener('click', syncData);
     if (courseSelect) courseSelect.addEventListener('change', handleCourseChange);
+	if (loginBtn) {
+        // Use direct event listener without arrow function to ensure proper 'this' binding
+        loginBtn.addEventListener('click', handleAuthClick);
+        console.log('Login button event listener attached');
+    } else {
+        console.error('Login button not found!');
+    }
+    
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleSignoutClick);
+    }
     
     // Table header sort listeners
     document.querySelectorAll('.sortable').forEach(header => {
@@ -1270,19 +1283,19 @@ function init() {
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
     
-    // Check if NFC is supported
-    nfcSupported = 'NDEFReader' in window;
-    if (!nfcSupported) {
-        // Only show notification on mobile devices where NFC might be expected
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        if (isMobile) {
-            pendingNotifications.push({
-                type: 'warning',
-                title: 'NFC Unsupported',
-                message: 'NFC scanning is only supported in Chrome on Android.'
-            });
-        }
+// Check if NFC is supported
+nfcSupported = 'NDEFReader' in window;
+if (!nfcSupported) {
+    // Only show notification on mobile devices where NFC might be expected
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile) {
+        pendingNotifications.push({
+            type: 'warning',
+            title: 'NFC Unsupported',
+            message: 'NFC scanning is only supported in Chrome on Android.'
+        });
     }
+}
     
     // Set up event listeners
     setupEventListeners();
@@ -1456,10 +1469,6 @@ gapi.load('client', () => {
 			}
 		}
 		
-		// Add event listener to login button here
-		loginBtn.addEventListener('click', handleAuthClick);
-		logoutBtn.addEventListener('click', handleSignoutClick);
-		
 	}).catch(error => {
 		console.error('Error initializing GAPI client:', error);
 		showImprovedNotification('error', 'API Error', 'Failed to initialize Google API.');
@@ -1610,21 +1619,34 @@ async function fetchUserInfo() {
 	/**
 	 * Handle auth button click to sign in.
 	 */
+// Replace your handleAuthClick function with this updated version
 function handleAuthClick(e) {
-if (e) e.preventDefault();
-
-console.log('Auth button clicked');
-showImprovedNotification('info', 'Signing In', 'Redirecting to Google...');
-
-// Get redirect URI - use exact current page URL
-const redirectUri = window.location.origin + window.location.pathname;
-
-// Create Google OAuth URL with scopes
-const scopes = 'openid email profile https://www.googleapis.com/auth/spreadsheets';
-const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes)}`;
-
-// Redirect to Google login
-window.location.href = authUrl;
+    if (e) e.preventDefault();
+    
+    console.log('Auth button clicked - redirecting to Google auth');
+    
+    // Show notification that we're redirecting
+    showImprovedNotification('info', 'Signing In', 'Redirecting to Google...');
+    
+    // Get the exact current URL as redirect URI (very important!)
+    const redirectUri = window.location.origin + window.location.pathname;
+    console.log('Using redirect URI:', redirectUri);
+    
+    // Create Google OAuth URL with scopes
+    const scopes = encodeURIComponent('openid email profile https://www.googleapis.com/auth/spreadsheets');
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                    `client_id=${CLIENT_ID}&` +
+                    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                    `response_type=token&` +
+                    `scope=${scopes}`;
+    
+    console.log('Auth URL:', authUrl);
+    
+    // Add a small delay before redirecting to ensure the notification is displayed
+    setTimeout(() => {
+        // Redirect to Google login
+        window.location.href = authUrl;
+    }, 100);
 }
 
 	
@@ -1695,19 +1717,28 @@ function updateAuthUI() {
         scannerModule.style.display = isSignedIn ? 'block' : 'none';
     }
     
-    // Handle scan buttons based on NFC support and admin status
-    const startScanBtn = document.getElementById('start-scan-btn');
-    const stopScanBtn = document.getElementById('stop-scan-btn');
-    
-    if (startScanBtn && stopScanBtn) {
-        if (nfcSupported && isSignedIn && isAdmin) {
+// Handle scan buttons based on NFC support and user status
+const startScanBtn = document.getElementById('start-scan-btn');
+const stopScanBtn = document.getElementById('stop-scan-btn');
+
+if (startScanBtn && stopScanBtn) {
+    // Only show scan buttons if NFC is supported
+    if (nfcSupported) {
+        // For non-signed in users OR admin users
+        if (!isSignedIn || (isSignedIn && isAdmin)) {
             startScanBtn.style.display = isScanning ? 'none' : 'flex';
             stopScanBtn.style.display = isScanning ? 'flex' : 'none';
         } else {
+            // For signed-in non-admin users
             startScanBtn.style.display = 'none';
             stopScanBtn.style.display = 'none';
         }
+    } else {
+        // NFC not supported - hide buttons regardless of user type
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
     }
+}
     
     // Handle guest mode UI
     if (!isSignedIn) {
@@ -3687,18 +3718,26 @@ stopScanning();
 }
 
 function updateScanButtons() {
-if (nfcSupported) {
-	if (isScanning) {
-		startScanBtn.style.display = 'none';
-		stopScanBtn.style.display = 'flex';
-	} else {
-		startScanBtn.style.display = (isSignedIn && !isAdmin) ? 'none' : 'flex';
-		stopScanBtn.style.display = 'none';
-	}
-} else {
-	startScanBtn.style.display = 'none';
-	stopScanBtn.style.display = 'none';
-}
+    // Return early if NFC isn't supported - don't show any scan buttons
+    if (!nfcSupported) {
+        if (startScanBtn) startScanBtn.style.display = 'none';
+        if (stopScanBtn) stopScanBtn.style.display = 'none';
+        return;
+    }
+
+    // If NFC is supported, continue with user role logic
+    if (isScanning) {
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'flex';
+    } else {
+        // Show start scan button for: non-signed in users OR admin users
+        if (!isSignedIn || (isSignedIn && isAdmin)) {
+            startScanBtn.style.display = 'flex';
+        } else {
+            startScanBtn.style.display = 'none';
+        }
+        stopScanBtn.style.display = 'none';
+    }
 }
 
 	
