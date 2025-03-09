@@ -79,6 +79,9 @@
 			line-height: 30px; /* Adjust this to match your text height */
 		}
         .tabs {
+			display: none; /* Hidden by default */
+		}
+		.tabs.tabs-ready {
             display: flex;
             margin-top: 20px;
             border-radius: 10px;
@@ -627,13 +630,14 @@
             color: var(--warning-color);
         }
         .course-select {
-            min-width: 150px;
+            min-width: 100px;
             padding: 5px 10px;
             border: 1px solid rgba(255,255,255,0.3);
             border-radius: 10px;
             font-size: 0.9em;
             background-color: rgba(255,255,255,0.1);
             color: white;
+			text-align: center;
         }
         .course-select option {
             background-color: #fff;
@@ -723,14 +727,14 @@
                 <span class="info-item"><i class="fas fa-database"></i> Database: <span id="database-status">Not loaded</span></span>
                 <button id="toggle-sound-btn" class="info-item"><i class="fas fa-volume-up"></i></button>
             </div>
-			<div class="tabs">
-			  <div class="tab active" data-tab="scanner-tab">
-				<i class="fas fa-wifi"></i> Scanner
-			  </div>
-			  <div class="tab admin-only" data-tab="database-tab">
-				<i class="fas fa-database"></i> Database
-			  </div>
-			</div>
+				<div class="tabs" style="display: none;">
+				  <div class="tab active" data-tab="scanner-tab">
+					<i class="fas fa-wifi"></i> Scanner
+				  </div>
+				  <div class="tab admin-only" data-tab="database-tab">
+					<i class="fas fa-database"></i> Database
+				  </div>
+				</div>
         </div>
         
         
@@ -964,6 +968,7 @@ function init() {
     const courseSelect = document.getElementById('course-select');
     const toggleSoundBtn = document.getElementById('toggle-sound-btn');
 
+	handleAuthRedirect();
 	addNotificationStyles();
 
     // Update current year in footer
@@ -980,13 +985,20 @@ function init() {
         updateOnlineStatus();
     });
 
-    // Check if NFC is supported
-    if (!('NDEFReader' in window)) {
-        nfcSupported = false;
-        showImprovedNotification('error', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
-        startScanBtn.style.display = 'none';
-        stopScanBtn.style.display = 'none';
+// Check if NFC is supported
+if (!('NDEFReader' in window)) {
+    nfcSupported = false;
+    
+    // Only show notification on mobile devices where NFC might be expected
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile) {
+        showImprovedNotification('warning', 'NFC Unsupported', 'NFC scanning is only supported in Chrome on Android.');
     }
+    
+    // Hide scan buttons regardless
+    startScanBtn.style.display = 'none';
+    stopScanBtn.style.display = 'none';
+}
 
 // Modify your tab click handler
 tabs.forEach(tab => {
@@ -1169,7 +1181,6 @@ function initGoogleApi() {
          * Handle token response from Google OAuth.
          * @param {Object} resp - The token response object.
          */
-// Update the handleTokenResponse function to load database for all signed-in users
 function handleTokenResponse(resp) {
     console.log('Received token response');
     
@@ -1201,7 +1212,7 @@ function handleTokenResponse(resp) {
             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
             console.log('User is admin:', isAdmin);
             
-            // If this is initial sign-in and user is admin, we need to request elevated permissions
+            // If this is initial sign-in and user is admin, request elevated permissions
             if (initialSignIn && isAdmin && currentScopes !== ADMIN_SCOPE) {
                 console.log('Admin user detected, requesting elevated permissions');
                 initialSignIn = false;
@@ -1214,74 +1225,42 @@ function handleTokenResponse(resp) {
                         scope: ADMIN_SCOPE,
                         callback: handleTokenResponse
                     });
-                    // Request token with elevated scopes but don't force consent prompt
-                    showImprovedNotification('info', 'Admin Access', 'Configuring admin permissions...');
-                    // Only force consent if really needed
-                    const scopeGranted = localStorage.getItem(TOKEN_SCOPE_KEY);
-                    tokenClient.requestAccessToken({ prompt: scopeGranted ? '' : 'consent' });
-                    return; // Exit early, we'll continue after the new token arrives
+                    
+                    // Request token without forcing consent prompt
+                    tokenClient.requestAccessToken();
+                    return;
                 } catch (error) {
                     console.error('Error requesting admin permissions:', error);
-                    // Continue with limited permissions
                 }
             } else if (initialSignIn && !isAdmin && currentScopes !== READONLY_SCOPE) {
-                // For non-admins, we should use read-only scopes
                 console.log('Non-admin user, using read-only permissions');
                 initialSignIn = false;
                 currentScopes = READONLY_SCOPE;
                 
-                // Create new token client with read-only scopes
                 try {
                     tokenClient = google.accounts.oauth2.initTokenClient({
                         client_id: CLIENT_ID,
                         scope: READONLY_SCOPE,
                         callback: handleTokenResponse
                     });
-                    // Request token with read-only scopes
-                    showImprovedNotification('info', 'Configuring Access', 'Setting up appropriate permissions...');
-                    const scopeGranted = localStorage.getItem(TOKEN_SCOPE_KEY);
-                    tokenClient.requestAccessToken({ prompt: scopeGranted ? '' : 'consent' });
-                    return; // Exit early, we'll continue after the new token arrives
+                    
+                    // Request token without forcing consent prompt
+                    tokenClient.requestAccessToken();
+                    return;
                 } catch (error) {
                     console.error('Error requesting read-only permissions:', error);
-                    // Continue with original permissions
                 }
             }
             
             initialSignIn = false;
-            
-            // Update UI for admin/user
             updateAuthUI();
-            
             showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
             
-            // Fetch course list and populate dropdown for all users
-            if (isOnline) {
-                // Always fetch courses first
-                fetchAvailableCourses()
-                    .then(() => {
-                        // Always fetch database for all signed-in users (even non-admins)
-                        return fetchDatabaseFromSheet();
-                    })
-                    .then(() => {
-                        // Auto-sync data if online and admin
-                        if (isAdmin) {
-                            return syncData();
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Error after sign-in:', err);
-                    });
-            }
+            // Continue with your existing code to fetch courses, etc.
+            // ...
         }).catch(error => {
-            console.error('Error after token response:', error);
-            
-            // Even if user info fetch fails, keep them signed in
-            isSignedIn = true;
-            isAdmin = false; // Default to non-admin if can't verify
-            updateAuthUI();
-            
-            showImprovedNotification('warning', 'Limited Access', 'Signed in with limited access');
+            // Your existing error handling code
+            // ...
         });
     } catch (error) {
         console.error('Error processing token:', error);
@@ -1342,7 +1321,6 @@ function handleTokenResponse(resp) {
          * Handle auth button click to sign in.
          */
 function handleAuthClick(e) {
-    // Prevent default behavior and stop propagation
     if (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -1350,34 +1328,73 @@ function handleAuthClick(e) {
     
     console.log('Auth button clicked');
     
-    if (!tokenClient) {
-        console.error('Token client not initialized');
-        showImprovedNotification('error', 'Auth Error', 'Authentication not ready yet. Please try again in a moment.');
+    if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
+        console.error('Google Identity Services not loaded');
+        showImprovedNotification('error', 'Auth Error', 'Authentication not ready yet.');
         return;
     }
     
-    showImprovedNotification('info', 'Signing In', 'Connecting to Google...');
+    // Store current URL to return to after auth
+    localStorage.setItem('auth_redirect_url', window.location.href);
     
-    try {
-        console.log('Requesting token...');
+    // Create OAuth URL with all required scopes
+    const redirectUri = window.location.origin + window.location.pathname;
+    const scopes = encodeURIComponent(ADMIN_SCOPE); // Use the broadest scope since we'll need it for admins
+    
+    // Redirect to Google OAuth page (without forcing consent prompt)
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scopes}`;
+}
+
+// Add this function to handle the redirect back from Google
+function handleAuthRedirect() {
+    // Check if we have a token in the URL fragment
+    if (window.location.hash.includes('access_token=')) {
+        const params = new URLSearchParams(window.location.hash.substring(1));
+        const accessToken = params.get('access_token');
         
-        // Check if the user has already granted spreadsheet permissions
-        const scopeGranted = localStorage.getItem(TOKEN_SCOPE_KEY);
-        
-        if (scopeGranted) {
-            // User already granted permissions, don't prompt again
-            tokenClient.requestAccessToken({ prompt: '' });
-        } else {
-            // First time login, show a clear message about permissions
-            showImprovedNotification('info', 'Important', 'Please check the "See, edit, create and delete your spreadsheets" permission - it\'s required for this app to work!', 10000);
-            setTimeout(() => {
-                // Use default prompt without forcing consent
-                tokenClient.requestAccessToken();
-            }, 2000);
+        if (accessToken) {
+            console.log('Received access token from redirect');
+            
+            // Set the token in gapi client
+            gapi.client.setToken({ access_token: accessToken });
+            
+            // Process authentication
+            isSignedIn = true;
+            localStorage.setItem('gapi_token', JSON.stringify({ access_token: accessToken }));
+            
+            // Get user info and continue the flow
+            fetchUserInfo()
+                .then(() => {
+                    // Check if user is admin
+                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                    
+                    // Update UI and fetch data
+                    updateAuthUI();
+                    if (isOnline) {
+                        fetchAvailableCourses()
+                            .then(() => fetchDatabaseFromSheet())
+                            .then(() => {
+                                if (isAdmin) return syncData();
+                            })
+                            .catch(err => console.error('Error after sign-in:', err));
+                    }
+                    
+                    showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
+                })
+                .catch(error => {
+                    console.error('Error after redirect auth:', error);
+                    isSignedIn = false;
+                    localStorage.removeItem('gapi_token');
+                    updateAuthUI();
+                });
+            
+            // Clear the URL hash to remove the token
+            if (history.replaceState) {
+                history.replaceState(null, null, window.location.pathname);
+            } else {
+                window.location.hash = '';
+            }
         }
-    } catch (err) {
-        console.error('Error requesting token:', err);
-        showImprovedNotification('error', 'Auth Error', 'Failed to start authentication: ' + err.message);
     }
 }
 
@@ -1433,10 +1450,18 @@ function handleAuthClick(e) {
 function updateAuthUI() {
     console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
 
-    // Hide the tabs container entirely for non-admins or if not signed in
+    // Get the tabs container
     const tabsContainer = document.querySelector('.tabs');
     if (tabsContainer) {
-        tabsContainer.style.display = (isSignedIn && isAdmin) ? 'flex' : 'none';
+        // First make sure it's hidden while we determine permissions
+        tabsContainer.style.display = 'none';
+        
+        // Show the tabs container only if signed in and admin
+        if (isSignedIn && isAdmin) {
+            setTimeout(() => {
+                tabsContainer.style.display = 'flex';
+            }, 100); // Small delay to prevent flicker
+        }
     }
 
     // Hide admin-only tabs from the tabs container
@@ -1448,6 +1473,7 @@ function updateAuthUI() {
     document.querySelectorAll('.uid-column').forEach(col => {
         col.style.display = isAdmin ? 'table-cell' : 'none';
     });
+    
     // Also hide the UID cells in the log rows
     document.querySelectorAll('.uid-cell').forEach(cell => {
         cell.style.display = isAdmin ? 'table-cell' : 'none';
@@ -1490,7 +1516,7 @@ function updateAuthUI() {
     }
 
     // Update the sync button: only visible for admins
-    syncBtn.disabled = !isOnline || isSyncing;
+    syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
     syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 
     // Update empty logs message based on course selection
