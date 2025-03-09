@@ -78,17 +78,18 @@
 			vertical-align: middle;
 			line-height: 30px; /* Adjust this to match your text height */
 		}
-        .tabs {
+		.tabs {
 			display: none; /* Hidden by default */
 			margin-top: 20px;
-            border-radius: 10px;
+			border-radius: 10px;
 		}
+
 		.tabs.tabs-ready {
-            display: flex;
-            margin-top: 20px;
-            border-radius: 10px;
-            overflow: hidden;
-        }
+			display: flex;
+			margin-top: 20px;
+			border-radius: 10px;
+			overflow: hidden; /* This was clipping the border radius */
+		}
         .tab {
             flex: 1;
             padding: 15px;
@@ -103,6 +104,14 @@
             justify-content: center;
             gap: 8px;
         }
+		.tab:first-child {
+			border-top-left-radius: 10px;
+			border-bottom-left-radius: 10px;
+		}
+		.tab:last-child {
+			border-top-right-radius: 10px;
+			border-bottom-right-radius: 10px;
+		}
         .tab.active {
             background-color: var(--primary-color);
             color: white;
@@ -113,6 +122,46 @@
         .tab-content.active {
             display: block;
         }
+		/* ===== Course button styles ===== */
+.course-buttons-container {
+        padding: 5px;
+        display: flex;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: 10px;
+}
+
+.course-button {
+    background-color: rgba(255,255,255,0.15);
+    color: white;
+    padding: 8px 15px;
+    border-radius: 20px;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(255,255,255,0.3);
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+}
+
+.course-button:hover {
+	background-color: #1a237e;
+	box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+	transform: translateY(-2px);
+	cursor: pointer;
+}
+
+.course-button.active {
+    background-color: var(--secondary-color);
+    font-weight: 500;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+/* Hide the course select dropdown */
+.info-item select.course-select {
+    display: none;
+}
+
         .module {
             background-color: #fff;
             border-radius: 20px;
@@ -228,22 +277,23 @@
 		.notification {
 		  margin-bottom: 10px; /* Reduced margin so new notifications don’t push content far down */
 		}
-.notification-close {
-    background: none; 
-    border: none; 
-    border-radius: 0; 
-	box-shadow: none;
-    cursor: pointer;
-    font-size: 18px;
-    color: inherit; 
-    opacity: 0.7;
-    padding: 0;
-    margin-left: 8px;
-    transition: none;
-    width: auto;
-    height: auto;
-    display: inline-block;
-}
+		.notification-close {
+			background: none; 
+			border: none; 
+			border-radius: 0; 
+			box-shadow: none;
+			cursor: pointer;
+			font-size: 18px;
+			color: inherit; 
+			opacity: 0.7;
+			padding: 0;
+			margin-left: 8px;
+			transition: none;
+			width: auto;
+			height: auto;
+			display: inline-block;
+			pointer-events: auto; /* Make only the close button clickable */
+		}
 
 .notification-close:hover {
     opacity: 1;
@@ -254,12 +304,12 @@
 
 .in-page-notifications {
     position: fixed;
-    top: 20px;
+    bottom: 20px;
     right: 20px;
     z-index: 10000;
     width: 350px;
     max-width: 70%;
-    pointer-events: auto;
+    pointer-events: none; /* This allows clicks to pass through */
 }
 
 .in-page-notification {
@@ -274,6 +324,7 @@
     align-items: center;
     opacity: 1;
     transition: transform 0.3s ease-in, opacity 0.3s ease-in;
+    pointer-events: none; /* Allow clicks to pass through notification body */
 }
 
 .in-page-notification.removing {
@@ -334,9 +385,9 @@
     }
     
     .in-page-notification.removing {
-    opacity: 0;
-    transform: translateX(100%);
-    transition: opacity 0.3s ease, transform 0.3s ease;
+        opacity: 0;
+        transform: translateY(100%);
+        transition: opacity 0.3s ease, transform 0.3s ease;
     }
     
     @keyframes slide-in {
@@ -749,12 +800,6 @@
             <h1><i class="fas fa-clipboard-list"></i> Attendance</h1>
             <h2>Track your attendance in the courses I am teaching</h2>
             <div class="app-info">
-                <span class="info-item">
-                    <select id="course-select" class="course-select">
-                        <option value="">Select course</option>
-                        <!-- Courses will be populated here -->
-                    </select>
-                </span>
                 <span class="info-item"><i class="fas fa-sync-alt"></i> <span id="total-scans">0</span> scans </span>
                 <span class="info-item"><i class="fas fa-clock"></i> Last scan: <span id="last-scan">Never</span></span>
                 <span class="info-item"><i class="fas fa-database"></i> Database: <span id="database-status">Not loaded</span></span>
@@ -770,7 +815,13 @@
 				</div>
         </div>
         
-        
+		<div id="course-buttons-container" class="course-buttons-container">
+		        <select id="course-select" class="course-select">
+            <option value="">Select course</option>
+            <!-- Courses will be populated here -->
+        </select>
+		<!-- Course buttons will be added here dynamically -->
+		</div>  
         <!-- Notification area -->
         <!-- <div id="notification-container"></div> -->
         <div id="in-page-notification-area" class="in-page-notifications"></div>
@@ -926,6 +977,8 @@
         let isOnline = navigator.onLine;
         let isSyncing = false;
 		let isInitializing = true;
+		let pendingNotifications = [];
+		let criticalErrorsOnly = true;
         
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -976,7 +1029,8 @@
          * Sets up event listeners, checks NFC support, and prepares the UI.
          */
 function init() {
-	isInitializing = true;
+    isInitializing = true;
+    
     // Re-assign DOM elements
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
@@ -1002,16 +1056,10 @@ function init() {
     // Update current year in footer
     updateYear();
 
-   // Set up online/offline listeners
+    // Set up online/offline listeners
     updateOnlineStatus();
-    window.addEventListener('online', function() {
-        console.log('You are online.');
-        updateOnlineStatus();
-    });
-    window.addEventListener('offline', function() {
-        console.log('You are offline.');
-        updateOnlineStatus();
-    });
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
     
     // HANDLE AUTH REDIRECT FIRST - Check if this is a return from authentication
     if (window.location.hash && window.location.hash.includes('access_token=')) {
@@ -1137,9 +1185,36 @@ function init() {
 
     // Update UI to show the initial state
     updateUI();
-	setTimeout(() => {
-	isInitializing = false;
-	}, 2000); // Wait 2 seconds before showing non-critical errors
+    
+    // Wait a reasonable time before showing non-critical errors
+    setTimeout(() => {
+        isInitializing = false;
+        criticalErrorsOnly = false;
+        // Process any pending notifications
+        processPendingNotifications();
+    }, 3000);
+}
+
+function processPendingNotifications() {
+    if (pendingNotifications.length > 0) {
+        // Only show the most recent notification of each type
+        const uniqueNotifications = {};
+        for (const notification of pendingNotifications) {
+            uniqueNotifications[notification.type + notification.title] = notification;
+        }
+        
+        // Display only the unique notifications
+        Object.values(uniqueNotifications).forEach(notification => {
+            showImprovedNotification(
+                notification.type, 
+                notification.title, 
+                notification.message, 
+                notification.duration
+            );
+        });
+        
+        pendingNotifications = [];
+    }
 }
         
         /**
@@ -1559,26 +1634,18 @@ function updateAuthUI() {
          * Handle course selection change.
          * Load logs for the selected course.
          */
-// Add this constant with your other constants at the top
 function handleCourseChange() {
-    // If not signed in and no course is selected, set to 'Default'
-    if (!isSignedIn && (!courseSelect.value || courseSelect.value.trim() === '')) {
-        currentCourse = 'Default';
-        courseSelect.value = 'Default';
-    } else {
-        currentCourse = courseSelect.value;
-    }
-
+    // Now course selection comes from currentCourse variable, not from dropdown
     logs = []; // Clear current logs before loading new ones
 
     if (!currentCourse) {
         updateUI();
-        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
         return;
     }
 
     if (!isSignedIn) {
-        // Load logs from local storage for the default course
+        // Load logs from local storage for the course
         const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
         if (storedLogs) {
             try {
@@ -1598,12 +1665,16 @@ function handleCourseChange() {
         fetchLogsFromSheet()
             .then(() => {
                 if (isAdmin) {
-                    showImprovedNotification('success', 'Course Selected', `Loaded attendance data for ${currentCourse}`);
+                    showImprovedNotification('success', 'Course Selected', `Loaded data for ${currentCourse}`);
                 }
             })
             .catch(error => {
                 console.error('Error fetching logs:', error);
-                showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                // Only show error if we're past initialization
+                if (!isInitializing) {
+                    showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                }
+                
                 // Fallback to local storage
                 const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
                 if (storedLogs) {
@@ -1648,35 +1719,35 @@ function saveLogsToLocalStorage() {
         /**
          * Populate course dropdown with available courses.
          */
-function populateCourseDropdown() {
-    // Clear existing options except the first placeholder
-    while (courseSelect.options.length > 1) {
-        courseSelect.remove(1);
-    }
+		function populateCourseDropdown() {
+			// Original dropdown code (keep it for backward compatibility)
+			while (courseSelect.options.length > 1) {
+				courseSelect.remove(1);
+			}
 
-    if (!isSignedIn) {
-        // For signed-out mode, add only the "Default" course.
-        const defaultOption = document.createElement('option');
-        defaultOption.value = 'Default';
-        defaultOption.textContent = 'Default';
-        courseSelect.appendChild(defaultOption);
-        courseSelect.value = 'Default';
-        currentCourse = 'Default';
-        return;
-    }
+			if (!isSignedIn) {
+				const defaultOption = document.createElement('option');
+				defaultOption.value = 'Default';
+				defaultOption.textContent = 'Default';
+				courseSelect.appendChild(defaultOption);
+				courseSelect.value = 'Default';
+				currentCourse = 'Default';
+			} else {
+				availableCourses.forEach(course => {
+					const option = document.createElement('option');
+					option.value = course;
+					option.textContent = course.replace('_', ' ');
+					courseSelect.appendChild(option);
+				});
 
-    // For signed-in users, populate from available courses (from the spreadsheet)
-    availableCourses.forEach(course => {
-        const option = document.createElement('option');
-        option.value = course;
-        option.textContent = course.replace('_', ' ');
-        courseSelect.appendChild(option);
-    });
-
-    if (currentCourse && availableCourses.includes(currentCourse)) {
-        courseSelect.value = currentCourse;
-    }
-}
+				if (currentCourse && availableCourses.includes(currentCourse)) {
+					courseSelect.value = currentCourse;
+				}
+			}
+			
+			// Also populate course buttons
+			populateCourseButtons();
+		}
 
         
         /**
@@ -3266,6 +3337,7 @@ function updateLogsList() {
                     stopScanBtn.style.display = 'none';
                 }
             }
+			populateCourseButtons();
         }
         
         /**
@@ -3445,7 +3517,7 @@ async function handleNfcReading({ serialNumber }) {
         /**
          * Update current year in footer.
          */
-	function updateYear() {
+function updateYear() {
 		const yearElement = document.getElementById('currentYear');
 		if (yearElement) {
 			yearElement.textContent = new Date().getFullYear();
@@ -3453,11 +3525,23 @@ async function handleNfcReading({ serialNumber }) {
 	}
 	
 		
-// Replace the showImprovedNotification function with this improved version
 function showImprovedNotification(type, title, message, duration) {
-    // Don't show default course notification
+    // Skip certain redundant notifications
     if (title === 'Courses Warning' && message === 'Using default course list') {
         return;
+    }
+    
+    // During initialization, only show critical notifications immediately
+    if (isInitializing || criticalErrorsOnly) {
+        const isCritical = type === 'error' && 
+                          (title.includes('Critical') || 
+                           message.includes('Permission denied'));
+        
+        if (!isCritical) {
+            // Store non-critical notifications for later
+            pendingNotifications.push({type, title, message, duration});
+            return;
+        }
     }
     
     // Safely remove notifications
@@ -3498,32 +3582,27 @@ function showImprovedNotification(type, title, message, duration) {
         default: icon = 'info-circle';
     }
     
-	notification.innerHTML = `
-		<i class="fas fa-${icon}"></i>
-		<div style="flex-grow:1;">
-			<strong>${title}</strong><br>
-			${message}
-		</div>
-		<button class="notification-close">&times;</button>
-	`;
+    notification.innerHTML = `
+        <i class="fas fa-${icon}"></i>
+        <div style="flex-grow:1;">
+            <strong>${title}</strong><br>
+            ${message}
+        </div>
+        <button class="notification-close">&times;</button>
+    `;
     
     notificationArea.appendChild(notification);
     
     // Add click handler to close button
-const closeBtn = notification.querySelector('.notification-close');
-if (closeBtn) {
-    closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        notification.classList.add('removing');
-        
-        // Wait for animation to complete before removing
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 300); // Match this to your CSS transition duration
-    });
-}
+    const closeBtn = notification.querySelector('.notification-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            notification.classList.add('removing');
+            setTimeout(() => safeRemove(notification), 300);
+        });
+    }
     
     // Auto-remove non-error notifications
     if (type !== 'error') {
@@ -3534,10 +3613,66 @@ if (closeBtn) {
     }
 }
 
+function populateCourseButtons() {
+    // Get button container
+    const courseButtonsContainer = document.getElementById('course-buttons-container');
+    if (!courseButtonsContainer) return;
+    
+    // Clear existing buttons
+    courseButtonsContainer.innerHTML = '';
+    
+    if (!isSignedIn) {
+        // For signed-out mode, add just the "Default" course button
+        const defaultButton = document.createElement('div');
+        defaultButton.className = 'course-button' + (currentCourse === 'Default' ? ' active' : '');
+        defaultButton.textContent = 'Default';
+        defaultButton.addEventListener('click', () => {
+            selectCourseButton('Default');
+        });
+        courseButtonsContainer.appendChild(defaultButton);
+        
+        // Set default course if none selected
+        if (!currentCourse) {
+            selectCourseButton('Default');
+        }
+        return;
+    }
+    
+    // For signed-in users, add buttons for all available courses
+    availableCourses.forEach(course => {
+        const button = document.createElement('div');
+        button.className = 'course-button' + (currentCourse === course ? ' active' : '');
+        button.textContent = course.replace('_', ' ');
+        button.addEventListener('click', () => {
+            selectCourseButton(course);
+        });
+        courseButtonsContainer.appendChild(button);
+    });
+    
+    // If no course selected but courses available, select first one
+    if (!currentCourse && availableCourses.length > 0) {
+        selectCourseButton(availableCourses[0]);
+    }
+}
+
+function selectCourseButton(course) {
+    currentCourse = course;
+    
+    // Update active button visually
+    document.querySelectorAll('.course-button').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.textContent.replace(' ', '_') === course.replace(' ', '_')) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Load course data
+    handleCourseChange();
+}
         
 // Initialize the application when window loads
 window.addEventListener('load', function() {
-	// Initialize the app UI first
+    // Initialize the app UI first
     init();
     
     // Wait longer before initializing Google API to ensure all scripts are loaded
