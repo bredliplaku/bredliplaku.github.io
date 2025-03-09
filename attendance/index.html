@@ -223,42 +223,42 @@
 		.notification {
 		  margin-bottom: 10px; /* Reduced margin so new notifications don’t push content far down */
 		}
-		/* Add these styles */
-/* Desktop: Notifications appear at top-right without pushing the layout */
 .in-page-notifications {
     position: fixed;
-    bottom: 15px;
-    right: 15px;
+    bottom: 20px;
+    right: 20px;
     z-index: 10000;
     width: 300px;
-    pointer-events: none; /* Allow clicks to pass through if needed */
-}
-
-/* Allow individual notifications to be interactive */
-.in-page-notifications .in-page-notification {
+    max-width: 90%;
     pointer-events: auto;
 }
 
-/* Mobile: Position notifications as a small toast at bottom center */
-@media (max-width: 600px) {
-    .in-page-notifications {
-        top: auto;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 90%;
-        max-width: 90%;
-    }
+.in-page-notification {
+    background-color: white;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    animation: slide-in 0.3s ease-out forwards;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-start;
+    opacity: 1;
+    transition: opacity 0.3s, transform 0.3s;
 }
 
+.in-page-notification.removing {
+    opacity: 0;
+    transform: translateX(100%);
+}
 
 @keyframes slide-in {
     from {
-        transform: translateY(-20px);
+        transform: translateX(100%);
         opacity: 0;
     }
     to {
-        transform: translateY(0);
+        transform: translateX(0);
         opacity: 1;
     }
 }
@@ -286,6 +286,33 @@
 .in-page-notification-success {
     background-color: #e8f5e9;
     color: #1b5e20;
+}
+
+/* Mobile adjustments */
+@media (max-width: 600px) {
+    .in-page-notifications {
+        bottom: 10px;
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        width: 90%;
+        max-width: 90%;
+    }
+    
+    .in-page-notification.removing {
+        transform: translateY(100%);
+    }
+    
+    @keyframes slide-in {
+        from {
+            transform: translateY(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
 }
         .filter-container {
             margin-bottom: 15px;
@@ -861,6 +888,9 @@
         let availableCourses = []; // Will be populated from spreadsheet
         let isOnline = navigator.onLine;
         let isSyncing = false;
+		let pendingRequests = [];
+		let initialSignIn = true;
+		let currentScopes = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
         
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -902,6 +932,9 @@
         const userContainer = document.getElementById('user-container');
         const userName = document.getElementById('user-name');
         const userAvatar = document.getElementById('user-avatar');
+		const READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+		const ADMIN_SCOPE = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+		const TOKEN_SCOPE_KEY = 'token_scope_granted';
         
         /**
          * Initialize the application.
@@ -931,6 +964,8 @@ function init() {
     const courseSelect = document.getElementById('course-select');
     const toggleSoundBtn = document.getElementById('toggle-sound-btn');
 
+	addNotificationStyles();
+
     // Update current year in footer
     updateYear();
 
@@ -953,22 +988,30 @@ function init() {
         stopScanBtn.style.display = 'none';
     }
 
-    // Set up tab navigation (assuming tabs and tabContents are defined globally)
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            // Prevent non-admin users from accessing the database tab
-            if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
-                return;
+// Modify your tab click handler
+tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        // Cancel any pending requests when switching tabs
+        pendingRequests.forEach(controller => {
+            try {
+                controller.abort();
+            } catch (e) {
+                console.log('Error aborting request:', e);
             }
-            // Remove active class from all tabs and tab contents
-            tabs.forEach(t => t.classList.remove('active'));
-            tabContents.forEach(c => c.classList.remove('active'));
-            // Add active class to clicked tab and corresponding content
-            tab.classList.add('active');
-            const tabId = tab.getAttribute('data-tab');
-            document.getElementById(tabId).classList.add('active');
         });
+        pendingRequests = [];
+        
+        // Rest of your existing tab switching code...
+        if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
+            return;
+        }
+        tabs.forEach(t => t.classList.remove('active'));
+        tabContents.forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        const tabId = tab.getAttribute('data-tab');
+        document.getElementById(tabId).classList.add('active');
     });
+});
 
     // Add event listeners for buttons and inputs
     startScanBtn.addEventListener('click', startScanning);
@@ -1042,12 +1085,12 @@ function initGoogleApi() {
         return;
     }
     
-    // *** FIX: Initialize token client before loading gapi.client ***
+    // Initialize with basic scopes first
     try {
         console.log('Setting up token client first...');
         tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: CLIENT_ID,
-            scope: SCOPES,
+            scope: currentScopes,
             callback: function(resp) {
                 console.log('Token response received:', resp);
                 // Only process if we have an access token
@@ -1063,7 +1106,6 @@ function initGoogleApi() {
     } catch (error) {
         console.error('Failed to initialize token client:', error);
         showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
-        // Continue anyway to try to load courses
     }
     
     // Load the GAPI client
@@ -1112,7 +1154,7 @@ function initGoogleApi() {
                 }
             }
             
-            // *** FIX: Add event listener to login button here ***
+            // Add event listener to login button here
             loginBtn.addEventListener('click', handleAuthClick);
             logoutBtn.addEventListener('click', handleSignoutClick);
             
@@ -1123,7 +1165,6 @@ function initGoogleApi() {
         });
     });
 }
-        
         /**
          * Handle token response from Google OAuth.
          * @param {Object} resp - The token response object.
@@ -1149,6 +1190,7 @@ function handleTokenResponse(resp) {
     try {
         // Store token in localStorage for session persistence
         localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
+        localStorage.setItem(TOKEN_SCOPE_KEY, 'true');
         
         // User is signed in
         isSignedIn = true;
@@ -1158,6 +1200,55 @@ function handleTokenResponse(resp) {
             // Check if user is admin
             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
             console.log('User is admin:', isAdmin);
+            
+            // If this is initial sign-in and user is admin, we need to request elevated permissions
+            if (initialSignIn && isAdmin && currentScopes !== ADMIN_SCOPE) {
+                console.log('Admin user detected, requesting elevated permissions');
+                initialSignIn = false;
+                currentScopes = ADMIN_SCOPE;
+                
+                // Create new token client with admin scopes
+                try {
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: ADMIN_SCOPE,
+                        callback: handleTokenResponse
+                    });
+                    // Request token with elevated scopes but don't force consent prompt
+                    showImprovedNotification('info', 'Admin Access', 'Configuring admin permissions...');
+                    // Only force consent if really needed
+                    const scopeGranted = localStorage.getItem(TOKEN_SCOPE_KEY);
+                    tokenClient.requestAccessToken({ prompt: scopeGranted ? '' : 'consent' });
+                    return; // Exit early, we'll continue after the new token arrives
+                } catch (error) {
+                    console.error('Error requesting admin permissions:', error);
+                    // Continue with limited permissions
+                }
+            } else if (initialSignIn && !isAdmin && currentScopes !== READONLY_SCOPE) {
+                // For non-admins, we should use read-only scopes
+                console.log('Non-admin user, using read-only permissions');
+                initialSignIn = false;
+                currentScopes = READONLY_SCOPE;
+                
+                // Create new token client with read-only scopes
+                try {
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: READONLY_SCOPE,
+                        callback: handleTokenResponse
+                    });
+                    // Request token with read-only scopes
+                    showImprovedNotification('info', 'Configuring Access', 'Setting up appropriate permissions...');
+                    const scopeGranted = localStorage.getItem(TOKEN_SCOPE_KEY);
+                    tokenClient.requestAccessToken({ prompt: scopeGranted ? '' : 'consent' });
+                    return; // Exit early, we'll continue after the new token arrives
+                } catch (error) {
+                    console.error('Error requesting read-only permissions:', error);
+                    // Continue with original permissions
+                }
+            }
+            
+            initialSignIn = false;
             
             // Update UI for admin/user
             updateAuthUI();
@@ -1269,8 +1360,21 @@ function handleAuthClick(e) {
     
     try {
         console.log('Requesting token...');
-        // Request token without forcing consent every time
-        tokenClient.requestAccessToken({ prompt: '' });
+        
+        // Check if the user has already granted spreadsheet permissions
+        const scopeGranted = localStorage.getItem(TOKEN_SCOPE_KEY);
+        
+        if (scopeGranted) {
+            // User already granted permissions, don't prompt again
+            tokenClient.requestAccessToken({ prompt: '' });
+        } else {
+            // First time login, show a clear message about permissions
+            showImprovedNotification('info', 'Important', 'Please check the "See, edit, create and delete your spreadsheets" permission - it\'s required for this app to work!', 10000);
+            setTimeout(() => {
+                // Use default prompt without forcing consent
+                tokenClient.requestAccessToken();
+            }, 2000);
+        }
     } catch (err) {
         console.error('Error requesting token:', err);
         showImprovedNotification('error', 'Auth Error', 'Failed to start authentication: ' + err.message);
@@ -1386,7 +1490,7 @@ function updateAuthUI() {
     }
 
     // Update the sync button: only visible for admins
-    syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+    syncBtn.disabled = !isOnline || isSyncing;
     syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 
     // Update empty logs message based on course selection
@@ -1531,12 +1635,26 @@ function updateOnlineStatus() {
     if (isOnline) {
         syncStatus.className = 'sync-status online';
         syncText.textContent = 'Online';
-        syncBtn.disabled = !isSignedIn || !isAdmin || isSyncing;
+        // Only disable if not signed in or syncing in progress
+        syncBtn.disabled = !isSignedIn || isSyncing;
     } else {
         syncStatus.className = 'sync-status offline';
         syncText.textContent = 'Offline';
         syncBtn.disabled = true;
     }
+    
+    // Ensure we show the button for admins regardless
+    syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    
+    // Debug output to help diagnose the issue
+    console.log('Sync button state:', {
+        isOnline,
+        isSignedIn,
+        isAdmin,
+        isSyncing,
+        disabled: syncBtn.disabled,
+        display: syncBtn.style.display
+    });
 }
         
         /**
@@ -1906,21 +2024,107 @@ async function syncDatabaseToSheet() {
             }
         }
         
+
+
+	function addNotificationStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .in-page-notifications {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10000;
+            width: 300px;
+            max-width: 90%;
+            pointer-events: auto; /* Changed from none */
+        }
+        
+        .in-page-notification {
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slide-in 0.3s ease-out forwards;
+            overflow: hidden;
+            display: flex;
+            align-items: flex-start;
+            opacity: 1;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        
+        .in-page-notification.removing {
+            opacity: 0;
+            transform: translateX(100%);
+        }
+        
+        @keyframes slide-in {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        /* Mobile adjustments */
+        @media (max-width: 600px) {
+            .in-page-notifications {
+                bottom: 10px;
+                left: 50%;
+                right: auto;
+                transform: translateX(-50%);
+                width: 90%;
+                max-width: 90%;
+            }
+            
+            .in-page-notification.removing {
+                transform: translateY(100%);
+            }
+            
+            @keyframes slide-in {
+                from {
+                    transform: translateY(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateY(0);
+                    opacity: 1;
+                }
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+
+
         /**
          * Show notification message.
          * @param {string} type - Type of notification (success, error, warning, info).
          * @param {string} title - Notification title.
          * @param {string} message - Notification message.
          */
-function showImprovedNotification(type, title, message) {
-    // Don't show default course notification
+function showImprovedNotification(type, title, message, duration) {
+    // Don't show certain notifications
     if (title === 'Courses Warning' && message === 'Using default course list') {
         return;
     }
     
-    // Use the in-page notification area
     const notificationArea = document.getElementById('in-page-notification-area');
     if (!notificationArea) return;
+    
+    // Limit to max 2 notifications at once
+    const existingNotifications = notificationArea.querySelectorAll('.in-page-notification');
+    if (existingNotifications.length >= 2) {
+        const oldest = existingNotifications[0];
+        oldest.classList.add('removing');
+        setTimeout(() => {
+            if (oldest.parentNode) oldest.parentNode.removeChild(oldest);
+        }, 300);
+    }
     
     const notification = document.createElement('div');
     notification.className = `in-page-notification in-page-notification-${type}`;
@@ -1939,7 +2143,7 @@ function showImprovedNotification(type, title, message) {
             <strong>${title}</strong><br>
             ${message}
         </div>
-        <span class="notification-close" style="cursor:pointer; margin-left:10px;">&times;</span>
+        <button class="notification-close" style="background: none; border: none; cursor: pointer; padding: 0 5px; font-size: 18px;">&times;</button>
     `;
     
     notificationArea.appendChild(notification);
@@ -1947,8 +2151,12 @@ function showImprovedNotification(type, title, message) {
     // Add click handler to close button
     const closeBtn = notification.querySelector('.notification-close');
     if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            notification.remove();
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent event from bubbling
+            notification.classList.add('removing');
+            setTimeout(() => {
+                if (notification.parentNode) notification.parentNode.removeChild(notification);
+            }, 300);
         });
     }
     
@@ -1956,9 +2164,12 @@ function showImprovedNotification(type, title, message) {
     if (type !== 'error') {
         setTimeout(() => {
             if (notification.parentNode) {
-                notification.remove();
+                notification.classList.add('removing');
+                setTimeout(() => {
+                    if (notification.parentNode) notification.parentNode.removeChild(notification);
+                }, 300);
             }
-        }, 5000);
+        }, duration || 5000);
     }
 }
         
