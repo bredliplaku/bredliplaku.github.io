@@ -666,7 +666,7 @@ iframe {
         
 <div class="course-actions" id="course-action-buttons">
     <button id="announcements-btn" style="display: none;" class="btn-orange"><i class="fas fa-bullhorn"></i> Announcements</button>
-    <button id="timetable-btn" style="display: none;"><i class="fas fa-calendar-alt"></i> Timetable</button>
+    <button id="timetable-btn" style="display:inline-block;" onclick="toggleTimetable()"><i class="fas fa-calendar-alt"></i> Timetable</button>
     <button id="evaluation-btn" style="display: none;" class="btn-green"><i class="fas fa-chart-pie"></i> Evaluation Criteria</button>
 </div>
 
@@ -727,7 +727,8 @@ const courseData = {
  * Initialize the application.
  */
 function init() {
-    updateYear();
+    document.getElementById('timetable-btn').style.display = 'inline-block';
+	updateYear();
     
     // Show loading screen
     const loadingIndicator = document.getElementById('app-loading');
@@ -925,8 +926,7 @@ function initGoogleApi() {
                     }
                 })
                 .catch(() => {
-                    document.getElementById('sign-in-btn').style.display = 'inline-block';
-                    document.getElementById('sign-out-btn').style.display = 'none';
+                    updateAuthButtonDisplay(false);
                     showMainContent();
                 });
         }).catch(error => {
@@ -1017,8 +1017,7 @@ function handleTokenResponse(resp) {
         isSignedIn = true;
         
         // Update auth buttons
-        document.getElementById('sign-in-btn').style.display = 'none';
-        document.getElementById('sign-out-btn').style.display = 'inline-block';
+        updateAuthButtonDisplay(true);
         
         // Fetch available courses and select the first one
         fetchAvailableCourses()
@@ -1098,8 +1097,7 @@ function handleSignoutClick() {
         localStorage.removeItem('gapi_token');
         isSignedIn = false;
         
-        document.getElementById('sign-in-btn').style.display = 'inline-block';
-        document.getElementById('sign-out-btn').style.display = 'none';
+        updateAuthButtonDisplay(false);
         
         document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-user-circle"></i><br>Please sign in to view course materials.</div>';
     }
@@ -1434,14 +1432,12 @@ if (professorsContainer) {
     if (professors.length > 0) {
         professors.forEach(professor => {
             const professorSpan = document.createElement('span');
-            professorSpan.className = 'info-item';
             professorSpan.innerHTML = `<i class="fas fa-user-circle"></i> ${professor}`;
             professorsContainer.appendChild(professorSpan);
         });
     } else {
         // Default if no professors specified
         const defaultSpan = document.createElement('span');
-        defaultSpan.className = 'info-item';
         defaultSpan.innerHTML = '<i class="fas fa-user-circle"></i> Instructor';
         professorsContainer.appendChild(defaultSpan);
     }
@@ -1527,12 +1523,9 @@ if (metadata.class_id) {
 
 // Update UI for buttons based on available metadata
 document.getElementById('announcements-btn').style.display = metadata.chat_link ? 'inline-block' : 'none';
+const timetableValue = String(metadata.timetable_enabled || '').toLowerCase();
 document.getElementById('timetable-btn').style.display = 
-    (metadata.timetable_enabled === 'true' || 
-     metadata.timetable_enabled === true || 
-     metadata.timetable_enabled === '1' || 
-     metadata.timetable_enabled === 1) ? 'inline-block' : 'none';
-document.getElementById('evaluation-btn').style.display = hasEvaluationData(metadata) ? 'inline-block' : 'none';
+    (timetableValue === 'true' || timetableValue === '1') ? 'inline-block' : 'none';
 
 // Pre-generate the evaluation criteria on load
 if (hasEvaluationData(metadata)) {
@@ -1703,19 +1696,35 @@ function openAnnouncements() {
     }
 }
 
+// Modify all occurrences of button style setting with null checks
+function updateAuthButtonDisplay(isSignedIn) {
+    const signInBtn = document.getElementById('sign-in-btn');
+    const signOutBtn = document.getElementById('sign-out-btn');
+    
+    if (signInBtn) {
+        signInBtn.style.display = isSignedIn ? 'none' : 'inline-block';
+    }
+    
+    if (signOutBtn) {
+        signOutBtn.style.display = isSignedIn ? 'inline-block' : 'none';
+    }
+}
+
 /**
- * Toggle grade distribution display
+ * Toggle grade distribution display and ensure content is generated
  */
 function toggleGradeDistribution() {
     const container = document.getElementById('gradeDistributionContainer');
     const button = document.getElementById('evaluation-btn');
     
-    if (container.style.maxHeight) {
+    // Always regenerate the data when toggling
+    generateGradeDistribution(courseData.metadata);
+    
+    if (container.style.maxHeight && container.style.maxHeight !== '0px') {
         container.style.maxHeight = null;
         button.innerHTML = '<i class="fas fa-chart-pie"></i> Evaluation Criteria';
     } else {
-        generateGradeDistribution(courseData.metadata);
-        container.style.maxHeight = container.scrollHeight + "px";
+        container.style.maxHeight = '300px'; // Fixed height to avoid cropping
         button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Evaluation Criteria';
     }
 }
