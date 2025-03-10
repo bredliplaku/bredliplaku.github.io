@@ -729,6 +729,7 @@ const courseData = {
 function init() {
 	document.getElementById('timetable-btn').style.display = 'inline-block';
     updateYear();
+	initContainers();
     
     // Add the style element for proper iframe container styles
     const styleElement = document.createElement('style');
@@ -797,6 +798,24 @@ function showMainContent() {
     
     if (mainContainer) {
         mainContainer.classList.remove('content-hidden');
+    }
+}
+
+function initContainers() {
+    // Reset any display styling that might be applied
+    const timetableContainer = document.getElementById('timetable-container');
+    if (timetableContainer && !timetableContainer.style.display) {
+        timetableContainer.style.display = '';
+    }
+    
+    const iframeContainer = document.getElementById('iframe-container');
+    if (iframeContainer) {
+        iframeContainer.classList.remove('visible');
+    }
+    
+    const gradeDistributionContainer = document.getElementById('gradeDistributionContainer');
+    if (gradeDistributionContainer) {
+        gradeDistributionContainer.style.maxHeight = null;
     }
 }
 
@@ -1420,47 +1439,46 @@ function processCourseData(rows) {
  * Update the course metadata in the UI.
  */
 function updateCourseMetadata(metadata) {
-console.log("Timetable enabled value:", metadata.timetable_enabled);
     // Update course code - make sure to format it by replacing underscores with spaces
     const formattedCode = metadata.code ? formatCourseCode(metadata.code) : 'Course Code';
     document.getElementById('course-code').textContent = formattedCode;
     
-// Update professor names
-const professorsContainer = document.getElementById('professors-container');
-if (professorsContainer) {
-    // Clear existing professors
-    professorsContainer.innerHTML = '';
-    
-    let professors = [];
-    
-    // Check for single professor
-    if (metadata.professor) {
-        professors.push(metadata.professor);
-    }
-    
-    // Check for multiple professors (professor1, professor2, etc.)
-    for (let i = 1; i <= 5; i++) {
-        const key = `professor${i}`;
-        if (metadata[key]) {
-            professors.push(metadata[key]);
+    // Update professor names
+    const professorsContainer = document.getElementById('professors-container');
+    if (professorsContainer) {
+        // Clear existing professors
+        professorsContainer.innerHTML = '';
+        
+        let professors = [];
+        
+        // Check for single professor
+        if (metadata.professor) {
+            professors.push(metadata.professor);
+        }
+        
+        // Check for multiple professors (professor1, professor2, etc.)
+        for (let i = 1; i <= 5; i++) {
+            const key = `professor${i}`;
+            if (metadata[key]) {
+                professors.push(metadata[key]);
+            }
+        }
+        
+        // Add professor info cards
+        if (professors.length > 0) {
+            professors.forEach(professor => {
+                const professorSpan = document.createElement('span');
+                professorSpan.innerHTML = `<i class="fas fa-user-circle"></i> ${professor}`;
+                professorsContainer.appendChild(professorSpan);
+            });
+        } else {
+            // Default if no professors specified
+            const defaultSpan = document.createElement('span');
+            defaultSpan.innerHTML = '<i class="fas fa-user-circle"></i> Instructor';
+            professorsContainer.appendChild(defaultSpan);
         }
     }
     
-    // Add professor info cards
-    if (professors.length > 0) {
-        professors.forEach(professor => {
-            const professorSpan = document.createElement('span');
-            professorSpan.innerHTML = `<i class="fas fa-user-circle"></i> ${professor}`;
-            professorsContainer.appendChild(professorSpan);
-        });
-    } else {
-        // Default if no professors specified
-        const defaultSpan = document.createElement('span');
-        defaultSpan.innerHTML = '<i class="fas fa-user-circle"></i> Instructor';
-        professorsContainer.appendChild(defaultSpan);
-    }
-}
-	
     // Update other metadata fields
     document.getElementById('course-title').textContent = metadata.title || 'Course Title';
     document.getElementById('course-semester').textContent = metadata.semester || 'Unknown Semester';
@@ -1490,72 +1508,60 @@ if (professorsContainer) {
         // Default values if not provided
         updateWeekProgress();
     }
-	// Update announcements button
-const announcementsBtn = document.getElementById('announcements-btn');
-if (metadata.chat_link) {
-    announcementsBtn.style.display = 'inline-block';
-    announcementsBtn.onclick = function() {
-        window.open(metadata.chat_link, '_blank', 'noopener,noreferrer');
-    };
-} else {
-    announcementsBtn.style.display = 'none';
-}
-
-// Update timetable button
-const timetableBtn = document.getElementById('timetable-btn');
-const timetableContainer = document.getElementById('timetable-container');
-if (metadata.timetable_enabled === 'true') {
-    // Update timetable form inputs
-    if (metadata.timetable_id) {
-        document.getElementById('timetable-id-input').value = metadata.timetable_id;
-    }
-    if (metadata.class_id) {
-        document.getElementById('class-select').value = metadata.class_id;
-    }
     
-    timetableBtn.style.display = 'inline-block';
-    timetableBtn.onclick = toggleTimetable;
-} else {
-    timetableBtn.style.display = 'none';
-    timetableContainer.style.display = 'none';
-}
+    // Update announcements button
+    const announcementsBtn = document.getElementById('announcements-btn');
+    if (metadata.chat_link) {
+        announcementsBtn.style.display = 'inline-block';
+        announcementsBtn.onclick = function() {
+            window.open(metadata.chat_link, '_blank', 'noopener,noreferrer');
+        };
+    } else {
+        announcementsBtn.style.display = 'none';
+    }
 
-// Update evaluation criteria button
-const evaluationBtn = document.getElementById('evaluation-btn');
-if (hasEvaluationData(metadata)) {
-    evaluationBtn.style.display = 'inline-block';
-    evaluationBtn.onclick = toggleGradeDistribution;
+    // Update timetable button
+    const timetableBtn = document.getElementById('timetable-btn');
+    const timetableContainer = document.getElementById('timetable-container');
+    const timetableValue = String(metadata.timetable_enabled || '').toLowerCase();
+    const isTimetableEnabled = (timetableValue === 'true' || timetableValue === '1');
     
-    // Pre-generate the grade distribution
-    generateGradeDistribution(metadata);
-} else {
-    evaluationBtn.style.display = 'none';
-}
-// Update form values from metadata
-if (metadata.timetable_id) {
-    document.getElementById('timetable-id-input').value = metadata.timetable_id;
-}
-if (metadata.class_id) {
-    document.getElementById('class-select').value = metadata.class_id;
-}
+    // FIX: Explicitly set display style in both cases
+    if (isTimetableEnabled) {
+        // Update timetable form inputs
+        if (metadata.timetable_id) {
+            document.getElementById('timetable-id-input').value = metadata.timetable_id;
+        }
+        if (metadata.class_id) {
+            document.getElementById('class-select').value = metadata.class_id;
+        }
+        
+        timetableBtn.style.display = 'inline-block';
+        timetableContainer.style.display = ''; // IMPORTANT: Reset display style to default
+        timetableBtn.onclick = toggleTimetable;
+    } else {
+        timetableBtn.style.display = 'none';
+        timetableContainer.style.display = 'none';
+    }
 
-// Update UI for buttons based on available metadata
-document.getElementById('announcements-btn').style.display = metadata.chat_link ? 'inline-block' : 'none';
-const timetableValue = String(metadata.timetable_enabled || '').toLowerCase();
-document.getElementById('timetable-btn').style.display = 
-    (timetableValue === 'true' || timetableValue === '1') ? 'inline-block' : 'none';
-
-// Pre-generate the evaluation criteria on load
-if (hasEvaluationData(metadata)) {
-    generateGradeDistribution(metadata);
-    // Make the evaluation button visible
-    document.getElementById('evaluation-btn').style.display = 'inline-block';
-} else {
-    document.getElementById('evaluation-btn').style.display = 'none';
+    // Update evaluation criteria button
+    const evaluationBtn = document.getElementById('evaluation-btn');
+    if (hasEvaluationData(metadata)) {
+        evaluationBtn.style.display = 'inline-block';
+        evaluationBtn.onclick = toggleGradeDistribution;
+        
+        // Pre-generate the grade distribution
+        generateGradeDistribution(metadata);
+        
+        // Reset the container state to start closed
+        const container = document.getElementById('gradeDistributionContainer');
+        if (container) {
+            container.style.maxHeight = null;
+        }
+    } else {
+        evaluationBtn.style.display = 'none';
+    }
 }
-
-}
-
 /**
  * Generate the HTML for course modules and materials.
  */
@@ -1676,17 +1682,14 @@ function toggleTimetable() {
     const iframe = document.getElementById('timetable-iframe');
     
     if (!iframeContainer.classList.contains('visible')) {
-        // First, add a load event handler to the iframe before submitting the form
-const handleIframeLoad = function() {
-    console.log("Iframe loaded, making visible");
-    iframeContainer.classList.add('visible');
-    iframe.removeEventListener('load', handleIframeLoad);
-};
-
-iframe.addEventListener('load', handleIframeLoad);
+        // Make sure timetable container is visible first
+        document.getElementById("timetable-container").style.display = '';
         
-        // Add the load event listener
-        iframe.addEventListener('load', handleIframeLoad);
+        // First, add a load event handler to the iframe before submitting the form
+        iframe.onload = function() {
+            console.log("Iframe loaded, making visible");
+            iframeContainer.classList.add('visible');
+        };
         
         console.log("Submitting timetable form");
         document.getElementById('timetable-form').submit();
@@ -1698,7 +1701,6 @@ iframe.addEventListener('load', handleIframeLoad);
         button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
     }
 }
-
 /**
  * Check if metadata contains any evaluation data
  */
