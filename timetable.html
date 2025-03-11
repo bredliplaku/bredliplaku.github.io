@@ -286,8 +286,8 @@
         flex-wrap: wrap;
         gap: 8px;
         margin-top: 10px;
-		margin-left: 5px;
-		margin-right: 5px;
+		margin-left: 10px;
+		margin-right: 10px;
     }
     
     .timetable-button {
@@ -321,6 +321,7 @@
         height: 700px;
         overflow: hidden;
         position: relative;
+		box-shadow: none;
         border-radius: 10px;
         margin-top: 20px;
         display: none;
@@ -348,6 +349,39 @@
 		left: 0;
 	}
     
+	Copy.app-loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #f4f4f4;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    transition: opacity 0.5s ease;
+}
+
+.iframe-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    background-color: rgba(255, 255, 255, 0.8);
+    padding: 20px;
+    border-radius: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.content-hidden {
+    visibility: hidden;
+}
+	
     /* For smaller screens */
 	
 	@media (max-width: 768px) {
@@ -393,6 +427,13 @@
 </style>
 </head>
 <body>
+<div id="app-loading" class="app-loading">
+    <img src="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/loading.gif" alt="Loading Cat" style="width: 150px; height: 150px;">
+    <div style="margin-top: 10px; font-size: 14px; color: #666;">Loading timetables...</div>
+</div>
+<div id="iframe-loading" class="iframe-loading" style="display: none;">
+    <img src="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/loading.gif" alt="Loading" style="width: 100px; height: 100px;">
+</div>
     <div class="container">
         <div class="course-actions">
             <button onclick="window.open('https://ce.epoka.edu.al/', '_blank', 'noopener,noreferrer')"><i class="fas fa-home"></i> Home</button>
@@ -532,23 +573,26 @@
         
         // Load all data from the spreadsheet
         async function loadAllData() {
-            try {
-                await loadSemesterInfo();
-                updateWeekCounter();
-                updateProgress();
-                await loadTimetableData();
-                
-                // Initialize UI with default tab
-                document.getElementById('undergrad-tab-content').classList.add('active');
-                document.getElementById('timetable-container').classList.add('active');
-                
-                isInitialized = true;
-                isLoading = false;
-            } catch (error) {
-                console.error("Error loading data:", error);
-                isLoading = false;
-            }
-        }
+    try {
+        await loadSemesterInfo();
+        updateWeekCounter();
+        updateProgress();
+        await loadTimetableData();
+        
+        // Initialize UI with default tab
+        document.getElementById('undergrad-tab-content').classList.add('active');
+        
+        isInitialized = true;
+        isLoading = false;
+        
+        // Show the content now that everything is loaded
+        showMainContent();
+    } catch (error) {
+        console.error("Error loading data:", error);
+        isLoading = false;
+        showMainContent(); // Show content even if there was an error
+    }
+}
         
         // Load semester info from the spreadsheet
         async function loadSemesterInfo() {
@@ -687,29 +731,18 @@
                             return;
                         }
                         
-                        loadTimetable(item.timetableId, item.classId);
-                        currentTimetableId = item.timetableId;
-                        currentClassId = item.classId;
-                        currentLecturerKey = null;
-                        
-                        // Highlight selected button
-                        document.querySelectorAll('.timetable-button').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-                        this.classList.add('active');
-                        
-                        // Make sure timetable iframe is visible
-                        document.getElementById('timetable-container').classList.add('active');
-                        
-                        // Update tab buttons
-                        document.querySelectorAll('.tab-button').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-                        document.getElementById('undergrad-tab').classList.add('active');
-                    };
-                    undergradContainer.appendChild(button);
+                // Pass this button to loadTimetable
+                loadTimetable(item.timetableId, item.classId, this);
+                
+                // Update tab buttons
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('active');
                 });
-            }
+                document.getElementById('undergrad-tab').classList.add('active');
+            };
+            undergradContainer.appendChild(button);
+        });
+    }
             
             // Graduate buttons
             const gradContainer = document.getElementById('graduate-buttons');
@@ -727,29 +760,18 @@
                             return;
                         }
                         
-                        loadTimetable(item.timetableId, item.classId);
-                        currentTimetableId = item.timetableId;
-                        currentClassId = item.classId;
-                        currentLecturerKey = null;
-                        
-                        // Highlight selected button
-                        document.querySelectorAll('.timetable-button').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-                        this.classList.add('active');
-                        
-                        // Make sure timetable iframe is visible
-                        document.getElementById('timetable-container').classList.add('active');
-                        
-                        // Update tab buttons
-                        document.querySelectorAll('.tab-button').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-                        document.getElementById('grad-tab').classList.add('active');
-                    };
-                    gradContainer.appendChild(button);
+                // Pass this button to loadTimetable
+                loadTimetable(item.timetableId, item.classId, this);
+                
+                // Update tab buttons
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('active');
                 });
-            }
+                document.getElementById('undergrad-tab').classList.add('active');
+            };
+            undergradContainer.appendChild(button);
+        });
+    }
             
             // Lecturer buttons
             const lecturerContainer = document.getElementById('lecturer-buttons');
@@ -767,29 +789,18 @@
                             return;
                         }
                         
-                        loadIframeWithID(item.key);
-                        currentLecturerKey = item.key;
-                        currentTimetableId = null;
-                        currentClassId = null;
-                        
-                        // Highlight selected button
-                        document.querySelectorAll('.timetable-button').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-                        this.classList.add('active');
-                        
-                        // Make sure timetable iframe is visible
-                        document.getElementById('timetable-container').classList.add('active');
-                        
-                        // Update tab buttons
-                        document.querySelectorAll('.tab-button').forEach(btn => {
-                            btn.classList.remove('active');
-                        });
-                        document.getElementById('lecturer-tab').classList.add('active');
-                    };
-                    lecturerContainer.appendChild(button);
+                // Pass this button to loadTimetable
+                loadTimetable(item.key, this);
+                
+                // Update tab buttons
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('active');
                 });
-            }
+                document.getElementById('lecturer-tab').classList.add('active');
+            };
+            lecturerContainer.appendChild(button);
+        });
+    }
         }
         
 		function switchTab(tabId) {
@@ -828,60 +839,105 @@
 			currentLecturerKey = null;
 		}
 
-		function loadTimetable(timetableValue, classValue) {
-			// First HIDE the lecturer container
-			document.getElementById('lecturer-container').classList.remove('active');
-			
-			// Show the timetable container first (important to do this before form submission)
-			document.getElementById('timetable-container').classList.add('active');
-			
-			// Then set form values and submit
-			document.getElementById('timetable-select').value = timetableValue;
-			document.getElementById('class-select').value = classValue;
-			document.getElementById('timetable-form').submit();
-			
-			// Track the current selection
-			currentTimetableId = timetableValue;
-			currentClassId = classValue;
-			currentLecturerKey = null;
-		}
+function loadTimetable(timetableValue, classValue, clickedButton) {
+    // Show loading screen
+    document.getElementById('iframe-loading').style.display = 'flex';
+    
+    // First HIDE the lecturer container
+    document.getElementById('lecturer-container').classList.remove('active');
+    
+    // Show the timetable container
+    document.getElementById('timetable-container').classList.add('active');
+    
+    // Then set form values and submit
+    document.getElementById('timetable-select').value = timetableValue;
+    document.getElementById('class-select').value = classValue;
+    document.getElementById('timetable-form').submit();
+    
+    // Track the current selection
+    currentTimetableId = timetableValue;
+    currentClassId = classValue;
+    currentLecturerKey = null;
+    
+    // Highlight selected button using the clickedButton parameter
+    document.querySelectorAll('.timetable-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    if (clickedButton) {
+        clickedButton.classList.add('active');
+    }
+}
         
-	function loadIframeWithID(id) {
-		if (id === "#") {
-			alert("Timetable not available for this lecturer.");
-			return;
-		}
+	function showMainContent() {
+    const loadingIndicator = document.getElementById('app-loading');
+    const mainContainer = document.querySelector('.container');
+    
+    if (loadingIndicator) {
+        loadingIndicator.style.opacity = '0';
+        setTimeout(() => {
+            loadingIndicator.style.display = 'none';
+        }, 500);
+    }
+    
+    if (mainContainer) {
+        mainContainer.classList.remove('content-hidden');
+    }
+}
+
+function setupIframeEvents() {
+    document.getElementById('timetable-iframe').addEventListener('load', function() {
+        document.getElementById('iframe-loading').style.display = 'none';
+    });
+    
+    document.getElementById('lecturer-iframe').addEventListener('load', function() {
+        document.getElementById('iframe-loading').style.display = 'none';
+    });
+}
 		
-		// First HIDE the timetable container
-		document.getElementById('timetable-container').classList.remove('active');
-		
-		// Clear any existing timetable form values to prevent automatic submission
-		document.getElementById('timetable-select').value = "";
-		document.getElementById('class-select').value = "";
-		
-		// Now show the lecturer container and set its iframe src
-		const baseUrl = "https://eis.epoka.edu.al/publictimetable/live/";
-		const iframe = document.getElementById('lecturer-iframe');
-		iframe.src = baseUrl + id;
-		document.getElementById('lecturer-container').classList.add('active');
-		
-		// Track the current selection
-		currentLecturerKey = id;
-		currentTimetableId = null;
-		currentClassId = null;
-		
-		// Update button highlights
-		document.querySelectorAll('.timetable-button').forEach(btn => {
-			btn.classList.remove('active');
-		});
-		this.classList.add('active');
-		
-		// Update tab buttons
-		document.querySelectorAll('.tab-button').forEach(btn => {
-			btn.classList.remove('active');
-		});
-		document.getElementById('lecturer-tab').classList.add('active');
-	}
+function loadIframeWithID(id) {
+    if (id === "#") {
+        alert("Timetable not available for this lecturer.");
+        return;
+    }
+    
+    // Show loading screen
+    document.getElementById('iframe-loading').style.display = 'flex';
+    
+    // First HIDE the timetable container
+    document.getElementById('timetable-container').classList.remove('active');
+    
+    // Clear any existing timetable form values to prevent automatic submission
+    document.getElementById('timetable-select').value = "";
+    document.getElementById('class-select').value = "";
+    
+    // Now show the lecturer container and set its iframe src
+    const baseUrl = "https://eis.epoka.edu.al/publictimetable/live/";
+    const iframe = document.getElementById('lecturer-iframe');
+    iframe.src = baseUrl + id;
+    document.getElementById('lecturer-container').classList.add('active');
+    
+    // Track the current selection
+    currentLecturerKey = id;
+    currentTimetableId = null;
+    currentClassId = null;
+    
+    // Update button highlights in a consistent way - use classList rather than direct styling
+    document.querySelectorAll('.timetable-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    // Since we don't have a reference to the button itself here, we need to find it
+    document.querySelectorAll('.timetable-button').forEach(btn => {
+        if (btn.textContent.includes(name)) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Update tab buttons
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.getElementById('lecturer-tab').classList.add('active');
+}
 		
 		function hideAllIframes() {
 			// Hide all iframe containers
@@ -934,9 +990,18 @@
 		}
 
 window.onload = function() {
+    const mainContainer = document.querySelector('.container');
+    if (mainContainer) {
+        mainContainer.classList.add('content-hidden');
+    }
+    
     updateYear();
-    hideAllIframes(); // Hide all iframes on load
+    hideAllIframes();
+    setupIframeEvents();
     initGoogleApi();
+    
+    // Show content after API initialization or after a timeout
+    setTimeout(showMainContent, 2000); // Fallback timeout
 };
 
     </script>
