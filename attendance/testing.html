@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Attendance</title>
+	<link rel="icon" href="https://bredliplaku.github.io/favicon.png">
+    <link rel="stylesheet" href="style.css">
+	<script src="script.js"></script>
+	<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+	<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Google API client library -->
+	<script src="https://apis.google.com/js/api.js" async defer></script>
+	<script src="https://accounts.google.com/gsi/client" async defer></script>
+<body>
+<div id="app-loading" class="app-loading">
+    <img src="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/loading.gif" alt="Loading Cat" style="width: 150px; height: 150px;">
+    <div style="margin-top: 10px; font-size: 14px; color: #666;">Calculating excuses per minute...</div>
+</div>
+    <div class="container content-hidden" id="main-container">
+        <!-- Audio elements for scan sounds -->
+        <audio id="success-sound" preload="auto">
+            <source src="https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3?filename=right-answer-sound-effect-21301.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="error-sound" preload="auto">
+            <source src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c6e26d.mp3?filename=wrong-answer-sound-effect-21367.mp3" type="audio/mpeg">
+        </audio>
+        
+<div class="sync-auth-container">
+  <!-- Left: Sync status and button -->
+  <div class="sync-container">
+    <div id="sync-status" class="sync-status offline">
+      <i class="fas fa-circle"></i> <span id="sync-text">Offline</span>
+    </div>
+    <button id="sync-btn" class="btn-blue admin-only" style="display: none;">
+      <i class="fas fa-sync-alt"></i> Sync
+    </button>
+  </div>
+  <!-- Right: Auth container -->
+  <div class="auth-container">
+    <div id="login-container">
+<button id="login-btn" class="btn-blue">
+    <i class="fas fa-sign-in-alt"></i> Sign in
+</button>
+    </div>
+    <div id="user-container" style="display: none">
+      <div class="user-info">
+        <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
+        <span id="user-name"></span>
+        <button id="logout-btn" class="btn-sm"><i class="fas fa-sign-out-alt"></i></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+        
+        <div class="app-header">
+            <h1><i class="fa-solid fa-list-check"></i> Attendance</h1>
+            <h2>Track your attendance</h2>
+            <div class="app-info">
+                <span class="info-item"><i class="fas fa-sync-alt"></i> <span id="total-scans">0</span> scans </span>
+                <span class="info-item"><i class="fas fa-clock"></i> Last scan: <span id="last-scan">Never</span></span>
+                <span class="info-item"><i class="fa-solid fa-folder-tree"></i> Database: <span id="database-status">Not loaded</span></span>
+                <button id="toggle-sound-btn" class="info-item"><i class="fas fa-volume-up"></i></button>
+            </div>
+				<div class="tabs" style="display: none;">
+				  <div class="tab active" data-tab="scanner-tab">
+					<i class="fa-brands fa-nfc-symbol"></i> Scanner
+				  </div>
+				  <div class="tab admin-only" data-tab="database-tab">
+					<i class="fa-solid fa-folder-tree"></i>&nbsp; Database
+				  </div>
+				</div>
+        </div>
+        
+		<div id="course-buttons-container" class="course-buttons-container">
+		        <select id="course-select" class="course-select">
+            <option value="">Select course</option>
+            <!-- Courses will be populated here -->
+        </select>
+		<!-- Course buttons will be added here dynamically -->
+		</div>  
+        <!-- Notification area -->
+        <!-- <div id="notification-container"></div> -->
+        <div id="in-page-notification-area" class="in-page-notifications"></div>
+
+        <!-- Scanner & History Tab -->
+        <div id="scanner-tab" class="tab-content active">
+            <div class="scan-buttons">
+                <button id="start-scan-btn" class="big-scan-button btn-blue scan-button" style="display: none;">
+                    <i class="fa-solid fa-wifi"></i><b>&nbsp;&nbsp; START SCANNING</b>
+                </button>
+                <button id="stop-scan-btn" class="big-scan-button btn-red scan-button" style="display: none;">
+                    <i class="fa-solid fa-circle-stop"></i><b>&nbsp;&nbsp; STOP SCANNING</b>
+                </button>
+            </div>
+            
+            <div class="module">
+                <div class="module-header">
+                    <span class="module-title"><i class="fas fa-history"></i> Scan History</span>
+                </div>
+                <div class="module-content">
+                    <div class="filter-container">
+                        <input type="text" id="filter-input" class="filter-input" placeholder="Search...">
+                        <select id="sort-select" class="sort-dropdown">
+                            <option value="date-desc">Date (Newest First)</option>
+                            <option value="date-asc">Date (Oldest First)</option>
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                            <option value="uid-asc">UID (A-Z)</option>
+                            <option value="uid-desc">UID (Z-A)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="logs-header">
+                        <div class="logs-count">Found logs: <span id="filtered-count">0</span></div>
+                        <div class="logs-actions">
+                            <button id="import-btn" class="btn-blue admin-only" style="display: none;"><i class="fas fa-file-import"></i> Import</button>
+                            <button id="export-btn" class="btn-blue admin-only" style="display: none;" disabled><i class="fas fa-file-export"></i> Export</button>
+                            <button id="add-log-btn" class="btn-green admin-only" style="display: none;"><i class="fas fa-plus"></i></button>
+                            <button id="clear-btn" class="btn-red admin-only" style="display: none;" disabled><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                    
+                    <!-- Hidden file inputs -->
+                    <input type="file" id="import-input" accept="application/json" style="display: none;">
+                    <input type="file" id="excel-input" accept=".xlsx,.xls" style="display: none;">
+                    
+                    <!-- Table container for horizontal scrolling -->
+                    <div class="table-container">
+					<table class="logs-table">
+						<thead>
+							<tr>
+								<th class="sortable name-column" data-sort="name">Name <i class="sort-icon fas fa-sort"></i></th>
+								<th class="sortable uid-column" data-sort="uid">UID <i class="sort-icon fas fa-sort"></i></th>
+								<th class="sortable date-column" data-sort="date">Date <i class="sort-icon fas fa-sort-down"></i></th>
+								<th>Time</th>
+								<th class="admin-only" style="display: none;">Actions</th>
+							</tr>
+						</thead>
+						<tbody id="logs-tbody">
+							<!-- Log entries will go here -->
+						</tbody>
+					</table>
+                    </div>
+                    
+                    <div id="empty-logs" class="empty-logs">
+                        <i class="fas fa-info-circle"></i> Please select a course to view attendance logs.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Database Tab -->
+        <div id="database-tab" class="tab-content">
+            <div class="module" style="margin-top:20px">
+                <div class="module-header">
+                    <span class="module-title"><i class="fa-solid fa-folder-tree"></i> UID Database</span>
+                </div>
+                <div class="module-content">
+                    <div class="filter-container">
+                        <input type="text" id="db-filter-input" class="filter-input" placeholder="Search database...">
+                    </div>
+                    
+                    <div class="database-controls">
+                        <div class="entry-count">Database entries: <span id="db-entry-count">0</span></div>
+                        <div class="database-actions">
+                            <button id="import-excel-btn" class="btn-blue admin-only" style="display: none;"><i class="fas fa-file-import"></i> Import</button>
+                            <button id="export-excel-btn" class="btn-blue admin-only" style="display: none;"><i class="fas fa-file-export"></i> Export</button>
+                            <button id="add-entry-btn" class="btn-green admin-only" style="display: none;"><i class="fas fa-plus"></i></button>
+                            <button id="clear-db-btn" class="btn-red admin-only" style="display: none;"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="database-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th class="uid-column">UID</th>
+                                    <th class="admin-only" style="display: none;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="database-tbody">
+                                <!-- Database entries will go here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div id="empty-database" class="empty-logs">
+                        <i class="fas fa-info-circle"></i> No database entries yet. Please sign in as admin to view and manage the database.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="footer">
+            <div class="social-links">
+                <a href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank" rel="noopener noreferrer"><i class="far fa-id-card"></i></a>
+                <a href="mailto:bplaku@epoka.edu.al" target="_blank" rel="noopener noreferrer"><i class="far fa-envelope"></i></a>
+            </div>
+            <p style="font-size:0.7em"><i class="far fa-copyright"></i> 2023-<span id="currentYear"></span> Bredli Plaku. All Rights Reserved.</p>
+        </footer>
+    </div>
+    
+</body>
+</html>
