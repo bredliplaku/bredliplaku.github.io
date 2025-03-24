@@ -1285,7 +1285,7 @@ body.is-admin td.admin-only {
 	let criticalErrorsOnly = true;
 	let initialSignIn = true; // Flag to track initial sign-in
 	let lastScannedUID = null;
-    let googleDriveFolderId = ''; // Folder ID for storing excuse attachments
+    let googleDriveFolderId = '1ShT1XneZH3mNi1INfRDt0BpMxy1qh0iv'; // Folder ID for storing excuse attachments
 	
 	// DOM Elements
 	const tabs = document.querySelectorAll('.tab');
@@ -1328,7 +1328,7 @@ body.is-admin td.admin-only {
 	const userName = document.getElementById('user-name');
 	const userAvatar = document.getElementById('user-avatar');
 	const READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.file";
-	const ADMIN_SCOPE = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.file";
+	const ADMIN_SCOPE = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive";
 	const TOKEN_SCOPE_KEY = 'token_scope_granted';
 	const AUTO_SIGNIN_KEY = 'prevent_auto_signin';
 	
@@ -1642,52 +1642,16 @@ async function initializeExcusesFolder() {
     if (!isAdmin || !isOnline || !isSignedIn) {
         return;
     }
-    
     try {
-        // Load the Drive API
-        await gapi.client.load('drive', 'v3');
-		console.log('Drive API loaded successfully');
-        
-        // Check if folder ID is stored in localStorage
-        const storedFolderId = localStorage.getItem('excuse_folder_id');
-        if (storedFolderId) {
-            // Verify the folder still exists
-            try {
-                const response = await gapi.client.drive.files.get({
-                    fileId: storedFolderId,
-                    fields: 'id,name'
-                });
-                googleDriveFolderId = storedFolderId;
-                console.log('Using existing excuse folder:', response.result.name);
-                
-                // Ensure folder is properly shared
-                await setFolderPermissions(googleDriveFolderId);
-                return;
-            } catch (error) {
-                console.warn('Stored folder not found, creating new one:', error);
-            }
-        }
-        
-        // Create a new folder
-        const response = await gapi.client.drive.files.create({
-            resource: {
-                name: 'Attendance Excuses',
-                mimeType: 'application/vnd.google-apps.folder',
-            },
-            fields: 'id'
-        });
-        
-        googleDriveFolderId = response.result.id;
-        localStorage.setItem('excuse_folder_id', googleDriveFolderId);
-        console.log('Created new excuses folder with ID:', googleDriveFolderId);
-        
-        // Set proper permissions for the folder
+        // Since the folder already exists, just set (or ensure) the correct permissions.
         await setFolderPermissions(googleDriveFolderId);
+        console.log('Using existing folder with ID:', googleDriveFolderId);
     } catch (error) {
-        console.error('Error initializing Drive folder:', error);
-        showImprovedNotification('error', 'Drive Error', 'Could not set up Google Drive folder for attachments.');
+        console.error('Error in initializeExcusesFolder:', error);
+        showImprovedNotification('error', 'Drive Error', 'Could not set up permissions for the existing Drive folder.');
     }
 }
+
 
 // Set permissions on the excuse folder so files are viewable by anyone with the link
 async function setFolderPermissions(folderId) {
@@ -1712,26 +1676,21 @@ async function uploadFileToDrive(file, fileName) {
         throw new Error('Cannot upload file: offline or not signed in');
     }
     
-    // Create or get folder if needed
-    if (!googleDriveFolderId) {
-        await initializeExcusesFolder();
-    }
-    
-    // Read file as array buffer
+    // We assume googleDriveFolderId is already set (via the hard-coded value).
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
                 const fileContent = e.target.result;
                 
-                // Create file metadata
+                // Create file metadata with your existing folder as parent.
                 const metadata = {
                     name: fileName || file.name,
                     mimeType: file.type,
                     parents: [googleDriveFolderId]
                 };
                 
-                // Create multipart request
+                // Prepare a multipart request body.
                 const boundary = 'attendance-excuse-boundary';
                 const delimiter = `\r\n--${boundary}\r\n`;
                 const closeDelimiter = `\r\n--${boundary}--`;
@@ -1743,14 +1702,12 @@ async function uploadFileToDrive(file, fileName) {
                     delimiter +
                     'Content-Type: ' + file.type + '\r\n\r\n';
                 
-                // Convert to blob
                 const blob = new Blob([
                     multipartRequestBody,
                     fileContent,
                     closeDelimiter
-                ], {type: 'multipart/related; boundary=' + boundary});
+                ], { type: 'multipart/related; boundary=' + boundary });
                 
-                // Create XHR request
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart');
                 xhr.setRequestHeader('Authorization', 'Bearer ' + gapi.client.getToken().access_token);
@@ -1761,20 +1718,19 @@ async function uploadFileToDrive(file, fileName) {
                         const result = xhr.response;
                         console.log('File uploaded successfully:', result);
                         
-                        // Make the file publicly accessible via link
+                        // Set file permissions so that bplaku@epoka.edu.al can view/edit.
                         try {
                             await gapi.client.drive.permissions.create({
                                 fileId: result.id,
                                 resource: {
-                                    role: 'reader',
-                                    type: 'anyone',
-                                    allowFileDiscovery: false
+                                    role: 'reader',  // Change to 'writer' if you need edit access on the file itself.
+                                    type: 'user',
+                                    emailAddress: 'bplaku@epoka.edu.al'
                                 }
                             });
-                            console.log('File permissions set to "anyone with the link can view"');
+                            console.log('File permissions set for bplaku@epoka.edu.al');
                         } catch (permissionError) {
                             console.error('Error setting file permissions:', permissionError);
-                            // Continue with the upload even if permission setting fails
                         }
                         
                         resolve(result);
@@ -1803,7 +1759,7 @@ async function uploadFileToDrive(file, fileName) {
         reader.readAsArrayBuffer(file);
     });
 }
-	
+
 function init() {
     isInitializing = true;
     
