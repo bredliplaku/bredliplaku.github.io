@@ -182,6 +182,11 @@ body.is-admin td.admin-only {
   font-size: 0.85em;
   font-weight: 500;
 }
+.excuse-button-container {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
 
 .status-pending {
   background-color: #fff3e0;
@@ -983,22 +988,20 @@ body.is-admin td.admin-only {
                 <span class="info-item"><i class="fa-solid fa-folder-tree"></i> Database: <span id="database-status">Not loaded</span></span>
                 <button id="toggle-sound-btn" class="info-item"><i class="fas fa-volume-up"></i></button>
             </div>
-				<div class="tabs" style="display: none;">
-				<div class="tabs tabs-ready">
-				  <div class="tab active" data-tab="scanner-tab">
-					<i class="fa-brands fa-nfc-symbol"></i> Scanner
-				  </div>
-				  <div class="tab" data-tab="excuses-tab">
-					<i class="fa-solid fa-notes-medical"></i> Excuses
-				  </div>
-				  <div class="tab admin-only" data-tab="database-tab">
-					<i class="fa-solid fa-folder-tree"></i> Database
-				  </div>
-				  <div class="tab admin-only" data-tab="manage-excuses-tab">
-					<i class="fa-solid fa-clipboard-check"></i> Manage Excuses
-				  </div>
-				</div>
-				  </div>
+<div class="tabs" id="main-tabs">
+  <div class="tab active" data-tab="scanner-tab">
+    <i class="fa-brands fa-nfc-symbol"></i> Scanner
+  </div>
+  <div class="tab" data-tab="excuses-tab">
+    <i class="fa-solid fa-notes-medical"></i> Excuses
+  </div>
+  <div class="tab admin-only" data-tab="database-tab">
+    <i class="fa-solid fa-folder-tree"></i> Database
+  </div>
+  <div class="tab admin-only" data-tab="manage-excuses-tab">
+    <i class="fa-solid fa-clipboard-check"></i> Manage Excuses
+  </div>
+</div>
 				</div>
         </div>
         
@@ -1023,7 +1026,11 @@ body.is-admin td.admin-only {
                     <i class="fa-solid fa-circle-stop"></i><b>&nbsp;&nbsp; STOP SCANNING</b>
                 </button>
             </div>
-            
+            <div class="excuse-button-container" style="margin: 15px 0 25px 0;">
+    <button id="submit-absence-btn" class="big-scan-button btn-orange">
+        <i class="fa-solid fa-notes-medical"></i><b>&nbsp;&nbsp; SUBMIT ABSENCE EXCUSE</b>
+    </button>
+</div>
             <div class="module">
                 <div class="module-header">
                     <span class="module-title"><i class="fas fa-history"></i> Scan History</span>
@@ -1079,7 +1086,36 @@ body.is-admin td.admin-only {
                 </div>
             </div>
         </div>
-        <div id="excuses-tab" class="tab-content">
+	<div id="my-excuses-container" class="module" style="display: none;">
+    <div class="module-header">
+        <span class="module-title"><i class="fas fa-notes-medical"></i> My Absence Excuses</span>
+        <button id="new-excuse-btn" class="btn-sm btn-green">
+            <i class="fas fa-plus"></i> New Excuse
+        </button>
+    </div>
+    <div class="module-content">
+        <div class="table-container">
+            <table class="logs-table">
+                <thead>
+                    <tr>
+                        <th>Course</th>
+                        <th>Date</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="scanner-excuses-tbody">
+                    <!-- Student's excuses will be populated here -->
+                </tbody>
+            </table>
+        </div>
+        <div id="empty-scanner-excuses" class="empty-logs">
+            <i class="fas fa-info-circle"></i> You haven't submitted any excuses yet.
+        </div>
+    </div>
+</div>
+<div id="excuses-tab" class="tab-content">
   <div class="module" style="margin-top:20px">
     <div class="module-header">
       <span class="module-title"><i class="fa-solid fa-notes-medical"></i> Submit Absence Excuse</span>
@@ -1464,6 +1500,8 @@ function setupEventListeners() {
     const toggleSoundBtn = document.getElementById('toggle-sound-btn');
 	const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
+	const submitAbsenceBtn = document.getElementById('submit-absence-btn');
+
     
     if (startScanBtn) startScanBtn.addEventListener('click', startScanning);
     if (stopScanBtn) stopScanBtn.addEventListener('click', stopScanning);
@@ -1513,6 +1551,17 @@ function setupEventListeners() {
             toggleSoundBtn.innerHTML = soundEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
         });
     }
+	
+if (submitAbsenceBtn) {
+    submitAbsenceBtn.addEventListener('click', function() {
+        if (isSignedIn && !isAdmin) {
+            showExcuseDialog();
+        } else if (!isSignedIn) {
+            showImprovedNotification('warning', 'Not Signed In', 
+                'Please sign in to submit an absence excuse.');
+        }
+    });
+}
 }
 
 // Add these to your setupEventListeners function
@@ -1531,6 +1580,79 @@ function setupExcuseEventListeners() {
     if (cancelExcuseReviewBtn) cancelExcuseReviewBtn.addEventListener('click', closeExcuseReview);
 }
 
+function updateScannerExcusesList() {
+    if (!isSignedIn || isAdmin) {
+        return;
+    }
+    
+    const excusesContainer = document.getElementById('my-excuses-container');
+    const excusesTbody = document.getElementById('scanner-excuses-tbody');
+    const emptyExcuses = document.getElementById('empty-scanner-excuses');
+    
+    if (!excusesContainer || !excusesTbody || !emptyExcuses) return;
+    
+    // Show the container
+    excusesContainer.style.display = 'block';
+    
+    // Clear the table body
+    excusesTbody.innerHTML = '';
+    
+    // Show/hide empty message
+    emptyExcuses.style.display = myExcuses.length > 0 ? 'none' : 'block';
+    
+    // Only show the 5 most recent excuses
+    const recentExcuses = myExcuses.slice(0, 5);
+    
+    // Add excuses to table
+    recentExcuses.forEach(excuse => {
+        const row = document.createElement('tr');
+        
+        // Course cell
+        const courseCell = document.createElement('td');
+        courseCell.textContent = excuse.courseId.replace(/_/g, ' ');
+        
+        // Date cell
+        const dateCell = document.createElement('td');
+        dateCell.textContent = excuse.absenceDate;
+        
+        // Reason cell
+        const reasonCell = document.createElement('td');
+        reasonCell.textContent = getReasonText(excuse.reason);
+        
+        // Status cell
+        const statusCell = document.createElement('td');
+        const statusSpan = document.createElement('span');
+        statusSpan.className = `excuse-status status-${excuse.status}`;
+        statusSpan.textContent = excuse.status.charAt(0).toUpperCase() + excuse.status.slice(1);
+        statusCell.appendChild(statusSpan);
+        
+        // Actions cell
+        const actionsCell = document.createElement('td');
+        const viewIcon = document.createElement('i');
+        viewIcon.className = 'fas fa-eye excuse-action-icon view-icon';
+        viewIcon.title = 'View Details';
+        viewIcon.addEventListener('click', () => showExcuseDetail(excuse, false));
+        actionsCell.appendChild(viewIcon);
+        
+        // Append cells to row
+        row.appendChild(courseCell);
+        row.appendChild(dateCell);
+        row.appendChild(reasonCell);
+        row.appendChild(statusCell);
+        row.appendChild(actionsCell);
+        
+        // Append row to table
+        excusesTbody.appendChild(row);
+    });
+    
+    // Add event listener to the new excuse button
+    const newExcuseBtn = document.getElementById('new-excuse-btn');
+    if (newExcuseBtn) {
+        newExcuseBtn.addEventListener('click', function() {
+            showExcuseDialog();
+        });
+    }
+}
 
 // Function to show the main content when ready
 function showMainContent() {
@@ -1829,6 +1951,164 @@ gapi.load('client', () => {
 	});
 });
 }
+
+function getCurrentDateString() {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+
+function showExcuseDialog() {
+    // Create dialog backdrop
+    const dialogBackdrop = document.createElement('div');
+    dialogBackdrop.className = 'dialog-backdrop';
+    
+    // Create dialog box
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog excuse-dialog';
+    dialog.style.maxWidth = '600px';
+    
+    // Precompute course options string
+    const courseOptions = availableCourses.map(course => {
+        return `<option value="${course}">${course.replace(/_/g, ' ')}</option>`;
+    }).join('');
+    
+    // Create dialog content using a single template literal
+    dialog.innerHTML = `
+        <h3 class="dialog-title">Submit Absence Excuse</h3>
+        
+        <div class="form-group">
+            <label for="dialog-excuse-course">Course:</label>
+            <select id="dialog-excuse-course" class="form-control">
+                <option value="">-- Select Course --</option>
+                ${courseOptions}
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="dialog-excuse-date">Date of Absence:</label>
+            <input type="date" id="dialog-excuse-date" class="form-control" value="${getCurrentDateString()}">
+        </div>
+        
+        <div class="form-group">
+            <label for="dialog-excuse-reason">Reason:</label>
+            <select id="dialog-excuse-reason" class="form-control">
+                <option value="">-- Select Reason --</option>
+                <option value="medical">Medical Issue</option>
+                <option value="family">Family Emergency</option>
+                <option value="academic">Academic Conflict</option>
+                <option value="transportation">Transportation Problem</option>
+                <option value="other">Other (Please Explain)</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="dialog-excuse-explanation">Explanation:</label>
+            <textarea id="dialog-excuse-explanation" class="form-control" rows="4" 
+                placeholder="Please provide details about your absence..."></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label for="dialog-excuse-attachment">Supporting Document (optional):</label>
+            <div class="file-upload-container">
+                <input type="file" id="dialog-excuse-attachment" class="form-control-file">
+                <div class="file-upload-preview" id="dialog-file-preview"></div>
+            </div>
+            <small class="form-text text-muted">Upload any supporting documents (.pdf, .jpg, .png formats, max 5MB)</small>
+        </div>
+        
+        <div class="dialog-actions">
+            <button id="dialog-submit-excuse-btn" class="btn-green">Submit</button>
+            <button id="dialog-cancel-excuse-btn">Cancel</button>
+        </div>
+    `;
+    
+    // Add dialog to page
+    dialogBackdrop.appendChild(dialog);
+    document.body.appendChild(dialogBackdrop);
+    
+    // Handle file selection
+    const fileInput = document.getElementById('dialog-excuse-attachment');
+    const filePreview = document.getElementById('dialog-file-preview');
+    let selectedFile = null;
+    
+    if (fileInput) {
+        fileInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                filePreview.classList.remove('has-file');
+                filePreview.innerHTML = '';
+                selectedFile = null;
+                return;
+            }
+            
+            // Check file size (5MB max)
+            if (file.size > 5 * 1024 * 1024) {
+                showImprovedNotification('error', 'File Too Large', 'The file exceeds the 5MB limit.');
+                fileInput.value = '';
+                filePreview.classList.remove('has-file');
+                filePreview.innerHTML = '';
+                selectedFile = null;
+                return;
+            }
+            
+            // Check file type
+            const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+            if (!allowedTypes.includes(file.type)) {
+                showImprovedNotification('error', 'Invalid File Type', 'Only PDF, JPG, and PNG files are allowed.');
+                fileInput.value = '';
+                filePreview.classList.remove('has-file');
+                filePreview.innerHTML = '';
+                selectedFile = null;
+                return;
+            }
+            
+            // Show file preview
+            filePreview.classList.add('has-file');
+            let fileIcon = 'fa-file-pdf';
+            if (file.type === 'image/jpeg' || file.type === 'image/png') {
+                fileIcon = 'fa-file-image';
+            }
+            
+            filePreview.innerHTML = `
+                <i class="fas ${fileIcon}"></i>
+                <span>${file.name} (${formatFileSize(file.size)})</span>
+            `;
+            
+            selectedFile = file;
+        });
+    }
+    
+    // Handle submit button
+    document.getElementById('dialog-submit-excuse-btn').addEventListener('click', async function() {
+        const courseId = document.getElementById('dialog-excuse-course').value;
+        const absenceDate = document.getElementById('dialog-excuse-date').value;
+        const reason = document.getElementById('dialog-excuse-reason').value;
+        const explanation = document.getElementById('dialog-excuse-explanation').value.trim();
+        
+        // Validate inputs
+        if (!courseId) {
+            showImprovedNotification('warning', 'Missing Course', 'Please select a course.');
+            return;
+        }
+        
+        if (!absenceDate) {
+            showImprovedNotification('warning', 'Missing Date', 'Please select the date of absence.');
+            return;
+        }
+        
+        if (!reason) {
+            showImprovedNotification('warning', 'Missing Reason', 'Please select a reason for your absence.');
+            return;
+        }
+        
+        if (!explanation) {
+            showImprovedNotification('warning', 'Missing Explanation', 'Please provide an explanation
+
+
 	/**
 	 * Handle token response from Google OAuth.
 	 * @param {Object} resp - The token response object.
@@ -2058,12 +2338,17 @@ function updateAuthUI() {
     const tabsContainer = document.querySelector('.tabs');
     const courseButtonsContainer = document.querySelector('.course-buttons-container');
     const scannerModule = document.querySelector('.module');
+	const excuseButtonContainer = document.querySelector('.excuse-button-container');
     
     // Show/hide main containers based on auth state
     if (loginContainer) loginContainer.style.display = isSignedIn ? 'none' : 'flex';
     if (userContainer) userContainer.style.display = isSignedIn ? 'flex' : 'none';
     if (tabsContainer) tabsContainer.style.display = isAdmin ? 'flex' : 'none';
     if (courseButtonsContainer) courseButtonsContainer.style.display = isSignedIn ? 'flex' : 'none';
+	if (excuseButtonContainer) {
+    // Only show to signed-in non-admin users
+    excuseButtonContainer.style.display = (isSignedIn && !isAdmin) ? 'flex' : 'none';
+}
     
     // Handle scanner and scan buttons
     if (scannerModule) {
@@ -2614,6 +2899,10 @@ function loadMyExcuses() {
     }
     
     updateExcuseUI();
+	
+	if (isSignedIn && !isAdmin) {
+        updateScannerExcusesList();
+    }
 }
 
 // Load all excuses (for admin)
@@ -4879,6 +5168,9 @@ updateLogsList();
 updateDatabaseList();
 updateDatabaseStatus();
 updatePageTitle();
+if (isSignedIn && !isAdmin) {
+    updateScannerExcusesList();
+}
 
 // Update total scans and last scan info
 totalScans.textContent = logs.length;
