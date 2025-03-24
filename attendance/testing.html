@@ -1335,7 +1335,6 @@ body:not(.is-admin) .student-only {
             <p style="font-size:0.7em"><i class="far fa-copyright"></i> 2023-<span id="currentYear"></span> Bredli Plaku. All Rights Reserved.</p>
         </footer>
     </div>
-    
 <script>
 	// Config
 	const ADMIN_EMAILS = ['bplaku@epoka.edu.al', 'bredliplaku@gmail.com']; // Add any admin emails here
@@ -1723,17 +1722,7 @@ function checkAuthRedirect() {
         }
     }
 }
-// Update the init function to initialize the excuses tab
-function initExcuses() {
-    // Set today's date as default for the excuse date input
-    if (excuseDateInput) {
-        const today = new Date();
-        const yyyy = today.getFullYear();
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const dd = String(today.getDate()).padStart(2, '0');
-        excuseDateInput.value = `${yyyy}-${mm}-${dd}`;
-    }
-}
+	
 // Initialize or get Google Drive folder for excuse attachments
 async function initializeExcusesFolder() {
     if (!isAdmin || !isOnline || !isSignedIn) {
@@ -1900,10 +1889,6 @@ async function uploadFileToDrive(file, fileName) {
     });
 }
 	
-	/**
-	 * Initialize the application.
-	 * Sets up event listeners, checks NFC support, and prepares the UI.
-	 */
 function init() {
     isInitializing = true;
     
@@ -1982,6 +1967,10 @@ function init() {
     }, 3000);
 }
 
+	/**
+	 * Initialize the application.
+	 * Sets up event listeners, checks NFC support, and prepares the UI.
+	 */
 function processPendingNotifications() {
 if (pendingNotifications.length > 0) {
 	// Only show the most recent notification of each type
@@ -2026,7 +2015,6 @@ if (window.location.hash.includes('access_token=')) {
 		history.replaceState(null, null, window.location.pathname);
 	}
 }
-
 // Set default courses
 availableCourses = [];
 populateCourseDropdown();
@@ -2378,6 +2366,2102 @@ function showExcuseDialog() {
     document.getElementById('dialog-cancel-excuse-btn').addEventListener('click', function() {
         document.body.removeChild(dialogBackdrop);
     });
+}
+
+
+	/**
+	 * Handle token response from Google OAuth.
+	 * @param {Object} resp - The token response object.
+	 */
+function handleTokenResponse(resp) {
+console.log('Received token response');
+
+if (resp.error !== undefined) {
+	console.error('Token response error:', resp.error);
+	showImprovedNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
+	return;
+}
+
+if (!resp.access_token) {
+	console.error('No access token in response');
+	showImprovedNotification('error', 'Auth Error', 'Did not receive access token');
+	return;
+}
+
+console.log('Access token received, storing token');
+
+try {
+	// Store token in localStorage for session persistence
+	localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
+	localStorage.setItem(TOKEN_SCOPE_KEY, 'true');
+	
+	// User is signed in
+	isSignedIn = true;
+	
+	// Get user info and update UI
+	fetchUserInfo().then(() => {
+		// Check if user is admin
+		isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+		console.log('User is admin:', isAdmin);
+		
+		// If this is initial sign-in and user is admin, request elevated permissions
+		if (initialSignIn && isAdmin && currentScopes !== ADMIN_SCOPE) {
+			console.log('Admin user detected, requesting elevated permissions');
+			initialSignIn = false;
+			currentScopes = ADMIN_SCOPE;
+			
+			// Create new token client with admin scopes
+			try {
+				tokenClient = google.accounts.oauth2.initTokenClient({
+					client_id: CLIENT_ID,
+					scope: ADMIN_SCOPE,
+					callback: handleTokenResponse
+				});
+				
+				// Request token without forcing consent prompt
+				tokenClient.requestAccessToken();
+				return;
+			} catch (error) {
+				console.error('Error requesting admin permissions:', error);
+			}
+		} else if (initialSignIn && !isAdmin && currentScopes !== READONLY_SCOPE) {
+			console.log('Non-admin user, using read-only permissions');
+			initialSignIn = false;
+			currentScopes = READONLY_SCOPE;
+			
+			try {
+				tokenClient = google.accounts.oauth2.initTokenClient({
+					client_id: CLIENT_ID,
+					scope: READONLY_SCOPE,
+					callback: handleTokenResponse
+				});
+				
+				// Request token without forcing consent prompt
+				tokenClient.requestAccessToken();
+				return;
+			} catch (error) {
+				console.error('Error requesting read-only permissions:', error);
+			}
+		}
+		
+		initialSignIn = false;
+		updateAuthUI();
+		showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
+		
+		// Continue with your existing code to fetch courses, etc.
+		// ...
+	}).catch(error => {
+		// Your existing error handling code
+		// ...
+	});
+} catch (error) {
+	console.error('Error processing token:', error);
+	showImprovedNotification('error', 'Auth Error', 'Error during sign-in process');
+}
+}
+	
+	/**
+	 * Fetch user info (profile) from Google.
+	 * @returns {Promise} A promise that resolves when user info is fetched.
+	 */
+async function fetchUserInfo() {
+	try {
+		const tokenObj = gapi.client.getToken();
+		if (!tokenObj || !tokenObj.access_token) {
+			console.error('No valid token available');
+			throw new Error('No valid token available');
+		}
+		
+		console.log('Fetching user info with token:', tokenObj.access_token.substring(0, 10) + '...');
+		
+		const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+			headers: { 'Authorization': `Bearer ${tokenObj.access_token}` }
+		});
+		
+		if (!response.ok) {
+			console.error('Failed to fetch user info, status:', response.status);
+			throw new Error(`Failed to fetch user info: ${response.status} ${response.statusText}`);
+		}
+		
+		const userInfo = await response.json();
+		console.log('User info fetched successfully:', userInfo.email);
+		
+		currentUser = {
+			id: userInfo.sub,
+			name: userInfo.name || userInfo.email,
+			email: userInfo.email,
+			picture: userInfo.picture || 'https://via.placeholder.com/32'
+		};
+		
+		// Update user info in UI
+		userName.textContent = currentUser.name;
+		userAvatar.src = currentUser.picture;
+		
+		// Check if user is admin
+		isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+		console.log('User is admin:', isAdmin);
+		
+		return currentUser;
+	} catch (error) {
+		console.error('Error fetching user info:', error);
+		showImprovedNotification('error', 'User Info Error', error.message || 'Failed to get user information');
+		throw error;
+	}
+}
+
+	/**
+	 * Handle auth button click to sign in.
+	 */
+// Replace your handleAuthClick function with this updated version
+function handleAuthClick(e) {
+    if (e) e.preventDefault();
+    
+    console.log('Auth button clicked - redirecting to Google auth');
+    
+    // Show notification that we're redirecting
+    showImprovedNotification('info', 'Signing In', 'Redirecting to Google...');
+    
+    // Get the exact current URL as redirect URI (very important!)
+    const redirectUri = window.location.origin + window.location.pathname;
+    console.log('Using redirect URI:', redirectUri);
+    
+    // Create Google OAuth URL with scopes
+    const scopes = encodeURIComponent('openid email profile https://www.googleapis.com/auth/spreadsheets');
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                    `client_id=${CLIENT_ID}&` +
+                    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                    `response_type=token&` +
+                    `scope=${scopes}`;
+    
+    console.log('Auth URL:', authUrl);
+    
+    // Add a small delay before redirecting to ensure the notification is displayed
+    setTimeout(() => {
+        // Redirect to Google login
+        window.location.href = authUrl;
+    }, 100);
+}
+
+	
+function handleSignoutClick() {
+try {
+	const token = gapi.client.getToken();
+	if (token !== null) {
+		console.log('Revoking token and signing out');
+		google.accounts.oauth2.revoke(token.access_token, () => {
+			gapi.client.setToken('');
+			localStorage.removeItem('gapi_token');
+			isSignedIn = false;
+			isAdmin = false;
+			currentUser = null;
+			updateAuthUI();
+			logs = [];
+			uidToNameMap = {};
+			updateUI();
+			showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
+		});
+	} else {
+		// If no token, just clear the UI state
+		console.log('No token to revoke, cleaning up state');
+		localStorage.removeItem('gapi_token');
+		isSignedIn = false;
+		isAdmin = false;
+		currentUser = null;
+		updateAuthUI();
+		logs = [];
+		uidToNameMap = {};
+		updateUI();
+	}
+} catch (error) {
+	console.error('Error during sign out:', error);
+	// Force sign-out even if there's an error
+	localStorage.removeItem('gapi_token');
+	isSignedIn = false;
+	isAdmin = false;
+	currentUser = null;
+	updateAuthUI();
+	logs = [];
+	uidToNameMap = {};
+	updateUI();
+}
+}
+
+function updateAuthUI() {
+    console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
+	updateExcuseAuthUI();
+    // Add class to body to trigger CSS display rules
+    document.body.classList.toggle('is-admin', isAdmin);
+    
+    // Get elements that need direct manipulation
+    const loginContainer = document.getElementById('login-container');
+    const userContainer = document.getElementById('user-container');
+    const tabsContainer = document.querySelector('.tabs');
+    const courseButtonsContainer = document.querySelector('.course-buttons-container');
+    const scannerModule = document.querySelector('.module');
+	const excuseButtonContainer = document.querySelector('.excuse-button-container');
+    
+    // Show/hide main containers based on auth state
+    if (loginContainer) loginContainer.style.display = isSignedIn ? 'none' : 'flex';
+    if (userContainer) userContainer.style.display = isSignedIn ? 'flex' : 'none';
+    if (tabsContainer) tabsContainer.style.display = isAdmin ? 'flex' : 'none';
+    if (courseButtonsContainer) courseButtonsContainer.style.display = isSignedIn ? 'flex' : 'none';
+	if (excuseButtonContainer) {
+    // Only show to signed-in non-admin users
+    excuseButtonContainer.style.display = (isSignedIn && !isAdmin) ? 'flex' : 'none';
+}
+    
+    // Handle scanner and scan buttons
+    if (scannerModule) {
+        scannerModule.style.display = isSignedIn ? 'block' : 'none';
+    }
+    
+	// Handle scan buttons based on NFC support and user status
+	const startScanBtn = document.getElementById('start-scan-btn');
+	const stopScanBtn = document.getElementById('stop-scan-btn');
+
+if (startScanBtn && stopScanBtn) {
+    // Only show scan buttons if NFC is supported
+    if (nfcSupported) {
+        // For non-signed in users OR admin users
+        if (!isSignedIn || (isSignedIn && isAdmin)) {
+            startScanBtn.style.display = isScanning ? 'none' : 'flex';
+            stopScanBtn.style.display = isScanning ? 'flex' : 'none';
+        } else {
+            // For signed-in non-admin users
+            startScanBtn.style.display = 'none';
+            stopScanBtn.style.display = 'none';
+        }
+    } else {
+        // NFC not supported - hide buttons regardless of user type
+        startScanBtn.style.display = 'none';
+        stopScanBtn.style.display = 'none';
+    }
+	updateScanButtons();
+}
+    
+    // Handle guest mode UI
+    if (!isSignedIn) {
+        // Create or update the not-signed-in message
+        let notSignedInMsg = document.getElementById('not-signed-in-message');
+        if (!notSignedInMsg) {
+            notSignedInMsg = document.createElement('div');
+            notSignedInMsg.id = 'not-signed-in-message';
+            notSignedInMsg.className = 'not-signed-in-message';
+            
+            // Insert after the app header
+            const appHeader = document.querySelector('.app-header');
+            if (appHeader && appHeader.nextSibling) {
+                appHeader.parentNode.insertBefore(notSignedInMsg, appHeader.nextSibling.nextSibling);
+            } else if (appHeader) {
+                appHeader.parentNode.appendChild(notSignedInMsg);
+            }
+        }
+        
+        if (lastScannedUID) {
+            // Show last scanned UID
+            notSignedInMsg.innerHTML = `
+                <p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
+                <h3 style="margin-top: 10px; font-weight: bold; text-transform: uppercase;">${lastScannedUID}</h3>
+            `;
+        } else {
+            // Default welcome message
+            notSignedInMsg.innerHTML = `
+                <h3><i class="fas fa-info-circle"></i> Welcome to Attendance Tracker</h3>
+                <p>Please sign in with your <b>EPOKA Mail</b> to track your attendance.</p>
+            `;
+        }
+        
+        // Hide UI elements except scan button
+        const logsHeader = document.querySelector('.logs-header');
+        const filterContainer = document.querySelector('.filter-container');
+        const tableContainer = document.querySelector('.table-container');
+        
+        if (logsHeader) logsHeader.style.display = 'none';
+        if (filterContainer) filterContainer.style.display = 'none';
+        if (tableContainer) tableContainer.style.display = 'none';
+    } else {
+        // Remove not-signed-in message if exists
+        const notSignedInMsg = document.getElementById('not-signed-in-message');
+        if (notSignedInMsg) {
+            notSignedInMsg.remove();
+        }
+        
+        // Show UI elements for signed-in users
+        const logsHeader = document.querySelector('.logs-header');
+        const filterContainer = document.querySelector('.filter-container');
+        const tableContainer = document.querySelector('.table-container');
+        
+        if (logsHeader) logsHeader.style.display = 'flex';
+        if (filterContainer) filterContainer.style.display = 'flex';
+        if (tableContainer) tableContainer.style.display = 'block';
+        
+        // Show/hide UID columns based on admin status
+        document.querySelectorAll('.uid-column').forEach(col => {
+            col.style.display = isAdmin ? 'table-cell' : 'none';
+        });
+    }
+    
+    // Update sync button visibility (admin only)
+    const syncBtn = document.getElementById('sync-btn');
+    if (syncBtn) {
+        syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+        syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    }
+    
+    // Update empty logs message for signed-in users
+    const emptyLogs = document.getElementById('empty-logs');
+    if (emptyLogs && isSignedIn) {
+        if (!currentCourse) {
+            emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
+        } else if (logs.length === 0) {
+            emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
+        }
+    }
+}
+
+function updateExcuseAuthUI() {
+    // Update excuses UI based on auth state
+    if (notSignedInExcuses && excuseForm) {
+        if (isSignedIn) {
+            notSignedInExcuses.style.display = 'none';
+            excuseForm.style.display = 'block';
+            
+            // Populate course dropdown
+            populateExcuseCourseSelect();
+            
+            // Load my excuses
+            loadMyExcuses();
+        } else {
+            notSignedInExcuses.style.display = 'block';
+            excuseForm.style.display = 'none';
+        }
+    }
+    
+    // Update admin UI for excuses
+    const manageExcusesTab = document.querySelector('.tab[data-tab="manage-excuses-tab"]');
+    if (manageExcusesTab) {
+        manageExcusesTab.style.display = isAdmin ? 'block' : 'none';
+    }
+    
+    // If admin is signed in, load all excuses
+    if (isAdmin) {
+        loadAllExcuses();
+        populateExcuseCourseFilterSelect();
+    }
+}
+
+	/**
+	 * Update authentication-dependent UI elements.
+	 * Show/hide elements based on sign-in status and admin privileges.
+	 */
+function updateSortOptions(showName, showDate) {
+// Clear existing options
+while (sortSelect.options.length > 0) {
+	sortSelect.remove(0);
+}
+
+// Date options are always available
+const dateDescOption = document.createElement('option');
+dateDescOption.value = 'date-desc';
+dateDescOption.textContent = 'Date (Newest First)';
+sortSelect.appendChild(dateDescOption);
+
+const dateAscOption = document.createElement('option');
+dateAscOption.value = 'date-asc';
+dateAscOption.textContent = 'Date (Oldest First)';
+sortSelect.appendChild(dateAscOption);
+
+// Add name options only if specified and admin
+if (showName && isAdmin) {
+	const nameAscOption = document.createElement('option');
+	nameAscOption.value = 'name-asc';
+	nameAscOption.textContent = 'Name (A-Z)';
+	sortSelect.appendChild(nameAscOption);
+	
+	const nameDescOption = document.createElement('option');
+	nameDescOption.value = 'name-desc';
+	nameDescOption.textContent = 'Name (Z-A)';
+	sortSelect.appendChild(nameDescOption);
+}
+
+// Add UID options only for admin
+if (isAdmin) {
+	const uidAscOption = document.createElement('option');
+	uidAscOption.value = 'uid-asc';
+	uidAscOption.textContent = 'UID (A-Z)';
+	sortSelect.appendChild(uidAscOption);
+	
+	const uidDescOption = document.createElement('option');
+	uidDescOption.value = 'uid-desc';
+	uidDescOption.textContent = 'UID (Z-A)';
+	sortSelect.appendChild(uidDescOption);
+}
+
+// Set default sort
+sortSelect.value = 'date-desc';
+currentSort = 'date-desc';
+}
+
+function handleCourseChange() {
+logs = []; // Clear current logs before loading new ones
+
+if (!currentCourse) {
+	updateUI();
+	emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
+	return;
+}
+
+const titleElement = document.querySelector('h1');
+if (titleElement) {
+	const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+	titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
+}
+
+if (!isSignedIn) {
+	// Load logs from local storage for the course
+	const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+	if (storedLogs) {
+		try {
+			logs = JSON.parse(storedLogs);
+			logs.sort((a, b) => b.timestamp - a.timestamp);
+		} catch (e) {
+			console.error('Error parsing stored logs:', e);
+			logs = [];
+		}
+	}
+	// Update the title when a course is selected
+	updatePageTitle(); 
+	updateUI();
+	return;
+}
+
+// When signed in, fetch logs from the spreadsheet
+if (isOnline) {
+	fetchLogsFromSheet()
+		.then(() => {
+			updatePageTitle();
+			updateUI();
+		})
+		.catch(error => {
+			console.error('Error fetching logs:', error);
+			
+			// On error, reset title back to default
+			const titleElement = document.querySelector('h1');
+			if (titleElement) {
+				titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+			}
+			
+			// Only show error if we're past initialization
+			if (!isInitializing) {
+				showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+			}
+			
+			// Fallback to local storage
+			const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+			if (storedLogs) {
+				try {
+					logs = JSON.parse(storedLogs);
+					logs.sort((a, b) => b.timestamp - a.timestamp);
+				} catch (e) {
+					console.error('Error parsing stored logs:', e);
+				}
+			}
+			updateUI();
+		});
+} else {
+	// Offline: fallback to local storage
+	const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+	if (storedLogs) {
+		try {
+			logs = JSON.parse(storedLogs);
+			logs.sort((a, b) => b.timestamp - a.timestamp);
+		} catch (e) {
+			console.error('Error parsing stored logs:', e);
+		}
+	}
+	updatePageTitle();
+	updateUI();
+}
+}
+
+
+// Add this helper function to save logs to localStorage
+function saveLogsToLocalStorage() {
+if (currentCourse) {
+	try {
+		localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
+	} catch (e) {
+		console.error('Error saving logs to localStorage:', e);
+	}
+}
+}
+
+// Populate excuse course select dropdown
+function populateExcuseCourseSelect() {
+    // Clear existing options except the first "Select Course" option
+    while (excuseCourseSelect.options.length > 1) {
+        excuseCourseSelect.remove(1);
+    }
+    
+    // Add courses
+    availableCourses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course;
+        option.textContent = course.replace(/_/g, ' ');
+        excuseCourseSelect.appendChild(option);
+    });
+}
+
+
+
+	/**
+	 * Populate course dropdown with available courses.
+	 */
+function populateCourseDropdown() {
+// Original dropdown code (keep it for backward compatibility)
+while (courseSelect.options.length > 1) {
+	courseSelect.remove(1);
+}
+
+if (!isSignedIn) {
+	const defaultOption = document.createElement('option');
+	defaultOption.value = 'Default';
+	defaultOption.textContent = 'Default';
+	courseSelect.appendChild(defaultOption);
+	courseSelect.value = 'Default';
+	currentCourse = 'Default';
+} else {
+	availableCourses.forEach(course => {
+		const option = document.createElement('option');
+		option.value = course;
+		option.textContent = course.replace('_', ' ');
+		courseSelect.appendChild(option);
+	});
+
+	if (currentCourse && availableCourses.includes(currentCourse)) {
+		courseSelect.value = currentCourse;
+	}
+}
+
+// Also populate course buttons
+populateCourseButtons();
+}
+
+// Populate excuse course filter select dropdown for admins
+function populateExcuseCourseFilterSelect() {
+    // Clear existing options except the first "All Courses" option
+    while (excuseCourseFilterSelect.options.length > 1) {
+        excuseCourseFilterSelect.remove(1);
+    }
+    
+    // Add courses
+    availableCourses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course;
+        option.textContent = course.replace(/_/g, ' ');
+        excuseCourseFilterSelect.appendChild(option);
+    });
+}
+
+// Handle excuse file selection
+function handleExcuseFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) {
+        filePreview.classList.remove('has-file');
+        filePreview.innerHTML = '';
+        excuseFile = null;
+        return;
+    }
+    
+    // Check file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+        showImprovedNotification('error', 'File Too Large', 'The file exceeds the 5MB limit.');
+        excuseAttachment.value = '';
+        filePreview.classList.remove('has-file');
+        filePreview.innerHTML = '';
+        excuseFile = null;
+        return;
+    }
+    
+    // Check file type
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!allowedTypes.includes(file.type)) {
+        showImprovedNotification('error', 'Invalid File Type', 'Only PDF, JPG, and PNG files are allowed.');
+        excuseAttachment.value = '';
+        filePreview.classList.remove('has-file');
+        filePreview.innerHTML = '';
+        excuseFile = null;
+        return;
+    }
+    
+    // Show file preview
+    filePreview.classList.add('has-file');
+    let fileIcon = 'fa-file-pdf';
+    if (file.type === 'image/jpeg' || file.type === 'image/png') {
+        fileIcon = 'fa-file-image';
+    }
+    
+    filePreview.innerHTML = `
+        <i class="fas ${fileIcon}"></i>
+        <span>${file.name} (${formatFileSize(file.size)})</span>
+    `;
+    
+    // Store file for later processing
+    excuseFile = file;
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' bytes';
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    else return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+// Submit excuse function
+async function submitExcuse() {
+    if (!isSignedIn) {
+        showImprovedNotification('warning', 'Not Signed In', 'You must be signed in to submit an excuse.');
+        return;
+    }
+    
+    // Validate inputs
+    const courseId = excuseCourseSelect.value;
+    const absenceDate = excuseDateInput.value;
+    const reason = excuseReasonSelect.value;
+    const explanation = excuseExplanation.value.trim();
+    
+    if (!courseId) {
+        showImprovedNotification('warning', 'Missing Course', 'Please select a course.');
+        return;
+    }
+    
+    if (!absenceDate) {
+        showImprovedNotification('warning', 'Missing Date', 'Please select the date of absence.');
+        return;
+    }
+    
+    if (!reason) {
+        showImprovedNotification('warning', 'Missing Reason', 'Please select a reason for your absence.');
+        return;
+    }
+    
+    if (!explanation) {
+        showImprovedNotification('warning', 'Missing Explanation', 'Please provide an explanation for your absence.');
+        return;
+    }
+    
+    // Disable submit button during processing
+    submitExcuseBtn.disabled = true;
+    submitExcuseBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    
+    // Create excuse object
+    const newExcuse = {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        studentUid: currentUser.id,
+        studentName: currentUser.name,
+        studentEmail: currentUser.email,
+        courseId: courseId,
+        absenceDate: absenceDate,
+        reason: reason,
+        explanation: explanation,
+        attachmentUrl: '', // Will be filled if there's a file
+        hasAttachment: !!excuseFile,
+        submittedAt: new Date().getTime(),
+        status: 'pending',
+        reviewedBy: '',
+        reviewTimestamp: 0,
+        reviewNote: ''
+    };
+    
+    try {
+        // If there's a file attachment, process it
+        if (excuseFile) {
+            // In a real application, you would upload the file to Google Drive or another storage service
+            // and update the attachmentUrl field with the URL.
+            // For this demo, we'll just note that there was an attachment.
+            newExcuse.attachmentUrl = 'file://' + excuseFile.name; // Placeholder
+        }
+        
+        // Add to excuses array
+        excuses.unshift(newExcuse);
+        myExcuses.unshift(newExcuse);
+        
+        // Save to localStorage
+        saveExcusesToLocalStorage();
+        
+        // Sync with Google Sheets if online
+        if (isOnline) {
+            try {
+                await appendExcuseToSheet(newExcuse);
+            } catch (error) {
+                console.error('Error syncing excuse:', error);
+                showImprovedNotification('warning', 'Sync Warning', 'Your excuse was saved locally but could not be synced with the server. It will sync when you reconnect.');
+            }
+        }
+        
+        // Show success message
+        showImprovedNotification('success', 'Excuse Submitted', 'Your absence excuse has been submitted successfully.');
+        
+        // Reset form
+        excuseCourseSelect.value = '';
+        excuseDateInput.value = '';
+        excuseReasonSelect.value = '';
+        excuseExplanation.value = '';
+        excuseAttachment.value = '';
+        filePreview.classList.remove('has-file');
+        filePreview.innerHTML = '';
+        excuseFile = null;
+        
+        // Update UI
+        updateExcuseUI();
+    } catch (error) {
+        console.error('Error submitting excuse:', error);
+        showImprovedNotification('error', 'Submission Error', 'An error occurred while submitting your excuse. Please try again.');
+    } finally {
+        // Re-enable submit button
+        submitExcuseBtn.disabled = false;
+        submitExcuseBtn.innerHTML = 'Submit Excuse';
+    }
+}
+
+// Load excuses for the current student
+function loadMyExcuses() {
+    if (!isSignedIn || !currentUser) {
+        myExcuses = [];
+        return;
+    }
+    
+    // Try to load from localStorage first
+    const storedExcuses = localStorage.getItem(EXCUSES_STORAGE_KEY);
+    if (storedExcuses) {
+        try {
+            excuses = JSON.parse(storedExcuses);
+            // Filter for current user
+            myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
+        } catch (e) {
+            console.error('Error parsing stored excuses:', e);
+            myExcuses = [];
+        }
+    }
+    
+    // If online, fetch excuses from sheet
+    if (isOnline) {
+        fetchExcusesFromSheet()
+            .then(() => {
+                myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
+                updateExcuseUI();
+            })
+            .catch(error => {
+                console.error('Error fetching excuses:', error);
+                if (!isInitializing) {
+                    showImprovedNotification('error', 'Data Error', 'Failed to load excuses from server');
+                }
+            });
+    }
+    
+    updateExcuseUI();
+	
+	if (isSignedIn && !isAdmin) {
+        updateScannerExcusesList();
+    }
+}
+
+// Load all excuses (for admin)
+function loadAllExcuses() {
+    if (!isAdmin) {
+        return;
+    }
+    
+    // Try to load from localStorage first
+    const storedExcuses = localStorage.getItem(EXCUSES_STORAGE_KEY);
+    if (storedExcuses) {
+        try {
+            excuses = JSON.parse(storedExcuses);
+        } catch (e) {
+            console.error('Error parsing stored excuses:', e);
+            excuses = [];
+        }
+    }
+    
+    // If online, fetch excuses from sheet
+    if (isOnline) {
+        fetchExcusesFromSheet()
+            .then(() => {
+                updateExcuseUI();
+            })
+            .catch(error => {
+                console.error('Error fetching excuses:', error);
+                if (!isInitializing) {
+                    showImprovedNotification('error', 'Data Error', 'Failed to load excuses from server');
+                }
+            });
+    }
+    
+    updateExcuseUI();
+}
+
+// Save excuses to localStorage
+function saveExcusesToLocalStorage() {
+    try {
+        localStorage.setItem(EXCUSES_STORAGE_KEY, JSON.stringify(excuses));
+    } catch (e) {
+        console.error('Error saving excuses to localStorage:', e);
+    }
+}
+
+// Fetch excuses from Google Sheet
+async function fetchExcusesFromSheet() {
+    try {
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: EXCUSES_SPREADSHEET_ID,
+            range: 'Excuses!A2:P', // Adjust range as needed
+        });
+        
+        const rows = response.result.values || [];
+        const sheetExcuses = [];
+        
+        rows.forEach(row => {
+            if (row.length >= 10) {
+                // Map spreadsheet columns to excuse object
+                const excuse = {
+                    id: row[0],
+                    studentUid: row[1],
+                    studentName: row[2],
+                    studentEmail: row[3],
+                    courseId: row[4],
+                    absenceDate: row[5],
+                    reason: row[6],
+                    explanation: row[7],
+                    attachmentUrl: row[8],
+                    hasAttachment: row[8] && row[8].trim() !== '',
+                    submittedAt: parseInt(row[9]) || new Date(row[9]).getTime(),
+                    status: row[10] || 'pending',
+                    reviewedBy: row[11] || '',
+                    reviewTimestamp: parseInt(row[12]) || 0,
+                    reviewNote: row[13] || ''
+                };
+                
+                sheetExcuses.push(excuse);
+            }
+        });
+        
+        // Sort excuses by submission time (newest first)
+        sheetExcuses.sort((a, b) => b.submittedAt - a.submittedAt);
+        excuses = sheetExcuses;
+        
+        // Also save to localStorage as backup
+        saveExcusesToLocalStorage();
+        
+        // If user is signed in, update myExcuses
+        if (isSignedIn && currentUser) {
+            myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
+        }
+        
+        console.log(`Loaded ${excuses.length} excuses from sheet`);
+        return true;
+    } catch (error) {
+        console.error('Error fetching excuses:', error);
+        throw error;
+    }
+}
+
+// Append a single excuse to Google Sheet
+async function appendExcuseToSheet(excuse) {
+    if (!isOnline || !isSignedIn) {
+        return;
+    }
+    
+    try {
+        await gapi.client.sheets.spreadsheets.values.append({
+            spreadsheetId: EXCUSES_SPREADSHEET_ID,
+            range: 'Excuses!A2:P',
+            valueInputOption: 'RAW',
+            insertDataOption: 'INSERT_ROWS',
+            resource: {
+                values: [[
+                    excuse.id,
+                    excuse.studentUid,
+                    excuse.studentName,
+                    excuse.studentEmail,
+                    excuse.courseId,
+                    excuse.absenceDate,
+                    excuse.reason,
+                    excuse.explanation,
+                    excuse.attachmentUrl,
+                    excuse.submittedAt,
+                    excuse.status,
+                    excuse.reviewedBy,
+                    excuse.reviewTimestamp,
+                    excuse.reviewNote
+                ]]
+            }
+        });
+        
+        console.log('Excuse appended to Google Sheet');
+    } catch (error) {
+        console.error('Error appending excuse:', error);
+        throw error;
+    }
+}
+
+// Sync all excuses with Google Sheet
+async function syncExcuses() {
+    if (!isOnline || !isSignedIn || !isAdmin) {
+        return;
+    }
+    
+    try {
+        // Show syncing indicator
+        syncExcusesBtn.disabled = true;
+        const syncIcon = syncExcusesBtn.querySelector('i');
+        if (syncIcon) {
+            syncIcon.classList.add('fa-spin');
+        }
+        
+        showImprovedNotification('info', 'Syncing', 'Syncing excuses with Google Sheets...');
+        
+        // Prepare the data for the spreadsheet
+        const sheetData = excuses.map(excuse => [
+            excuse.id,
+            excuse.studentUid,
+            excuse.studentName,
+            excuse.studentEmail,
+            excuse.courseId,
+            excuse.absenceDate,
+            excuse.reason,
+            excuse.explanation,
+            excuse.attachmentUrl,
+            excuse.submittedAt,
+            excuse.status,
+            excuse.reviewedBy,
+            excuse.reviewTimestamp,
+            excuse.reviewNote
+        ]);
+        
+        // Clear existing data
+        await gapi.client.sheets.spreadsheets.values.clear({
+            spreadsheetId: EXCUSES_SPREADSHEET_ID,
+            range: 'Excuses!A2:P',
+        });
+        
+        // Write the new data if there is any
+        if (sheetData.length > 0) {
+            await gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: EXCUSES_SPREADSHEET_ID,
+                range: 'Excuses!A2:P',
+                valueInputOption: 'RAW',
+                resource: { values: sheetData }
+            });
+        }
+        
+        showImprovedNotification('success', 'Sync Complete', `Successfully synced ${excuses.length} excuses with Google Sheets`);
+    } catch (error) {
+        console.error('Error syncing excuses:', error);
+        showImprovedNotification('error', 'Sync Error', 'Failed to sync excuses with Google Sheets');
+    } finally {
+        // Remove syncing indicator
+        syncExcusesBtn.disabled = false;
+        const syncIcon = syncExcusesBtn.querySelector('i');
+        if (syncIcon) {
+            syncIcon.classList.remove('fa-spin');
+        }
+    }
+}
+
+// Export excuses to Excel file
+function exportExcuses() {
+    if (!isAdmin || excuses.length === 0) {
+        showImprovedNotification('warning', 'Export Failed', 'No excuses to export');
+        return;
+    }
+    
+    // Create worksheet data
+    const wsData = [
+        ["ID", "Student", "Email", "Course", "Absence Date", "Reason", "Explanation", 
+         "Has Attachment", "Submitted At", "Status", "Reviewed By", "Review Date", "Review Note"]
+    ]; // header
+    
+    excuses.forEach(excuse => {
+        wsData.push([
+            excuse.id,
+            excuse.studentName,
+            excuse.studentEmail,
+            excuse.courseId,
+            excuse.absenceDate,
+            getReasonText(excuse.reason),
+            excuse.explanation,
+            excuse.hasAttachment ? 'Yes' : 'No',
+            new Date(excuse.submittedAt).toLocaleString(),
+            excuse.status,
+            excuse.reviewedBy,
+            excuse.reviewTimestamp ? new Date(excuse.reviewTimestamp).toLocaleString() : '',
+            excuse.reviewNote
+        ]);
+    });
+    
+    // Create worksheet
+    const worksheet = XLSX.utils.aoa_to_sheet(wsData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Excuses");
+    
+    // Generate Excel file
+    XLSX.writeFile(workbook, "attendance_excuses.xlsx");
+    
+    showImprovedNotification('success', 'Export Complete', 'Excuses exported to Excel file');
+}
+
+// Filter handlers
+function handleExcuseFilterChange() {
+    excuseFilter = excuseFilterInput.value.toLowerCase();
+    updateExcuseUI();
+}
+
+function handleExcuseStatusFilterChange() {
+    excuseStatusFilter = excuseStatusFilterSelect.value;
+    updateExcuseUI();
+}
+
+function handleExcuseCourseFilterChange() {
+    excuseCourseFilter = excuseCourseFilterSelect.value;
+    updateExcuseUI();
+}
+
+// Helper function to get human-readable reason text
+function getReasonText(reasonCode) {
+    const reasons = {
+        'medical': 'Medical Issue',
+        'family': 'Family Emergency',
+        'academic': 'Academic Conflict',
+        'transportation': 'Transportation Problem',
+        'other': 'Other'
+    };
+    return reasons[reasonCode] || reasonCode;
+}
+
+// Update the excuse UI elements
+function updateExcuseUI() {
+    // Update my excuses list for regular users
+    updateMyExcusesList();
+    
+    // Update admin view if user is admin
+    if (isAdmin) {
+        updateAdminExcusesList();
+    }
+}
+
+// Update the list of excuses for the current student
+function updateMyExcusesList() {
+    if (!isSignedIn) {
+        return;
+    }
+    
+    // Clear the table body
+    myExcusesTbody.innerHTML = '';
+    
+    // Show/hide empty message
+    emptyExcuses.style.display = myExcuses.length > 0 ? 'none' : 'block';
+    
+    // Add excuses to table
+    myExcuses.forEach(excuse => {
+        const row = document.createElement('tr');
+        
+        // Course cell
+        const courseCell = document.createElement('td');
+        courseCell.textContent = excuse.courseId.replace(/_/g, ' ');
+        
+        // Date cell
+        const dateCell = document.createElement('td');
+        dateCell.textContent = excuse.absenceDate;
+        
+        // Reason cell
+        const reasonCell = document.createElement('td');
+        reasonCell.textContent = getReasonText(excuse.reason);
+        
+        // Status cell
+        const statusCell = document.createElement('td');
+        const statusSpan = document.createElement('span');
+        statusSpan.className = `excuse-status status-${excuse.status}`;
+        statusSpan.textContent = excuse.status.charAt(0).toUpperCase() + excuse.status.slice(1);
+        statusCell.appendChild(statusSpan);
+        
+        // Actions cell
+        const actionsCell = document.createElement('td');
+        const viewIcon = document.createElement('i');
+        viewIcon.className = 'fas fa-eye excuse-action-icon view-icon';
+        viewIcon.title = 'View Details';
+        viewIcon.addEventListener('click', () => showExcuseDetail(excuse, false));
+        actionsCell.appendChild(viewIcon);
+        
+        // Append cells to row
+        row.appendChild(courseCell);
+        row.appendChild(dateCell);
+        row.appendChild(reasonCell);
+        row.appendChild(statusCell);
+        row.appendChild(actionsCell);
+        
+        // Append row to table
+        myExcusesTbody.appendChild(row);
+    });
+}
+
+// Update the admin view of all excuses
+function updateAdminExcusesList() {
+    if (!isAdmin) {
+        return;
+    }
+    
+    // Filter excuses based on search, status, and course filters
+    const filteredExcuses = excuses.filter(excuse => {
+        const matchesFilter = excuseFilter === '' || 
+            excuse.studentName.toLowerCase().includes(excuseFilter) ||
+            excuse.studentEmail.toLowerCase().includes(excuseFilter) ||
+            excuse.courseId.toLowerCase().includes(excuseFilter) ||
+            excuse.explanation.toLowerCase().includes(excuseFilter);
+        
+        const matchesStatus = excuseStatusFilter === 'all' || excuse.status === excuseStatusFilter;
+        
+        const matchesCourse = excuseCourseFilter === 'all' || excuse.courseId === excuseCourseFilter;
+        
+        return matchesFilter && matchesStatus && matchesCourse;
+    });
+    
+    // Update count
+    excusesCount.textContent = filteredExcuses.length;
+    
+    // Clear the table body
+    adminExcusesTbody.innerHTML = '';
+    
+    // Show/hide empty message
+    emptyAdminExcuses.style.display = filteredExcuses.length > 0 ? 'none' : 'block';
+    
+    // Add excuses to table
+    filteredExcuses.forEach(excuse => {
+        const row = document.createElement('tr');
+        
+        // Student cell
+        const studentCell = document.createElement('td');
+        studentCell.textContent = excuse.studentName;
+        
+        // Course cell
+        const courseCell = document.createElement('td');
+        courseCell.textContent = excuse.courseId.replace(/_/g, ' ');
+        
+        // Date cell
+        const dateCell = document.createElement('td');
+        dateCell.textContent = excuse.absenceDate;
+        
+        // Reason cell
+        const reasonCell = document.createElement('td');
+        reasonCell.textContent = getReasonText(excuse.reason);
+        
+        // Submitted cell
+        const submittedCell = document.createElement('td');
+        submittedCell.textContent = new Date(excuse.submittedAt).toLocaleDateString();
+        
+        // Status cell
+        const statusCell = document.createElement('td');
+        const statusSpan = document.createElement('span');
+        statusSpan.className = `excuse-status status-${excuse.status}`;
+        statusSpan.textContent = excuse.status.charAt(0).toUpperCase() + excuse.status.slice(1);
+        statusCell.appendChild(statusSpan);
+        
+        // Actions cell
+        const actionsCell = document.createElement('td');
+        
+        // View icon
+        const viewIcon = document.createElement('i');
+        viewIcon.className = 'fas fa-eye excuse-action-icon view-icon';
+        viewIcon.title = 'View Details';
+        viewIcon.addEventListener('click', () => showExcuseDetail(excuse, true));
+        actionsCell.appendChild(viewIcon);
+        
+        // Only show approve/reject for pending excuses
+        if (excuse.status === 'pending') {
+            // Approve icon
+            const approveIcon = document.createElement('i');
+            approveIcon.className = 'fas fa-check-circle excuse-action-icon approve-icon';
+            approveIcon.title = 'Approve';
+            approveIcon.addEventListener('click', () => showExcuseReview(excuse));
+            actionsCell.appendChild(approveIcon);
+            
+            // Reject icon
+            const rejectIcon = document.createElement('i');
+            rejectIcon.className = 'fas fa-times-circle excuse-action-icon reject-icon';
+            rejectIcon.title = 'Reject';
+            rejectIcon.addEventListener('click', () => showExcuseReview(excuse));
+            actionsCell.appendChild(rejectIcon);
+        }
+        
+        // Append cells to row
+        row.appendChild(studentCell);
+        row.appendChild(courseCell);
+        row.appendChild(dateCell);
+        row.appendChild(reasonCell);
+        row.appendChild(submittedCell);
+        row.appendChild(statusCell);
+        row.appendChild(actionsCell);
+        
+        // Append row to table
+        adminExcusesTbody.appendChild(row);
+    });
+}
+
+// Show excuse details dialog
+function showExcuseDetail(excuse, isAdmin) {
+    currentExcuse = excuse;
+    
+    // Format submitted date
+    const submittedDate = new Date(excuse.submittedAt).toLocaleString();
+    
+    // Format review date if available
+    let reviewDate = '';
+    if (excuse.reviewTimestamp) {
+        reviewDate = new Date(excuse.reviewTimestamp).toLocaleString();
+    }
+    
+    // Create content HTML
+    let contentHtml = `
+        <div class="excuse-detail-section">
+            <h4>Student Information</h4>
+            <p><strong>Name:</strong> ${excuse.studentName}</p>
+            <p><strong>Email:</strong> ${excuse.studentEmail}</p>
+        </div>
+        
+        <div class="excuse-detail-section">
+            <h4>Absence Details</h4>
+            <p><strong>Course:</strong> ${excuse.courseId.replace(/_/g, ' ')}</p>
+            <p><strong>Date of Absence:</strong> ${excuse.absenceDate}</p>
+            <p><strong>Reason:</strong> ${getReasonText(excuse.reason)}</p>
+            <p><strong>Explanation:</strong></p>
+            <p style="white-space: pre-wrap;">${excuse.explanation}</p>
+        </div>
+    `;
+    
+    // Add attachment section if there's an attachment
+    if (excuse.hasAttachment) {
+        contentHtml += `
+            <div class="excuse-detail-section">
+                <h4>Supporting Document</h4>
+                <p><strong>Attachment:</strong> ${excuse.attachmentUrl.replace('file://', '')}</p>
+                <!-- In a real app, you would display the actual file here -->
+            </div>
+        `;
+    }
+    
+    // Add submission info
+    contentHtml += `
+        <div class="excuse-detail-section">
+            <h4>Submission Information</h4>
+            <p><strong>Submitted On:</strong> ${submittedDate}</p>
+            <p><strong>Status:</strong> <span class="excuse-status status-${excuse.status}">${excuse.status.charAt(0).toUpperCase() + excuse.status.slice(1)}</span></p>
+        </div>
+    `;
+    
+    // Add review info if reviewed
+    if (excuse.status !== 'pending') {
+		contentHtml += `
+			<div class="excuse-detail-section">
+				<h4>Review Information</h4>
+				<p><strong>Reviewed By:</strong> ${excuse.reviewedBy}</p>
+				<p><strong>Reviewed On:</strong> ${reviewDate}</p>
+		` + (excuse.reviewNote ? `<p><strong>Feedback:</strong> ${excuse.reviewNote}</p>` : '') + `
+			</div>
+		`;
+    }
+    
+    // Set the content
+    excuseDetailContent.innerHTML = contentHtml;
+    
+    // Update action buttons based on user role and excuse status
+    excuseDetailActions.innerHTML = '';
+    
+    // For admin, add review button for pending excuses
+    if (isAdmin && excuse.status === 'pending') {
+        const reviewBtn = document.createElement('button');
+        reviewBtn.className = 'btn-blue';
+        reviewBtn.textContent = 'Review';
+        reviewBtn.addEventListener('click', () => {
+            closeExcuseDetail();
+            showExcuseReview(excuse);
+        });
+        excuseDetailActions.appendChild(reviewBtn);
+    }
+    
+    // Add close button
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'close-excuse-detail-btn';
+    closeBtn.className = isAdmin ? '' : 'btn-blue';
+    closeBtn.textContent = 'Close';
+    closeBtn.addEventListener('click', closeExcuseDetail);
+    excuseDetailActions.appendChild(closeBtn);
+    
+    // Show the dialog
+    excuseDetailDialog.style.display = 'flex';
+}
+
+// Close excuse detail dialog
+function closeExcuseDetail() {
+    excuseDetailDialog.style.display = 'none';
+    currentExcuse = null;
+}
+
+// Show excuse review dialog for admin
+function showExcuseReview(excuse) {
+    currentExcuse = excuse;
+    
+// Create content HTML
+let contentHtml = `
+    <div style="margin-bottom: 20px;">
+        <p><strong>Student:</strong> ${excuse.studentName}</p>
+        <p><strong>Course:</strong> ${excuse.courseId.replace(/_/g, ' ')}</p>
+        <p><strong>Date of Absence:</strong> ${excuse.absenceDate}</p>
+        <p><strong>Reason:</strong> ${getReasonText(excuse.reason)}</p>
+        <p><strong>Explanation:</strong></p>
+        <p style="white-space: pre-wrap;">${excuse.explanation}</p>
+` + (excuse.hasAttachment ? `<p><strong>Has Attachment:</strong> Yes</p>` : '') + `
+    </div>
+`;
+
+    
+    // Set the content
+    excuseReviewContent.innerHTML = contentHtml;
+    
+    // Clear any previous review note
+    excuseReviewNote.value = '';
+    
+    // Show the dialog
+    excuseReviewDialog.style.display = 'flex';
+}
+
+// Close excuse review dialog
+function closeExcuseReview() {
+    excuseReviewDialog.style.display = 'none';
+    currentExcuse = null;
+}
+
+// Process excuse review (approve or reject)
+async function reviewExcuse(decision) {
+    if (!isAdmin || !currentExcuse) {
+        return;
+    }
+    
+    // Update excuse with review information
+    const excuseIndex = excuses.findIndex(e => e.id === currentExcuse.id);
+    if (excuseIndex === -1) {
+        showImprovedNotification('error', 'Review Error', 'Could not find the excuse to update.');
+        closeExcuseReview();
+        return;
+    }
+    
+    excuses[excuseIndex].status = decision;
+    excuses[excuseIndex].reviewedBy = currentUser.name;
+    excuses[excuseIndex].reviewTimestamp = new Date().getTime();
+    excuses[excuseIndex].reviewNote = excuseReviewNote.value.trim();
+    
+    // Save to localStorage
+    saveExcusesToLocalStorage();
+    
+    // Sync with Google Sheets if online
+    if (isOnline) {
+        try {
+            await syncExcuses();
+        } catch (error) {
+            console.error('Error syncing after review:', error);
+            showImprovedNotification('warning', 'Sync Warning', 'Review saved locally but could not be synced with the server.');
+        }
+    }
+    
+    // Update UI
+    updateExcuseUI();
+    
+    // Show success message
+    showImprovedNotification('success', 'Review Complete', `Excuse has been ${decision}.`);
+    
+    // Close the dialog
+    closeExcuseReview();
+}
+
+// Update the init function to initialize the excuses tab
+function initExcuses() {
+    // Set today's date as default for the excuse date input
+    if (excuseDateInput) {
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        excuseDateInput.value = `${yyyy}-${mm}-${dd}`;
+    }
+}
+
+	/**
+	 * Update online/offline status indicator.
+	 */
+function updateOnlineStatus() {
+isOnline = navigator.onLine;
+console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
+
+if (isOnline) {
+	syncStatus.className = 'sync-status online';
+	syncText.textContent = 'Online';
+	// Only disable if not signed in or syncing in progress
+	syncBtn.disabled = !isSignedIn || isSyncing;
+} else {
+	syncStatus.className = 'sync-status offline';
+	syncText.textContent = 'Offline';
+	syncBtn.disabled = true;
+}
+
+// Ensure we show the button for admins regardless
+syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+
+// Debug output to help diagnose the issue
+console.log('Sync button state:', {
+	isOnline,
+	isSignedIn,
+	isAdmin,
+	isSyncing,
+	disabled: syncBtn.disabled,
+	display: syncBtn.style.display
+});
+}
+	
+	/**
+	 * Sync data with Google Sheets.
+	 * Fetches and updates both database and logs.
+	 */
+async function syncData() {
+if (!isOnline || !isSignedIn || isSyncing) {
+	return;
+}
+
+isSyncing = true;
+
+// Show syncing indicator
+const syncIcon = syncBtn.querySelector('i');
+if (syncIcon) {
+	syncIcon.classList.add('fa-spin');
+}
+syncBtn.disabled = true;
+
+showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
+
+try {
+	// First sync database to get up-to-date UID-name mappings
+	try {
+		await fetchDatabaseFromSheet();
+	} catch (dbError) {
+		console.error('Database sync error:', dbError);
+		// Continue with logs sync even if database sync fails
+	}
+	
+	// Then sync logs if a course is selected
+	if (currentCourse) {
+		await syncLogsWithSheet();
+	} else if (availableCourses.length > 0) {
+		// If no course selected but courses are available, select the first one
+		currentCourse = availableCourses[0];
+		courseSelect.value = currentCourse;
+		await fetchLogsFromSheet();
+	}
+	
+	showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
+} catch (error) {
+	console.error('Sync error:', error);
+	showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+} finally {
+	isSyncing = false;
+	
+	if (syncIcon) {
+		syncIcon.classList.remove('fa-spin');
+	}
+	
+	syncBtn.disabled = !isSignedIn || !isOnline;
+	updateUI();
+}
+}
+
+	/**
+	 * Fetch database entries from Google Sheet.
+	 * Updates uidToNameMap with the latest data.
+	 */
+async function fetchDatabaseFromSheet() {
+try {
+	const response = await gapi.client.sheets.spreadsheets.values.get({
+		spreadsheetId: DATABASE_SPREADSHEET_ID,
+		range: 'Database!A2:C'
+	});
+	
+	const rows = response.result.values || [];
+	const sheetMappings = {};
+	
+	// Expecting each row as [Index, Name, UID]
+	rows.forEach(row => {
+		if (row.length >= 3) {
+			const name = row[1];
+			const uid = row[2];
+			if (name && uid) {
+				sheetMappings[uid] = name;
+			}
+		}
+	});
+	
+	uidToNameMap = sheetMappings;
+	updateDatabaseStatus();
+	updateDatabaseList();
+	console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
+} catch (error) {
+	console.error('Error fetching database:', error);
+	// Only show error for admin users
+	if (!isInitializing && isAdmin) {
+		showImprovedNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+	}
+	throw error;
+}
+}
+
+function updatePageTitle() {
+const titleElement = document.querySelector('h1');
+if (!titleElement) return;
+
+if (currentCourse && currentCourse !== 'Default') {
+	// Format nicely - replace underscores and capitalize
+	const formattedCourse = currentCourse
+		.replace(/_/g, ' ')
+		.replace(/\b\w/g, l => l.toUpperCase());
+	
+	titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> ${formattedCourse} Attendance`;
+} else {
+	titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+}
+}
+	
+	/**
+	 * Fetch available courses (sheet names) from logs spreadsheet.
+	 */
+async function fetchAvailableCourses() {
+try {
+	console.log('Fetching available courses from spreadsheet...');
+	
+	if (!isOnline) {
+		console.log('Not online or not signed in, using default courses');
+		// Default courses if offline or not signed in
+		availableCourses = [];
+		populateCourseDropdown();
+		return;
+	}
+	
+	const response = await gapi.client.sheets.spreadsheets.get({
+		spreadsheetId: LOGS_SPREADSHEET_ID
+	});
+	
+	const sheets = response.result.sheets || [];
+	availableCourses = sheets.map(sheet => sheet.properties.title);
+	
+	console.log('Fetched courses:', availableCourses);
+	
+	// If no courses found, use defaults
+	if (availableCourses.length === 0) {
+		console.warn('No courses found in spreadsheet, using defaults');
+		availableCourses = [];
+	}
+	
+	populateCourseDropdown();
+	console.log(`Found ${availableCourses.length} courses in spreadsheet`);
+} catch (error) {
+	console.error('Error fetching courses:', error);
+	
+	// Use default courses if fetch fails
+	console.log('Using default courses due to error');
+	availableCourses = [];
+	populateCourseDropdown();
+	
+	showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
+	throw error;
+}
+}
+
+	/**
+	 * Fetch logs from Google Sheet for current course.
+	 */
+async function fetchLogsFromSheet() {
+if (!currentCourse) {
+	return;
+}
+
+try {
+	const response = await gapi.client.sheets.spreadsheets.values.get({
+		spreadsheetId: LOGS_SPREADSHEET_ID,
+		range: `${currentCourse}!A2:D`,
+	});
+	
+	const rows = response.result.values || [];
+	const sheetLogs = [];
+	
+	rows.forEach(row => {
+		if (row.length >= 3) {
+			const uid = String(row[0]);
+			const timestamp = new Date(row[1]).getTime();
+			const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+			const manual = row.length >= 4 ? row[3] === 'true' : false;
+			
+			if (uid && !isNaN(timestamp)) {
+				sheetLogs.push({ uid, timestamp, id, manual });
+			}
+		}
+	});
+	
+	// Sort logs by timestamp (newest first)
+	sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
+	logs = sheetLogs;
+	
+	// Also save to localStorage as backup
+	saveLogsToLocalStorage();
+	
+	console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
+	return true;
+} catch (error) {
+	console.error('Error fetching logs:', error);
+	
+	// Reset title back to default on error
+	const titleElement = document.querySelector('h1');
+	if (titleElement) {
+		titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
+	}
+	
+	if (!isInitializing) {
+		showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+	}
+	throw error;
+}
+}
+	
+function mergeLogs(localLogs, remoteLogs) {
+const merged = {};
+// Add remote logs first.
+remoteLogs.forEach(log => {
+	merged[log.id] = log;
+});
+// For local logs, update only if local has a newer timestamp.
+localLogs.forEach(log => {
+	if (!merged[log.id] || log.timestamp > merged[log.id].timestamp) {
+		merged[log.id] = log;
+	}
+});
+// Return sorted logs (newest first)
+return Object.values(merged).sort((a, b) => b.timestamp - a.timestamp);
+}
+
+
+// Helper function to convert a timestamp to a local ISO-like string (without timezone info)
+function convertTimestampToLocalISOString(timestamp) {
+const date = new Date(timestamp);
+const pad = (num) => String(num).padStart(2, '0');
+// Build a string like "YYYY-MM-DDTHH:MM:SS"
+return date.getFullYear() + '-' +
+	   pad(date.getMonth() + 1) + '-' +
+	   pad(date.getDate()) + 'T' +
+	   pad(date.getHours()) + ':' +
+	   pad(date.getMinutes()) + ':' +
+	   pad(date.getSeconds());
+}
+
+async function syncLogsWithSheet() {
+if (!currentCourse || !isAdmin) {
+	return;
+}
+
+try {
+	console.log("Starting sync with spreadsheet...");
+	// Show syncing indicator on the sync button
+	const syncIcon = syncBtn.querySelector('i');
+	if (syncIcon) {
+		syncIcon.classList.add('fa-spin');
+	}
+	isSyncing = true;
+	
+	// Prepare the data for the spreadsheet using the universal timestamp conversion.
+	const sheetData = logs.map(log => [
+		log.uid,
+		convertTimestampToLocalISOString(log.timestamp),
+		log.id,
+		log.manual ? 'true' : 'false'
+	]);
+	
+	console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
+	
+	// Clear existing data in the target range
+	await gapi.client.sheets.spreadsheets.values.clear({
+		spreadsheetId: LOGS_SPREADSHEET_ID,
+		range: `${currentCourse}!A2:D`,
+	});
+	
+	// Write the new data if there is any
+	if (sheetData.length > 0) {
+		await gapi.client.sheets.spreadsheets.values.update({
+			spreadsheetId: LOGS_SPREADSHEET_ID,
+			range: `${currentCourse}!A2:D`,
+			valueInputOption: 'RAW',
+			resource: { values: sheetData }
+		});
+	}
+	
+	console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
+} catch (error) {
+	console.error('Error syncing logs:', error);
+	showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+	throw error;
+} finally {
+	// Remove syncing indicator
+	const syncIcon = syncBtn.querySelector('i');
+	if (syncIcon) {
+		syncIcon.classList.remove('fa-spin');
+	}
+	isSyncing = false;
+}
+}
+
+	
+	/**
+	 * Sync database (UID-name map) to Google Sheets.
+	 */
+async function syncDatabaseToSheet() {
+// Only allow sync if the user is signed in as admin.
+if (!isSignedIn || !isAdmin || !isOnline) {
+	console.warn('Database sync aborted: Not signed in as admin or not online.');
+	return;
+}
+
+try {
+	const entries = Object.entries(uidToNameMap);
+	// Format data as [Index, Name, UID]
+	const sheetData = entries.map(([uid, name], index) => [
+		index + 1,
+		name,
+		uid
+	]);
+	
+	// Clear existing data in the range
+	await gapi.client.sheets.spreadsheets.values.clear({
+		spreadsheetId: DATABASE_SPREADSHEET_ID,
+		range: 'Database!A2:C'
+	});
+	
+	// Write new data if there are entries
+	if (sheetData.length > 0) {
+		await gapi.client.sheets.spreadsheets.values.update({
+			spreadsheetId: DATABASE_SPREADSHEET_ID,
+			range: 'Database!A2:C',
+			valueInputOption: 'RAW',
+			resource: { values: sheetData }
+		});
+	}
+	
+	console.log(`Synced ${entries.length} database entries to sheet`);
+} catch (error) {
+	console.error('Error syncing database:', error);
+	showImprovedNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
+	throw error;
+}
+}
+
+ 
+	/**
+	 * Append a single log to Google Sheet (for immediate sync).
+	 * @param {Object} log - The log entry to append.
+	 */
+async function appendLogToSheet(log) {
+if (!currentCourse || !isOnline || !isSignedIn) {
+	return;
+}
+
+try {
+	await gapi.client.sheets.spreadsheets.values.append({
+		spreadsheetId: LOGS_SPREADSHEET_ID,
+		range: `${currentCourse}!A2:D`,
+		valueInputOption: 'RAW',
+		insertDataOption: 'INSERT_ROWS',
+		resource: {
+			values: [[
+				log.uid,
+				new Date(log.timestamp).toISOString(),
+				log.id,
+				log.manual ? 'true' : 'false'
+			]]
+		}
+	});
+	
+	console.log('Log appended to Google Sheet');
+} catch (error) {
+	console.error('Error appending log:', error);
+	showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
+}
+}
+
+	/**
+	 * Update sort icons in the table headers.
+	 */
+function updateSortIcons() {
+// Reset all sort icons
+document.querySelectorAll('.sort-icon').forEach(icon => {
+	icon.className = 'sort-icon fas fa-sort';
+});
+
+// Set sort icon for current sort field
+const [field, direction] = currentSort.split('-');
+const header = document.querySelector(`.sortable[data-sort="${field}"]`);
+
+if (header) {
+	const icon = header.querySelector('.sort-icon');
+	icon.className = `sort-icon fas fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
+}
+}
+	
+
+	
+	/**
+	 * Handle filter input change for logs.
+	 */
+function handleFilterChange() {
+filter = filterInput.value.toLowerCase();
+updateLogsList();
+}
+	
+	/**
+	 * Handle sort dropdown change for logs.
+	 */
+function handleSortChange() {
+currentSort = sortSelect.value;
+updateSortIcons();
+updateLogsList();
+}
+	
+	/**
+	 * Handle filter input change for database.
+	 */
+function handleDbFilterChange() {
+dbFilter = dbFilterInput.value.toLowerCase();
+updateDatabaseList();
+}
+	
+	/**
+	 * Add new database entry.
+	 */
+function showAddEntryDialog() {
+if (!isAdmin) return;
+
+// Prompt for UID and name
+const uid = prompt("Enter UID for new entry:");
+if (uid === null) return;
+
+const trimmedUid = uid.trim();
+if (!trimmedUid) {
+	alert("UID cannot be empty.");
+	return;
+}
+
+if (uidToNameMap[trimmedUid]) {
+	alert("This UID already exists in the database.");
+	return;
+}
+
+const name = prompt("Enter name for UID " + trimmedUid + ":");
+if (name === null) return;
+
+const trimmedName = name.trim();
+if (!trimmedName) {
+	alert("Name cannot be empty.");
+	return;
+}
+
+// Add to database
+uidToNameMap[trimmedUid] = trimmedName;
+
+// Sync to sheet if online
+if (isOnline && isSignedIn) {
+	syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+}
+
+updateUI();
+showImprovedNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
+}
+
+	/**
+	 * Edit database entry (change name).
+	 * @param {string} uid - The UID of the entry to edit.
+	 */
+function editDatabaseEntry(uid) {
+if (!isAdmin) return;
+
+const currentName = uidToNameMap[uid] || '';
+const newName = prompt(`Enter a new name for ${uid}:`, currentName);
+
+if (newName === null) return;
+
+const trimmed = newName.trim();
+if (!trimmed) {
+	alert('Name cannot be empty.');
+	return;
+}
+
+uidToNameMap[uid] = trimmed;
+
+// Sync to sheet if online
+if (isOnline && isSignedIn) {
+	syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+}
+
+updateUI();
+showImprovedNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
+}
+
+	/**
+	 * Delete database entry.
+	 * @param {string} uid - The UID of the entry to delete.
+	 */
+function deleteDatabaseEntry(uid) {
+if (!isAdmin) return;
+
+const name = uidToNameMap[uid];
+if (!name) return;
+
+if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the database?`)) {
+	delete uidToNameMap[uid];
+	
+	// Sync to sheet if online
+	if (isOnline && isSignedIn) {
+		syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+	}
+	
+	updateUI();
+	showImprovedNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
+}
+}
+	
+	/**
+	 * Clear the entire database.
+	 */
+function clearDatabase() {
+if (!isAdmin) return;
+
+if (confirm('Are you sure you want to clear the entire database? This will remove all UID-name mappings.')) {
+	uidToNameMap = {};
+	
+	// Sync to sheet if online
+	if (isOnline && isSignedIn) {
+		syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+	}
+	
+	updateUI();
+	showImprovedNotification('success', 'Database Cleared', 'All database entries have been removed.');
+}
+}
+
+	/**
+	 * Add manual log entry.
+	 */
+function showAddLogEntryDialog() {
+if (!isAdmin) return;
+
+if (!currentCourse) {
+	showImprovedNotification('warning', 'No Course Selected', 'Please select a course before adding a log entry');
+	return;
+}
+
+// Create dialog for adding a manual log entry
+const dialogBackdrop = document.createElement('div');
+dialogBackdrop.className = 'dialog-backdrop';
+
+const dialog = document.createElement('div');
+dialog.className = 'dialog';
+
+// Get current date and time for default values
+const now = new Date();
+const formattedDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+
+// Build options for known people from database
+let nameOptions = '';
+const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
+
+sortedEntries.forEach(([uid, name]) => {
+	nameOptions += `<option value="${uid}">${name} (${uid})</option>`;
+});
+
+dialog.innerHTML = `
+	<h3 class="dialog-title">Add Manual Log Entry</h3>
+	<div class="form-group">
+		<label for="manual-name">Person:</label>
+		<select id="manual-name" class="form-control">
+			<option value="">-- Select Person --</option>
+			${nameOptions}
+		</select>
+	</div>
+	<div class="form-group">
+		<label for="manual-date">Date:</label>
+		<input type="date" id="manual-date" class="form-control" value="${formattedDate}">
+	</div>
+	<div class="form-group">
+		<label for="manual-time">Time:</label>
+		<input type="time" id="manual-time" class="form-control" value="${formattedTime}">
+	</div>
+	<div class="dialog-actions">
+		<button id="save-manual-log-btn" class="btn-green">Add Entry</button>
+		<button id="cancel-manual-btn">Cancel</button>
+	</div>
+`;
+
+dialogBackdrop.appendChild(dialog);
+document.body.appendChild(dialogBackdrop);
+
+// Handle save button
+document.getElementById('save-manual-log-btn').addEventListener('click', function() {
+	const selectedUid = document.getElementById('manual-name').value;
+	const manualDate = document.getElementById('manual-date').value;
+	const manualTime = document.getElementById('manual-time').value;
+	
+	if (!selectedUid) {
+		alert('Please select a person.');
+		return;
+	}
+	
+	if (!manualDate) {
+		alert('Please enter a date.');
+		return;
+	}
+	
+	if (!manualTime) {
+		alert('Please enter a time.');
+		return;
+	}
+	
+	// Create new log entry
+	const timestamp = new Date(`${manualDate}T${manualTime}:00`);
+	const newLog = {
+		uid: selectedUid,
+		timestamp: timestamp.getTime(),
+		id: Date.now() + Math.random().toString(36).substr(2, 9),
+		manual: true
+	};
+	
+	// Add to logs
+	logs.unshift(newLog);
+	
+	// Sync with sheets if online
+	if (isOnline && isSignedIn) {
+		appendLogToSheet(newLog).catch(err => console.error('Error appending log:', err));
+	}
+	
+	updateUI();
+	
+	const name = uidToNameMap[selectedUid] || 'Unknown';
+	showImprovedNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate} ${manualTime}`);
+	
+	document.body.removeChild(dialogBackdrop);
+});
+
+// Handle cancel button
+document.getElementById('cancel-manual-btn').addEventListener('click', function() {
+	document.body.removeChild(dialogBackdrop);
+});
 }
 
 	/**
