@@ -2106,10 +2106,84 @@ function showExcuseDialog() {
         }
         
         if (!explanation) {
-            showImprovedNotification('warning', 'Missing Explanation', 'Please provide an explanation');
-			return;
-		}
-		}
+            showImprovedNotification('warning', 'Missing Explanation', 'Please provide an explanation for your absence.');
+            return;
+        }
+        
+        // Disable submit button during processing
+        this.disabled = true;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+        
+        // Create excuse object
+        const newExcuse = {
+            id: Date.now() + Math.random().toString(36).substr(2, 9),
+            studentUid: currentUser.id,
+            studentName: currentUser.name,
+            studentEmail: currentUser.email,
+            courseId: courseId,
+            absenceDate: absenceDate,
+            reason: reason,
+            explanation: explanation,
+            attachmentUrl: '', // Will be filled if there's a file
+            hasAttachment: !!selectedFile,
+            submittedAt: new Date().getTime(),
+            status: 'pending',
+            reviewedBy: '',
+            reviewTimestamp: 0,
+            reviewNote: ''
+        };
+        
+        try {
+            // If there's a file attachment, note that the implementation is just a placeholder
+            if (selectedFile) {
+                // In a real app, you would upload to Google Drive or another storage service
+                // This is just storing the filename as a placeholder
+                newExcuse.attachmentUrl = 'file://' + selectedFile.name;
+            }
+            
+            // Add to excuses array
+            excuses.unshift(newExcuse);
+            myExcuses.unshift(newExcuse);
+            
+            // Save to localStorage
+            saveExcusesToLocalStorage();
+            
+            // Sync with Google Sheets if online
+            if (isOnline) {
+                try {
+                    await appendExcuseToSheet(newExcuse);
+                } catch (error) {
+                    console.error('Error syncing excuse:', error);
+                    showImprovedNotification('warning', 'Sync Warning', 
+                        'Your excuse was saved locally but could not be synced with the server. It will sync when you reconnect.');
+                }
+            }
+            
+            // Show success message
+            showImprovedNotification('success', 'Excuse Submitted', 'Your absence excuse has been submitted successfully.');
+            
+            // Close dialog
+            document.body.removeChild(dialogBackdrop);
+            
+            // Update UI for my excuses list
+            updateMyExcusesList();
+            
+        } catch (error) {
+            console.error('Error submitting excuse:', error);
+            showImprovedNotification('error', 'Submission Error', 
+                'An error occurred while submitting your excuse. Please try again.');
+            
+            // Re-enable button on error
+            this.disabled = false;
+            this.innerHTML = 'Submit';
+        }
+    });
+    
+    // Handle cancel button
+    document.getElementById('dialog-cancel-excuse-btn').addEventListener('click', function() {
+        document.body.removeChild(dialogBackdrop);
+    });
+}
 
 
 	/**
