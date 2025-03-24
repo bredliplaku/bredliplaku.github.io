@@ -1606,11 +1606,6 @@ function checkAuthRedirect() {
                             if (isOnline) {
                                 fetchAvailableCourses().catch(err => console.error('Error:', err));
                                 fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
-                                
-                                // Initialize Google Drive folder for excuses if admin
-                                if (isAdmin) {
-                                    initializeExcusesFolder();
-                                }
                             }
                             showMainContent();
                         })
@@ -1634,55 +1629,6 @@ function checkAuthRedirect() {
                 window.location.hash = '';
             }
         }
-    }
-}
-	
-// Initialize or get Google Drive folder for excuse attachments
-async function initializeExcusesFolder() {
-    if (!isAdmin || !isOnline || !isSignedIn) {
-        return;
-    }
-    
-    try {
-        // Check if we can access the specified folder first
-        try {
-            const response = await gapi.client.drive.files.get({
-                fileId: googleDriveFolderId,
-                fields: 'id,name'
-            });
-            
-            console.log('Found existing folder:', response.result.name);
-            
-            // Set permissions
-            await setFolderPermissions(googleDriveFolderId);
-        } catch (error) {
-            // If folder not found or not accessible, create a new one
-            if (error.status === 404 || error.status === 403) {
-                console.log('Folder not accessible, creating new folder...');
-                
-                const folderMetadata = {
-                    name: 'Attendance Excuses',
-                    mimeType: 'application/vnd.google-apps.folder'
-                };
-                
-                const folderResponse = await gapi.client.drive.files.create({
-                    resource: folderMetadata,
-                    fields: 'id'
-                });
-                
-                // Update the global folder ID
-                googleDriveFolderId = folderResponse.result.id;
-                console.log('Created new folder with ID:', googleDriveFolderId);
-                
-                // Set permissions
-                await setFolderPermissions(googleDriveFolderId);
-            } else {
-                throw error; // Re-throw other errors
-            }
-        }
-    } catch (error) {
-        console.error('Error initializing folder:', error);
-        showImprovedNotification('error', 'Drive Error', 'Could not set up folder for storing attachments. Attachments may not be saved properly.');
     }
 }
 
@@ -1956,11 +1902,6 @@ function initGoogleApi() {
                             if (isOnline) {
                                 fetchAvailableCourses().catch(err => console.error('Error:', err));
                                 fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
-                                
-                                // Initialize Google Drive folder for excuses if admin
-                                if (isAdmin) {
-                                    initializeExcusesFolder();
-                                }
                             }
                         })
                         .catch(e => {
@@ -2401,20 +2342,21 @@ function handleAuthClick(e) {
     console.log('Using redirect URI:', redirectUri);
     
     // Create Google OAuth URL with proper drive scopes
+    // Add approval_prompt=auto and include_granted_scopes=true to avoid repeated permission requests
     const scopes = encodeURIComponent('openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file');
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
                     `client_id=${CLIENT_ID}&` +
                     `redirect_uri=${encodeURIComponent(redirectUri)}&` +
                     `response_type=token&` +
-                    `scope=${scopes}`;
+                    `scope=${scopes}&` +
+                    `approval_prompt=auto&` +
+                    `include_granted_scopes=true&` +
+                    `access_type=offline`;
     
     console.log('Auth URL:', authUrl);
     
-    // Add a small delay before redirecting to ensure the notification is displayed
-    setTimeout(() => {
-        // Redirect to Google login
-        window.location.href = authUrl;
-    }, 100);
+    // Redirect to Google login
+    window.location.href = authUrl;
 }
 
 	
