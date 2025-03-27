@@ -1257,6 +1257,7 @@ body.is-admin td.admin-only {
 	const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
 	const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
 	const LOGS_STORAGE_KEY = 'attendance_logs';
+	const APPS_SCRIPT_URL = 'https://script.google.com/a/macros/epoka.edu.al/s/AKfycbyMD_i9PIhcsLBuVmL69EPyEJB8FEtD_AygWSR9pNNFk2xcM-xQhaQ3FerBq6tBpNSVfA/exec';
 	
 	// Discovery docs and scopes for Google API
 	const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -2970,17 +2971,17 @@ function loadMyExcuses() {
     
     // If online, fetch excuses from sheet
     if (isOnline) {
-        fetchExcusesFromSheet()
-            .then(() => {
-                myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
-                updateExcuseUI();
-            })
-            .catch(error => {
-                console.error('Error fetching excuses:', error);
-                if (!isInitializing) {
-                    showImprovedNotification('error', 'Data Error', 'Failed to load excuses from server');
-                }
-            });
+		fetchExcusesFromWebApp()
+		  .then(data => {
+			excuses = data;
+			// If user is signed in, filter their excuses
+			if (isSignedIn && currentUser) {
+			  myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
+			}
+			// Update UI
+			updateExcuseUI();
+		  })
+		  .catch(error => { /* handle error */ });
     }
     
     updateExcuseUI();
@@ -3009,16 +3010,17 @@ function loadAllExcuses() {
     
     // If online, fetch excuses from sheet
     if (isOnline) {
-        fetchExcusesFromSheet()
-            .then(() => {
-                updateExcuseUI();
-            })
-            .catch(error => {
-                console.error('Error fetching excuses:', error);
-                if (!isInitializing) {
-                    showImprovedNotification('error', 'Data Error', 'Failed to load excuses from server');
-                }
-            });
+		fetchExcusesFromWebApp()
+		  .then(data => {
+			excuses = data;
+			// If user is signed in, filter their excuses
+			if (isSignedIn && currentUser) {
+			  myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
+			}
+			// Update UI
+			updateExcuseUI();
+		  })
+		  .catch(error => { /* handle error */ });
     }
     
     updateExcuseUI();
@@ -3031,6 +3033,32 @@ function saveExcusesToLocalStorage() {
     } catch (e) {
         console.error('Error saving excuses to localStorage:', e);
     }
+}
+
+async function fetchExcusesFromWebApp() {
+  if (!isOnline || !isSignedIn || !currentUser) {
+    return [];
+  }
+  
+  try {
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getExcuses&email=${encodeURIComponent(currentUser.email)}&isAdmin=${isAdmin}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    const result = await response.json();
+    if (result.status !== 'success') {
+      throw new Error(result.message || 'Failed to fetch excuses');
+    }
+    
+    console.log(`Loaded ${result.data.length} excuses from web app`);
+    return result.data;
+  } catch (error) {
+    console.error('Error fetching excuses:', error);
+    throw error;
+  }
 }
 
 // Fetch excuses from Google Sheet
@@ -3091,41 +3119,32 @@ async function fetchExcusesFromSheet() {
 
 // Append a single excuse to Google Sheet
 async function appendExcuseToSheet(excuse) {
-    if (!isOnline || !isSignedIn) {
-        return;
+  if (!isOnline || !isSignedIn) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'submitExcuse',
+        ...excuse
+      })
+    });
+    
+    const result = await response.json();
+    if (result.status !== 'success') {
+      throw new Error(result.message || 'Failed to submit excuse');
     }
     
-    try {
-        await gapi.client.sheets.spreadsheets.values.append({
-            spreadsheetId: EXCUSES_SPREADSHEET_ID,
-            range: 'Excuses!A2:P',
-            valueInputOption: 'RAW',
-            insertDataOption: 'INSERT_ROWS',
-            resource: {
-                values: [[
-                    excuse.id,
-                    excuse.studentUid,
-                    excuse.studentName,
-                    excuse.studentEmail,
-                    excuse.courseId,
-                    excuse.absenceDate,
-                    excuse.reason,
-                    excuse.explanation,
-                    excuse.attachmentUrl,
-                    excuse.submittedAt,
-                    excuse.status,
-                    excuse.reviewedBy,
-                    excuse.reviewTimestamp,
-                    excuse.reviewNote
-                ]]
-            }
-        });
-        
-        console.log('Excuse appended to Google Sheet');
-    } catch (error) {
-        console.error('Error appending excuse:', error);
-        throw error;
-    }
+    console.log('Excuse submitted successfully');
+  } catch (error) {
+    console.error('Error submitting excuse:', error);
+    throw error;
+  }
 }
 
 // Sync all excuses with Google Sheet
