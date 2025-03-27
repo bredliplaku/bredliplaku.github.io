@@ -1257,7 +1257,7 @@ body.is-admin td.admin-only {
 	const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
 	const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
 	const LOGS_STORAGE_KEY = 'attendance_logs';
-	const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw158k8VjD8o-nMwZNfkKJCKMt8xbaI81KRNF1YxsNjYf4ENMk6bPcZ5d_RQe1hsccLxg/exec';
+	const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxK8u8NRMo9JdUv_OZGx5pE-GAk00r97WLJMKYrg24d-cTg5fng-pvzV3cNxUYkyFB0FA/exec';
 	
 	// Discovery docs and scopes for Google API
 	const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -3063,58 +3063,76 @@ async function fetchExcusesFromWebApp() {
 
 // Fetch excuses from Google Sheet
 async function fetchExcusesFromSheet() {
-    try {
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: EXCUSES_SPREADSHEET_ID,
-            range: 'Excuses!A2:P', // Adjust range as needed
-        });
-        
-        const rows = response.result.values || [];
-        const sheetExcuses = [];
-        
-        rows.forEach(row => {
-            if (row.length >= 10) {
-                // Map spreadsheet columns to excuse object
-                const excuse = {
-                    id: row[0],
-                    studentUid: row[1],
-                    studentName: row[2],
-                    studentEmail: row[3],
-                    courseId: row[4],
-                    absenceDate: row[5],
-                    reason: row[6],
-                    explanation: row[7],
-                    attachmentUrl: row[8],
-                    hasAttachment: row[8] && row[8].trim() !== '',
-                    submittedAt: parseInt(row[9]) || new Date(row[9]).getTime(),
-                    status: row[10] || 'pending',
-                    reviewedBy: row[11] || '',
-                    reviewTimestamp: parseInt(row[12]) || 0,
-                    reviewNote: row[13] || ''
-                };
-                
-                sheetExcuses.push(excuse);
-            }
-        });
-        
-        // Sort excuses by submission time (newest first)
-        sheetExcuses.sort((a, b) => b.submittedAt - a.submittedAt);
-        excuses = sheetExcuses;
-        
-        // Also save to localStorage as backup
-        saveExcusesToLocalStorage();
-        
-        // If user is signed in, update myExcuses
-        if (isSignedIn && currentUser) {
-            myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
-        }
-        
-        console.log(`Loaded ${excuses.length} excuses from sheet`);
-        return true;
-    } catch (error) {
-        console.error('Error fetching excuses:', error);
-        throw error;
+  if (!isOnline || !isSignedIn || !currentUser) {
+    return;
+  }
+  
+  try {
+    const url = `https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec?action=getExcuses&email=${encodeURIComponent(currentUser.email)}&isAdmin=${isAdmin}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
     }
+    
+    const result = await response.json();
+    if (result.status !== 'success') {
+      throw new Error(result.message || 'Failed to fetch excuses');
+    }
+    
+    excuses = result.data;
+    // If user is signed in, filter their excuses
+    if (isSignedIn && currentUser) {
+      myExcuses = excuses.filter(excuse => excuse.studentEmail === currentUser.email);
+    }
+    
+    console.log(`Loaded ${excuses.length} excuses`);
+    return true;
+  } catch (error) {
+    console.error('Error fetching excuses:', error);
+    throw error;
+  }
+}
+
+async function appendExcuseToSheet(excuse) {
+  if (!isOnline || !isSignedIn) {
+    return;
+  }
+  
+  try {
+    const url = 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec';
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        action: 'submitExcuse',
+        excuse: excuse
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error ${response.status}`);
+    }
+    
+    const result = await response.json();
+    if (result.status !== 'success') {
+      throw new Error(result.message || 'Failed to submit excuse');
+    }
+    
+    console.log('Excuse submitted successfully');
+  } catch (error) {
+    console.error('Error submitting excuse:', error);
+    throw error;
+  }
 }
 
 // Append a single excuse to Google Sheet
