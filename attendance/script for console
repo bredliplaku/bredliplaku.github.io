@@ -1,0 +1,125 @@
+javascript:(function(){
+  console.log("Starting clipboard import...");
+
+  // Check if the document is focused
+  if (!document.hasFocus()) {
+    console.log("Document is not focused, attempting to focus...");
+    window.focus();
+  }
+  
+  // Clipboard access must be triggered by a user action.
+  navigator.clipboard.readText()
+    .then(text => {
+      try {
+        const data = JSON.parse(text);
+        console.log("Successfully parsed clipboard data");
+        
+        if (!data.parameters || !data.attendance || !data.nameMap) {
+          throw new Error("Invalid format: missing required data");
+        }
+        
+        fillFormParameters(data.parameters);
+        
+        setTimeout(() => {
+          processAttendance(data.attendance, data.nameMap, data.parameters.hours);
+        }, 2000);
+        
+      } catch (error) {
+        console.error("Error processing clipboard data:", error);
+        alert("Error: " + error.message + "\n\nPlease ensure you've copied valid attendance data to the clipboard.");
+      }
+    })
+    .catch(error => {
+      console.error("Clipboard access error:", error);
+      alert("Could not access clipboard. Ensure the document is focused and that clipboard permissions are granted.");
+    });
+
+  // Fill the form parameters
+  function fillFormParameters(params) {
+    setFormValue("didcourseattendance_week", params.week);
+    setFormValue("didcourseattendance_topicen", params.topic);
+    setFormValue("didcourseattendance_categoryen", params.category);
+    setFormValue("didcourseattendance_date", params.date);
+    setFormValue("didcourseattendance_nrhours", params.hours);
+    console.log("Form parameters filled, waiting for checkboxes...");
+  }
+
+  // Set a form value and trigger the appropriate event
+  function setFormValue(id, value) {
+    const element = document.getElementById(id);
+    if (!element) {
+      console.warn(`Element not found: ${id}`);
+      return false;
+    }
+    element.value = value;
+    const eventType = (element.tagName === "INPUT" && element.type === "text") ? "input" : "change";
+    element.dispatchEvent(new Event(eventType, { bubbles: true }));
+    console.log(`Set ${id} to "${value}"`);
+    return true;
+  }
+
+  // Process attendance data
+  function processAttendance(attendance, nameMap, numHours) {
+    const rows = document.querySelectorAll("#student_list_table tbody tr");
+    console.log(`Processing ${rows.length} student rows with ${numHours} hours`);
+    let processed = 0;
+    document.querySelectorAll("#student_list_table tbody tr input[type='checkbox']").forEach(checkbox => {
+      checkbox.checked = false;
+    });
+    console.log("Reset all checkboxes to unchecked");
+
+    rows.forEach(row => {
+      const nameCell = row.querySelector("td:nth-child(3)");
+      if (!nameCell) return;
+      let fullName = nameCell.textContent.trim();
+      let cleanName = fullName.replace(/\s+R\s+EX|\s+EX|\s+R|\s+\(R\)|\s+\(EX\)/g, "").trim();
+      if (row.querySelector("td[data-exempted='EX']")) {
+        console.log(`Skipping exempted student: ${cleanName}`);
+        return;
+      }
+      
+      let foundUid = null;
+      for (const [uid, name] of Object.entries(nameMap)) {
+        const mappedName = String(name).replace(/\s+R\s+EX|\s+EX|\s+R|\s+\(R\)|\s+\(EX\)/g, "").trim();
+        if (mappedName.toLowerCase() === cleanName.toLowerCase()) {
+          foundUid = uid;
+          break;
+        }
+      }
+      
+      if (!foundUid) {
+        console.log(`No UID found for: ${cleanName}`);
+        return;
+      }
+      
+      const attendCount = attendance[foundUid] || 0;
+      const checkboxes = Array.from(row.querySelectorAll("input[type='checkbox']")).slice(1);
+      
+      for (let i = 0; i < attendCount && i < checkboxes.length; i++) {
+        checkboxes[i].checked = true;
+        checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      
+      const hiddenFields = row.querySelectorAll("input[type='hidden']");
+      if (hiddenFields.length >= 3) {
+        const hourField = hiddenFields[0],
+              checkedField = hiddenFields[1],
+              updateField = hiddenFields[2];
+        const absentHours = Math.max(0, parseInt(numHours) - attendCount);
+        const absentList = [];
+        for (let i = attendCount + 1; i <= numHours; i++) {
+          absentList.push(i);
+        }
+        hourField.value = absentHours;
+        checkedField.value = absentList.join(',');
+        updateField.value = "1";
+      }
+      
+      row.classList.add('active');
+      processed++;
+    });
+    
+    console.log(`Attendance processed for ${processed} students`);
+    alert(`Attendance updated for ${processed} students. Please review and click Save Changes.`);
+  }
+})();
