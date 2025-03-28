@@ -1417,6 +1417,295 @@ function exportParameterizedAttendance() {
     });
 }
 
+
+function enhancedExportAttendance() {
+  // Create dialog backdrop and dialog
+  const dialogBackdrop = document.createElement('div');
+  dialogBackdrop.className = 'dialog-backdrop';
+  const dialog = document.createElement('div');
+  dialog.className = 'dialog';
+  dialogBackdrop.appendChild(dialog);
+  
+  // Add dialog title
+  const title = document.createElement('h3');
+  title.className = 'dialog-title';
+  title.textContent = 'Export Attendance for EIS';
+  dialog.appendChild(title);
+  
+  // Create form content
+  const today = new Date().toISOString().split('T')[0];
+  const formContent = document.createElement('div');
+  
+  // Week selection
+  const weekGroup = document.createElement('div');
+  weekGroup.className = 'form-group';
+  const weekLabel = document.createElement('label');
+  weekLabel.textContent = 'Week Number:';
+  weekLabel.htmlFor = 'export-week';
+  const weekSelect = document.createElement('select');
+  weekSelect.className = 'form-control';
+  weekSelect.id = 'export-week';
+  for (let i = 1; i <= 14; i++) {
+    const option = document.createElement('option');
+    option.value = i;
+    option.textContent = `Week ${i}`;
+    weekSelect.appendChild(option);
+  }
+  weekGroup.appendChild(weekLabel);
+  weekGroup.appendChild(weekSelect);
+  formContent.appendChild(weekGroup);
+  
+  // Hours selection
+  const hoursGroup = document.createElement('div');
+  hoursGroup.className = 'form-group';
+  const hoursLabel = document.createElement('label');
+  hoursLabel.textContent = 'Number of Hours:';
+  hoursLabel.htmlFor = 'export-hours';
+  const hoursSelect = document.createElement('select');
+  hoursSelect.className = 'form-control';
+  hoursSelect.id = 'export-hours';
+  for (let i = 1; i <= 10; i++) {
+    const option = document.createElement('option');
+    option.value = i;
+    option.textContent = `${i} hr${i > 1 ? 's' : ''}`;
+    if (i === 2) option.selected = true;
+    hoursSelect.appendChild(option);
+  }
+  hoursGroup.appendChild(hoursLabel);
+  hoursGroup.appendChild(hoursSelect);
+  formContent.appendChild(hoursGroup);
+  
+  // Category selection
+  const catGroup = document.createElement('div');
+  catGroup.className = 'form-group';
+  const catLabel = document.createElement('label');
+  catLabel.textContent = 'Category:';
+  catLabel.htmlFor = 'export-category';
+  const catSelect = document.createElement('select');
+  catSelect.className = 'form-control';
+  catSelect.id = 'export-category';
+  
+  const categories = [
+    { value: 'theory', text: 'Theory', selected: true },
+    { value: 'lab', text: 'Lab' },
+    { value: 'practice', text: 'Practice' }
+  ];
+  
+  categories.forEach(cat => {
+    const option = document.createElement('option');
+    option.value = cat.value;
+    option.textContent = cat.text;
+    if (cat.selected) option.selected = true;
+    catSelect.appendChild(option);
+  });
+  
+  catGroup.appendChild(catLabel);
+  catGroup.appendChild(catSelect);
+  formContent.appendChild(catGroup);
+  
+  // Date selection
+  const dateGroup = document.createElement('div');
+  dateGroup.className = 'form-group';
+  const dateLabel = document.createElement('label');
+  dateLabel.textContent = 'Date:';
+  dateLabel.htmlFor = 'export-date';
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateInput.className = 'form-control';
+  dateInput.id = 'export-date';
+  dateInput.value = today;
+  dateGroup.appendChild(dateLabel);
+  dateGroup.appendChild(dateInput);
+  formContent.appendChild(dateGroup);
+  
+  // Topic input
+  const topicGroup = document.createElement('div');
+  topicGroup.className = 'form-group';
+  const topicLabel = document.createElement('label');
+  topicLabel.textContent = 'Topic:';
+  topicLabel.htmlFor = 'export-topic';
+  const topicInput = document.createElement('input');
+  topicInput.type = 'text';
+  topicInput.className = 'form-control';
+  topicInput.id = 'export-topic';
+  topicInput.value = 'Lecture';
+  topicGroup.appendChild(topicLabel);
+  topicGroup.appendChild(topicInput);
+  formContent.appendChild(topicGroup);
+  
+  dialog.appendChild(formContent);
+  
+  // Dialog actions
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+  
+  // Add multiple export options
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'btn-blue';
+  downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download';
+  
+  const clipboardBtn = document.createElement('button');
+  clipboardBtn.className = 'btn-green';
+  clipboardBtn.innerHTML = '<i class="fas fa-clipboard"></i> Copy to Clipboard';
+  
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn-red';
+  cancelBtn.textContent = 'Cancel';
+  
+  actions.appendChild(downloadBtn);
+  actions.appendChild(clipboardBtn);
+  actions.appendChild(cancelBtn);
+  dialog.appendChild(actions);
+  
+  // Add to document
+  document.body.appendChild(dialogBackdrop);
+  
+  // Create export data function (reused for both buttons)
+  const createExportData = () => {
+    const data = {
+      parameters: {
+        week: weekSelect.value,
+        hours: hoursSelect.value,
+        category: catSelect.value,
+        date: dateInput.value,
+        topic: topicInput.value,
+        course: currentCourse || 'Default'
+      },
+      attendance: {},
+      nameMap: { ...uidToNameMap }  // Include UID-to-name mapping for EIS
+    };
+    
+    // Process logs to count scans per student
+    if (logs && logs.length > 0) {
+      const uidCounts = {};
+      
+      // Convert the selected date to start/end timestamps for comparison
+      const selectedDate = new Date(dateInput.value);
+      selectedDate.setHours(0, 0, 0, 0); // Start of day
+      
+      const nextDay = new Date(selectedDate);
+      nextDay.setDate(nextDay.getDate() + 1); // End at start of next day
+      
+      // Count logs by UID for the selected date
+      logs.forEach(log => {
+        const logDate = new Date(log.timestamp);
+        
+        if (logDate >= selectedDate && logDate < nextDay) {
+          const uid = log.uid;
+          uidCounts[uid] = (uidCounts[uid] || 0) + 1;
+          
+          // Add name mapping if available
+          if (uidToNameMap[uid]) {
+            data.nameMap[uid] = uidToNameMap[uid];
+          }
+        }
+      });
+      
+      // Add the counts to the export data
+      data.attendance = uidCounts;
+    }
+    
+    return data;
+  };
+  
+  // Handle download button
+  downloadBtn.addEventListener('click', () => {
+    const data = createExportData();
+    
+    // Create downloadable file
+    const dataStr = "data:text/json;charset=utf-8," + 
+                  encodeURIComponent(JSON.stringify(data, null, 2));
+    const downloadEl = document.createElement('a');
+    downloadEl.setAttribute("href", dataStr);
+    downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${dateInput.value}.json`);
+    downloadEl.style.display = "none";
+    document.body.appendChild(downloadEl);
+    downloadEl.click();
+    document.body.removeChild(downloadEl);
+    
+    // Also save to localStorage with a recognizable key
+    const storageKey = `eis_export_${currentCourse || 'default'}_${dateInput.value}`;
+    localStorage.setItem(storageKey, JSON.stringify(data));
+    
+    showImprovedNotification('success', 'Export Complete', 
+        `Attendance data downloaded and saved to localStorage with key "${storageKey}"`);
+    document.body.removeChild(dialogBackdrop);
+  });
+  
+  // Handle clipboard button
+  clipboardBtn.addEventListener('click', () => {
+    const data = createExportData();
+    
+    // Copy to clipboard
+    const jsonString = JSON.stringify(data, null, 2);
+    
+    // Also save to localStorage with a recognizable key
+    const storageKey = `eis_export_${currentCourse || 'default'}_${dateInput.value}`;
+    localStorage.setItem(storageKey, jsonString);
+    
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(jsonString)
+        .then(() => {
+          showImprovedNotification('success', 'Copied to Clipboard', 
+            `Attendance data copied to clipboard and saved to localStorage with key "${storageKey}"`);
+        })
+        .catch(err => {
+          console.error('Could not copy text: ', err);
+          showImprovedNotification('error', 'Clipboard Error', 
+            'Could not copy to clipboard. See console for details.');
+        });
+    } else {
+      // Fallback for browsers without clipboard API
+      const textarea = document.createElement('textarea');
+      textarea.value = jsonString;
+      textarea.style.position = 'fixed';  // Prevent scrolling to bottom
+      document.body.appendChild(textarea);
+      textarea.select();
+      
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          showImprovedNotification('success', 'Copied to Clipboard', 
+            `Attendance data copied to clipboard and saved to localStorage with key "${storageKey}"`);
+        } else {
+          throw new Error('Copy command was unsuccessful');
+        }
+      } catch (err) {
+        console.error('Could not copy text: ', err);
+        showImprovedNotification('error', 'Clipboard Error', 
+          'Could not copy to clipboard. See console for details.');
+      }
+      
+      document.body.removeChild(textarea);
+    }
+    
+    document.body.removeChild(dialogBackdrop);
+  });
+  
+  // Handle cancel
+  cancelBtn.addEventListener('click', () => {
+    document.body.removeChild(dialogBackdrop);
+  });
+}
+
+// Add this to your action bar or controls
+function addEnhancedExportButton() {
+  const actionsContainer = document.querySelector('.logs-actions');
+  
+  if (actionsContainer) {
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn-orange';
+    exportBtn.id = 'enhanced-export-btn';
+    exportBtn.innerHTML = '<i class="fas fa-university"></i> Enhanced EIS Export';
+    exportBtn.title = 'Export attendance for EIS with advanced options';
+    
+    exportBtn.addEventListener('click', enhancedExportAttendance);
+    
+    // Insert at the beginning of the container
+    actionsContainer.insertBefore(exportBtn, actionsContainer.firstChild);
+  }
+}
+
 /**
  * Add the EIS export button to the UI
  */
