@@ -1211,6 +1211,260 @@ function showMainContent() {
     }
 }
 
+// Fixed export function using DOM creation instead of innerHTML
+
+/**
+ * Export attendance data with form parameters for EIS integration
+ */
+function exportParameterizedAttendance() {
+    // Create dialog for export parameters using DOM APIs (safer than innerHTML)
+    const dialogBackdrop = document.createElement('div');
+    dialogBackdrop.className = 'dialog-backdrop';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog';
+    
+    // Get today's date in YYYY-MM-DD format
+    const today = new Date();
+    const dateStr = today.toISOString().split('T')[0];
+    
+    // Create dialog title
+    const title = document.createElement('h3');
+    title.className = 'dialog-title';
+    title.textContent = 'Export Attendance for EIS';
+    dialog.appendChild(title);
+    
+    // Create week field
+    const weekGroup = createFormGroup('export-week', 'Week Number:');
+    const weekSelect = document.createElement('select');
+    weekSelect.id = 'export-week';
+    weekSelect.className = 'form-control';
+    
+    // Add week options (1-14)
+    for (let i = 1; i <= 14; i++) {
+        const option = document.createElement('option');
+        option.value = i.toString();
+        option.textContent = i.toString();
+        weekSelect.appendChild(option);
+    }
+    
+    weekGroup.appendChild(weekSelect);
+    dialog.appendChild(weekGroup);
+    
+    // Create hours field
+    const hoursGroup = createFormGroup('export-hours', 'Number of Hours:');
+    const hoursSelect = document.createElement('select');
+    hoursSelect.id = 'export-hours';
+    hoursSelect.className = 'form-control';
+    
+    // Add hour options (1-10)
+    for (let i = 1; i <= 10; i++) {
+        const option = document.createElement('option');
+        option.value = i.toString();
+        option.textContent = `${i} hr${i > 1 ? 's' : ''}`;
+        
+        // Set default to 2 hours
+        if (i === 2) {
+            option.selected = true;
+        }
+        
+        hoursSelect.appendChild(option);
+    }
+    
+    hoursGroup.appendChild(hoursSelect);
+    dialog.appendChild(hoursGroup);
+    
+    // Create category field
+    const categoryGroup = createFormGroup('export-category', 'Category:');
+    const categorySelect = document.createElement('select');
+    categorySelect.id = 'export-category';
+    categorySelect.className = 'form-control';
+    
+    // Add category options
+    const categories = [
+        { value: 'theory', text: 'Theory', selected: true },
+        { value: 'lab', text: 'Lab', selected: false },
+        { value: 'practice', text: 'Practice', selected: false }
+    ];
+    
+    categories.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat.value;
+        option.textContent = cat.text;
+        option.selected = cat.selected;
+        categorySelect.appendChild(option);
+    });
+    
+    categoryGroup.appendChild(categorySelect);
+    dialog.appendChild(categoryGroup);
+    
+    // Create date field
+    const dateGroup = createFormGroup('export-date', 'Date:');
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.id = 'export-date';
+    dateInput.className = 'form-control';
+    dateInput.value = dateStr;
+    
+    dateGroup.appendChild(dateInput);
+    dialog.appendChild(dateGroup);
+    
+    // Create topic field
+    const topicGroup = createFormGroup('export-topic', 'Topic:');
+    const topicInput = document.createElement('input');
+    topicInput.type = 'text';
+    topicInput.id = 'export-topic';
+    topicInput.className = 'form-control';
+    topicInput.value = 'Lecture';
+    
+    topicGroup.appendChild(topicInput);
+    dialog.appendChild(topicGroup);
+    
+    // Create dialog actions
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'dialog-actions';
+    
+    // Create confirm button
+    const confirmBtn = document.createElement('button');
+    confirmBtn.id = 'confirm-export-btn';
+    confirmBtn.className = 'btn-green';
+    confirmBtn.textContent = 'Export';
+    actionsDiv.appendChild(confirmBtn);
+    
+    // Create cancel button
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id = 'cancel-export-btn';
+    cancelBtn.className = 'btn-red';
+    cancelBtn.textContent = 'Cancel';
+    actionsDiv.appendChild(cancelBtn);
+    
+    dialog.appendChild(actionsDiv);
+    dialogBackdrop.appendChild(dialog);
+    document.body.appendChild(dialogBackdrop);
+
+    // Handle confirm button
+    confirmBtn.addEventListener('click', () => {
+        // Get parameter values
+        const week = weekSelect.value;
+        const hours = hoursSelect.value;
+        const category = categorySelect.value;
+        const date = dateInput.value;
+        const topic = topicInput.value;
+
+        // Create formatted attendance data
+        const attendanceData = {
+            parameters: {
+                week: week,
+                hours: hours,
+                category: category,
+                date: date,
+                topic: topic,
+                course: currentCourse || 'Default'
+            },
+            attendance: {}
+        };
+        
+        // Process logs to count scans per student
+        if (logs && logs.length > 0) {
+            // Group logs by UID and count them
+            const uidCounts = {};
+            
+            // Get selected date at midnight for comparison
+            const selectedDate = new Date(date);
+            const nextDate = new Date(selectedDate);
+            nextDate.setDate(selectedDate.getDate() + 1);
+            
+            logs.forEach(log => {
+                const logDate = new Date(log.timestamp);
+                
+                // Only count logs from selected date
+                if (logDate >= selectedDate && logDate < nextDate) {
+                    const uid = log.uid;
+                    if (!uidCounts[uid]) {
+                        uidCounts[uid] = 0;
+                    }
+                    uidCounts[uid]++;
+                }
+            });
+            
+            // Convert to the format needed for the university system
+            attendanceData.attendance = uidCounts;
+        }
+        
+        // Create a downloadable JSON file with the data
+        const dataStr = "data:text/json;charset=utf-8," + 
+                        encodeURIComponent(JSON.stringify(attendanceData, null, 2));
+        
+        // Create and trigger download
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `eis_attendance_${currentCourse || 'default'}_${date}.json`);
+        downloadAnchor.style.display = "none";
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        document.body.removeChild(downloadAnchor);
+        
+        // Show success notification
+        showImprovedNotification('success', 'Export Complete', 'Attendance data exported for EIS integration');
+        
+        // Remove dialog
+        document.body.removeChild(dialogBackdrop);
+    });
+
+    // Handle cancel button
+    cancelBtn.addEventListener('click', () => {
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    // Helper function to create form groups
+    function createFormGroup(id, labelText) {
+        const group = document.createElement('div');
+        group.className = 'form-group';
+        
+        const label = document.createElement('label');
+        label.htmlFor = id;
+        label.textContent = labelText;
+        
+        group.appendChild(label);
+        return group;
+    }
+}
+
+/**
+ * Add the EIS export button to the UI
+ */
+function addEisExportButton() {
+    // Find a good place to add the button (next to existing actions)
+    const actionsContainer = document.querySelector('.logs-actions');
+    
+    if (actionsContainer) {
+        const eisExportBtn = document.createElement('button');
+        eisExportBtn.className = 'btn-orange';
+        eisExportBtn.id = 'eis-export-btn';
+        
+        // Create and append icon element
+        const icon = document.createElement('i');
+        icon.className = 'fas fa-university';
+        eisExportBtn.appendChild(icon);
+        
+        // Add space after icon
+        eisExportBtn.appendChild(document.createTextNode(' Export for EIS'));
+        
+        eisExportBtn.title = 'Export attendance data for Epoka Interactive System';
+        
+        eisExportBtn.addEventListener('click', exportParameterizedAttendance);
+        
+        // Insert at the beginning of the container
+        actionsContainer.insertBefore(eisExportBtn, actionsContainer.firstChild);
+        
+        console.log('EIS export button added to UI');
+    } else {
+        console.error('Could not find logs-actions container for EIS button');
+    }
+}
+
+
+
 // Check for auth redirect
 function checkAuthRedirect() {
     // Handle auth redirect token at the very start
