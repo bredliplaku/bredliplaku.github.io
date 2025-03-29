@@ -2674,19 +2674,8 @@ if (currentCourse && currentCourse !== 'Default') {
  * Get the actual sheet name for a course (handles display name mapping)
  */
 function getSheetNameForCourse(courseName) {
-  // Check if we have a mapping in sheetNameMap
-  if (sheetNameMap && sheetNameMap[courseName]) {
-    // Verify the mapped sheet name doesn't look like a date
-    const mappedName = sheetNameMap[courseName];
-    if (mappedName.includes('-') || /^\d{4}/.test(mappedName)) {
-      console.error(`Invalid mapped sheet name detected: ${mappedName}`);
-      return courseName; // Fall back to the original name
-    }
-    return mappedName;
-  }
-  
-  // No mapping, return the course name directly
-  return courseName;
+  // If we have a mapping, use it, otherwise use the course name directly
+  return sheetNameMap[courseName] || courseName;
 }
 
 /**
@@ -2817,48 +2806,58 @@ async function fetchLogsFromSheet() {
 
   try {
     // Get the actual sheet name to use (might be different from display name)
-    const actualSheetName = getSheetNameForCourse(currentCourse);
+    const sheetName = getSheetNameForCourse(currentCourse);
     
-    // CRITICAL FIX: Ensure the sheet name is properly validated
-    if (!isValidSheetName(actualSheetName)) {
-      throw new Error(`Invalid sheet name detected: ${actualSheetName}`);
-    }
-    
-    // Format the sheet name for the API request - make sure to properly quote it
-    const formattedSheetName = `'${actualSheetName}'`;
+    // Format the sheet name for the API request
+    const formattedSheetName = formatSheetName(sheetName);
     const range = `${formattedSheetName}!A2:D`;
     
-    console.log(`Fetching logs from sheet: ${actualSheetName}, using range: ${range}`);
+    console.log(`Fetching logs from sheet: ${sheetName}, using range: ${range}`);
     
     const response = await gapi.client.sheets.spreadsheets.values.get({
       spreadsheetId: LOGS_SPREADSHEET_ID,
       range: range,
     });
     
-    // Process response data...
-    // (rest of your function remains the same)
+    const rows = response.result.values || [];
+    const sheetLogs = [];
+    
+    rows.forEach(row => {
+      if (row.length >= 3) {
+        const uid = String(row[0]);
+        const timestamp = new Date(row[1]).getTime();
+        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+        const manual = row.length >= 4 ? row[3] === 'true' : false;
+        
+        if (uid && !isNaN(timestamp)) {
+          sheetLogs.push({ uid, timestamp, id, manual });
+        }
+      }
+    });
+    
+    // Sort logs by timestamp (newest first)
+    sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
+    logs = sheetLogs;
+    
+    // Also save to localStorage as backup
+    saveLogsToLocalStorage();
+    
+    console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
+    return true;
   } catch (error) {
     console.error('Error fetching logs:', error);
+    
+    // Reset title back to default on error
+    const titleElement = document.querySelector('h1');
+    if (titleElement) {
+      titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+    }
+    
+    if (!isInitializing) {
+      showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+    }
     throw error;
   }
-}
-
-/**
- * Check if a string is a valid sheet name
- * @param {string} name - The name to check
- * @returns {boolean} True if valid, false otherwise
- */
-function isValidSheetName(name) {
-  // Check if the name looks like a date or contains invalid characters
-  if (!name) return false;
-  
-  // Check if it's potentially a date
-  if (name.includes('-') || /^\d{4}/.test(name)) {
-    console.error(`Potential date detected in sheet name: ${name}`);
-    return false;
-  }
-  
-  return true;
 }
 	
 function mergeLogs(localLogs, remoteLogs) {
@@ -3246,7 +3245,6 @@ async function fetchCourseInfo() {
         console.error("Error fetching course info:", error);
     }
 }
-
 	/**
 	 * Clear the entire database.
 	 */
