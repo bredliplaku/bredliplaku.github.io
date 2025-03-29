@@ -2221,7 +2221,7 @@ function addDirectEisExportButton() {
 }
 
 /**
- * Update the Direct EIS Export functionality to ensure data is properly saved to localStorage
+ * Updated Direct EIS Export function using clipboard instead of files
  */
 function showDirectEisExportDialog() {
     if (!currentCourse) {
@@ -2395,6 +2395,7 @@ function showDirectEisExportDialog() {
     // Option: Auto save changes
     const autoSaveLabel = document.createElement('label');
     autoSaveLabel.style.display = 'block';
+    autoSaveLabel.style.marginBottom = '10px';
     
     const autoSaveCheckbox = document.createElement('input');
     autoSaveCheckbox.type = 'checkbox';
@@ -2430,7 +2431,7 @@ function showDirectEisExportDialog() {
     
     const exportBtn = document.createElement('button');
     exportBtn.className = 'btn-purple';
-    exportBtn.textContent = 'Export to EIS';
+    exportBtn.textContent = 'Copy & Go to EIS';
     exportBtn.id = 'confirm-eis-export-btn';
     
     const saveBtn = document.createElement('button');
@@ -2451,7 +2452,7 @@ function showDirectEisExportDialog() {
     // Add to document
     document.body.appendChild(dialogBackdrop);
     
-    // Handle direct export button
+    // Handle direct export button with clipboard
     exportBtn.addEventListener('click', () => {
         const data = createExportData();
         const eisId = getCurrentCourseEisId();
@@ -2459,43 +2460,39 @@ function showDirectEisExportDialog() {
         const autoSave = document.getElementById('auto-save-option').checked;
         const markMissing = document.getElementById('mark-missing-option').checked;
         
-        // Save the export data to localStorage for the EIS page to access
-        const storageKey = `eis_export_${currentCourse}_${dateInput.value}`;
-        localStorage.setItem(storageKey, JSON.stringify(data));
-        localStorage.setItem('latest_eis_export', storageKey);
-        localStorage.setItem('eis_auto_save', autoSave ? 'true' : 'false');
-        localStorage.setItem('eis_mark_missing', markMissing ? 'true' : 'false');
+        // Create a clean data object with options embedded
+        const exportData = {
+            ...data,
+            options: {
+                autoSave,
+                markMissingAsAbsent: markMissing
+            }
+        };
         
-        // For cross-domain data sharing, also save to sessionStorage
-        // (This won't work for cross-domain, but let's do it anyway for completeness)
-        sessionStorage.setItem(storageKey, JSON.stringify(data));
-        sessionStorage.setItem('latest_eis_export', storageKey);
+        // Convert to JSON string
+        const jsonString = JSON.stringify(exportData);
         
-        // Save to a downloadable file automatically so user can import it manually if needed
-        const downloadData = "data:text/json;charset=utf-8," + 
-                encodeURIComponent(JSON.stringify(data, null, 2));
-        const downloadEl = document.createElement('a');
-        downloadEl.setAttribute("href", downloadData);
-        downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${dateInput.value}.json`);
-        downloadEl.style.display = "none";
-        document.body.appendChild(downloadEl);
-        downloadEl.click();
-        document.body.removeChild(downloadEl);
-        
-        showImprovedNotification('success', 'Export Ready', 
-            `Attendance data file has been automatically downloaded. ` +
-            `You'll need to import it manually on the EIS page using the "Import Attendance" button.`);
-        
-        // Navigate to the EIS page
-        const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
-        
-        if (openInNewTab) {
-            window.open(eisUrl, '_blank');
-        } else {
-            window.location.href = eisUrl;
-        }
-        
-        document.body.removeChild(dialogBackdrop);
+        // Copy to clipboard
+        copyToClipboard(jsonString).then(() => {
+            // Navigate to the EIS page
+            const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
+            
+            showImprovedNotification('success', 'Data Copied', 
+                `Attendance data copied to clipboard. On the EIS page, click ` +
+                `the "Paste Attendance" button that will appear.`);
+            
+            if (openInNewTab) {
+                window.open(eisUrl, '_blank');
+            } else {
+                window.location.href = eisUrl;
+            }
+            
+            document.body.removeChild(dialogBackdrop);
+        }).catch((error) => {
+            console.error("Clipboard error:", error);
+            showImprovedNotification('error', 'Clipboard Error', 
+                `Could not copy to clipboard. Try saving as file instead.`);
+        });
     });
     
     // Handle save file button
@@ -2570,6 +2567,41 @@ function showDirectEisExportDialog() {
         }
         
         return data;
+    }
+}
+
+/**
+ * Helper function to copy text to clipboard (Promise-based)
+ */
+function copyToClipboard(text) {
+    // Use modern clipboard API if available
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+    } else {
+        // Fallback for older browsers
+        return new Promise((resolve, reject) => {
+            try {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';  // Prevent scrolling to bottom
+                textArea.style.left = '-999999px';
+                textArea.style.top = '-999999px';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                
+                const successful = document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                if (successful) {
+                    resolve();
+                } else {
+                    reject(new Error('Clipboard copy failed'));
+                }
+            } catch (err) {
+                reject(err);
+            }
+        });
     }
 }
 
