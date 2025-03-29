@@ -2689,9 +2689,10 @@ function formatSheetName(sheetName) {
          `'${sheetName}'` : sheetName;
 }
 	
-	/**
-	 * Fetch available courses (sheet names) from logs spreadsheet.
-	 */
+/**
+ * Fetch available courses (sheet names) from logs spreadsheet.
+ * FIXED: Updated to read from A2:G instead of A2:C to match fetchCourseInfo
+ */
 async function fetchAvailableCourses() {
   try {
     console.log('Fetching available courses from spreadsheet...');
@@ -2718,10 +2719,10 @@ async function fetchAvailableCourses() {
       try {
         console.log('COURSE_INFO sheet found, fetching course information...');
         
-        // Format the range with quotes since it has a space
+        // FIXED: Changed range from A2:C to A2:G to be consistent with fetchCourseInfo
         const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
           spreadsheetId: LOGS_SPREADSHEET_ID,
-          range: "'COURSE_INFO'!A2:G"
+          range: "'COURSE_INFO'!A2:G" // Reading all columns
         });
         
         const rows = codeResponse.result.values || [];
@@ -2733,14 +2734,20 @@ async function fetchAvailableCourses() {
           sheetNameMap = {};
           
           rows.forEach(row => {
-            if (row.length >= 2 && row[0] && row[1]) {
+            if (row.length >= 1 && row[0]) {
               const courseDisplayName = row[0].trim();
-              const courseID = row[1].trim();
-              // Use sheet name from column C if provided, otherwise use the display name
-              const sheetName = (row.length >= 3 && row[2]) ? row[2].trim() : courseDisplayName;
+              
+              const courseID = (row.length >= 7 && row[6]) ? row[6].trim() : "";
+
+              // Let's use display name by default for simplicity
+              const sheetName = courseDisplayName;
               
               availableCourses.push(courseDisplayName);
-              courseIDMap[courseDisplayName] = courseID;
+              
+              if (courseID) {
+                courseIDMap[courseDisplayName] = courseID;
+              }
+              
               sheetNameMap[courseDisplayName] = sheetName;
             }
           });
@@ -2785,6 +2792,7 @@ async function fetchAvailableCourses() {
     throw error;
   }
 }
+
 
 /**
  * Get the EIS ID for the current course
