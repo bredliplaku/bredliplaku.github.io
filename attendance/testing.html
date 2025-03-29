@@ -331,6 +331,36 @@ body.is-admin td.admin-only {
             padding: 6px 12px;
             font-size: 0.85em;
         }
+		@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-20px); }
+}
+
+#admin-welcome-message {
+    text-align: center;
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 15px;
+    background-color: rgba(57, 73, 171, 0.1);
+    color: #333;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+#admin-welcome-message h2 {
+    font-size: 1.8em;
+    margin-bottom: 10px;
+}
+
+#admin-welcome-message h3 {
+    font-size: 1.3em;
+    margin-top: 5px;
+}
 		#notification-container {
 		  position: fixed;
 		  top: 10px;
@@ -4507,71 +4537,111 @@ function updateScanButtons() {
 	 * @param {Object} event - The NFC reading event.
 	 */
 async function handleNfcReading({ serialNumber }) {
-lastScannedUID = serialNumber;
-// For non-signed-in users, only show UID without saving anything
-if (!isSignedIn) {
-	// Play success sound
-	playSound(true);
-	
-	// Update the welcome message to show the UID
-	let notSignedInMsg = document.getElementById('not-signed-in-message');
-	if (notSignedInMsg) {
-		notSignedInMsg.innerHTML = `
-			<h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
-			<h3 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h3>
-		`;
-	}
-	
-	// Show success notification
-	/* showImprovedNotification('success', 'Tag scanned', 
-		`<b>UID:</b> ${serialNumber}<br><br>` +
-		`<b>Sign in with your EPOKA account to track attendance.</b>`);*/
-	return;
-}
+    lastScannedUID = serialNumber;
+    
+    // For non-signed-in users, only show UID without saving anything
+    if (!isSignedIn) {
+        // Play success sound
+        playSound(true);
+        
+        // Update the welcome message to show the UID
+        let notSignedInMsg = document.getElementById('not-signed-in-message');
+        if (notSignedInMsg) {
+            notSignedInMsg.innerHTML = `
+                <h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
+                <h3 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h3>
+            `;
+        }
+        return;
+    }
+    
+    // Standard flow for signed-in users
+    if (!currentCourse) {
+        showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+        return;
+    }
 
-// Standard flow for signed-in users
-if (!currentCourse) {
-	showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
-	return;
-}
+    // Create log entry
+    const timestamp = new Date();
+    const newLog = {
+        uid: serialNumber,
+        timestamp: timestamp.getTime(),
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        manual: false
+    };
 
-// Create log entry
-const timestamp = new Date();
-const newLog = {
-	uid: serialNumber,
-	timestamp: timestamp.getTime(),
-	id: Date.now() + Math.random().toString(36).substr(2, 9),
-	manual: false
-};
+    // Add to logs
+    logs.unshift(newLog);
 
-// Add to logs
-logs.unshift(newLog);
+    // Save to localStorage
+    saveLogsToLocalStorage();
 
-// Save to localStorage
-saveLogsToLocalStorage();
+    // Update UI
+    updateUI();
 
-// Update UI
-updateUI();
+    // Determine name for notification
+    const name = uidToNameMap[serialNumber] || 'Unknown';
 
-// Determine name for notification
-const name = uidToNameMap[serialNumber] || 'Unknown';
+    // Play success sound
+    playSound(true);
+    
+    // Create welcome banner for admin users only
+    if (isAdmin) {
+        // Create or get the welcome message element
+        let adminWelcomeMsg = document.getElementById('admin-welcome-message');
+        if (!adminWelcomeMsg) {
+            adminWelcomeMsg = document.createElement('div');
+            adminWelcomeMsg.id = 'admin-welcome-message';
+            adminWelcomeMsg.className = 'not-signed-in-message'; // Using same style class
+            
+            // Insert after the course buttons container
+            const courseButtonsContainer = document.getElementById('course-buttons-container');
+            if (courseButtonsContainer && courseButtonsContainer.nextSibling) {
+                courseButtonsContainer.parentNode.insertBefore(adminWelcomeMsg, courseButtonsContainer.nextSibling);
+            } else {
+                // Fallback - after header
+                const appHeader = document.querySelector('.app-header');
+                if (appHeader) {
+                    appHeader.parentNode.insertBefore(adminWelcomeMsg, appHeader.nextSibling);
+                }
+            }
+        }
+        
+        // Update the admin welcome message with the name
+        adminWelcomeMsg.innerHTML = `
+            <h2 style="margin-bottom: 10px;"><i class="fas fa-check-circle" style="color: #43a047;"></i> Welcome, ${name}!</h2>
+            <h3 style="margin-top: 5px; color: #3949ab;">Your attendance has been recorded.</h3>
+        `;
+        
+        // Add CSS to make message appear with animation
+        adminWelcomeMsg.style.animation = 'none';
+        adminWelcomeMsg.offsetHeight; // Trigger reflow
+        adminWelcomeMsg.style.animation = 'fadeIn 0.5s ease-in-out';
+        
+        // Auto-hide the message after some time
+        setTimeout(() => {
+            adminWelcomeMsg.style.animation = 'fadeOut 0.5s ease-in-out forwards';
+            setTimeout(() => {
+                if (adminWelcomeMsg.parentNode) {
+                    adminWelcomeMsg.parentNode.removeChild(adminWelcomeMsg);
+                }
+            }, 500);
+        }, 10000); // Display for 10 seconds
+    }
 
-// Play success sound
-playSound(true);
+    // Show success notification
+    showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
 
-// Show success notification
-showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
-
-// If online and signed in as admin, append log to sheet
-if (isOnline && isSignedIn && isAdmin) {
-	try {
-		await appendLogToSheet(newLog);
-		console.log('Log synced successfully');
-	} catch (err) {
-		console.error('Error appending log:', err);
-		showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
-	}
-}
+    // If online and signed in as admin, append log to sheet
+    if (isOnline && isSignedIn && isAdmin) {
+        try {
+            await appendLogToSheet(newLog);
+            console.log('Log synced successfully');
+        } catch (err) {
+            console.error('Error appending log:', err);
+            showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
+        }
+    }
 }
 
 	
