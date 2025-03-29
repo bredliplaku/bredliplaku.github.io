@@ -1757,14 +1757,17 @@ function eisInjectorFunction() {
         return;
     }
     
-    // Configuration
-    const CONFIG = {
-        // Set this to true if checkbox checked means ABSENT (inverts the logic)
-        // Set this to false if checkbox checked means PRESENT
-        checkedMeansAbsent: true
-    };
+// Configuration options
+  const CONFIG = {
+    // Set this to true if checkbox checked means ABSENT (inverts the logic)
+    // Set this to false if checkbox checked means PRESENT
+    checkedMeansAbsent: true,
     
-// Try to find latest exported data in localStorage
+    // Set this to true to mark students without UIDs as absent
+    markMissingAsAbsent: true
+  };
+  
+  // Try to find latest exported data in localStorage
   const latestKey = localStorage.getItem('latest_eis_export');
   const autoSave = localStorage.getItem('eis_auto_save') === 'true';
   
@@ -1782,8 +1785,12 @@ function eisInjectorFunction() {
         
         // Confirm with user
         if (confirm(`Found attendance data for ${data.parameters.course} on ${data.parameters.date}. Do you want to import it?`)) {
-          // Set form parameters
-          fillFormParameters(data.parameters);
+          // Fill form fields
+          setFormValue("didcourseattendance_week", data.parameters.week);
+          setFormValue("didcourseattendance_topicen", data.parameters.topic);
+          setFormValue("didcourseattendance_categoryen", data.parameters.category);
+          setFormValue("didcourseattendance_date", data.parameters.date);
+          setFormValue("didcourseattendance_nrhours", data.parameters.hours);
           
           // Wait for form to update and generate checkboxes
           setTimeout(() => {
@@ -1807,6 +1814,7 @@ function eisInjectorFunction() {
       } catch (error) {
         console.error("Import error:", error);
         alert("Error processing stored data: " + error.message);
+        promptForImport();
       }
     } else {
       promptForImport();
@@ -1816,69 +1824,14 @@ function eisInjectorFunction() {
   }
   
   function promptForImport() {
-    // If no stored data, show file input
+    // If no stored data, show file picker immediately instead of just adding button
     if (confirm("No recent attendance data found. Would you like to import from a file?")) {
       importAttendance();
+    } else {
+      // Only add the button if user cancels the import dialog
+      addImportButton();
+      alert("Import button added to the page. Click it when you're ready to import attendance data.");
     }
-  }
-  
-  function importAttendance() {
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.json';
-    fileInput.style.display = 'none';
-    document.body.appendChild(fileInput);
-    
-    fileInput.onchange = function(event) {
-      const file = event.target.files[0];
-      if (!file) {
-        document.body.removeChild(fileInput);
-        return;
-      }
-      
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          const data = JSON.parse(e.target.result);
-          console.log("Parsed data:", data);
-          
-          if (!data.parameters || !data.attendance || !data.nameMap) {
-            throw new Error("Missing required data in import file");
-          }
-          
-          // Set form parameters
-          fillFormParameters(data.parameters);
-          
-          // Wait for form to update and generate checkboxes
-          setTimeout(() => {
-            processAttendance(data.attendance, data.nameMap, data.parameters.hours);
-          }, 2000);
-          
-        } catch (error) {
-          console.error("Import error:", error);
-          alert("Error importing: " + error.message);
-        }
-        document.body.removeChild(fileInput);
-      };
-      
-      reader.readAsText(file);
-    };
-    
-    fileInput.click();
-  }
-  
-  function fillFormParameters(params) {
-    // Fill form fields
-    setFormValue("didcourseattendance_week", params.week);
-    setFormValue("didcourseattendance_topicen", params.topic);
-    setFormValue("didcourseattendance_categoryen", params.category);
-    setFormValue("didcourseattendance_date", params.date);
-    
-    // Set hours last - this triggers checkbox generation
-    setFormValue("didcourseattendance_nrhours", params.hours);
-    
-    // Force form submission to regenerate the page
-    console.log("Form parameters filled, waiting for page update...");
   }
   
   function setFormValue(id, value) {
@@ -1911,6 +1864,8 @@ function eisInjectorFunction() {
     console.log(`Processing ${rows.length} student rows with ${numHours} hours`);
     
     let processed = 0;
+    let skipped = 0;
+    let noUidMarkedAbsent = 0;
     
     // Process each student row
     rows.forEach((row) => {
@@ -1926,6 +1881,7 @@ function eisInjectorFunction() {
       const isExempted = row.querySelector("td[data-exempted='EX']");
       if (isExempted) {
         console.log(`Skipping exempted student: ${cleanName}`);
+        skipped++;
         return;
       }
       
@@ -1941,6 +1897,52 @@ function eisInjectorFunction() {
       
       if (!foundUid) {
         console.log(`No UID found for: ${cleanName}`);
+        
+        // If markMissingAsAbsent is true, mark student as absent for all hours
+        if (CONFIG.markMissingAsAbsent) {
+          console.log(`Marking ${cleanName} as absent for all hours`);
+          
+          // Get hour checkboxes
+          const allRowCheckboxes = Array.from(row.querySelectorAll("input[type='checkbox']"));
+          const checkboxes = allRowCheckboxes.slice(1, 1 + parseInt(numHours));
+          
+          if (checkboxes.length === 0) {
+            console.log(`No hour checkboxes found for ${cleanName}`);
+            return;
+          }
+          
+          // Process each hour checkbox - mark all as absent
+          for (let i = 0; i < checkboxes.length && i < numHours; i++) {
+            const checkbox = checkboxes[i];
+            
+            // For absent, checkbox should be checked if checkedMeansAbsent=true
+            // or unchecked if checkedMeansAbsent=false
+            const shouldBeChecked = CONFIG.checkedMeansAbsent ? true : false;
+            
+            // Force the checkbox to the correct state
+            checkbox.checked = shouldBeChecked;
+            
+            // Create and dispatch events
+            const clickEvent = new MouseEvent('click', {
+              bubbles: true,
+              cancelable: true,
+              view: window
+            });
+            checkbox.dispatchEvent(clickEvent);
+            
+            const changeEvent = new Event('change', { bubbles: true });
+            checkbox.dispatchEvent(changeEvent);
+          }
+          
+          // Set all hours as absent in the hidden fields
+          updateHiddenFieldsForAbsent(row, numHours, cleanName);
+          
+          // Mark row as updated
+          row.classList.add('active');
+          row.style.backgroundColor = '#ffeeee'; // Highlight students with no UID
+          noUidMarkedAbsent++;
+        }
+        
         return;
       }
       
@@ -2007,8 +2009,59 @@ function eisInjectorFunction() {
       processed++;
     });
     
-    console.log(`Attendance processed for ${processed} students`);
-    alert(`Attendance updated for ${processed} students. Please review and click Save Changes.`);
+    const statusMessage = `
+      Attendance processed:
+      - ${processed} students marked with proper attendance
+      - ${noUidMarkedAbsent} students without UIDs marked as absent
+      - ${skipped} exempted students skipped
+      
+      Please review and click Save Changes.
+    `;
+    
+    console.log(statusMessage);
+    alert(statusMessage);
+  }
+  
+  // Special function for students with no UID - mark all hours as absent
+  function updateHiddenFieldsForAbsent(row, numHours, studentName) {
+    // Set the hidden values for the form submission
+    const checkboxCell = row.querySelector(".checkboxes_row_td");
+    if (!checkboxCell) {
+      console.log(`No checkbox cell found for ${studentName}`);
+      return;
+    }
+    
+    const rowIndex = checkboxCell.getAttribute("data-row");
+    if (!rowIndex) {
+      console.log(`No row index found for ${studentName}`);
+      return;
+    }
+    
+    // Find and set hidden fields
+    const hourField = document.getElementById(`stdabsences_${rowIndex}_numofhours`);
+    const checkedField = document.getElementById(`stdabsences_${rowIndex}_checked`);
+    const updateField = document.getElementById(`stdabsences_${rowIndex}_update`);
+    
+    if (!hourField || !checkedField || !updateField) {
+      console.log(`Missing hidden fields for ${studentName}`);
+      return;
+    }
+    
+    // For students with no UID, mark all hours as absent
+    const absentHours = parseInt(numHours);
+    
+    // Build list of all hours (all absent)
+    const absentList = [];
+    for (let i = 1; i <= numHours; i++) {
+      absentList.push(i);
+    }
+    
+    // Set values
+    hourField.value = absentHours;
+    checkedField.value = absentList.join(',');
+    updateField.value = "1";
+    
+    console.log(`Updated hidden fields for ${studentName} (no UID): absent=${absentHours}, list=${absentList.join(',')}`);
   }
   
   function updateHiddenFields(row, numHours, attendCount, studentName) {
@@ -2052,12 +2105,74 @@ function eisInjectorFunction() {
     console.log(`Updated hidden fields for ${studentName}: absent=${absentHours}, list=${absentList.join(',')}`);
   }
   
-  // Add import button to the UI
+  function importAttendance() {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+    
+    fileInput.onchange = function(event) {
+      const file = event.target.files[0];
+      if (!file) {
+        document.body.removeChild(fileInput);
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result);
+          console.log("Parsed data:", data);
+          
+          if (!data.parameters || !data.attendance || !data.nameMap) {
+            throw new Error("Missing required data in import file");
+          }
+          
+          // Save to localStorage for future use
+          const storageKey = `eis_export_${data.parameters.course || 'default'}_${data.parameters.date}`;
+          localStorage.setItem(storageKey, JSON.stringify(data));
+          localStorage.setItem('latest_eis_export', storageKey);
+          
+          console.log(`Saved imported data to localStorage with key: ${storageKey}`);
+          
+          // Set form parameters
+          setFormValue("didcourseattendance_week", data.parameters.week);
+          setFormValue("didcourseattendance_topicen", data.parameters.topic);
+          setFormValue("didcourseattendance_categoryen", data.parameters.category);
+          setFormValue("didcourseattendance_date", data.parameters.date);
+          setFormValue("didcourseattendance_nrhours", data.parameters.hours);
+          
+          // Wait for form to update and generate checkboxes
+          setTimeout(() => {
+            processAttendance(data.attendance, data.nameMap, data.parameters.hours);
+          }, 2000);
+          
+        } catch (error) {
+          console.error("Import error:", error);
+          alert("Error importing: " + error.message);
+        }
+        document.body.removeChild(fileInput);
+      };
+      
+      reader.readAsText(file);
+    };
+    
+    fileInput.click();
+  }
+  
   function addImportButton() {
+    // Remove any existing import button first
+    const existingBtn = document.getElementById('eis-import-btn');
+    if (existingBtn) {
+      existingBtn.remove();
+    }
+    
     const actionBar = document.querySelector('.record_actions');
     if (!actionBar) return;
     
     const button = document.createElement('button');
+    button.id = 'eis-import-btn';
     button.className = 'btn btn-info';
     button.innerHTML = '<i class="fa fa-file-import"></i> Import Attendance';
     button.onclick = importAttendance;
@@ -2067,8 +2182,7 @@ function eisInjectorFunction() {
   
   // Run on load
   console.log("EIS Attendance Import Script loaded");
-  addImportButton();
-}
+  }
 
 /**
  * Add the Direct EIS Export button to the UI
@@ -2107,7 +2221,7 @@ function addDirectEisExportButton() {
 }
 
 /**
- * Show dialog for Direct EIS Export with advanced options
+ * Update the Direct EIS Export functionality to ensure data is properly saved to localStorage
  */
 function showDirectEisExportDialog() {
     if (!currentCourse) {
@@ -2292,6 +2406,20 @@ function showDirectEisExportDialog() {
     autoSaveLabel.appendChild(document.createTextNode('Auto save changes (use with caution)'));
     optionsGroup.appendChild(autoSaveLabel);
     
+    // Option: Mark students without UIDs as absent
+    const markMissingLabel = document.createElement('label');
+    markMissingLabel.style.display = 'block';
+    
+    const markMissingCheckbox = document.createElement('input');
+    markMissingCheckbox.type = 'checkbox';
+    markMissingCheckbox.id = 'mark-missing-option';
+    markMissingCheckbox.checked = true;
+    markMissingCheckbox.style.marginRight = '8px';
+    
+    markMissingLabel.appendChild(markMissingCheckbox);
+    markMissingLabel.appendChild(document.createTextNode('Mark students without UID as absent'));
+    optionsGroup.appendChild(markMissingLabel);
+    
     formContent.appendChild(optionsGroup);
     
     dialog.appendChild(formContent);
@@ -2329,12 +2457,34 @@ function showDirectEisExportDialog() {
         const eisId = getCurrentCourseEisId();
         const openInNewTab = document.getElementById('new-tab-option').checked;
         const autoSave = document.getElementById('auto-save-option').checked;
+        const markMissing = document.getElementById('mark-missing-option').checked;
         
         // Save the export data to localStorage for the EIS page to access
         const storageKey = `eis_export_${currentCourse}_${dateInput.value}`;
         localStorage.setItem(storageKey, JSON.stringify(data));
         localStorage.setItem('latest_eis_export', storageKey);
         localStorage.setItem('eis_auto_save', autoSave ? 'true' : 'false');
+        localStorage.setItem('eis_mark_missing', markMissing ? 'true' : 'false');
+        
+        // For cross-domain data sharing, also save to sessionStorage
+        // (This won't work for cross-domain, but let's do it anyway for completeness)
+        sessionStorage.setItem(storageKey, JSON.stringify(data));
+        sessionStorage.setItem('latest_eis_export', storageKey);
+        
+        // Save to a downloadable file automatically so user can import it manually if needed
+        const downloadData = "data:text/json;charset=utf-8," + 
+                encodeURIComponent(JSON.stringify(data, null, 2));
+        const downloadEl = document.createElement('a');
+        downloadEl.setAttribute("href", downloadData);
+        downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${dateInput.value}.json`);
+        downloadEl.style.display = "none";
+        document.body.appendChild(downloadEl);
+        downloadEl.click();
+        document.body.removeChild(downloadEl);
+        
+        showImprovedNotification('success', 'Export Ready', 
+            `Attendance data file has been automatically downloaded. ` +
+            `You'll need to import it manually on the EIS page using the "Import Attendance" button.`);
         
         // Navigate to the EIS page
         const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
@@ -2422,6 +2572,7 @@ function showDirectEisExportDialog() {
         return data;
     }
 }
+
 
 /**
  * Add the EIS export button to the UI
