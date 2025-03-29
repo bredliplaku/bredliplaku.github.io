@@ -1250,24 +1250,37 @@ function addDirectEisExportButton() {
 }
 
 /**
- * Direct EIS Export function using clipboard
+ * Direct EIS Export function using clipboard - FIXED version that ensures course metadata is loaded
  */
-function showDirectEisExportDialog() {
+async function showDirectEisExportDialog() {
     if (!currentCourse) {
         showImprovedNotification('warning', 'No Course Selected', 'Please select a course before exporting to EIS');
         return;
+    }
+    
+    // Show loading notification
+    showImprovedNotification('info', 'Loading', 'Fetching course data from spreadsheet...');
+    
+    // First, ensure we have the latest course info from the spreadsheet
+    try {
+        await fetchCourseInfo();
+        console.log("Course info after fetch:", window.courseInfoMap);
+    } catch (error) {
+        console.error("Error fetching course info:", error);
+        showImprovedNotification('warning', 'Data Warning', 'Could not fetch latest course data. Using cached data.');
     }
     
     // Check if we have an EIS ID for this course
     const eisId = getCurrentCourseEisId();
     if (!eisId) {
         showImprovedNotification('error', 'Missing EIS ID', 
-            'No EIS ID found for this course. Please add it to the COURSE_INFO sheet in your spreadsheet.');
+            'No EIS ID found for this course. Please add it to the COURSE_INFO sheet in your spreadsheet (column G).');
         return;
     }
     
     // Get course metadata for smart defaults
     const courseMetadata = getCourseMetadata(currentCourse);
+    console.log("Course metadata for dialog:", courseMetadata);
     
     // Create dialog backdrop and dialog
     const dialogBackdrop = document.createElement('div');
@@ -1310,6 +1323,7 @@ function showDirectEisExportDialog() {
     
     // Get current week if available
     const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : null;
+    console.log("Calculated current week:", currentWeek);
     
     for (let i = 1; i <= 14; i++) {
         const option = document.createElement('option');
@@ -1335,7 +1349,9 @@ function showDirectEisExportDialog() {
     hoursSelect.id = 'export-hours';
     
     // Get default hours from course metadata
-    const defaultHours = courseMetadata ? parseInt(courseMetadata.default_hours) || 2 : 2;
+    const defaultHours = courseMetadata && courseMetadata.default_hours ? 
+                         parseInt(courseMetadata.default_hours) : 2;
+    console.log("Default hours from metadata:", defaultHours);
     
     for (let i = 1; i <= 6; i++) {
         const option = document.createElement('option');
@@ -1361,7 +1377,9 @@ function showDirectEisExportDialog() {
     catSelect.id = 'export-category';
     
     // Get default category from course metadata
-    const defaultCategory = courseMetadata ? courseMetadata.default_category || 'theory' : 'theory';
+    const defaultCategory = courseMetadata && courseMetadata.default_category ? 
+                           courseMetadata.default_category : 'theory';
+    console.log("Default category from metadata:", defaultCategory);
     
     const categories = [
         { value: 'theory', text: 'Theory' },
@@ -1396,6 +1414,7 @@ function showDirectEisExportDialog() {
     
     // Get the suggested date based on course schedule
     const suggestedDate = courseMetadata ? getSuggestedDate(courseMetadata) : today;
+    console.log("Suggested date:", suggestedDate);
     dateInput.value = suggestedDate;
     
     dateGroup.appendChild(dateLabel);
@@ -2095,17 +2114,22 @@ function handleAuthClick(e) {
 }
 
 /**
- * Get course metadata for the specified course
- * @param {string} course - Course name
- * @returns {Object|null} Course metadata or null if not found
+ * Get course metadata for the specified course - FIXED version with better logging
  */
 function getCourseMetadata(course) {
-    if (!course) return null;
+    if (!course) {
+        console.log("getCourseMetadata: No course provided");
+        return null;
+    }
     
-    // Try to get from global courseInfoMap
+    // Check if the global courseInfoMap exists and contains this course
     if (window.courseInfoMap && window.courseInfoMap[course]) {
+        console.log(`Found metadata for course: ${course}`, window.courseInfoMap[course]);
         return window.courseInfoMap[course];
     }
+    
+    console.log(`No metadata found for course: ${course}`);
+    console.log("Available courseInfoMap:", window.courseInfoMap);
     
     // No metadata found
     return null;
@@ -2691,7 +2715,6 @@ function formatSheetName(sheetName) {
 	
 /**
  * Fetch available courses (sheet names) from logs spreadsheet.
- * FIXED: Updated to read from A2:G instead of A2:C to match fetchCourseInfo
  */
 async function fetchAvailableCourses() {
   try {
