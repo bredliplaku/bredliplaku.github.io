@@ -1227,7 +1227,7 @@ function addDirectEisExportButton() {
         
         // Create and append icon element
         const icon = document.createElement('i');
-        icon.className = 'fas fa-rocket';
+        icon.className = 'fas-solid fa-list-check';
         directEisBtn.appendChild(icon);
         
         // Add space after icon
@@ -1250,7 +1250,7 @@ function addDirectEisExportButton() {
 }
 
 /**
- * Direct EIS Export function using clipboard instead of files
+ * Direct EIS Export function using clipboard
  */
 function showDirectEisExportDialog() {
     if (!currentCourse) {
@@ -1262,9 +1262,12 @@ function showDirectEisExportDialog() {
     const eisId = getCurrentCourseEisId();
     if (!eisId) {
         showImprovedNotification('error', 'Missing EIS ID', 
-            'No EIS ID found for this course. Please add it to the COURSE_CODES sheet in your spreadsheet.');
+            'No EIS ID found for this course. Please add it to the COURSE_INFO sheet in your spreadsheet.');
         return;
     }
+    
+    // Get course metadata for smart defaults
+    const courseMetadata = getCourseMetadata(currentCourse);
     
     // Create dialog backdrop and dialog
     const dialogBackdrop = document.createElement('div');
@@ -1276,7 +1279,7 @@ function showDirectEisExportDialog() {
     // Add dialog title
     const title = document.createElement('h3');
     title.className = 'dialog-title';
-    title.textContent = 'Direct EIS Export';
+    title.textContent = 'Add to EIS';
     dialog.appendChild(title);
     
     // Create form content
@@ -1295,26 +1298,33 @@ function showDirectEisExportDialog() {
     `;
     formContent.appendChild(courseInfo);
     
-    // Week selection
+    // Week selection with smart default based on current week calculation
     const weekGroup = document.createElement('div');
     weekGroup.className = 'form-group';
     const weekLabel = document.createElement('label');
-    weekLabel.textContent = 'Week Number:';
+    weekLabel.textContent = 'Week:';
     weekLabel.htmlFor = 'export-week';
     const weekSelect = document.createElement('select');
     weekSelect.className = 'form-control';
     weekSelect.id = 'export-week';
+    
+    // Get current week if available
+    const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : null;
+    
     for (let i = 1; i <= 14; i++) {
         const option = document.createElement('option');
         option.value = i;
         option.textContent = `Week ${i}`;
+        if (currentWeek && i === currentWeek) {
+            option.selected = true;
+        }
         weekSelect.appendChild(option);
     }
     weekGroup.appendChild(weekLabel);
     weekGroup.appendChild(weekSelect);
     formContent.appendChild(weekGroup);
     
-    // Hours selection
+    // Hours selection with default from course metadata
     const hoursGroup = document.createElement('div');
     hoursGroup.className = 'form-group';
     const hoursLabel = document.createElement('label');
@@ -1323,11 +1333,17 @@ function showDirectEisExportDialog() {
     const hoursSelect = document.createElement('select');
     hoursSelect.className = 'form-control';
     hoursSelect.id = 'export-hours';
-    for (let i = 1; i <= 10; i++) {
+    
+    // Get default hours from course metadata
+    const defaultHours = courseMetadata ? parseInt(courseMetadata.default_hours) || 2 : 2;
+    
+    for (let i = 1; i <= 6; i++) {
         const option = document.createElement('option');
         option.value = i;
         option.textContent = `${i} hr${i > 1 ? 's' : ''}`;
-        if (i === 2) option.selected = true;
+        if (i === defaultHours) {
+            option.selected = true;
+        }
         hoursSelect.appendChild(option);
     }
     hoursGroup.appendChild(hoursLabel);
@@ -1344,8 +1360,11 @@ function showDirectEisExportDialog() {
     catSelect.className = 'form-control';
     catSelect.id = 'export-category';
     
+    // Get default category from course metadata
+    const defaultCategory = courseMetadata ? courseMetadata.default_category || 'theory' : 'theory';
+    
     const categories = [
-        { value: 'theory', text: 'Theory', selected: true },
+        { value: 'theory', text: 'Theory' },
         { value: 'lab', text: 'Lab' },
         { value: 'practice', text: 'Practice' }
     ];
@@ -1354,7 +1373,9 @@ function showDirectEisExportDialog() {
         const option = document.createElement('option');
         option.value = cat.value;
         option.textContent = cat.text;
-        if (cat.selected) option.selected = true;
+        if (cat.value === defaultCategory) {
+            option.selected = true;
+        }
         catSelect.appendChild(option);
     });
     
@@ -1362,7 +1383,7 @@ function showDirectEisExportDialog() {
     catGroup.appendChild(catSelect);
     formContent.appendChild(catGroup);
     
-    // Date selection
+    // Date selection with smart default based on current week
     const dateGroup = document.createElement('div');
     dateGroup.className = 'form-group';
     const dateLabel = document.createElement('label');
@@ -1372,7 +1393,11 @@ function showDirectEisExportDialog() {
     dateInput.type = 'date';
     dateInput.className = 'form-control';
     dateInput.id = 'export-date';
-    dateInput.value = today;
+    
+    // Get the suggested date based on course schedule
+    const suggestedDate = courseMetadata ? getSuggestedDate(courseMetadata) : today;
+    dateInput.value = suggestedDate;
+    
     dateGroup.appendChild(dateLabel);
     dateGroup.appendChild(dateInput);
     formContent.appendChild(dateGroup);
@@ -1418,7 +1443,7 @@ function showDirectEisExportDialog() {
     newTabCheckbox.style.marginRight = '8px';
     
     newTabLabel.appendChild(newTabCheckbox);
-    newTabLabel.appendChild(document.createTextNode('Open in new tab'));
+    newTabLabel.appendChild(document.createTextNode('Open EIS in new tab'));
     optionsGroup.appendChild(newTabLabel);
     
     // Option: Mark students without UIDs as absent
@@ -1468,41 +1493,38 @@ function showDirectEisExportDialog() {
     
     // Handle direct export button with clipboard
     exportBtn.addEventListener('click', () => {
-		const data = createExportData();
-		const eisId = getCurrentCourseEisId();
-		const openInNewTab = document.getElementById('new-tab-option').checked;
-		const autoSave = document.getElementById('auto-save-option').checked;
-		const markMissing = document.getElementById('mark-missing-option').checked;
+        const data = createExportData();
+        const eisId = getCurrentCourseEisId();
+        const openInNewTab = document.getElementById('new-tab-option').checked;
+        const markMissing = document.getElementById('mark-missing-option').checked;
 
-		// Add options to data
-		data.options = {
-			autoSave: autoSave,
-			markMissingAsAbsent: markMissing
-		};
+        // Add options to data (explicitly excluding autoSave)
+        data.options = {
+            markMissingAsAbsent: markMissing
+        };
 
-		// Convert to JSON and copy to clipboard
-		const jsonString = JSON.stringify(data);
-		copyToClipboard(jsonString).then(() => {
-			// Navigate to the EIS page
-			const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
-			
-			showImprovedNotification('success', 'Data Copied', 
-				`Attendance data copied to clipboard. When EIS page loads, it will ` +
-				`automatically import the data.`);
-			
-			if (openInNewTab) {
-				window.open(eisUrl, '_blank');
-			} else {
-				window.location.href = eisUrl;
-			}
-			
-			document.body.removeChild(dialogBackdrop);
-		}).catch((error) => {
-			console.error("Clipboard error:", error);
-			showImprovedNotification('error', 'Clipboard Error', 
-				`Could not copy to clipboard. Try saving as file instead.`);
-		});
-		});
+        // Convert to JSON and copy to clipboard
+        const jsonString = JSON.stringify(data);
+        copyToClipboard(jsonString).then(() => {
+            // Navigate to the EIS page
+            const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
+            
+            showImprovedNotification('success', 'Data Copied', 
+                `Attendance data copied to clipboard. When EIS page loads, click "Paste Attendance Data" to import.`);
+            
+            if (openInNewTab) {
+                window.open(eisUrl, '_blank');
+            } else {
+                window.location.href = eisUrl;
+            }
+            
+            document.body.removeChild(dialogBackdrop);
+        }).catch((error) => {
+            console.error("Clipboard error:", error);
+            showImprovedNotification('error', 'Clipboard Error', 
+                `Could not copy to clipboard. Try saving as file instead.`);
+        });
+    });
     
     // Handle save file button
     saveBtn.addEventListener('click', () => {
@@ -1529,55 +1551,8 @@ function showDirectEisExportDialog() {
     cancelBtn.addEventListener('click', () => {
         document.body.removeChild(dialogBackdrop);
     });
-    
-    // Helper function to create export data
-    function createExportData() {
-        const data = {
-          parameters: {
-            week: weekSelect.value,
-            hours: hoursSelect.value,
-            category: catSelect.value,
-            date: dateInput.value,
-            topic: topicInput.value,
-            course: currentCourse || 'Default'
-          },
-          attendance: {},
-          nameMap: { ...uidToNameMap }  // Include UID-to-name mapping for EIS
-        };
-        
-        // Process logs to count scans per student
-        if (logs && logs.length > 0) {
-          const uidCounts = {};
-          
-          // Convert the selected date to start/end timestamps for comparison
-          const selectedDate = new Date(dateInput.value);
-          selectedDate.setHours(0, 0, 0, 0); // Start of day
-          
-          const nextDay = new Date(selectedDate);
-          nextDay.setDate(nextDay.getDate() + 1); // End at start of next day
-          
-          // Count logs by UID for the selected date
-          logs.forEach(log => {
-            const logDate = new Date(log.timestamp);
-            
-            if (logDate >= selectedDate && logDate < nextDay) {
-              const uid = log.uid;
-              uidCounts[uid] = (uidCounts[uid] || 0) + 1;
-              
-              // Add name mapping if available
-              if (uidToNameMap[uid]) {
-                data.nameMap[uid] = uidToNameMap[uid];
-              }
-            }
-          });
-          
-          // Add the counts to the export data
-          data.attendance = uidCounts;
-        }
-        
-        return data;
-    }
 }
+
 
 /**
  * Copy text to clipboard
@@ -2068,6 +2043,73 @@ function handleAuthClick(e) {
     }, 100);
 }
 
+/**
+ * Get course metadata for the specified course
+ * @param {string} course - Course name
+ * @returns {Object|null} Course metadata or null if not found
+ */
+function getCourseMetadata(course) {
+    if (!course) return null;
+    
+    // Try to get from global courseInfoMap
+    if (window.courseInfoMap && window.courseInfoMap[course]) {
+        return window.courseInfoMap[course];
+    }
+    
+    // No metadata found
+    return null;
+}
+
+/**
+ * Calculate the current week of the course
+ * @param {Object} metadata - Course metadata with start_date, end_date, and holiday_weeks
+ * @returns {number|null} Current week number or null if metadata is invalid
+ */
+function calculateCurrentWeek(metadata) {
+    if (!metadata || !metadata.start_date || !metadata.end_date) {
+        return null;
+    }
+    
+    const startDate = new Date(metadata.start_date);
+    const endDate = new Date(metadata.end_date);
+    const today = new Date();
+    const holidayWeeks = parseInt(metadata.holiday_weeks || 0);
+    
+    // Make sure dates are valid
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        return null;
+    }
+    
+    // Calculate week number
+    const totalWeeks = Math.ceil((endDate - startDate) / (7 * 24 * 60 * 60 * 1000));
+    const currentWeek = Math.ceil((today - startDate) / (7 * 24 * 60 * 60 * 1000));
+    const adjustedWeek = currentWeek - holidayWeeks;
+    
+    // Ensure week is within valid range
+    return Math.min(Math.max(adjustedWeek, 1), totalWeeks);
+}
+
+/**
+ * Get a suggested date for attendance export
+ * @param {Object} metadata - Course metadata
+ * @returns {string} Date string in YYYY-MM-DD format
+ */
+function getSuggestedDate(metadata) {
+    // Current date is a good default
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // If we're on a weekend, suggest the previous Friday
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        const friday = new Date(today);
+        // Go back to the previous Friday
+        friday.setDate(today.getDate() - (dayOfWeek === 0 ? 2 : 1));
+        return friday.toISOString().split('T')[0];
+    }
+    
+    return todayStr;
+}
 	
 function handleSignoutClick() {
 try {
@@ -2459,59 +2501,67 @@ console.log('Sync button state:', {
 });
 }
 	
-	/**
-	 * Sync data with Google Sheets.
-	 * Fetches and updates both database and logs.
-	 */
+/**
+ * Sync data with Google Sheets.
+ * Fetches and updates both database and logs.
+ */
 async function syncData() {
-if (!isOnline || !isSignedIn || isSyncing) {
-	return;
-}
-
-isSyncing = true;
-
-// Show syncing indicator
-const syncIcon = syncBtn.querySelector('i');
-if (syncIcon) {
-	syncIcon.classList.add('fa-spin');
-}
-syncBtn.disabled = true;
-
-showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
-
-try {
-	// First sync database to get up-to-date UID-name mappings
-	try {
-		await fetchDatabaseFromSheet();
-	} catch (dbError) {
-		console.error('Database sync error:', dbError);
-		// Continue with logs sync even if database sync fails
-	}
-	
-	// Then sync logs if a course is selected
-	if (currentCourse) {
-		await syncLogsWithSheet();
-	} else if (availableCourses.length > 0) {
-		// If no course selected but courses are available, select the first one
-		currentCourse = availableCourses[0];
-		courseSelect.value = currentCourse;
-		await fetchLogsFromSheet();
-	}
-	
-	showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
-} catch (error) {
-	console.error('Sync error:', error);
-	showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
-} finally {
-	isSyncing = false;
-	
-	if (syncIcon) {
-		syncIcon.classList.remove('fa-spin');
-	}
-	
-	syncBtn.disabled = !isSignedIn || !isOnline;
-	updateUI();
-}
+    if (!isOnline || !isSignedIn || isSyncing) {
+        return;
+    }
+    
+    isSyncing = true;
+    
+    // Show syncing indicator
+    const syncIcon = syncBtn.querySelector('i');
+    if (syncIcon) {
+        syncIcon.classList.add('fa-spin');
+    }
+    syncBtn.disabled = true;
+    
+    showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
+    
+    try {
+        // First sync database to get up-to-date UID-name mappings
+        try {
+            await fetchDatabaseFromSheet();
+        } catch (dbError) {
+            console.error('Database sync error:', dbError);
+            // Continue with logs sync even if database sync fails
+        }
+        
+        // Fetch course info data
+        try {
+            await fetchCourseInfo();
+        } catch (infoError) {
+            console.error('Course info sync error:', infoError);
+            // Continue with logs sync even if course info sync fails
+        }
+        
+        // Then sync logs if a course is selected
+        if (currentCourse) {
+            await syncLogsWithSheet();
+        } else if (availableCourses.length > 0) {
+            // If no course selected but courses are available, select the first one
+            currentCourse = availableCourses[0];
+            courseSelect.value = currentCourse;
+            await fetchLogsFromSheet();
+        }
+        
+        showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
+    } catch (error) {
+        console.error('Sync error:', error);
+        showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+    } finally {
+        isSyncing = false;
+        
+        if (syncIcon) {
+            syncIcon.classList.remove('fa-spin');
+        }
+        
+        syncBtn.disabled = !isSignedIn || !isOnline;
+        updateUI();
+    }
 }
 
 	/**
@@ -3070,6 +3120,80 @@ if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the databas
 	showImprovedNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
 }
 }
+	
+/**
+ * Fetch course information from COURSE_INFO sheet
+ * @returns {Promise} A promise that resolves when course info is fetched
+ */
+async function fetchCourseInfo() {
+    if (!isOnline || !isSignedIn) {
+        console.log("Not fetching course info: not signed in or offline");
+        return;
+    }
+    
+    try {
+        console.log("Fetching course info from spreadsheet...");
+        
+        // Check if the COURSE_INFO sheet exists
+        const spreadsheetResponse = await gapi.client.sheets.spreadsheets.get({
+            spreadsheetId: LOGS_SPREADSHEET_ID
+        });
+        
+        const sheets = spreadsheetResponse.result.sheets || [];
+        const hasInfoSheet = sheets.some(sheet => sheet.properties.title === 'COURSE_INFO');
+        
+        if (!hasInfoSheet) {
+            console.log("No COURSE_INFO sheet found");
+            return;
+        }
+        
+        // Fetch the course info data
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: LOGS_SPREADSHEET_ID,
+            range: 'COURSE_INFO!A2:G'
+        });
+        
+        const rows = response.result.values || [];
+        if (rows.length === 0) {
+            console.log("No course info data found");
+            return;
+        }
+        
+        // Initialize global courseInfoMap if it doesn't exist
+        if (!window.courseInfoMap) {
+            window.courseInfoMap = {};
+        }
+        
+        // Process the course info data
+        // Expected columns: Course, Start Date, End Date, Holiday Weeks, Default Hours, Default Category, EIS ID
+        rows.forEach(row => {
+            if (row.length < 4) return; // Skip incomplete rows
+            
+            const course = row[0];
+            if (!course) return;
+            
+            // Store in the global courseInfoMap
+            window.courseInfoMap[course] = {
+                start_date: row[1] || "",
+                end_date: row[2] || "",
+                holiday_weeks: row[3] || "0",
+                default_hours: row[4] || "2",
+                default_category: row[5] || "theory",
+                eis_id: row[6] || ""
+            };
+            
+            // If EIS ID is provided, update the courseIDMap
+            if (row[6]) {
+                if (!courseIDMap) courseIDMap = {};
+                courseIDMap[course] = row[6];
+            }
+        });
+        
+        console.log("Course info loaded successfully:", window.courseInfoMap);
+    } catch (error) {
+        console.error("Error fetching course info:", error);
+    }
+}	
 	
 	/**
 	 * Clear the entire database.
