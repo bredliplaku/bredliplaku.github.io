@@ -1055,6 +1055,7 @@ body.is-admin td.admin-only {
 	let initialSignIn = true; // Flag to track initial sign-in
 	let lastScannedUID = null;
 	let courseIDMap = {}; // Object to store course information - name to ID mapping
+	let sheetNameMap = {}; // Maps display names to actual sheet names
 	
 	// DOM Elements
 	const tabs = document.querySelectorAll('.tab');
@@ -3415,6 +3416,25 @@ if (currentCourse && currentCourse !== 'Default') {
 	titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
 }
 }
+
+/**
+ * Get the actual sheet name for a course (handles display name mapping)
+ */
+function getSheetNameForCourse(courseName) {
+  // If we have a mapping, use it, otherwise use the course name directly
+  return sheetNameMap[courseName] || courseName;
+}
+
+/**
+ * Format a sheet name for the Google Sheets API
+ * Encloses in single quotes if the name has spaces or special characters
+ */
+function formatSheetName(sheetName) {
+  return sheetName.includes(' ') || 
+         sheetName.includes('!') || 
+         sheetName.includes('\'') ? 
+         `'${sheetName}'` : sheetName;
+}
 	
 	/**
 	 * Fetch available courses (sheet names) from logs spreadsheet.
@@ -3423,69 +3443,77 @@ async function fetchAvailableCourses() {
   try {
     console.log('Fetching available courses from spreadsheet...');
     
-    if (!isOnline || !isSignedIn) {
+    if (!isOnline) {
       console.log('Not online or not signed in, using default courses');
       // Default courses if offline or not signed in
       availableCourses = [];
       courseIDMap = {};
+      sheetNameMap = {};
       populateCourseDropdown();
       return;
     }
     
-    // First, get all sheet names for backwards compatibility
-    const sheetResponse = await gapi.client.sheets.spreadsheets.get({
+    const response = await gapi.client.sheets.spreadsheets.get({
       spreadsheetId: LOGS_SPREADSHEET_ID
     });
     
-    // Filter out the COURSE_CODES sheet from general sheets
-    const sheets = sheetResponse.result.sheets || [];
-    const courseSheets = sheets
-      .map(sheet => sheet.properties.title)
-      .filter(title => title !== 'COURSE_CODES');
+    const sheets = response.result.sheets || [];
+    const allSheetNames = sheets.map(sheet => sheet.properties.title);
     
-    // Now try to get course codes from dedicated sheet
-    try {
-      const response = await gapi.client.sheets.spreadsheets.values.get({
-        spreadsheetId: LOGS_SPREADSHEET_ID,
-        range: 'COURSE_CODES!A2:B'
-      });
-      
-      const rows = response.result.values || [];
-      
-      if (rows.length > 0) {
-        // We found course codes, use this data
-        availableCourses = [];
-        courseIDMap = {};
+    // Check if we have a COURSE_CODES sheet
+    if (allSheetNames.includes('COURSE_CODES')) {
+      try {
+        console.log('COURSE_CODES sheet found, fetching course information...');
         
-        rows.forEach(row => {
-          if (row.length >= 2 && row[0] && row[1]) {
-            const courseName = row[0].trim();
-            const courseID = row[1].trim();
-            
-            availableCourses.push(courseName);
-            courseIDMap[courseName] = courseID;
-          }
+        // Format the range with quotes since it has a space
+        const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
+          spreadsheetId: LOGS_SPREADSHEET_ID,
+          range: "'COURSE_CODES'!A2:C" // A: Display Name, B: EIS ID, C: Sheet Name (optional)
         });
         
-        console.log('Fetched courses from COURSE_CODES:', availableCourses);
-        console.log('Course ID mapping:', courseIDMap);
-      } else {
-        // No data in COURSE_CODES, fall back to sheet names
-        availableCourses = courseSheets;
-        console.log('No data in COURSE_CODES, using sheet names:', availableCourses);
+        const rows = codeResponse.result.values || [];
+        
+        if (rows.length > 0) {
+          // We found course codes, use this data
+          availableCourses = [];
+          courseIDMap = {};
+          sheetNameMap = {};
+          
+          rows.forEach(row => {
+            if (row.length >= 2 && row[0] && row[1]) {
+              const courseDisplayName = row[0].trim();
+              const courseID = row[1].trim();
+              // Use sheet name from column C if provided, otherwise use the display name
+              const sheetName = (row.length >= 3 && row[2]) ? row[2].trim() : courseDisplayName;
+              
+              availableCourses.push(courseDisplayName);
+              courseIDMap[courseDisplayName] = courseID;
+              sheetNameMap[courseDisplayName] = sheetName;
+            }
+          });
+          
+          console.log('Fetched courses from COURSE_CODES:', availableCourses);
+          console.log('Course ID mapping:', courseIDMap);
+          console.log('Sheet name mapping:', sheetNameMap);
+        } else {
+          // No data in COURSE_CODES, fall back to sheet names
+          availableCourses = allSheetNames.filter(name => name !== 'COURSE_CODES');
+          console.log('No data in COURSE_CODES, using sheet names:', availableCourses);
+        }
+      } catch (codeError) {
+        console.warn('Error reading COURSE_CODES sheet:', codeError);
+        availableCourses = allSheetNames.filter(name => name !== 'COURSE_CODES');
       }
-    } catch (codeError) {
-      // COURSE_CODES sheet might not exist, fallback to sheet names
-      console.warn('Could not fetch COURSE_CODES sheet, using sheet names instead:', codeError);
-      availableCourses = courseSheets;
-      console.log('Using sheet names as courses:', availableCourses);
+    } else {
+      // No COURSE_CODES sheet, use sheet names directly
+      availableCourses = allSheetNames;
+      console.log('No COURSE_CODES sheet found, using all sheet names:', availableCourses);
     }
     
     // If no courses found, use defaults
     if (availableCourses.length === 0) {
       console.warn('No courses found in spreadsheet, using defaults');
       availableCourses = [];
-      courseIDMap = {};
     }
     
     populateCourseDropdown();
@@ -3497,6 +3525,7 @@ async function fetchAvailableCourses() {
     console.log('Using default courses due to error');
     availableCourses = [];
     courseIDMap = {};
+    sheetNameMap = {};
     populateCourseDropdown();
     
     showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
@@ -3514,59 +3543,68 @@ function getCurrentCourseEisId() {
   return courseIDMap[currentCourse] || null;
 }
 
-	/**
-	 * Fetch logs from Google Sheet for current course.
-	 */
+/**
+ * Fetch logs from Google Sheet for current course.
+ */
 async function fetchLogsFromSheet() {
-if (!currentCourse) {
-	return;
-}
+  if (!currentCourse) {
+    return;
+  }
 
-try {
-	const response = await gapi.client.sheets.spreadsheets.values.get({
-		spreadsheetId: LOGS_SPREADSHEET_ID,
-		range: `${currentCourse}!A2:D`,
-	});
-	
-	const rows = response.result.values || [];
-	const sheetLogs = [];
-	
-	rows.forEach(row => {
-		if (row.length >= 3) {
-			const uid = String(row[0]);
-			const timestamp = new Date(row[1]).getTime();
-			const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
-			const manual = row.length >= 4 ? row[3] === 'true' : false;
-			
-			if (uid && !isNaN(timestamp)) {
-				sheetLogs.push({ uid, timestamp, id, manual });
-			}
-		}
-	});
-	
-	// Sort logs by timestamp (newest first)
-	sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
-	logs = sheetLogs;
-	
-	// Also save to localStorage as backup
-	saveLogsToLocalStorage();
-	
-	console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
-	return true;
-} catch (error) {
-	console.error('Error fetching logs:', error);
-	
-	// Reset title back to default on error
-	const titleElement = document.querySelector('h1');
-	if (titleElement) {
-		titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
-	}
-	
-	if (!isInitializing) {
-		showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
-	}
-	throw error;
-}
+  try {
+    // Get the actual sheet name to use (might be different from display name)
+    const sheetName = getSheetNameForCourse(currentCourse);
+    
+    // Format the sheet name for the API request
+    const formattedSheetName = formatSheetName(sheetName);
+    const range = `${formattedSheetName}!A2:D`;
+    
+    console.log(`Fetching logs from sheet: ${sheetName}, using range: ${range}`);
+    
+    const response = await gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId: LOGS_SPREADSHEET_ID,
+      range: range,
+    });
+    
+    const rows = response.result.values || [];
+    const sheetLogs = [];
+    
+    rows.forEach(row => {
+      if (row.length >= 3) {
+        const uid = String(row[0]);
+        const timestamp = new Date(row[1]).getTime();
+        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+        const manual = row.length >= 4 ? row[3] === 'true' : false;
+        
+        if (uid && !isNaN(timestamp)) {
+          sheetLogs.push({ uid, timestamp, id, manual });
+        }
+      }
+    });
+    
+    // Sort logs by timestamp (newest first)
+    sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
+    logs = sheetLogs;
+    
+    // Also save to localStorage as backup
+    saveLogsToLocalStorage();
+    
+    console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
+    return true;
+  } catch (error) {
+    console.error('Error fetching logs:', error);
+    
+    // Reset title back to default on error
+    const titleElement = document.querySelector('h1');
+    if (titleElement) {
+      titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+    }
+    
+    if (!isInitializing) {
+      showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+    }
+    throw error;
+  }
 }
 	
 function mergeLogs(localLogs, remoteLogs) {
@@ -3599,59 +3637,66 @@ return date.getFullYear() + '-' +
 	   pad(date.getSeconds());
 }
 
+/**
+ * Sync logs with Google Sheet.
+ */
 async function syncLogsWithSheet() {
-if (!currentCourse || !isAdmin) {
-	return;
-}
+  if (!currentCourse || !isAdmin) {
+    return;
+  }
 
-try {
-	console.log("Starting sync with spreadsheet...");
-	// Show syncing indicator on the sync button
-	const syncIcon = syncBtn.querySelector('i');
-	if (syncIcon) {
-		syncIcon.classList.add('fa-spin');
-	}
-	isSyncing = true;
-	
-	// Prepare the data for the spreadsheet using the universal timestamp conversion.
-	const sheetData = logs.map(log => [
-		log.uid,
-		convertTimestampToLocalISOString(log.timestamp),
-		log.id,
-		log.manual ? 'true' : 'false'
-	]);
-	
-	console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
-	
-	// Clear existing data in the target range
-	await gapi.client.sheets.spreadsheets.values.clear({
-		spreadsheetId: LOGS_SPREADSHEET_ID,
-		range: `${currentCourse}!A2:D`,
-	});
-	
-	// Write the new data if there is any
-	if (sheetData.length > 0) {
-		await gapi.client.sheets.spreadsheets.values.update({
-			spreadsheetId: LOGS_SPREADSHEET_ID,
-			range: `${currentCourse}!A2:D`,
-			valueInputOption: 'RAW',
-			resource: { values: sheetData }
-		});
-	}
-	
-	console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
-} catch (error) {
-	console.error('Error syncing logs:', error);
-	showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
-	throw error;
-} finally {
-	// Remove syncing indicator
-	const syncIcon = syncBtn.querySelector('i');
-	if (syncIcon) {
-		syncIcon.classList.remove('fa-spin');
-	}
-	isSyncing = false;
-}
+  try {
+    console.log("Starting sync with spreadsheet...");
+    // Show syncing indicator on the sync button
+    const syncIcon = syncBtn.querySelector('i');
+    if (syncIcon) {
+      syncIcon.classList.add('fa-spin');
+    }
+    isSyncing = true;
+    
+    // Get the actual sheet name
+    const sheetName = getSheetNameForCourse(currentCourse);
+    const formattedSheetName = formatSheetName(sheetName);
+    
+    // Prepare the data for the spreadsheet using the universal timestamp conversion.
+    const sheetData = logs.map(log => [
+      log.uid,
+      convertTimestampToLocalISOString(log.timestamp),
+      log.id,
+      log.manual ? 'true' : 'false'
+    ]);
+    
+    console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
+    
+    // Clear existing data in the target range
+    await gapi.client.sheets.spreadsheets.values.clear({
+      spreadsheetId: LOGS_SPREADSHEET_ID,
+      range: `${formattedSheetName}!A2:D`,
+    });
+    
+    // Write the new data if there is any
+    if (sheetData.length > 0) {
+      await gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: LOGS_SPREADSHEET_ID,
+        range: `${formattedSheetName}!A2:D`,
+        valueInputOption: 'RAW',
+        resource: { values: sheetData }
+      });
+    }
+    
+    console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
+  } catch (error) {
+    console.error('Error syncing logs:', error);
+    showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+    throw error;
+  } finally {
+    // Remove syncing indicator
+    const syncIcon = syncBtn.querySelector('i');
+    if (syncIcon) {
+      syncIcon.classList.remove('fa-spin');
+    }
+    isSyncing = false;
+  }
 }
 
 	
@@ -3699,36 +3744,39 @@ try {
 }
 
  
-	/**
-	 * Append a single log to Google Sheet (for immediate sync).
-	 * @param {Object} log - The log entry to append.
-	 */
+/**
+ * Append a single log to Google Sheet (for immediate sync).
+ */
 async function appendLogToSheet(log) {
-if (!currentCourse || !isOnline || !isSignedIn) {
-	return;
-}
+  if (!currentCourse || !isOnline || !isSignedIn) {
+    return;
+  }
 
-try {
-	await gapi.client.sheets.spreadsheets.values.append({
-		spreadsheetId: LOGS_SPREADSHEET_ID,
-		range: `${currentCourse}!A2:D`,
-		valueInputOption: 'RAW',
-		insertDataOption: 'INSERT_ROWS',
-		resource: {
-			values: [[
-				log.uid,
-				new Date(log.timestamp).toISOString(),
-				log.id,
-				log.manual ? 'true' : 'false'
-			]]
-		}
-	});
-	
-	console.log('Log appended to Google Sheet');
-} catch (error) {
-	console.error('Error appending log:', error);
-	showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
-}
+  try {
+    // Get the actual sheet name
+    const sheetName = getSheetNameForCourse(currentCourse);
+    const formattedSheetName = formatSheetName(sheetName);
+    
+    await gapi.client.sheets.spreadsheets.values.append({
+      spreadsheetId: LOGS_SPREADSHEET_ID,
+      range: `${formattedSheetName}!A2:D`,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: [[
+          log.uid,
+          new Date(log.timestamp).toISOString(),
+          log.id,
+          log.manual ? 'true' : 'false'
+        ]]
+      }
+    });
+    
+    console.log('Log appended to Google Sheet');
+  } catch (error) {
+    console.error('Error appending log:', error);
+    showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
+  }
 }
 
 	/**
