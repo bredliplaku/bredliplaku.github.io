@@ -1054,6 +1054,7 @@ body.is-admin td.admin-only {
 	let criticalErrorsOnly = true;
 	let initialSignIn = true; // Flag to track initial sign-in
 	let lastScannedUID = null;
+	let courseIDMap = {}; // Object to store course information - name to ID mapping
 	
 	// DOM Elements
 	const tabs = document.querySelectorAll('.tab');
@@ -1706,6 +1707,721 @@ function addEnhancedExportButton() {
   }
 }
 
+// Add these functions to your initialization code
+function initializeEisExport() {
+    // Add the standard EIS export button (with admin-only class)
+    addEisExportButton();
+    
+    // Add the direct EIS export button
+    addDirectEisExportButton();
+    
+    // Check if we're on the EIS page and need to run the injector
+    if (window.location.href.includes('eis.epoka.edu.al/courseattendance') && 
+        window.location.href.includes('newcl')) {
+        
+        // Create a small floating button to trigger import
+        const importTrigger = document.createElement('div');
+        importTrigger.style.position = 'fixed';
+        importTrigger.style.bottom = '20px';
+        importTrigger.style.right = '20px';
+        importTrigger.style.backgroundColor = '#3949ab';
+        importTrigger.style.color = 'white';
+        importTrigger.style.padding = '10px 15px';
+        importTrigger.style.borderRadius = '5px';
+        importTrigger.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+        importTrigger.style.cursor = 'pointer';
+        importTrigger.style.zIndex = '9999';
+        importTrigger.innerHTML = '<i class="fa fa-magic"></i> Auto-fill Attendance';
+        
+        importTrigger.addEventListener('click', function() {
+            // Execute the injector script
+            const script = document.createElement('script');
+            script.textContent = `(${eisInjectorFunction.toString()})();`;
+            document.body.appendChild(script);
+            document.body.removeChild(script);
+        });
+        
+        document.body.appendChild(importTrigger);
+    }
+}
+
+function eisInjectorFunction() {
+    // Paste the contents of the eis-injector-script here
+    // This is the JavaScript code that will be executed on the EIS page
+    console.log("EIS Attendance Automation starting...");
+    
+    // First check if we're on the right page
+    if (!window.location.href.includes('courseattendance') || !window.location.href.includes('newcl')) {
+        alert("Please run this script on the EIS course attendance page");
+        return;
+    }
+    
+    // Configuration
+    const CONFIG = {
+        // Set this to true if checkbox checked means ABSENT (inverts the logic)
+        // Set this to false if checkbox checked means PRESENT
+        checkedMeansAbsent: true
+    };
+    
+// Try to find latest exported data in localStorage
+  const latestKey = localStorage.getItem('latest_eis_export');
+  const autoSave = localStorage.getItem('eis_auto_save') === 'true';
+  
+  if (latestKey) {
+    const latestData = localStorage.getItem(latestKey);
+    
+    if (latestData) {
+      try {
+        const data = JSON.parse(latestData);
+        console.log("Found attendance data:", data);
+        
+        if (!data.parameters || !data.attendance || !data.nameMap) {
+          throw new Error("Missing required data in stored export");
+        }
+        
+        // Confirm with user
+        if (confirm(`Found attendance data for ${data.parameters.course} on ${data.parameters.date}. Do you want to import it?`)) {
+          // Set form parameters
+          fillFormParameters(data.parameters);
+          
+          // Wait for form to update and generate checkboxes
+          setTimeout(() => {
+            processAttendance(data.attendance, data.nameMap, data.parameters.hours);
+            
+            // If auto-save is enabled, find and click the save button
+            if (autoSave) {
+              setTimeout(() => {
+                const saveBtn = document.querySelector('button[name="submit"]');
+                if (saveBtn) {
+                  if (confirm("Auto-save is enabled. Do you want to save changes now?")) {
+                    saveBtn.click();
+                  }
+                } else {
+                  alert("Could not find save button. Please review and save manually.");
+                }
+              }, 1000);
+            }
+          }, 2000);
+        }
+      } catch (error) {
+        console.error("Import error:", error);
+        alert("Error processing stored data: " + error.message);
+      }
+    } else {
+      promptForImport();
+    }
+  } else {
+    promptForImport();
+  }
+  
+  function promptForImport() {
+    // If no stored data, show file input
+    if (confirm("No recent attendance data found. Would you like to import from a file?")) {
+      importAttendance();
+    }
+  }
+  
+  function importAttendance() {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+    
+    fileInput.onchange = function(event) {
+      const file = event.target.files[0];
+      if (!file) {
+        document.body.removeChild(fileInput);
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result);
+          console.log("Parsed data:", data);
+          
+          if (!data.parameters || !data.attendance || !data.nameMap) {
+            throw new Error("Missing required data in import file");
+          }
+          
+          // Set form parameters
+          fillFormParameters(data.parameters);
+          
+          // Wait for form to update and generate checkboxes
+          setTimeout(() => {
+            processAttendance(data.attendance, data.nameMap, data.parameters.hours);
+          }, 2000);
+          
+        } catch (error) {
+          console.error("Import error:", error);
+          alert("Error importing: " + error.message);
+        }
+        document.body.removeChild(fileInput);
+      };
+      
+      reader.readAsText(file);
+    };
+    
+    fileInput.click();
+  }
+  
+  function fillFormParameters(params) {
+    // Fill form fields
+    setFormValue("didcourseattendance_week", params.week);
+    setFormValue("didcourseattendance_topicen", params.topic);
+    setFormValue("didcourseattendance_categoryen", params.category);
+    setFormValue("didcourseattendance_date", params.date);
+    
+    // Set hours last - this triggers checkbox generation
+    setFormValue("didcourseattendance_nrhours", params.hours);
+    
+    // Force form submission to regenerate the page
+    console.log("Form parameters filled, waiting for page update...");
+  }
+  
+  function setFormValue(id, value) {
+    const element = document.getElementById(id);
+    if (!element) {
+      console.warn(`Element not found: ${id}`);
+      return false;
+    }
+    
+    element.value = value;
+    
+    // Trigger appropriate event
+    let eventType = "change";
+    if (element.tagName === "INPUT" && element.type === "text") {
+      eventType = "input";
+    }
+    
+    const event = new Event(eventType, { bubbles: true });
+    element.dispatchEvent(event);
+    console.log(`Set ${id} to "${value}"`);
+    return true;
+  }
+  
+  function processAttendance(attendance, nameMap, numHours) {
+    // We'll work with the existing form structure rather than resetting everything
+    console.log("Starting attendance processing");
+    
+    // Now process each student row
+    const rows = document.querySelectorAll("#student_list_table tbody tr");
+    console.log(`Processing ${rows.length} student rows with ${numHours} hours`);
+    
+    let processed = 0;
+    
+    // Process each student row
+    rows.forEach((row) => {
+      // Get student name
+      const nameCell = row.querySelector("td:nth-child(3)");
+      if (!nameCell) return;
+      
+      // Get name without R/EX markers
+      let fullName = nameCell.textContent.trim();
+      let cleanName = fullName.replace(/\s+R\s+EX|\s+EX|\s+R|\s+\(R\)|\s+\(EX\)/g, "").trim();
+      
+      // Check if exempted
+      const isExempted = row.querySelector("td[data-exempted='EX']");
+      if (isExempted) {
+        console.log(`Skipping exempted student: ${cleanName}`);
+        return;
+      }
+      
+      // Find UID for student
+      let foundUid = null;
+      for (const [uid, name] of Object.entries(nameMap)) {
+        const mappedName = String(name).replace(/\s+R\s+EX|\s+EX|\s+R|\s+\(R\)|\s+\(EX\)/g, "").trim();
+        if (mappedName.toLowerCase() === cleanName.toLowerCase()) {
+          foundUid = uid;
+          break;
+        }
+      }
+      
+      if (!foundUid) {
+        console.log(`No UID found for: ${cleanName}`);
+        return;
+      }
+      
+      // Get attendance count
+      const attendCount = attendance[foundUid] || 0;
+      console.log(`${cleanName} (${foundUid}) attended ${attendCount} hours of ${numHours} total hours`);
+      
+      // Get hour checkboxes more reliably - the form structure shows they're in separate cells
+      // First identify all checkboxes in the row
+      const allRowCheckboxes = Array.from(row.querySelectorAll("input[type='checkbox']"));
+      
+      // The first checkbox is typically the "SELECT ALL" for this row, skip it
+      // We only want the hour checkboxes which start from index 1
+      const checkboxes = allRowCheckboxes.slice(1, 1 + parseInt(numHours));
+      
+      console.log(`Found ${checkboxes.length} hour checkboxes for ${cleanName} (need ${numHours})`);
+      
+      // If we don't have enough checkboxes, something is wrong
+      if (checkboxes.length < numHours) {
+        console.warn(`Expected ${numHours} hour checkboxes for ${cleanName}, but found ${checkboxes.length}`);
+      }
+      
+      if (checkboxes.length === 0) {
+        console.log(`No hour checkboxes found for ${cleanName}`);
+        return;
+      }
+      
+      // Process each hour checkbox
+      for (let i = 0; i < checkboxes.length && i < numHours; i++) {
+        const checkbox = checkboxes[i];
+        const hourNumber = i + 1; // Hour numbers are 1-based
+        // Determine if the hour should be marked as attended
+        const isHourAttended = hourNumber <= attendCount;
+        
+        // Apply the configuration to determine checkbox state
+        // If checkedMeansAbsent is true: checkbox should be checked when student is ABSENT
+        // If checkedMeansAbsent is false: checkbox should be checked when student is PRESENT
+        const shouldBeChecked = CONFIG.checkedMeansAbsent ? !isHourAttended : isHourAttended;
+        
+        // Force the checkbox to the correct state
+        checkbox.checked = shouldBeChecked;
+        
+        // Create and dispatch a proper MouseEvent instead of just a change event
+        // This better simulates an actual user click
+        const clickEvent = new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          view: window
+        });
+        checkbox.dispatchEvent(clickEvent);
+        
+        // Also dispatch the change event for good measure
+        const changeEvent = new Event('change', { bubbles: true });
+        checkbox.dispatchEvent(changeEvent);
+        
+        console.log(`Set ${cleanName} hour ${hourNumber} to ${isHourAttended ? 'Present' : 'Absent'} (checkbox is ${shouldBeChecked ? 'checked' : 'unchecked'})`);
+      }
+      
+      // Set the hidden values
+      updateHiddenFields(row, numHours, attendCount, cleanName);
+      
+      // Mark row as updated
+      row.classList.add('active');
+      processed++;
+    });
+    
+    console.log(`Attendance processed for ${processed} students`);
+    alert(`Attendance updated for ${processed} students. Please review and click Save Changes.`);
+  }
+  
+  function updateHiddenFields(row, numHours, attendCount, studentName) {
+    // Set the hidden values for the form submission
+    const checkboxCell = row.querySelector(".checkboxes_row_td");
+    if (!checkboxCell) {
+      console.log(`No checkbox cell found for ${studentName}`);
+      return;
+    }
+    
+    const rowIndex = checkboxCell.getAttribute("data-row");
+    if (!rowIndex) {
+      console.log(`No row index found for ${studentName}`);
+      return;
+    }
+    
+    // Find and set hidden fields
+    const hourField = document.getElementById(`stdabsences_${rowIndex}_numofhours`);
+    const checkedField = document.getElementById(`stdabsences_${rowIndex}_checked`);
+    const updateField = document.getElementById(`stdabsences_${rowIndex}_update`);
+    
+    if (!hourField || !checkedField || !updateField) {
+      console.log(`Missing hidden fields for ${studentName}`);
+      return;
+    }
+    
+    // Calculate hours absent
+    const absentHours = Math.max(0, parseInt(numHours) - attendCount);
+    
+    // Build list of absent hours
+    const absentList = [];
+    for (let i = attendCount + 1; i <= numHours; i++) {
+      absentList.push(i);
+    }
+    
+    // Set values
+    hourField.value = absentHours;
+    checkedField.value = absentList.join(',');
+    updateField.value = "1";
+    
+    console.log(`Updated hidden fields for ${studentName}: absent=${absentHours}, list=${absentList.join(',')}`);
+  }
+  
+  // Add import button to the UI
+  function addImportButton() {
+    const actionBar = document.querySelector('.record_actions');
+    if (!actionBar) return;
+    
+    const button = document.createElement('button');
+    button.className = 'btn btn-info';
+    button.innerHTML = '<i class="fa fa-file-import"></i> Import Attendance';
+    button.onclick = importAttendance;
+    
+    actionBar.insertBefore(button, actionBar.firstChild);
+  }
+  
+  // Run on load
+  console.log("EIS Attendance Import Script loaded");
+  addImportButton();
+}
+
+/**
+ * Add the Direct EIS Export button to the UI
+ */
+function addDirectEisExportButton() {
+    // Find a good place to add the button (next to existing actions)
+    const actionsContainer = document.querySelector('.logs-actions');
+    
+    if (actionsContainer) {
+        const directEisBtn = document.createElement('button');
+        directEisBtn.className = 'btn-purple admin-only'; // Using purple to distinguish from regular export
+        directEisBtn.id = 'direct-eis-export-btn';
+        
+        // Create and append icon element
+        const icon = document.createElement('i');
+        icon.className = 'fas fa-rocket';
+        directEisBtn.appendChild(icon);
+        
+        // Add space after icon
+        directEisBtn.appendChild(document.createTextNode(' Direct EIS Export'));
+        
+        directEisBtn.title = 'Export attendance directly to EIS system';
+        
+        directEisBtn.addEventListener('click', showDirectEisExportDialog);
+        
+        // Insert at the beginning of the container
+        actionsContainer.insertBefore(directEisBtn, actionsContainer.firstChild);
+        
+        // Only show for admins
+        directEisBtn.style.display = isAdmin ? 'inline-block' : 'none';
+        
+        console.log('Direct EIS export button added to UI');
+    } else {
+        console.error('Could not find logs-actions container for Direct EIS button');
+    }
+}
+
+/**
+ * Show dialog for Direct EIS Export with advanced options
+ */
+function showDirectEisExportDialog() {
+    if (!currentCourse) {
+        showImprovedNotification('warning', 'No Course Selected', 'Please select a course before exporting to EIS');
+        return;
+    }
+    
+    // Check if we have an EIS ID for this course
+    const eisId = getCurrentCourseEisId();
+    if (!eisId) {
+        showImprovedNotification('error', 'Missing EIS ID', 
+            'No EIS ID found for this course. Please add it to the COURSE_CODES sheet in your spreadsheet.');
+        return;
+    }
+    
+    // Create dialog backdrop and dialog
+    const dialogBackdrop = document.createElement('div');
+    dialogBackdrop.className = 'dialog-backdrop';
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog';
+    dialogBackdrop.appendChild(dialog);
+    
+    // Add dialog title
+    const title = document.createElement('h3');
+    title.className = 'dialog-title';
+    title.textContent = 'Direct EIS Export';
+    dialog.appendChild(title);
+    
+    // Create form content
+    const today = new Date().toISOString().split('T')[0];
+    const formContent = document.createElement('div');
+    
+    // Course info section
+    const courseInfo = document.createElement('div');
+    courseInfo.style.marginBottom = '15px';
+    courseInfo.style.padding = '10px';
+    courseInfo.style.backgroundColor = '#f0f0f0';
+    courseInfo.style.borderRadius = '5px';
+    courseInfo.innerHTML = `
+        <div><strong>Course:</strong> ${currentCourse}</div>
+        <div><strong>EIS ID:</strong> ${eisId}</div>
+    `;
+    formContent.appendChild(courseInfo);
+    
+    // Week selection
+    const weekGroup = document.createElement('div');
+    weekGroup.className = 'form-group';
+    const weekLabel = document.createElement('label');
+    weekLabel.textContent = 'Week Number:';
+    weekLabel.htmlFor = 'export-week';
+    const weekSelect = document.createElement('select');
+    weekSelect.className = 'form-control';
+    weekSelect.id = 'export-week';
+    for (let i = 1; i <= 14; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = `Week ${i}`;
+        weekSelect.appendChild(option);
+    }
+    weekGroup.appendChild(weekLabel);
+    weekGroup.appendChild(weekSelect);
+    formContent.appendChild(weekGroup);
+    
+    // Hours selection
+    const hoursGroup = document.createElement('div');
+    hoursGroup.className = 'form-group';
+    const hoursLabel = document.createElement('label');
+    hoursLabel.textContent = 'Number of Hours:';
+    hoursLabel.htmlFor = 'export-hours';
+    const hoursSelect = document.createElement('select');
+    hoursSelect.className = 'form-control';
+    hoursSelect.id = 'export-hours';
+    for (let i = 1; i <= 10; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = `${i} hr${i > 1 ? 's' : ''}`;
+        if (i === 2) option.selected = true;
+        hoursSelect.appendChild(option);
+    }
+    hoursGroup.appendChild(hoursLabel);
+    hoursGroup.appendChild(hoursSelect);
+    formContent.appendChild(hoursGroup);
+    
+    // Category selection
+    const catGroup = document.createElement('div');
+    catGroup.className = 'form-group';
+    const catLabel = document.createElement('label');
+    catLabel.textContent = 'Category:';
+    catLabel.htmlFor = 'export-category';
+    const catSelect = document.createElement('select');
+    catSelect.className = 'form-control';
+    catSelect.id = 'export-category';
+    
+    const categories = [
+        { value: 'theory', text: 'Theory', selected: true },
+        { value: 'lab', text: 'Lab' },
+        { value: 'practice', text: 'Practice' }
+    ];
+    
+    categories.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat.value;
+        option.textContent = cat.text;
+        if (cat.selected) option.selected = true;
+        catSelect.appendChild(option);
+    });
+    
+    catGroup.appendChild(catLabel);
+    catGroup.appendChild(catSelect);
+    formContent.appendChild(catGroup);
+    
+    // Date selection
+    const dateGroup = document.createElement('div');
+    dateGroup.className = 'form-group';
+    const dateLabel = document.createElement('label');
+    dateLabel.textContent = 'Date:';
+    dateLabel.htmlFor = 'export-date';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.className = 'form-control';
+    dateInput.id = 'export-date';
+    dateInput.value = today;
+    dateGroup.appendChild(dateLabel);
+    dateGroup.appendChild(dateInput);
+    formContent.appendChild(dateGroup);
+    
+    // Topic input
+    const topicGroup = document.createElement('div');
+    topicGroup.className = 'form-group';
+    const topicLabel = document.createElement('label');
+    topicLabel.textContent = 'Topic:';
+    topicLabel.htmlFor = 'export-topic';
+    const topicInput = document.createElement('input');
+    topicInput.type = 'text';
+    topicInput.className = 'form-control';
+    topicInput.id = 'export-topic';
+    topicInput.value = 'Lecture';
+    topicGroup.appendChild(topicLabel);
+    topicGroup.appendChild(topicInput);
+    formContent.appendChild(topicGroup);
+    
+    // EIS process options
+    const optionsGroup = document.createElement('div');
+    optionsGroup.className = 'form-group';
+    optionsGroup.style.marginTop = '15px';
+    optionsGroup.style.padding = '10px';
+    optionsGroup.style.backgroundColor = '#f0f0f0';
+    optionsGroup.style.borderRadius = '5px';
+    
+    const optionsTitle = document.createElement('div');
+    optionsTitle.style.fontWeight = 'bold';
+    optionsTitle.style.marginBottom = '10px';
+    optionsTitle.textContent = 'EIS Processing Options';
+    optionsGroup.appendChild(optionsTitle);
+    
+    // Option: Open in new tab vs same window
+    const newTabLabel = document.createElement('label');
+    newTabLabel.style.display = 'block';
+    newTabLabel.style.marginBottom = '10px';
+    
+    const newTabCheckbox = document.createElement('input');
+    newTabCheckbox.type = 'checkbox';
+    newTabCheckbox.id = 'new-tab-option';
+    newTabCheckbox.checked = true;
+    newTabCheckbox.style.marginRight = '8px';
+    
+    newTabLabel.appendChild(newTabCheckbox);
+    newTabLabel.appendChild(document.createTextNode('Open EIS in new tab'));
+    optionsGroup.appendChild(newTabLabel);
+    
+    // Option: Auto save changes
+    const autoSaveLabel = document.createElement('label');
+    autoSaveLabel.style.display = 'block';
+    
+    const autoSaveCheckbox = document.createElement('input');
+    autoSaveCheckbox.type = 'checkbox';
+    autoSaveCheckbox.id = 'auto-save-option';
+    autoSaveCheckbox.checked = false;
+    autoSaveCheckbox.style.marginRight = '8px';
+    
+    autoSaveLabel.appendChild(autoSaveCheckbox);
+    autoSaveLabel.appendChild(document.createTextNode('Auto save changes (use with caution)'));
+    optionsGroup.appendChild(autoSaveLabel);
+    
+    formContent.appendChild(optionsGroup);
+    
+    dialog.appendChild(formContent);
+    
+    // Dialog actions
+    const actions = document.createElement('div');
+    actions.className = 'dialog-actions';
+    
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn-purple';
+    exportBtn.textContent = 'Export to EIS';
+    exportBtn.id = 'confirm-eis-export-btn';
+    
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn-blue';
+    saveBtn.textContent = 'Save Export File';
+    saveBtn.id = 'save-export-btn';
+    
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-red';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.id = 'cancel-export-btn';
+    
+    actions.appendChild(exportBtn);
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    dialog.appendChild(actions);
+    
+    // Add to document
+    document.body.appendChild(dialogBackdrop);
+    
+    // Handle direct export button
+    exportBtn.addEventListener('click', () => {
+        const data = createExportData();
+        const eisId = getCurrentCourseEisId();
+        const openInNewTab = document.getElementById('new-tab-option').checked;
+        const autoSave = document.getElementById('auto-save-option').checked;
+        
+        // Save the export data to localStorage for the EIS page to access
+        const storageKey = `eis_export_${currentCourse}_${dateInput.value}`;
+        localStorage.setItem(storageKey, JSON.stringify(data));
+        localStorage.setItem('latest_eis_export', storageKey);
+        localStorage.setItem('eis_auto_save', autoSave ? 'true' : 'false');
+        
+        // Navigate to the EIS page
+        const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
+        
+        if (openInNewTab) {
+            window.open(eisUrl, '_blank');
+        } else {
+            window.location.href = eisUrl;
+        }
+        
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    // Handle save file button
+    saveBtn.addEventListener('click', () => {
+        const data = createExportData();
+        
+        // Create downloadable file
+        const dataStr = "data:text/json;charset=utf-8," + 
+                      encodeURIComponent(JSON.stringify(data, null, 2));
+        const downloadEl = document.createElement('a');
+        downloadEl.setAttribute("href", dataStr);
+        downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${dateInput.value}.json`);
+        downloadEl.style.display = "none";
+        document.body.appendChild(downloadEl);
+        downloadEl.click();
+        document.body.removeChild(downloadEl);
+        
+        showImprovedNotification('success', 'Export Saved', 
+            `Attendance data saved as a file. You can use "Import Attendance" on the EIS page.`);
+            
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    // Handle cancel
+    cancelBtn.addEventListener('click', () => {
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    // Helper function to create export data
+    function createExportData() {
+        const data = {
+          parameters: {
+            week: weekSelect.value,
+            hours: hoursSelect.value,
+            category: catSelect.value,
+            date: dateInput.value,
+            topic: topicInput.value,
+            course: currentCourse || 'Default'
+          },
+          attendance: {},
+          nameMap: { ...uidToNameMap }  // Include UID-to-name mapping for EIS
+        };
+        
+        // Process logs to count scans per student
+        if (logs && logs.length > 0) {
+          const uidCounts = {};
+          
+          // Convert the selected date to start/end timestamps for comparison
+          const selectedDate = new Date(dateInput.value);
+          selectedDate.setHours(0, 0, 0, 0); // Start of day
+          
+          const nextDay = new Date(selectedDate);
+          nextDay.setDate(nextDay.getDate() + 1); // End at start of next day
+          
+          // Count logs by UID for the selected date
+          logs.forEach(log => {
+            const logDate = new Date(log.timestamp);
+            
+            if (logDate >= selectedDate && logDate < nextDay) {
+              const uid = log.uid;
+              uidCounts[uid] = (uidCounts[uid] || 0) + 1;
+              
+              // Add name mapping if available
+              if (uidToNameMap[uid]) {
+                data.nameMap[uid] = uidToNameMap[uid];
+              }
+            }
+          });
+          
+          // Add the counts to the export data
+          data.attendance = uidCounts;
+        }
+        
+        return data;
+    }
+}
+
 /**
  * Add the EIS export button to the UI
  */
@@ -1715,8 +2431,9 @@ function addEisExportButton() {
     
     if (actionsContainer) {
         const eisExportBtn = document.createElement('button');
-        eisExportBtn.className = 'btn-orange';
+        eisExportBtn.className = 'btn-orange admin-only'; // Add admin-only class
         eisExportBtn.id = 'eis-export-btn';
+        eisExportBtn.style.display = 'none'; // Initially hidden
         
         // Create and append icon element
         const icon = document.createElement('i');
@@ -1733,12 +2450,14 @@ function addEisExportButton() {
         // Insert at the beginning of the container
         actionsContainer.insertBefore(eisExportBtn, actionsContainer.firstChild);
         
-        console.log('EIS export button added to UI');
+        // Update visibility based on admin status
+        eisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
+        
+        console.log('EIS export button added to UI - visible:', isAdmin);
     } else {
         console.error('Could not find logs-actions container for EIS button');
     }
 }
-
 
 
 // Check for auth redirect
@@ -2248,6 +2967,9 @@ function updateAuthUI() {
     const tabsContainer = document.querySelector('.tabs');
     const courseButtonsContainer = document.querySelector('.course-buttons-container');
     const scannerModule = document.querySelector('.module');
+	const eisExportBtn = document.getElementById('eis-export-btn');
+	const directEisExportBtn = document.getElementById('direct-eis-export-btn');
+
     
     // Show/hide main containers based on auth state
     if (loginContainer) loginContainer.style.display = isSignedIn ? 'none' : 'flex';
@@ -2258,6 +2980,13 @@ function updateAuthUI() {
     // Handle scanner and scan buttons
     if (scannerModule) {
         scannerModule.style.display = isSignedIn ? 'block' : 'none';
+    }
+	
+	if (eisExportBtn) {
+    eisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
+	}
+	if (directEisExportBtn) {
+        directEisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
     }
     
 	// Handle scan buttons based on NFC support and user status
@@ -2691,45 +3420,98 @@ if (currentCourse && currentCourse !== 'Default') {
 	 * Fetch available courses (sheet names) from logs spreadsheet.
 	 */
 async function fetchAvailableCourses() {
-try {
-	console.log('Fetching available courses from spreadsheet...');
-	
-	if (!isOnline) {
-		console.log('Not online or not signed in, using default courses');
-		// Default courses if offline or not signed in
-		availableCourses = [];
-		populateCourseDropdown();
-		return;
-	}
-	
-	const response = await gapi.client.sheets.spreadsheets.get({
-		spreadsheetId: LOGS_SPREADSHEET_ID
-	});
-	
-	const sheets = response.result.sheets || [];
-	availableCourses = sheets.map(sheet => sheet.properties.title);
-	
-	console.log('Fetched courses:', availableCourses);
-	
-	// If no courses found, use defaults
-	if (availableCourses.length === 0) {
-		console.warn('No courses found in spreadsheet, using defaults');
-		availableCourses = [];
-	}
-	
-	populateCourseDropdown();
-	console.log(`Found ${availableCourses.length} courses in spreadsheet`);
-} catch (error) {
-	console.error('Error fetching courses:', error);
-	
-	// Use default courses if fetch fails
-	console.log('Using default courses due to error');
-	availableCourses = [];
-	populateCourseDropdown();
-	
-	showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
-	throw error;
+  try {
+    console.log('Fetching available courses from spreadsheet...');
+    
+    if (!isOnline || !isSignedIn) {
+      console.log('Not online or not signed in, using default courses');
+      // Default courses if offline or not signed in
+      availableCourses = [];
+      courseIDMap = {};
+      populateCourseDropdown();
+      return;
+    }
+    
+    // First, get all sheet names for backwards compatibility
+    const sheetResponse = await gapi.client.sheets.spreadsheets.get({
+      spreadsheetId: LOGS_SPREADSHEET_ID
+    });
+    
+    // Filter out the COURSE_CODES sheet from general sheets
+    const sheets = sheetResponse.result.sheets || [];
+    const courseSheets = sheets
+      .map(sheet => sheet.properties.title)
+      .filter(title => title !== 'COURSE_CODES');
+    
+    // Now try to get course codes from dedicated sheet
+    try {
+      const response = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: LOGS_SPREADSHEET_ID,
+        range: 'COURSE_CODES!A2:B'
+      });
+      
+      const rows = response.result.values || [];
+      
+      if (rows.length > 0) {
+        // We found course codes, use this data
+        availableCourses = [];
+        courseIDMap = {};
+        
+        rows.forEach(row => {
+          if (row.length >= 2 && row[0] && row[1]) {
+            const courseName = row[0].trim();
+            const courseID = row[1].trim();
+            
+            availableCourses.push(courseName);
+            courseIDMap[courseName] = courseID;
+          }
+        });
+        
+        console.log('Fetched courses from COURSE_CODES:', availableCourses);
+        console.log('Course ID mapping:', courseIDMap);
+      } else {
+        // No data in COURSE_CODES, fall back to sheet names
+        availableCourses = courseSheets;
+        console.log('No data in COURSE_CODES, using sheet names:', availableCourses);
+      }
+    } catch (codeError) {
+      // COURSE_CODES sheet might not exist, fallback to sheet names
+      console.warn('Could not fetch COURSE_CODES sheet, using sheet names instead:', codeError);
+      availableCourses = courseSheets;
+      console.log('Using sheet names as courses:', availableCourses);
+    }
+    
+    // If no courses found, use defaults
+    if (availableCourses.length === 0) {
+      console.warn('No courses found in spreadsheet, using defaults');
+      availableCourses = [];
+      courseIDMap = {};
+    }
+    
+    populateCourseDropdown();
+    console.log(`Found ${availableCourses.length} courses in spreadsheet`);
+  } catch (error) {
+    console.error('Error fetching courses:', error);
+    
+    // Use default courses if fetch fails
+    console.log('Using default courses due to error');
+    availableCourses = [];
+    courseIDMap = {};
+    populateCourseDropdown();
+    
+    showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
+    throw error;
+  }
 }
+
+/**
+ * Get the EIS ID for the current course
+ * @returns {string|null} The EIS ID for the current course or null if not found
+ */
+function getCurrentCourseEisId() {
+  if (!currentCourse) return null;
+  
+  return courseIDMap[currentCourse] || null;
 }
 
 	/**
@@ -4628,7 +5410,7 @@ setTimeout(() => {
 		}, 3000);
 	}
 }, 2000);
-    setTimeout(addEisExportButton, 2000);
+setTimeout(initializeEisExport, 2000);
 });
 </script>
 
