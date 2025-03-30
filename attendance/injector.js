@@ -5,6 +5,8 @@
 // @description  Automatically import attendance data from clipboard on EIS page load
 // @author       Bredli Plaku
 // @match        https://eis.epoka.edu.al/courseattendance/*/newcl
+// @updateURL    https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.js
+// @downloadURL  https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
