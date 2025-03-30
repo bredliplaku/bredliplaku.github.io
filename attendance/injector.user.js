@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Attendance Auto-Import
 // @namespace    https://bredliplaku.com/
-// @version      1.0
+// @version      1.1
 // @description  Automatically import attendance data from clipboard on EIS page load
 // @author       Bredli Plaku
 // @match        https://eis.epoka.edu.al/courseattendance/*/newcl
@@ -347,6 +347,7 @@ function applyGlobalStyles() {
                 // Just add the paste button
                 hideLoadingIndicator();
                 addPasteButton();
+				addImportButton();
             }
         }, 1000);
     });
