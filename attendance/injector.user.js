@@ -486,37 +486,7 @@ function updateLoadingMessage(message) {
     }
 }
 
-    function addPasteButton() {
-        // Remove any existing paste button
-        const existingBtn = document.getElementById('eis-paste-btn');
-        if (existingBtn) {
-            existingBtn.remove();
-        }
 
-        // Create a floating button in the bottom right
-        const pasteBtn = document.createElement('button');
-        pasteBtn.id = 'eis-paste-btn';
-        pasteBtn.className = 'eis-btn eis-btn-lg eis-paste-btn';
-        pasteBtn.innerHTML = '<i class="fas fa-paste"></i> Paste Attendance Data';
-
-        // Add click handler for clipboard paste
-        pasteBtn.onclick = function() {
-            pasteAttendanceData();
-        };
-
-        document.body.appendChild(pasteBtn);
-
-        // Also add an import button in the action bar
-        addImportButton();
-
-        // Make it pulse briefly to draw attention
-        setTimeout(() => {
-            pasteBtn.style.transform = 'scale(1.1)';
-            setTimeout(() => {
-                pasteBtn.style.transform = 'scale(1)';
-            }, 300);
-        }, 500);
-    }
 
     async function pasteAttendanceData() {
         showLoadingIndicator("Reading attendance data from clipboard...");
@@ -903,11 +873,37 @@ Please review and click Save Changes.`;
         button.style.border = 'none';
         button.style.borderRadius = '5px';
         button.style.padding = '6px 12px';
-        button.innerHTML = '<i class="fas fa-file-import"></i> Import Attendance';
+        button.innerHTML = '<i class="fas fa-file-import"></i> Import from file';
         button.onclick = importAttendance;
 
         actionBar.insertBefore(button, actionBar.firstChild);
     }
+	
+	    function addPasteButton() {
+        // Remove any existing paste button first
+        const existingBtn = document.getElementById('eis-paste-btn');
+        if (existingBtn) {
+            existingBtn.remove();
+        }
+
+        const actionBar = document.querySelector('.record_actions');
+        if (!actionBar) return;
+
+        const button = document.createElement('button');
+        button.id = 'eis-paste-btn';
+        button.className = 'btn btn-info';
+        button.style.backgroundColor = COLORS.info;
+        button.style.color = COLORS.white;
+        button.style.marginRight = '10px';
+        button.style.border = 'none';
+        button.style.borderRadius = '5px';
+        button.style.padding = '6px 12px';
+        button.innerHTML = '<i class="fas fa-paste"></i> Import from clipboard';
+        button.onclick = pasteAttendanceData;
+
+        actionBar.insertBefore(button, actionBar.firstChild);
+    }
+
 
     function importAttendance() {
         const fileInput = document.createElement('input');
