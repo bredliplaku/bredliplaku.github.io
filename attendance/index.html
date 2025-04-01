@@ -331,6 +331,36 @@ body.is-admin td.admin-only {
             padding: 6px 12px;
             font-size: 0.85em;
         }
+		@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-20px); }
+}
+
+#admin-welcome-message {
+    text-align: center;
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 15px;
+    background-color: rgba(57, 73, 171, 0.1);
+    color: #333;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+#admin-welcome-message h2 {
+    font-size: 1.8em;
+    margin-bottom: 10px;
+}
+
+#admin-welcome-message h3 {
+    font-size: 1.3em;
+    margin-top: 5px;
+}
 		#notification-container {
 		  position: fixed;
 		  top: 10px;
@@ -688,6 +718,9 @@ body.is-admin td.admin-only {
             width: 90%;
             max-width: 500px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+			margin: 20px 0;
+			max-height: calc(100% - 40px);
+			overflow-y: auto;
         }
         .dialog-title {
             margin-top: 0;
@@ -1054,6 +1087,8 @@ body.is-admin td.admin-only {
 	let criticalErrorsOnly = true;
 	let initialSignIn = true; // Flag to track initial sign-in
 	let lastScannedUID = null;
+	let courseIDMap = {}; // Object to store course information - name to ID mapping
+	let sheetNameMap = {}; // Maps display names to actual sheet names
 	
 	// DOM Elements
 	const tabs = document.querySelectorAll('.tab');
@@ -1210,6 +1245,492 @@ function showMainContent() {
         mainContainer.classList.remove('content-hidden');
     }
 }
+
+/**
+ * Add the Direct EIS Export button to the UI
+ */
+function addDirectEisExportButton() {
+    // Find a good place to add the button (next to existing actions)
+    const actionsContainer = document.querySelector('.logs-actions');
+    
+    if (actionsContainer) {
+        const directEisBtn = document.createElement('button');
+        directEisBtn.className = 'btn admin-only';
+        directEisBtn.id = 'direct-eis-export-btn';
+        
+        // Create and append icon element
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-list-check';
+        directEisBtn.appendChild(icon);
+        
+        // Add space after icon
+        directEisBtn.appendChild(document.createTextNode(' Add to EIS'));
+        
+        directEisBtn.title = 'Export attendance to EIS';
+        
+        directEisBtn.addEventListener('click', showDirectEisExportDialog);
+        
+        // Insert at the beginning of the container
+		actionsContainer.insertBefore(directEisBtn, actionsContainer.firstChild);
+        
+        // Only show for admins
+        directEisBtn.style.display = isAdmin ? 'inline-block' : 'none';
+        
+        console.log('Direct EIS export button added to UI');
+    } else {
+        console.error('Could not find logs-actions container for Direct EIS button');
+    }
+}
+
+/**
+ * Direct EIS Export function using clipboard - FIXED version that ensures course metadata is loaded
+ */
+async function showDirectEisExportDialog() {
+    if (!currentCourse) {
+        showImprovedNotification('warning', 'No Course Selected', 'Please select a course before exporting to EIS');
+        return;
+    }
+    
+    // Show loading notification
+    showImprovedNotification('info', 'Loading', 'Fetching course data from spreadsheet...');
+    
+    // First, ensure we have the latest course info from the spreadsheet
+    try {
+        await fetchCourseInfo();
+        console.log("Course info after fetch:", window.courseInfoMap);
+    } catch (error) {
+        console.error("Error fetching course info:", error);
+        showImprovedNotification('warning', 'Data Warning', 'Could not fetch latest course data. Using cached data.');
+    }
+    
+    // Check if we have an EIS ID for this course
+    const eisId = getCurrentCourseEisId();
+    if (!eisId) {
+        showImprovedNotification('error', 'No course selected', 
+            'Please select a course before adding to EIS.');
+        return;
+    }
+    
+    // Get course metadata for smart defaults
+    const courseMetadata = getCourseMetadata(currentCourse);
+    console.log("Course metadata for dialog:", courseMetadata);
+    
+    // Create dialog backdrop and dialog
+    const dialogBackdrop = document.createElement('div');
+    dialogBackdrop.className = 'dialog-backdrop';
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog';
+    dialogBackdrop.appendChild(dialog);
+    
+    // Add dialog title
+    const title = document.createElement('h3');
+    title.className = 'dialog-title';
+    title.textContent = 'Add to EIS';
+    dialog.appendChild(title);
+    
+    // Create form content
+    const today = new Date().toISOString().split('T')[0];
+    const formContent = document.createElement('div');
+    
+    // Course info section
+    const courseInfo = document.createElement('div');
+    courseInfo.style.marginBottom = '15px';
+    courseInfo.style.padding = '10px';
+    courseInfo.style.backgroundColor = '#f0f0f0';
+    courseInfo.style.borderRadius = '5px';
+    courseInfo.innerHTML = `
+        <div><strong>Course:</strong> ${currentCourse}</div>
+        <div><strong>EIS ID:</strong> ${eisId}</div>
+    `;
+    formContent.appendChild(courseInfo);
+    
+    // Week selection with smart default based on current week calculation
+    const weekGroup = document.createElement('div');
+    weekGroup.className = 'form-group';
+    const weekLabel = document.createElement('label');
+    weekLabel.textContent = 'Week:';
+    weekLabel.htmlFor = 'export-week';
+    const weekSelect = document.createElement('select');
+    weekSelect.className = 'form-control';
+    weekSelect.id = 'export-week';
+    
+    // Get current week if available
+    const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : null;
+    console.log("Calculated current week:", currentWeek);
+    
+    for (let i = 1; i <= 14; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = `Week ${i}`;
+        if (currentWeek && i === currentWeek) {
+            option.selected = true;
+        }
+        weekSelect.appendChild(option);
+    }
+    weekGroup.appendChild(weekLabel);
+    weekGroup.appendChild(weekSelect);
+    formContent.appendChild(weekGroup);
+    
+    // Hours selection with default from course metadata
+    const hoursGroup = document.createElement('div');
+    hoursGroup.className = 'form-group';
+    const hoursLabel = document.createElement('label');
+    hoursLabel.textContent = 'Number of Hours:';
+    hoursLabel.htmlFor = 'export-hours';
+    const hoursSelect = document.createElement('select');
+    hoursSelect.className = 'form-control';
+    hoursSelect.id = 'export-hours';
+    
+    // Get default hours from course metadata
+    const defaultHours = courseMetadata && courseMetadata.default_hours ? 
+                         parseInt(courseMetadata.default_hours) : 2;
+    console.log("Default hours from metadata:", defaultHours);
+    
+    for (let i = 1; i <= 6; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = `${i} hr${i > 1 ? 's' : ''}`;
+        if (i === defaultHours) {
+            option.selected = true;
+        }
+        hoursSelect.appendChild(option);
+    }
+    hoursGroup.appendChild(hoursLabel);
+    hoursGroup.appendChild(hoursSelect);
+    formContent.appendChild(hoursGroup);
+    
+    // Category selection
+    const catGroup = document.createElement('div');
+    catGroup.className = 'form-group';
+    const catLabel = document.createElement('label');
+    catLabel.textContent = 'Category:';
+    catLabel.htmlFor = 'export-category';
+    const catSelect = document.createElement('select');
+    catSelect.className = 'form-control';
+    catSelect.id = 'export-category';
+    
+    // Get default category from course metadata
+    const defaultCategory = courseMetadata && courseMetadata.default_category ? 
+                           courseMetadata.default_category : 'theory';
+    console.log("Default category from metadata:", defaultCategory);
+    
+    const categories = [
+        { value: 'theory', text: 'Theory' },
+        { value: 'lab', text: 'Lab' },
+        { value: 'practice', text: 'Practice' }
+    ];
+    
+    categories.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat.value;
+        option.textContent = cat.text;
+        if (cat.value === defaultCategory) {
+            option.selected = true;
+        }
+        catSelect.appendChild(option);
+    });
+    
+    catGroup.appendChild(catLabel);
+    catGroup.appendChild(catSelect);
+    formContent.appendChild(catGroup);
+    
+    // Date selection with smart default based on current week
+    const dateGroup = document.createElement('div');
+    dateGroup.className = 'form-group';
+    const dateLabel = document.createElement('label');
+    dateLabel.textContent = 'Date:';
+    dateLabel.htmlFor = 'export-date';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.className = 'form-control';
+    dateInput.id = 'export-date';
+    
+    // Get the suggested date based on course schedule
+    const suggestedDate = courseMetadata ? getSuggestedDate(courseMetadata) : today;
+    console.log("Suggested date:", suggestedDate);
+    dateInput.value = suggestedDate;
+    
+    dateGroup.appendChild(dateLabel);
+    dateGroup.appendChild(dateInput);
+    formContent.appendChild(dateGroup);
+    
+    // Topic input
+    const topicGroup = document.createElement('div');
+    topicGroup.className = 'form-group';
+    const topicLabel = document.createElement('label');
+    topicLabel.textContent = 'Topic:';
+    topicLabel.htmlFor = 'export-topic';
+    const topicInput = document.createElement('input');
+    topicInput.type = 'text';
+    topicInput.className = 'form-control';
+    topicInput.id = 'export-topic';
+    topicInput.value = 'Lecture';
+    topicGroup.appendChild(topicLabel);
+    topicGroup.appendChild(topicInput);
+    formContent.appendChild(topicGroup);
+    
+    // EIS process options
+    const optionsGroup = document.createElement('div');
+    optionsGroup.className = 'form-group';
+    optionsGroup.style.marginTop = '15px';
+    optionsGroup.style.padding = '10px';
+    optionsGroup.style.backgroundColor = '#f0f0f0';
+    optionsGroup.style.borderRadius = '5px';
+    
+    const optionsTitle = document.createElement('div');
+    optionsTitle.style.fontWeight = 'bold';
+    optionsTitle.style.marginBottom = '10px';
+    optionsTitle.textContent = 'EIS Processing Options';
+    optionsGroup.appendChild(optionsTitle);
+    
+    // Option: Open in new tab vs same window
+    const newTabLabel = document.createElement('label');
+    newTabLabel.style.display = 'block';
+    newTabLabel.style.marginBottom = '10px';
+    
+    const newTabCheckbox = document.createElement('input');
+    newTabCheckbox.type = 'checkbox';
+    newTabCheckbox.id = 'new-tab-option';
+    newTabCheckbox.checked = true;
+    newTabCheckbox.style.marginRight = '8px';
+    
+    newTabLabel.appendChild(newTabCheckbox);
+    newTabLabel.appendChild(document.createTextNode('Open EIS in new tab'));
+    optionsGroup.appendChild(newTabLabel);
+    
+    // Option: Mark students without UIDs as absent
+    const markMissingLabel = document.createElement('label');
+    markMissingLabel.style.display = 'block';
+    
+    const markMissingCheckbox = document.createElement('input');
+    markMissingCheckbox.type = 'checkbox';
+    markMissingCheckbox.id = 'mark-missing-option';
+    markMissingCheckbox.checked = true;
+    markMissingCheckbox.style.marginRight = '8px';
+    
+    markMissingLabel.appendChild(markMissingCheckbox);
+    markMissingLabel.appendChild(document.createTextNode('Mark students without UID as absent'));
+    optionsGroup.appendChild(markMissingLabel);
+    
+    formContent.appendChild(optionsGroup);
+    
+    dialog.appendChild(formContent);
+    
+    // Dialog actions
+    const actions = document.createElement('div');
+    actions.className = 'dialog-actions';
+    
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn-green';
+    exportBtn.textContent = 'Add to EIS';
+    exportBtn.id = 'confirm-eis-export-btn';
+	
+	// Create the green info icon button
+	const infoIcon = document.createElement('i');
+	infoIcon.className = 'fas fa-info-circle';
+	infoIcon.style.fontSize = '1.2em';      // Adjust as needed
+	infoIcon.style.verticalAlign = 'middle';
+	infoIcon.style.lineHeight = '1.6';      // Matches typical button text
+	infoIcon.style.marginRight = '2px';      // Space between "Add to EIS" and the icon
+	infoIcon.style.cursor = 'pointer';
+	infoIcon.style.color = 'green';       // Set the icon color to green
+	infoIcon.style.opacity = '0.8';         // Make it opaque
+	infoIcon.title = 'Click for instructions';	
+	
+	// Create an inline info form container (initially hidden)
+	const infoForm = document.createElement('div');
+	infoForm.className = 'form-group';
+	infoForm.style.marginTop = '15px';
+	infoForm.style.padding = '10px';
+	infoForm.style.backgroundColor = '#f0f0f0';
+	infoForm.style.borderRadius = '5px';
+	infoForm.style.display = 'none';  // Hide initially
+	infoForm.innerHTML = `
+	  <p>1. Install <a href="https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">Tampermonkey</a> in your browser.</p>
+	  <p>2. Install the Userscript <a href="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js" target="_blank">by clicking here</a>.</p>
+`;
+    
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn-blue';
+    saveBtn.textContent = 'Download';
+    saveBtn.id = 'save-export-btn';
+    
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-red';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.id = 'cancel-export-btn';
+    
+    actions.appendChild(infoIcon);
+	actions.appendChild(exportBtn);
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    dialog.appendChild(actions);
+	dialog.appendChild(infoForm);
+    
+    // Add to document
+    document.body.appendChild(dialogBackdrop);
+    
+	   // Add to document
+    document.body.appendChild(dialogBackdrop);
+    
+    // Helper function to create export data (defined INSIDE the outer function)
+    function createExportData() {
+        const data = {
+            parameters: {
+                week: weekSelect.value,
+                hours: hoursSelect.value,
+                category: catSelect.value,
+                date: dateInput.value,
+                topic: topicInput.value,
+                course: currentCourse || 'Default'
+            },
+            attendance: {},
+            nameMap: { ...uidToNameMap }  // Include UID-to-name mapping for EIS
+        };
+        
+        // Process logs to count scans per student
+        if (logs && logs.length > 0) {
+            const uidCounts = {};
+            
+            // Convert the selected date to start/end timestamps for comparison
+            const selectedDate = new Date(dateInput.value);
+            selectedDate.setHours(0, 0, 0, 0); // Start of day
+            
+            const nextDay = new Date(selectedDate);
+            nextDay.setDate(nextDay.getDate() + 1); // End at start of next day
+            
+            // Count logs by UID for the selected date
+            logs.forEach(log => {
+                const logDate = new Date(log.timestamp);
+                
+                if (logDate >= selectedDate && logDate < nextDay) {
+                    const uid = log.uid;
+                    uidCounts[uid] = (uidCounts[uid] || 0) + 1;
+                    
+                    // Add name mapping if available
+                    if (uidToNameMap[uid]) {
+                        data.nameMap[uid] = uidToNameMap[uid];
+                    }
+                }
+            });
+            
+            // Add the counts to the export data
+            data.attendance = uidCounts;
+        }
+        
+        return data;
+    }
+	
+	// Add event listener for the info icon
+	infoIcon.addEventListener('click', function() {
+		// Toggle the inline info form's visibility.
+		if (infoForm.style.display === 'none' || infoForm.style.display === '') {
+			infoForm.style.display = 'block';
+		} else {
+			infoForm.style.display = 'none';
+		}
+	});
+	
+    // Handle direct export button with clipboard
+    exportBtn.addEventListener('click', () => {
+        const data = createExportData();
+        const eisId = getCurrentCourseEisId();
+        const openInNewTab = document.getElementById('new-tab-option').checked;
+        const markMissing = document.getElementById('mark-missing-option').checked;
+
+        // Add options to data (explicitly excluding autoSave)
+        data.options = {
+            markMissingAsAbsent: markMissing
+        };
+
+        // Convert to JSON and copy to clipboard
+        const jsonString = JSON.stringify(data);
+        copyToClipboard(jsonString).then(() => {
+            // Navigate to the EIS page
+            const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
+            
+            showImprovedNotification('success', 'Data Copied', 
+                `Attendance data copied to clipboard. When EIS page loads, click "Paste Attendance Data" to import.`);
+            
+            if (openInNewTab) {
+                window.open(eisUrl, '_blank');
+            } else {
+                window.location.href = eisUrl;
+            }
+            
+            document.body.removeChild(dialogBackdrop);
+        }).catch((error) => {
+            console.error("Clipboard error:", error);
+            showImprovedNotification('error', 'Clipboard Error', 
+                `Could not copy to clipboard. Try saving as file instead.`);
+        });
+    });
+    
+    // Handle save file button
+    saveBtn.addEventListener('click', () => {
+        const data = createExportData();
+        
+        // Create downloadable file
+        const dataStr = "data:text/json;charset=utf-8," + 
+                      encodeURIComponent(JSON.stringify(data, null, 2));
+        const downloadEl = document.createElement('a');
+        downloadEl.setAttribute("href", dataStr);
+        downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${dateInput.value}.json`);
+        downloadEl.style.display = "none";
+        document.body.appendChild(downloadEl);
+        downloadEl.click();
+        document.body.removeChild(downloadEl);
+        
+        showImprovedNotification('success', 'Export Saved', 
+            `Attendance data saved as a file. You can use "Import Attendance" on the EIS page.`);
+            
+        document.body.removeChild(dialogBackdrop);
+    });
+    
+    // Handle cancel
+    cancelBtn.addEventListener('click', () => {
+        document.body.removeChild(dialogBackdrop);
+    });
+}
+
+
+/**
+ * Copy text to clipboard
+ * @param {string} text - Text to copy
+ * @returns {Promise} - Resolves when copied successfully
+ */
+function copyToClipboard(text) {
+  // Use modern clipboard API if available
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  } else {
+    // Fallback for older browsers
+    return new Promise((resolve, reject) => {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';  // Prevent scrolling to bottom
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        if (successful) {
+          resolve();
+        } else {
+          reject(new Error('Clipboard copy failed'));
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+}
+
 
 // Check for auth redirect
 function checkAuthRedirect() {
@@ -1662,6 +2183,78 @@ function handleAuthClick(e) {
     }, 100);
 }
 
+/**
+ * Get course metadata for the specified course - FIXED version with better logging
+ */
+function getCourseMetadata(course) {
+    if (!course) {
+        console.log("getCourseMetadata: No course provided");
+        return null;
+    }
+    
+    // Check if the global courseInfoMap exists and contains this course
+    if (window.courseInfoMap && window.courseInfoMap[course]) {
+        console.log(`Found metadata for course: ${course}`, window.courseInfoMap[course]);
+        return window.courseInfoMap[course];
+    }
+    
+    console.log(`No metadata found for course: ${course}`);
+    console.log("Available courseInfoMap:", window.courseInfoMap);
+    
+    // No metadata found
+    return null;
+}
+
+/**
+ * Calculate the current week of the course
+ * @param {Object} metadata - Course metadata with start_date, end_date, and holiday_weeks
+ * @returns {number|null} Current week number or null if metadata is invalid
+ */
+function calculateCurrentWeek(metadata) {
+    if (!metadata || !metadata.start_date || !metadata.end_date) {
+        return null;
+    }
+    
+    const startDate = new Date(metadata.start_date);
+    const endDate = new Date(metadata.end_date);
+    const today = new Date();
+    const holidayWeeks = parseInt(metadata.holiday_weeks || 0);
+    
+    // Make sure dates are valid
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        return null;
+    }
+    
+    // Calculate week number
+    const totalWeeks = Math.ceil((endDate - startDate) / (7 * 24 * 60 * 60 * 1000));
+    const currentWeek = Math.ceil((today - startDate) / (7 * 24 * 60 * 60 * 1000));
+    const adjustedWeek = currentWeek - holidayWeeks;
+    
+    // Ensure week is within valid range
+    return Math.min(Math.max(adjustedWeek, 1), totalWeeks);
+}
+
+/**
+ * Get a suggested date for attendance export
+ * @param {Object} metadata - Course metadata
+ * @returns {string} Date string in YYYY-MM-DD format
+ */
+function getSuggestedDate(metadata) {
+    // Current date is a good default
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // If we're on a weekend, suggest the previous Friday
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        const friday = new Date(today);
+        // Go back to the previous Friday
+        friday.setDate(today.getDate() - (dayOfWeek === 0 ? 2 : 1));
+        return friday.toISOString().split('T')[0];
+    }
+    
+    return todayStr;
+}
 	
 function handleSignoutClick() {
 try {
@@ -1718,6 +2311,8 @@ function updateAuthUI() {
     const tabsContainer = document.querySelector('.tabs');
     const courseButtonsContainer = document.querySelector('.course-buttons-container');
     const scannerModule = document.querySelector('.module');
+	const directEisExportBtn = document.getElementById('direct-eis-export-btn');
+
     
     // Show/hide main containers based on auth state
     if (loginContainer) loginContainer.style.display = isSignedIn ? 'none' : 'flex';
@@ -1728,6 +2323,10 @@ function updateAuthUI() {
     // Handle scanner and scan buttons
     if (scannerModule) {
         scannerModule.style.display = isSignedIn ? 'block' : 'none';
+    }
+	
+	if (directEisExportBtn) {
+        directEisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
     }
     
 	// Handle scan buttons based on NFC support and user status
@@ -1751,7 +2350,6 @@ if (startScanBtn && stopScanBtn) {
         startScanBtn.style.display = 'none';
         stopScanBtn.style.display = 'none';
     }
-	updateScanButtons();
 }
     
     // Handle guest mode UI
@@ -1887,85 +2485,86 @@ currentSort = 'date-desc';
 }
 
 function handleCourseChange() {
-logs = []; // Clear current logs before loading new ones
+    logs = []; // Clear current logs before loading new ones
 
-if (!currentCourse) {
-	updateUI();
-	emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
-	return;
-}
+    if (!currentCourse) {
+        updateUI();
+        emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
+        return;
+    }
 
-const titleElement = document.querySelector('h1');
-if (titleElement) {
-	const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-	titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
-}
+    const titleElement = document.querySelector('h1');
+    if (titleElement) {
+        const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
+    }
 
-if (!isSignedIn) {
-	// Load logs from local storage for the course
-	const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-	if (storedLogs) {
-		try {
-			logs = JSON.parse(storedLogs);
-			logs.sort((a, b) => b.timestamp - a.timestamp);
-		} catch (e) {
-			console.error('Error parsing stored logs:', e);
-			logs = [];
-		}
-	}
-	// Update the title when a course is selected
-	updatePageTitle(); 
-	updateUI();
-	return;
-}
+    if (!isSignedIn) {
+        // Load logs from local storage for the course
+        const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+        if (storedLogs) {
+            try {
+                logs = JSON.parse(storedLogs);
+                logs.sort((a, b) => b.timestamp - a.timestamp);
+            } catch (e) {
+                console.error('Error parsing stored logs:', e);
+                logs = [];
+            }
+        }
+        
+        // Update the title when a course is selected
+        updatePageTitle(); 
+        updateUI();
+        return;
+    }
 
-// When signed in, fetch logs from the spreadsheet
-if (isOnline) {
-	fetchLogsFromSheet()
-		.then(() => {
-			updatePageTitle();
-			updateUI();
-		})
-		.catch(error => {
-			console.error('Error fetching logs:', error);
-			
-			// On error, reset title back to default
-			const titleElement = document.querySelector('h1');
-			if (titleElement) {
-				titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
-			}
-			
-			// Only show error if we're past initialization
-			if (!isInitializing) {
-				showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
-			}
-			
-			// Fallback to local storage
-			const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-			if (storedLogs) {
-				try {
-					logs = JSON.parse(storedLogs);
-					logs.sort((a, b) => b.timestamp - a.timestamp);
-				} catch (e) {
-					console.error('Error parsing stored logs:', e);
-				}
-			}
-			updateUI();
-		});
-} else {
-	// Offline: fallback to local storage
-	const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-	if (storedLogs) {
-		try {
-			logs = JSON.parse(storedLogs);
-			logs.sort((a, b) => b.timestamp - a.timestamp);
-		} catch (e) {
-			console.error('Error parsing stored logs:', e);
-		}
-	}
-	updatePageTitle();
-	updateUI();
-}
+    // When signed in, fetch logs from the spreadsheet
+    if (isOnline) {
+        fetchLogsFromSheet()
+            .then(() => {
+                updatePageTitle();
+                updateUI();
+            })
+            .catch(error => {
+                console.error('Error fetching logs:', error);
+                
+                // On error, reset title back to default
+                const titleElement = document.querySelector('h1');
+                if (titleElement) {
+                    titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+                }
+                
+                // Only show error if we're past initialization
+                if (!isInitializing) {
+                    showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                }
+                
+                // Fallback to local storage
+                const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+                if (storedLogs) {
+                    try {
+                        logs = JSON.parse(storedLogs);
+                        logs.sort((a, b) => b.timestamp - a.timestamp);
+                    } catch (e) {
+                        console.error('Error parsing stored logs:', e);
+                    }
+                }
+                updateUI();
+            });
+    } else {
+        // Offline: fallback to local storage
+        const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+        if (storedLogs) {
+            try {
+                logs = JSON.parse(storedLogs);
+                logs.sort((a, b) => b.timestamp - a.timestamp);
+            } catch (e) {
+                console.error('Error parsing stored logs:', e);
+            }
+        }
+        updatePageTitle();
+        updateUI();
+    }
 }
 
 
@@ -2047,59 +2646,67 @@ console.log('Sync button state:', {
 });
 }
 	
-	/**
-	 * Sync data with Google Sheets.
-	 * Fetches and updates both database and logs.
-	 */
+/**
+ * Sync data with Google Sheets.
+ * Fetches and updates both database and logs.
+ */
 async function syncData() {
-if (!isOnline || !isSignedIn || isSyncing) {
-	return;
-}
-
-isSyncing = true;
-
-// Show syncing indicator
-const syncIcon = syncBtn.querySelector('i');
-if (syncIcon) {
-	syncIcon.classList.add('fa-spin');
-}
-syncBtn.disabled = true;
-
-showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
-
-try {
-	// First sync database to get up-to-date UID-name mappings
-	try {
-		await fetchDatabaseFromSheet();
-	} catch (dbError) {
-		console.error('Database sync error:', dbError);
-		// Continue with logs sync even if database sync fails
-	}
-	
-	// Then sync logs if a course is selected
-	if (currentCourse) {
-		await syncLogsWithSheet();
-	} else if (availableCourses.length > 0) {
-		// If no course selected but courses are available, select the first one
-		currentCourse = availableCourses[0];
-		courseSelect.value = currentCourse;
-		await fetchLogsFromSheet();
-	}
-	
-	showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
-} catch (error) {
-	console.error('Sync error:', error);
-	showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
-} finally {
-	isSyncing = false;
-	
-	if (syncIcon) {
-		syncIcon.classList.remove('fa-spin');
-	}
-	
-	syncBtn.disabled = !isSignedIn || !isOnline;
-	updateUI();
-}
+    if (!isOnline || !isSignedIn || isSyncing) {
+        return;
+    }
+    
+    isSyncing = true;
+    
+    // Show syncing indicator
+    const syncIcon = syncBtn.querySelector('i');
+    if (syncIcon) {
+        syncIcon.classList.add('fa-spin');
+    }
+    syncBtn.disabled = true;
+    
+    showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
+    
+    try {
+        // First sync database to get up-to-date UID-name mappings
+        try {
+            await fetchDatabaseFromSheet();
+        } catch (dbError) {
+            console.error('Database sync error:', dbError);
+            // Continue with logs sync even if database sync fails
+        }
+        
+        // Fetch course info data
+        try {
+            await fetchCourseInfo();
+        } catch (infoError) {
+            console.error('Course info sync error:', infoError);
+            // Continue with logs sync even if course info sync fails
+        }
+        
+        // Then sync logs if a course is selected
+        if (currentCourse) {
+            await syncLogsWithSheet();
+        } else if (availableCourses.length > 0) {
+            // If no course selected but courses are available, select the first one
+            currentCourse = availableCourses[0];
+            courseSelect.value = currentCourse;
+            await fetchLogsFromSheet();
+        }
+        
+        showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
+    } catch (error) {
+        console.error('Sync error:', error);
+        showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+    } finally {
+        isSyncing = false;
+        
+        if (syncIcon) {
+            syncIcon.classList.remove('fa-spin');
+        }
+        
+        syncBtn.disabled = !isSignedIn || !isOnline;
+        updateUI();
+    }
 }
 
 	/**
@@ -2156,105 +2763,202 @@ if (currentCourse && currentCourse !== 'Default') {
 	titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
 }
 }
+
+/**
+ * Get the actual sheet name for a course (handles display name mapping)
+ */
+function getSheetNameForCourse(courseName) {
+  // If we have a mapping, use it, otherwise use the course name directly
+  return sheetNameMap[courseName] || courseName;
+}
+
+/**
+ * Format a sheet name for the Google Sheets API
+ * Encloses in single quotes if the name has spaces or special characters
+ */
+function formatSheetName(sheetName) {
+  return sheetName.includes(' ') || 
+         sheetName.includes('!') || 
+         sheetName.includes('\'') ? 
+         `'${sheetName}'` : sheetName;
+}
 	
-	/**
-	 * Fetch available courses (sheet names) from logs spreadsheet.
-	 */
+/**
+ * Fetch available courses (sheet names) from logs spreadsheet.
+ */
 async function fetchAvailableCourses() {
-try {
-	console.log('Fetching available courses from spreadsheet...');
-	
-	if (!isOnline) {
-		console.log('Not online or not signed in, using default courses');
-		// Default courses if offline or not signed in
-		availableCourses = [];
-		populateCourseDropdown();
-		return;
-	}
-	
-	const response = await gapi.client.sheets.spreadsheets.get({
-		spreadsheetId: LOGS_SPREADSHEET_ID
-	});
-	
-	const sheets = response.result.sheets || [];
-	availableCourses = sheets.map(sheet => sheet.properties.title);
-	
-	console.log('Fetched courses:', availableCourses);
-	
-	// If no courses found, use defaults
-	if (availableCourses.length === 0) {
-		console.warn('No courses found in spreadsheet, using defaults');
-		availableCourses = [];
-	}
-	
-	populateCourseDropdown();
-	console.log(`Found ${availableCourses.length} courses in spreadsheet`);
-} catch (error) {
-	console.error('Error fetching courses:', error);
-	
-	// Use default courses if fetch fails
-	console.log('Using default courses due to error');
-	availableCourses = [];
-	populateCourseDropdown();
-	
-	showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
-	throw error;
-}
+  try {
+    console.log('Fetching available courses from spreadsheet...');
+    
+    if (!isOnline) {
+      console.log('Not online or not signed in, using default courses');
+      // Default courses if offline or not signed in
+      availableCourses = [];
+      courseIDMap = {};
+      sheetNameMap = {};
+      populateCourseDropdown();
+      return;
+    }
+    
+    const response = await gapi.client.sheets.spreadsheets.get({
+      spreadsheetId: LOGS_SPREADSHEET_ID
+    });
+    
+    const sheets = response.result.sheets || [];
+    const allSheetNames = sheets.map(sheet => sheet.properties.title);
+    
+    // Check if we have a COURSE_INFO sheet
+    if (allSheetNames.includes('COURSE_INFO')) {
+      try {
+        console.log('COURSE_INFO sheet found, fetching course information...');
+        
+        // FIXED: Changed range from A2:C to A2:G to be consistent with fetchCourseInfo
+        const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
+          spreadsheetId: LOGS_SPREADSHEET_ID,
+          range: "'COURSE_INFO'!A2:G" // Reading all columns
+        });
+        
+        const rows = codeResponse.result.values || [];
+        
+        if (rows.length > 0) {
+          // We found course codes, use this data
+          availableCourses = [];
+          courseIDMap = {};
+          sheetNameMap = {};
+          
+          rows.forEach(row => {
+            if (row.length >= 1 && row[0]) {
+              const courseDisplayName = row[0].trim();
+              
+              const courseID = (row.length >= 7 && row[6]) ? row[6].trim() : "";
+
+              // Let's use display name by default for simplicity
+              const sheetName = courseDisplayName;
+              
+              availableCourses.push(courseDisplayName);
+              
+              if (courseID) {
+                courseIDMap[courseDisplayName] = courseID;
+              }
+              
+              sheetNameMap[courseDisplayName] = sheetName;
+            }
+          });
+          
+          console.log('Fetched courses from COURSE_INFO:', availableCourses);
+          console.log('Course ID mapping:', courseIDMap);
+          console.log('Sheet name mapping:', sheetNameMap);
+        } else {
+          // No data in COURSE_INFO, fall back to sheet names
+          availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
+          console.log('No data in COURSE_INFO, using sheet names:', availableCourses);
+        }
+      } catch (codeError) {
+        console.warn('Error reading COURSE_INFO sheet:', codeError);
+        availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
+      }
+    } else {
+      // No COURSE_INFO sheet, use sheet names directly
+      availableCourses = allSheetNames;
+      console.log('No COURSE_INFO sheet found, using all sheet names:', availableCourses);
+    }
+    
+    // If no courses found, use defaults
+    if (availableCourses.length === 0) {
+      console.warn('No courses found in spreadsheet, using defaults');
+      availableCourses = [];
+    }
+    
+    populateCourseDropdown();
+    console.log(`Found ${availableCourses.length} courses in spreadsheet`);
+  } catch (error) {
+    console.error('Error fetching courses:', error);
+    
+    // Use default courses if fetch fails
+    console.log('Using default courses due to error');
+    availableCourses = [];
+    courseIDMap = {};
+    sheetNameMap = {};
+    populateCourseDropdown();
+    
+    showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
+    throw error;
+  }
 }
 
-	/**
-	 * Fetch logs from Google Sheet for current course.
-	 */
+
+/**
+ * Get the EIS ID for the current course
+ * @returns {string|null} The EIS ID for the current course or null if not found
+ */
+function getCurrentCourseEisId() {
+  if (!currentCourse) return null;
+  
+  return courseIDMap[currentCourse] || null;
+}
+
+/**
+ * Fetch logs from Google Sheet for current course.
+ */
 async function fetchLogsFromSheet() {
-if (!currentCourse) {
-	return;
-}
+  if (!currentCourse) {
+    return;
+  }
 
-try {
-	const response = await gapi.client.sheets.spreadsheets.values.get({
-		spreadsheetId: LOGS_SPREADSHEET_ID,
-		range: `${currentCourse}!A2:D`,
-	});
-	
-	const rows = response.result.values || [];
-	const sheetLogs = [];
-	
-	rows.forEach(row => {
-		if (row.length >= 3) {
-			const uid = String(row[0]);
-			const timestamp = new Date(row[1]).getTime();
-			const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
-			const manual = row.length >= 4 ? row[3] === 'true' : false;
-			
-			if (uid && !isNaN(timestamp)) {
-				sheetLogs.push({ uid, timestamp, id, manual });
-			}
-		}
-	});
-	
-	// Sort logs by timestamp (newest first)
-	sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
-	logs = sheetLogs;
-	
-	// Also save to localStorage as backup
-	saveLogsToLocalStorage();
-	
-	console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
-	return true;
-} catch (error) {
-	console.error('Error fetching logs:', error);
-	
-	// Reset title back to default on error
-	const titleElement = document.querySelector('h1');
-	if (titleElement) {
-		titleElement.innerHTML = `<i class="fas fa-clipboard-list"></i> Attendance`;
-	}
-	
-	if (!isInitializing) {
-		showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
-	}
-	throw error;
-}
+  try {
+    // Get the actual sheet name to use (might be different from display name)
+    const sheetName = getSheetNameForCourse(currentCourse);
+    
+    // Format the sheet name for the API request
+    const formattedSheetName = formatSheetName(sheetName);
+    const range = `${formattedSheetName}!A2:D`;
+    
+    console.log(`Fetching logs from sheet: ${sheetName}, using range: ${range}`);
+    
+    const response = await gapi.client.sheets.spreadsheets.values.get({
+      spreadsheetId: LOGS_SPREADSHEET_ID,
+      range: range,
+    });
+    
+    const rows = response.result.values || [];
+    const sheetLogs = [];
+    
+    rows.forEach(row => {
+      if (row.length >= 3) {
+        const uid = String(row[0]);
+        const timestamp = new Date(row[1]).getTime();
+        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+        const manual = row.length >= 4 ? row[3] === 'true' : false;
+        
+        if (uid && !isNaN(timestamp)) {
+          sheetLogs.push({ uid, timestamp, id, manual });
+        }
+      }
+    });
+    
+    // Sort logs by timestamp (newest first)
+    sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
+    logs = sheetLogs;
+    
+    // Also save to localStorage as backup
+    saveLogsToLocalStorage();
+    
+    console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
+    return true;
+  } catch (error) {
+    console.error('Error fetching logs:', error);
+    
+    // Reset title back to default on error
+    const titleElement = document.querySelector('h1');
+    if (titleElement) {
+      titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+    }
+    
+    if (!isInitializing) {
+      showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+    }
+    throw error;
+  }
 }
 	
 function mergeLogs(localLogs, remoteLogs) {
@@ -2287,59 +2991,66 @@ return date.getFullYear() + '-' +
 	   pad(date.getSeconds());
 }
 
+/**
+ * Sync logs with Google Sheet.
+ */
 async function syncLogsWithSheet() {
-if (!currentCourse || !isAdmin) {
-	return;
-}
+  if (!currentCourse || !isAdmin) {
+    return;
+  }
 
-try {
-	console.log("Starting sync with spreadsheet...");
-	// Show syncing indicator on the sync button
-	const syncIcon = syncBtn.querySelector('i');
-	if (syncIcon) {
-		syncIcon.classList.add('fa-spin');
-	}
-	isSyncing = true;
-	
-	// Prepare the data for the spreadsheet using the universal timestamp conversion.
-	const sheetData = logs.map(log => [
-		log.uid,
-		convertTimestampToLocalISOString(log.timestamp),
-		log.id,
-		log.manual ? 'true' : 'false'
-	]);
-	
-	console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
-	
-	// Clear existing data in the target range
-	await gapi.client.sheets.spreadsheets.values.clear({
-		spreadsheetId: LOGS_SPREADSHEET_ID,
-		range: `${currentCourse}!A2:D`,
-	});
-	
-	// Write the new data if there is any
-	if (sheetData.length > 0) {
-		await gapi.client.sheets.spreadsheets.values.update({
-			spreadsheetId: LOGS_SPREADSHEET_ID,
-			range: `${currentCourse}!A2:D`,
-			valueInputOption: 'RAW',
-			resource: { values: sheetData }
-		});
-	}
-	
-	console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
-} catch (error) {
-	console.error('Error syncing logs:', error);
-	showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
-	throw error;
-} finally {
-	// Remove syncing indicator
-	const syncIcon = syncBtn.querySelector('i');
-	if (syncIcon) {
-		syncIcon.classList.remove('fa-spin');
-	}
-	isSyncing = false;
-}
+  try {
+    console.log("Starting sync with spreadsheet...");
+    // Show syncing indicator on the sync button
+    const syncIcon = syncBtn.querySelector('i');
+    if (syncIcon) {
+      syncIcon.classList.add('fa-spin');
+    }
+    isSyncing = true;
+    
+    // Get the actual sheet name
+    const sheetName = getSheetNameForCourse(currentCourse);
+    const formattedSheetName = formatSheetName(sheetName);
+    
+    // Prepare the data for the spreadsheet using the universal timestamp conversion.
+    const sheetData = logs.map(log => [
+      log.uid,
+      convertTimestampToLocalISOString(log.timestamp),
+      log.id,
+      log.manual ? 'true' : 'false'
+    ]);
+    
+    console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
+    
+    // Clear existing data in the target range
+    await gapi.client.sheets.spreadsheets.values.clear({
+      spreadsheetId: LOGS_SPREADSHEET_ID,
+      range: `${formattedSheetName}!A2:D`,
+    });
+    
+    // Write the new data if there is any
+    if (sheetData.length > 0) {
+      await gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: LOGS_SPREADSHEET_ID,
+        range: `${formattedSheetName}!A2:D`,
+        valueInputOption: 'RAW',
+        resource: { values: sheetData }
+      });
+    }
+    
+    console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
+  } catch (error) {
+    console.error('Error syncing logs:', error);
+    showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+    throw error;
+  } finally {
+    // Remove syncing indicator
+    const syncIcon = syncBtn.querySelector('i');
+    if (syncIcon) {
+      syncIcon.classList.remove('fa-spin');
+    }
+    isSyncing = false;
+  }
 }
 
 	
@@ -2387,36 +3098,39 @@ try {
 }
 
  
-	/**
-	 * Append a single log to Google Sheet (for immediate sync).
-	 * @param {Object} log - The log entry to append.
-	 */
+/**
+ * Append a single log to Google Sheet (for immediate sync).
+ */
 async function appendLogToSheet(log) {
-if (!currentCourse || !isOnline || !isSignedIn) {
-	return;
-}
+  if (!currentCourse || !isOnline || !isSignedIn) {
+    return;
+  }
 
-try {
-	await gapi.client.sheets.spreadsheets.values.append({
-		spreadsheetId: LOGS_SPREADSHEET_ID,
-		range: `${currentCourse}!A2:D`,
-		valueInputOption: 'RAW',
-		insertDataOption: 'INSERT_ROWS',
-		resource: {
-			values: [[
-				log.uid,
-				new Date(log.timestamp).toISOString(),
-				log.id,
-				log.manual ? 'true' : 'false'
-			]]
-		}
-	});
-	
-	console.log('Log appended to Google Sheet');
-} catch (error) {
-	console.error('Error appending log:', error);
-	showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
-}
+  try {
+    // Get the actual sheet name
+    const sheetName = getSheetNameForCourse(currentCourse);
+    const formattedSheetName = formatSheetName(sheetName);
+    
+    await gapi.client.sheets.spreadsheets.values.append({
+      spreadsheetId: LOGS_SPREADSHEET_ID,
+      range: `${formattedSheetName}!A2:D`,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: [[
+          log.uid,
+          new Date(log.timestamp).toISOString(),
+          log.id,
+          log.manual ? 'true' : 'false'
+        ]]
+      }
+    });
+    
+    console.log('Log appended to Google Sheet');
+  } catch (error) {
+    console.error('Error appending log:', error);
+    showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
+  }
 }
 
 	/**
@@ -2559,6 +3273,79 @@ if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the databas
 }
 }
 	
+/**
+ * Fetch course information from COURSE_INFO sheet
+ * @returns {Promise} A promise that resolves when course info is fetched
+ */
+async function fetchCourseInfo() {
+    if (!isOnline || !isSignedIn) {
+        console.log("Not fetching course info: not signed in or offline");
+        return;
+    }
+    
+    try {
+        console.log("Fetching course info from spreadsheet...");
+        
+        // Check if the COURSE_INFO sheet exists
+        const spreadsheetResponse = await gapi.client.sheets.spreadsheets.get({
+            spreadsheetId: LOGS_SPREADSHEET_ID
+        });
+        
+        const sheets = spreadsheetResponse.result.sheets || [];
+        const hasInfoSheet = sheets.some(sheet => sheet.properties.title === 'COURSE_INFO');
+        
+        if (!hasInfoSheet) {
+            console.log("No COURSE_INFO sheet found");
+            return;
+        }
+        
+        // Fetch the course info data
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: LOGS_SPREADSHEET_ID,
+            range: 'COURSE_INFO!A2:G'
+        });
+        
+        const rows = response.result.values || [];
+        if (rows.length === 0) {
+            console.log("No course info data found");
+            return;
+        }
+        
+        // Initialize global courseInfoMap if it doesn't exist
+        if (!window.courseInfoMap) {
+            window.courseInfoMap = {};
+        }
+        
+        // Process the course info data
+        // Columns: A=Course, B=Start Date, C=End Date, D=Holiday Weeks, E=Default Hours, F=Default Category, G=EIS ID
+        rows.forEach(row => {
+            if (row.length < 4) return; // Skip incomplete rows
+            
+            const course = row[0];
+            if (!course) return;
+            
+            // Store in the global courseInfoMap - FIXED INDICES HERE
+            window.courseInfoMap[course] = {
+                start_date: row[1] || "",         // Column B - Start Date
+                end_date: row[2] || "",           // Column C - End Date
+                holiday_weeks: row[3] || "0",     // Column D - Holiday Weeks
+                default_hours: row[4] || "2",     // Column E - Default Hours
+                default_category: row[5] || "theory", // Column F - Default Category
+                eis_id: row[6] || ""              // Column G - EIS ID
+            };
+            
+            // If EIS ID is provided, update the courseIDMap
+            if (row[6]) {
+                if (!courseIDMap) courseIDMap = {};
+                courseIDMap[course] = row[6];     // Use EIS ID from column G
+            }
+        });
+        
+        console.log("Course info loaded successfully:", window.courseInfoMap);
+    } catch (error) {
+        console.error("Error fetching course info:", error);
+    }
+}
 	/**
 	 * Clear the entire database.
 	 */
@@ -3647,43 +4434,38 @@ databaseStatus.textContent = count > 0 ? `${count} entries` : 'Not loaded';
 	 * Update the entire UI.
 	 */
 function updateUI() {
-updateLogsList();
-updateDatabaseList();
-updateDatabaseStatus();
-updatePageTitle();
+    updateLogsList();
+    updateDatabaseList();
+    updateDatabaseStatus();
+    updatePageTitle();
 
-// Update total scans and last scan info
-totalScans.textContent = logs.length;
+    // Update total scans and last scan info
+    totalScans.textContent = logs.length;
 
-if (logs.length > 0) {
-	const latestLog = logs.reduce((latest, log) => 
-		log.timestamp > latest.timestamp ? log : latest, logs[0]);
-		
-	const lastTimestamp = new Date(latestLog.timestamp);
-	lastScan.textContent = lastTimestamp.toLocaleString();
-} else {
-	lastScan.textContent = 'Never';
-}
+    if (logs.length > 0) {
+        const latestLog = logs.reduce((latest, log) => 
+            log.timestamp > latest.timestamp ? log : latest, logs[0]);
+            
+        const lastTimestamp = new Date(latestLog.timestamp);
+        lastScan.textContent = lastTimestamp.toLocaleString();
+    } else {
+        lastScan.textContent = 'Never';
+    }
 
-// Enable/disable buttons
-exportBtn.disabled = logs.length === 0;
-clearBtn.disabled = logs.length === 0;
+    // Enable/disable buttons
+    exportBtn.disabled = logs.length === 0;
+    clearBtn.disabled = logs.length === 0;
 
-if (isAdmin) {
-	// Admin-specific UI updates
-	clearDbBtn.disabled = Object.keys(uidToNameMap).length === 0;
-	exportExcelBtn.disabled = Object.keys(uidToNameMap).length === 0;
-	
-	// Update scan buttons based on scanning state
-	if (isScanning) {
-		startScanBtn.style.display = 'none';
-		stopScanBtn.style.display = 'flex';
-	} else {
-		startScanBtn.style.display = 'flex';
-		stopScanBtn.style.display = 'none';
-	}
-}
-populateCourseButtons();
+    if (isAdmin) {
+        // Admin-specific UI updates
+        clearDbBtn.disabled = Object.keys(uidToNameMap).length === 0;
+        exportExcelBtn.disabled = Object.keys(uidToNameMap).length === 0;
+    }
+    
+    // IMPORTANT: Always respect NFC support status
+    updateScanButtons();
+    
+    populateCourseButtons();
 }
 
 	/**
@@ -3758,15 +4540,15 @@ function updateScanButtons() {
         return;
     }
     
-    // Always hide buttons first if NFC is not supported
+    // ALWAYS check NFC support first - this takes highest priority
     if (!nfcSupported) {
         console.log('NFC not supported - hiding all scan buttons');
         startScanBtn.style.display = 'none';
         stopScanBtn.style.display = 'none';
-        return;
+        return; // Exit early!
     }
     
-    // If NFC is supported, handle button visibility based on user role
+    // Only proceed if NFC is supported
     console.log('NFC supported - updating buttons based on user role');
     console.log('isSignedIn:', isSignedIn, 'isAdmin:', isAdmin, 'isScanning:', isScanning);
     
@@ -3791,71 +4573,112 @@ function updateScanButtons() {
 	 * @param {Object} event - The NFC reading event.
 	 */
 async function handleNfcReading({ serialNumber }) {
-lastScannedUID = serialNumber;
-// For non-signed-in users, only show UID without saving anything
-if (!isSignedIn) {
-	// Play success sound
-	playSound(true);
-	
-	// Update the welcome message to show the UID
-	let notSignedInMsg = document.getElementById('not-signed-in-message');
-	if (notSignedInMsg) {
-		notSignedInMsg.innerHTML = `
-			<h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
-			<h3 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h3>
-		`;
-	}
-	
-	// Show success notification
-	/* showImprovedNotification('success', 'Tag scanned', 
-		`<b>UID:</b> ${serialNumber}<br><br>` +
-		`<b>Sign in with your EPOKA account to track attendance.</b>`);*/
-	return;
-}
+    lastScannedUID = serialNumber;
+    
+    // For non-signed-in users, only show UID without saving anything
+    if (!isSignedIn) {
+        // Play success sound
+        playSound(true);
+        
+        // Update the welcome message to show the UID
+        let notSignedInMsg = document.getElementById('not-signed-in-message');
+        if (notSignedInMsg) {
+            notSignedInMsg.innerHTML = `
+                <h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
+                <h2 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h2>
+            `;
+        }
+        return;
+    }
+    
+    // Standard flow for signed-in users
+    if (!currentCourse) {
+        showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+        return;
+    }
 
-// Standard flow for signed-in users
-if (!currentCourse) {
-	showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
-	return;
-}
+    // Create log entry
+    const timestamp = new Date();
+    const newLog = {
+        uid: serialNumber,
+        timestamp: timestamp.getTime(),
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        manual: false
+    };
 
-// Create log entry
-const timestamp = new Date();
-const newLog = {
-	uid: serialNumber,
-	timestamp: timestamp.getTime(),
-	id: Date.now() + Math.random().toString(36).substr(2, 9),
-	manual: false
-};
+    // Add to logs
+    logs.unshift(newLog);
 
-// Add to logs
-logs.unshift(newLog);
+    // Save to localStorage
+    saveLogsToLocalStorage();
 
-// Save to localStorage
-saveLogsToLocalStorage();
+    // Update UI
+    updateUI();
 
-// Update UI
-updateUI();
+    // Determine name for notification
+    const name = uidToNameMap[serialNumber] || 'Unknown';
 
-// Determine name for notification
-const name = uidToNameMap[serialNumber] || 'Unknown';
+    // Play success sound
+    playSound(true);
+    
+    // Create welcome banner for admin users only
+    if (isAdmin) {
+        // Create or get the welcome message element
+        let adminWelcomeMsg = document.getElementById('admin-welcome-message');
+        if (!adminWelcomeMsg) {
+            adminWelcomeMsg = document.createElement('div');
+            adminWelcomeMsg.id = 'admin-welcome-message';
+            adminWelcomeMsg.className = 'not-signed-in-message'; // Using same style class
+            
+            // Insert after the course buttons container
+            const courseButtonsContainer = document.getElementById('course-buttons-container');
+            if (courseButtonsContainer && courseButtonsContainer.nextSibling) {
+                courseButtonsContainer.parentNode.insertBefore(adminWelcomeMsg, courseButtonsContainer.nextSibling);
+            } else {
+                // Fallback - after header
+                const appHeader = document.querySelector('.app-header');
+                if (appHeader) {
+                    appHeader.parentNode.insertBefore(adminWelcomeMsg, appHeader.nextSibling);
+                }
+            }
+        }
+        
+        // Update the admin welcome message with the name
+        adminWelcomeMsg.innerHTML = `
+            <h3><i class="fas fa-check-circle"></i> Welcome<br></h3>
+			<h2 style="margin-top: 10px; font-weight: bold;"> ${name}!</h2>
+            <h3>Your attendance has been recorded.</h3>
+        `;
+        
+        // Add CSS to make message appear with animation
+        adminWelcomeMsg.style.animation = 'none';
+        adminWelcomeMsg.offsetHeight; // Trigger reflow
+        adminWelcomeMsg.style.animation = 'fadeIn 0.5s ease-in-out';
+        
+        // Auto-hide the message after some time
+        setTimeout(() => {
+            adminWelcomeMsg.style.animation = 'fadeOut 0.5s ease-in-out forwards';
+            setTimeout(() => {
+                if (adminWelcomeMsg.parentNode) {
+                    adminWelcomeMsg.parentNode.removeChild(adminWelcomeMsg);
+                }
+            }, 500);
+        }, 10000); // Display for 10 seconds
+    }
 
-// Play success sound
-playSound(true);
+    // Show success notification
+    showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
 
-// Show success notification
-showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
-
-// If online and signed in as admin, append log to sheet
-if (isOnline && isSignedIn && isAdmin) {
-	try {
-		await appendLogToSheet(newLog);
-		console.log('Log synced successfully');
-	} catch (err) {
-		console.error('Error appending log:', err);
-		showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
-	}
-}
+    // If online and signed in as admin, append log to sheet
+    if (isOnline && isSignedIn && isAdmin) {
+        try {
+            await appendLogToSheet(newLog);
+            console.log('Log synced successfully');
+        } catch (err) {
+            console.error('Error appending log:', err);
+            showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
+        }
+    }
 }
 
 	
@@ -4098,6 +4921,7 @@ setTimeout(() => {
 		}, 3000);
 	}
 }, 2000);
+setTimeout(addDirectEisExportButton, 2000);
 });
 </script>
 
