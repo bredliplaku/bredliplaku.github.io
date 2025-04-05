@@ -516,8 +516,8 @@
                         <input type="text" id="student-name" class="form-control" placeholder="Enter your full name" required>
                     </div>
                     <div class="form-group">
-                        <label for="student-id">Student ID</label>
-                        <input type="text" id="student-id" class="form-control" placeholder="Enter your student ID" required>
+                        <label for="student-id">EXAM ID</label>
+                        <input type="text" id="student-id" class="form-control" placeholder="Enter your exam ID" required>
                     </div>
                     <div class="form-group">
                         <label for="student-email">Epoka Email</label>
@@ -573,8 +573,8 @@ const EXAM_CONFIG_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw
 const EXAM_SUBMISSIONS_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw'; // Replace with your actual submissions spreadsheet ID
 
 // API client configuration
-const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
-const SCOPES = "https://www.googleapis.com/auth/spreadsheets";
+const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4", "https://www.googleapis.com/discovery/v1/apis/oauth2/v2/rest"];
+const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
 // Global variables
 let tokenClient = null;
@@ -655,25 +655,6 @@ function initGoogleApi() {
         return;
     }
     
-    if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
-        console.error('google.accounts object is undefined');
-        showNotification('error', 'API Error', 'Google Identity Services not loaded.');
-        showMainContent();
-        return;
-    }
-    
-    // Set up token client for auth
-    try {
-        tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: CLIENT_ID,
-            scope: SCOPES,
-            callback: handleTokenResponse
-        });
-    } catch (error) {
-        console.error('Failed to initialize token client:', error);
-        showNotification('error', 'Auth Error', 'Failed to initialize authentication.');
-    }
-    
     // Load the GAPI client
     gapi.load('client', () => {
         gapi.client.init({
@@ -682,18 +663,20 @@ function initGoogleApi() {
         }).then(() => {
             console.log('GAPI client initialized successfully');
             
+            // Check for existing auth
+            checkAuthRedirect();
+            
             // Try to access the spreadsheet without authentication first
             tryPublicAccess()
                 .then(success => {
                     if (success) {
                         showMainContent();
                     } else {
-                        // Public access failed, try to authenticate
-                        doAuth();
+                        showMainContent();
                     }
                 })
                 .catch(() => {
-                    doAuth();
+                    showMainContent();
                 });
         }).catch(error => {
             console.error('Error initializing GAPI client:', error);
@@ -750,10 +733,11 @@ function doAuth() {
                    `client_id=${CLIENT_ID}&` +
                    `redirect_uri=${redirectUri}&` +
                    `response_type=token&` +
+                   `prompt=select_account&` +
                    `scope=${scopes}`;
     
-    // Redirect to Google auth page
-    window.location.href = authUrl;
+    // Open Google auth in a new tab
+    window.open(authUrl, '_blank');
 }
 
 /**
