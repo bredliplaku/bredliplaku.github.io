@@ -596,14 +596,17 @@ function init() {
     const loadingIndicator = document.getElementById('app-loading');
     loadingIndicator.style.display = 'flex';
     
+    // Check for saved token in localStorage
+    checkSavedSession();
+    
     // Initialize Google API
     setTimeout(() => {
-        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+        if (typeof gapi !== 'undefined') {
             initGoogleApi();
         } else {
             console.warn('Google API objects not available yet, waiting longer...');
             setTimeout(() => {
-                if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+                if (typeof gapi !== 'undefined') {
                     console.log('Google API objects loaded after extended wait');
                     initGoogleApi();
                 } else {
@@ -621,6 +624,23 @@ function init() {
     
     // Collect device fingerprint
     collectDeviceFingerprint();
+}
+
+/**
+ * Check for saved session in localStorage
+ */
+function checkSavedSession() {
+    const storedToken = localStorage.getItem('gapi_token');
+    if (storedToken) {
+        try {
+            JSON.parse(storedToken); // Validate JSON format
+            isSignedIn = true;
+            console.log('Found saved session token');
+        } catch (e) {
+            console.error('Invalid token format in localStorage');
+            localStorage.removeItem('gapi_token');
+        }
+    }
 }
 
 /**
@@ -656,33 +676,27 @@ function initGoogleApi() {
     }
     
     // Load the GAPI client
-    gapi.load('client', () => {
-        gapi.client.init({
-            apiKey: API_KEY,
-            discoveryDocs: DISCOVERY_DOCS
-        }).then(() => {
+    gapi.load('client', async () => {
+        try {
+            await gapi.client.init({
+                apiKey: API_KEY,
+                discoveryDocs: DISCOVERY_DOCS
+            });
+            
             console.log('GAPI client initialized successfully');
             
-            // Check for existing auth
-            checkAuthRedirect();
-            
             // Try to access the spreadsheet without authentication first
-            tryPublicAccess()
-                .then(success => {
-                    if (success) {
-                        showMainContent();
-                    } else {
-                        showMainContent();
-                    }
-                })
-                .catch(() => {
-                    showMainContent();
-                });
-        }).catch(error => {
+            const success = await tryPublicAccess();
+            
+            // Check for auth token in URL (must be done after GAPI is initialized)
+            processAuthRedirect();
+            
+            showMainContent();
+        } catch (error) {
             console.error('Error initializing GAPI client:', error);
             showNotification('error', 'API Error', 'Failed to initialize Google API.');
             showMainContent();
-        });
+        }
     });
 }
 
@@ -727,7 +741,7 @@ async function tryPublicAccess() {
 function doAuth() {
     // Create Google OAuth URL with scopes
     const scopes = encodeURIComponent(SCOPES);
-    const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
+    const redirectUri = encodeURIComponent(window.location.href.split('#')[0]); // Remove any existing hash
     
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
                    `client_id=${CLIENT_ID}&` +
@@ -736,8 +750,8 @@ function doAuth() {
                    `prompt=select_account&` +
                    `scope=${scopes}`;
     
-    // Open Google auth in a new tab
-    window.open(authUrl, '_blank');
+    // Open Google auth in same window to ensure proper redirect
+    window.location.href = authUrl;
 }
 
 /**
