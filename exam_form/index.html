@@ -523,6 +523,11 @@
                         <label for="student-email">Epoka Email</label>
                         <input type="email" id="student-email" class="form-control" placeholder="youremail@epoka.edu.al" required>
                     </div>
+                    <div class="form-group" style="text-align: center; margin-top: 20px;">
+                        <button type="button" id="epoka-sign-in" class="btn-submit" style="background-color: #2196F3;">
+                            <i class="fas fa-sign-in-alt"></i> Sign in with EPOKA Mail
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -564,8 +569,8 @@
 // Configuration
 const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
 const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
-const EXAM_CONFIG_SPREADSHEET_ID = '14SgW9V3ZLYDqqoAutkvHEuLvcogpJ2hMEj_qj72wmEw'; // Replace with your actual spreadsheet ID
-const EXAM_SUBMISSIONS_SPREADSHEET_ID = '14SgW9V3ZLYDqqoAutkvHEuLvcogpJ2hMEj_qj72wmEw'; // Replace with your actual submissions spreadsheet ID
+const EXAM_CONFIG_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw'; // Replace with your actual spreadsheet ID
+const EXAM_SUBMISSIONS_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw'; // Replace with your actual submissions spreadsheet ID
 
 // API client configuration
 const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -610,8 +615,9 @@ function init() {
         }
     }, 1000);
     
-    // Attach event listener to the submit button
+    // Attach event listeners to buttons
     document.getElementById('submit-exam').addEventListener('click', submitExam);
+    document.getElementById('epoka-sign-in').addEventListener('click', doAuth);
     
     // Collect device fingerprint
     collectDeviceFingerprint();
@@ -711,6 +717,15 @@ async function tryPublicAccess() {
             
             if (data.values && data.values.length > 0) {
                 processExamConfig(data.values);
+                
+                // Even if public access works, we still need auth for submissions
+                // So make the sign-in button visible but not mandatory yet
+                const signInBtn = document.getElementById('epoka-sign-in');
+                if (signInBtn) {
+                    signInBtn.style.backgroundColor = '#fb8c00';
+                    signInBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign in to Submit';
+                }
+                
                 return true;
             }
         }
@@ -724,17 +739,21 @@ async function tryPublicAccess() {
 }
 
 /**
- * Authenticate with Google
+ * Authenticate with Google using redirect flow
  */
 function doAuth() {
-    if (tokenClient) {
-        tokenClient.callback = handleTokenResponse;
-        tokenClient.requestAccessToken({prompt: 'consent'});
-    } else {
-        console.error('Token client not initialized');
-        showNotification('error', 'Auth Error', 'Authentication client not initialized.');
-        showMainContent();
-    }
+    // Create Google OAuth URL with scopes
+    const scopes = encodeURIComponent(SCOPES);
+    const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
+    
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                   `client_id=${CLIENT_ID}&` +
+                   `redirect_uri=${redirectUri}&` +
+                   `response_type=token&` +
+                   `scope=${scopes}`;
+    
+    // Redirect to Google auth page
+    window.location.href = authUrl;
 }
 
 /**
