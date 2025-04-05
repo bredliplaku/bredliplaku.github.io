@@ -27,19 +27,14 @@ RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters ,1 ,True
 echo Enabling firewall and applying rules...
 netsh advfirewall set allprofiles state on
 
-:: Resolve IP of allowed domain
-for /f "tokens=2 delims=[]" %%a in ('ping -n 1 github.io') do set "SITE_IP=%%a"
+:: Allow GitHub domains for exam site
+netsh advfirewall firewall add rule name="Allow GitHub for Exam" dir=out action=allow remoteip=192.30.252.0/22,185.199.108.0/22,140.82.112.0/20,143.55.64.0/20 enable=yes
 
-:: Allow access to exam site (GitHub Pages)
-netsh advfirewall firewall add rule name="Allow Exam Site" dir=out action=allow remoteip=%SITE_IP% enable=yes
+:: Allow Google domains for authentication and sheets
+netsh advfirewall firewall add rule name="Allow Google Domains" dir=out action=allow remoteip=172.217.0.0/19,74.125.0.0/16,64.233.160.0/19,108.177.0.0/17,34.192.0.0/10,35.184.0.0/13,35.192.0.0/14,35.196.0.0/15,35.198.0.0/16,35.199.0.0/17,35.235.0.0/16 enable=yes
 
-:: Allow Google APIs for authentication and sheet access
-for /f "tokens=2 delims=[]" %%a in ('ping -n 1 googleapis.com') do set "GOOGLE_API_IP=%%a"
-netsh advfirewall firewall add rule name="Allow Google APIs" dir=out action=allow remoteip=%GOOGLE_API_IP% enable=yes
-
-:: Allow Google Accounts for authentication
-for /f "tokens=2 delims=[]" %%a in ('ping -n 1 accounts.google.com') do set "GOOGLE_ACCOUNTS_IP=%%a"
-netsh advfirewall firewall add rule name="Allow Google Accounts" dir=out action=allow remoteip=%GOOGLE_ACCOUNTS_IP% enable=yes
+:: Allow Cloudflare CDN (for libraries)
+netsh advfirewall firewall add rule name="Allow Cloudflare CDN" dir=out action=allow remoteip=104.16.0.0/12,162.158.0.0/15,172.64.0.0/13,131.0.72.0/22 enable=yes
 
 :: Block all other traffic
 netsh advfirewall firewall add rule name="Block All Other Traffic" dir=out action=block enable=yes
