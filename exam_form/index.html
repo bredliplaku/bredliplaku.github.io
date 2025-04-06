@@ -1424,36 +1424,56 @@ function fetchUserInfo() {
  * Fetch exam configuration from the spreadsheet.
  */
 function fetchExamConfig() {
-    showNotification('info', 'Loading', 'Fetching exam configuration...', 3000);
+    if (typeof gapi === 'undefined' || !gapi.client) {
+        console.error('GAPI client not available');
+        showLoadingError('API client not loaded. Please refresh the page.');
+        return Promise.reject(new Error('GAPI client not available'));
+    }
 
-    // First try direct API access with authentication
     return gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: EXAM_CONFIG_SPREADSHEET_ID,
         range: 'ExamConfig!A2:F'
     }).then(response => {
-        console.log('Successfully fetched exam config with auth', response);
         const data = response.result;
         if (data.values && data.values.length > 0) {
             processExamConfig(data.values);
-            
-            // Also fetch questions now that we have the exam details
             return fetchExamQuestions();
         } else {
-            console.error('No exam config data found');
-            showLoadingError('No exam configuration found in the spreadsheet.');
+            showLoadingError('No exam configuration found.');
+            return Promise.reject(new Error('No exam config data'));
         }
     }).catch(error => {
-        console.error('Error fetching exam config with auth:', error);
+        console.error('Error fetching exam config:', error);
         
-        // Try public access as a fallback
-        return tryPublicAccess().then(success => {
-            if (!success) {
-                showLoadingError('Could not access the exam configuration. Please check your connection or contact the instructor.');
-            } else {
-                // If public access worked for exam config, try to fetch questions
-                return fetchExamQuestions();
-            }
-        });
+        if (error.status === 403) {
+            showNotification('error', 'Permission Denied', 
+                'You don\'t have permission to access this exam. Please sign in with your EPOKA email.');
+        } else {
+            showLoadingError('Could not access exam configuration. Try signing in again.');
+        }
+        
+        return Promise.reject(error);
+    });
+}
+
+/**
+ * Test spreadsheet access
+ */
+function testSpreadsheetAccess() {
+    if (!isSignedIn) {
+        showNotification('warning', 'Not Signed In', 'Please sign in first to test access.');
+        return;
+    }
+    
+    showNotification('info', 'Testing Access', 'Checking spreadsheet permissions...');
+    
+    gapi.client.sheets.spreadsheets.get({
+        spreadsheetId: EXAM_CONFIG_SPREADSHEET_ID
+    }).then(() => {
+        showNotification('success', 'Access Granted', 'You have permission to access the spreadsheet.');
+    }).catch(error => {
+        console.error('Permission test failed:', error);
+        showNotification('error', 'Access Denied', 'You don\'t have permission. Make sure you\'re using the correct EPOKA email account.');
     });
 }
 
