@@ -717,18 +717,33 @@ function handleAuthRedirect() {
         showNotification('success', 'Authentication Successful', 'Successfully signed in with your EPOKA mail.');
         
         // Set the token in gapi client
-        gapi.client.setToken({ access_token: params.access_token });
-        localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-        isSignedIn = true;
-        
-        // Fetch user info and update form
-        fetchUserInfo();
-        
-        // Update sign-in button
-        updateSignInButton(true);
-        
-        // Fetch exam config
-        fetchExamConfig();
+        if (typeof gapi !== 'undefined' && gapi.client) {
+            gapi.client.setToken({ access_token: params.access_token });
+            localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
+            isSignedIn = true;
+            
+            // Fetch user info and update form
+            fetchUserInfo().then(() => {
+                // Update sign-in button
+                updateSignInButton(true);
+                
+                // Also fetch exam config
+                return fetchExamConfig();
+            }).catch(error => {
+                console.error('Error after authentication:', error);
+                showNotification('warning', 'Authentication Issue', 'Authenticated successfully but had trouble loading your profile.');
+            });
+        } else {
+            // If gapi isn't ready yet, store the token and wait
+            localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
+            isSignedIn = true;
+            showNotification('info', 'Setting up your session...', 'Please wait a moment.');
+            
+            // Try to initialize again
+            setTimeout(() => {
+                initGoogleApiWithRetry();
+            }, 1000);
+        }
         
         // Clean up the URL to remove the token (for security)
         if (history.replaceState) {
@@ -743,59 +758,54 @@ function handleAuthRedirect() {
  * Initialize the application.
  */
     function init() {
-        updateYear();
-        
-        // Show loading screen
-        const loadingIndicator = document.getElementById('app-loading');
-        loadingIndicator.style.display = 'flex';
-        
-        // Check for saved token in localStorage
-        const storedToken = localStorage.getItem('gapi_token');
-        if (storedToken) {
-            try {
-                JSON.parse(storedToken);
-                isSignedIn = true;
-                console.log('Found saved session token');
-            } catch (e) {
-                console.error('Invalid token format in localStorage');
-                localStorage.removeItem('gapi_token');
-            }
+    updateYear();
+    
+    // Show loading screen
+    const loadingIndicator = document.getElementById('app-loading');
+    loadingIndicator.style.display = 'flex';
+    
+    // Check for saved token in localStorage
+    const storedToken = localStorage.getItem('gapi_token');
+    if (storedToken) {
+        try {
+            const tokenObj = JSON.parse(storedToken);
+            isSignedIn = true;
+            console.log('Found saved session token');
+            
+            // Set the token in gapi client once it's loaded
+            const setTokenInterval = setInterval(() => {
+                if (typeof gapi !== 'undefined' && gapi.client) {
+                    clearInterval(setTokenInterval);
+                    gapi.client.setToken(tokenObj);
+                    
+                    // Also call fetchUserInfo to load user data
+                    fetchUserInfo();
+                }
+            }, 500);
+        } catch (e) {
+            console.error('Invalid token format in localStorage');
+            localStorage.removeItem('gapi_token');
         }
-        
-        // Handle auth redirect if there's a hash in the URL
-        if (window.location.hash && window.location.hash.includes('access_token=')) {
-            console.log('Found token in URL, will process after initialization');
-        }
-        
-        // Initialize Google API
-        setTimeout(() => {
-            if (typeof gapi !== 'undefined') {
-                initGoogleApi();
-            } else {
-                console.warn('Google API objects not available yet, waiting longer...');
-                setTimeout(() => {
-                    if (typeof gapi !== 'undefined') {
-                        console.log('Google API objects loaded after extended wait');
-                        initGoogleApi();
-                    } else {
-                        console.error('Google API objects still not available after extended wait');
-                        showNotification('error', 'API Error', 'Google API libraries not loaded. Check your internet connection or try using a different browser.');
-                        showMainContent();
-                    }
-                }, 3000);
-            }
-        }, 1000);
-        
-        // Attach event listeners to buttons
-        document.getElementById('submit-exam').addEventListener('click', submitExam);
-        document.getElementById('epoka-sign-in').addEventListener('click', doAuth);
-        
-        // Collect device fingerprint
-        collectDeviceFingerprint();
-        
-        // Initialize connection monitoring (add this line)
-        initConnectionMonitoring();
     }
+    
+    // Handle auth redirect if there's a hash in the URL
+    if (window.location.hash && window.location.hash.includes('access_token=')) {
+        console.log('Found token in URL, will process after initialization');
+    }
+    
+    // Initialize Google API with retry
+    initGoogleApiWithRetry();
+    
+    // Attach event listeners to buttons
+    document.getElementById('submit-exam').addEventListener('click', submitExam);
+    document.getElementById('epoka-sign-in').addEventListener('click', doAuth);
+    
+    // Collect device fingerprint
+    collectDeviceFingerprint();
+    
+    // Initialize connection monitoring
+    initConnectionMonitoring();
+}
 
 /**
  * Show the main content when ready
@@ -819,13 +829,18 @@ function showMainContent() {
 /**
  * Initialize the Google API client.
  */
-function initGoogleApi() {
+function initGoogleApiWithRetry(retryCount = 0) {
     console.log('Initializing Google API...');
     
     if (typeof gapi === 'undefined') {
-        console.error('gapi object is undefined');
-        showNotification('error', 'API Error', 'Google API client not loaded.');
-        showMainContent();
+        if (retryCount < 5) {
+            console.warn(`gapi not available, retrying in 1 second (attempt ${retryCount + 1}/5)...`);
+            setTimeout(() => initGoogleApiWithRetry(retryCount + 1), 1000);
+        } else {
+            console.error('gapi object is undefined after 5 retries');
+            showNotification('error', 'API Error', 'Google API client not loaded. Please refresh the page or try a different browser.');
+            showMainContent();
+        }
         return;
     }
     
@@ -850,8 +865,14 @@ function initGoogleApi() {
             showMainContent();
         } catch (error) {
             console.error('Error initializing GAPI client:', error);
-            showNotification('error', 'API Error', 'Failed to initialize Google API.');
-            showMainContent();
+            
+            if (retryCount < 3) {
+                console.warn(`Error initializing GAPI, retrying in 2 seconds (attempt ${retryCount + 1}/3)...`);
+                setTimeout(() => initGoogleApiWithRetry(retryCount + 1), 2000);
+            } else {
+                showNotification('error', 'API Error', 'Failed to initialize Google API after multiple attempts. Please check your internet connection.');
+                showMainContent();
+            }
         }
     });
 }
@@ -1281,30 +1302,48 @@ function updateSignInButton(isSignedIn) {
 /**
  * Fetch user profile information
  */
-function fetchUserInfo() {
-    if (!isSignedIn) return;
-    
-    console.log('Fetching user info...');
-    
-    gapi.client.request({
-        'path': 'https://www.googleapis.com/oauth2/v2/userinfo',
-        'method': 'GET'
-    }).then(function(response) {
-        const data = response.result;
-        console.log('Got user info:', data);
-        
-        // Update form fields with user information
-        if (data.name) {
-            document.getElementById('student-name').value = data.name;
-            document.getElementById('student-name').readOnly = true;
+function fetchUserInfo(retryCount = 0) {
+    return new Promise((resolve, reject) => {
+        if (!isSignedIn) {
+            reject(new Error('Not signed in'));
+            return;
         }
         
-        if (data.email) {
-            document.getElementById('student-email').value = data.email;
-            document.getElementById('student-email').readOnly = true;
-        }
-    }, function(error) {
-        console.error('Error fetching user info:', error);
+        console.log('Fetching user info...');
+        
+        gapi.client.request({
+            'path': 'https://www.googleapis.com/oauth2/v2/userinfo',
+            'method': 'GET'
+        }).then(function(response) {
+            const data = response.result;
+            console.log('Got user info:', data);
+            
+            // Update form fields with user information
+            if (data.name) {
+                document.getElementById('student-name').value = data.name;
+                document.getElementById('student-name').readOnly = true;
+            }
+            
+            if (data.email) {
+                document.getElementById('student-email').value = data.email;
+                document.getElementById('student-email').readOnly = true;
+            }
+            
+            resolve(data);
+        }, function(error) {
+            console.error('Error fetching user info:', error);
+            
+            if (retryCount < 2) {
+                console.warn(`Error fetching user info, retrying in 1 second (attempt ${retryCount + 1}/2)...`);
+                setTimeout(() => {
+                    fetchUserInfo(retryCount + 1)
+                        .then(resolve)
+                        .catch(reject);
+                }, 1000);
+            } else {
+                reject(error);
+            }
+        });
     });
 }
 
@@ -1750,19 +1789,26 @@ async function submitExam(autoSubmit = false) {
     if (isSubmitting || hasSubmitted) {
         return;
     }
-	
-	// Check if online and authenticated
-	if (!isOnline) {
-		showNotification('error', 'Offline Mode', 'You cannot submit your exam while offline. Please connect to the internet.', 5000);
-		return;
-	}
-	
-	// Validate token before submission
-	const tokenValid = await validateToken();
-	if (!tokenValid) {
-		showAuthExpiredModal();
-		return;
-	}
+    
+    // Check if online and authenticated
+    if (!isOnline) {
+        showNotification('error', 'Offline Mode', 'You cannot submit your exam while offline. Please connect to the internet.', 5000);
+        return;
+    }
+    
+    // Validate token before submission
+    let tokenValid = false;
+    try {
+        tokenValid = await validateToken();
+    } catch (error) {
+        console.error('Token validation error:', error);
+    }
+    
+    if (!tokenValid) {
+        showNotification('error', 'Session Expired', 'Your session has expired. Please sign in again.');
+        showAuthExpiredModal();
+        return;
+    }
     
     // Set submitting flag
     isSubmitting = true;
@@ -1779,6 +1825,7 @@ async function submitExam(autoSubmit = false) {
     
     try {
         // Collect answers
+        showNotification('info', 'Processing', 'Collecting your answers...', 3000);
         const examData = await collectAnswers();
         
         // Generate a submission ID
@@ -1788,22 +1835,26 @@ async function submitExam(autoSubmit = false) {
         // Submit to Google Sheets
         if (isSignedIn) {
             try {
+                showNotification('info', 'Processing', 'Submitting your exam...', 3000);
                 await submitToGoogleSheets(examData);
                 showSubmissionSuccess(submissionId);
             } catch (error) {
                 console.error('Error submitting to Google Sheets:', error);
+                showNotification('warning', 'Submission Issue', 'Could not submit to server. Saving locally instead.', 5000);
+                
                 // Try to submit via alternative method
                 saveLocally(examData);
                 showSubmissionSuccess(submissionId, true);
             }
         } else {
             // If not signed in, save locally
+            showNotification('warning', 'Not Signed In', 'You are not signed in. Saving your submission locally.', 5000);
             saveLocally(examData);
             showSubmissionSuccess(submissionId, true);
         }
     } catch (error) {
         console.error('Error submitting exam:', error);
-        showNotification('error', 'Submission Error', 'There was an error submitting your exam. Please try again or contact your instructor.');
+        showNotification('error', 'Submission Error', 'There was an error submitting your exam: ' + error.message, 10000);
         
         // Reset the submit button
         document.getElementById('submit-exam').disabled = false;
@@ -1824,17 +1875,37 @@ function generateSubmissionId(studentId) {
 /**
  * Submit exam data to Google Sheets
  */
-async function submitToGoogleSheets(examData) {
-    // Prepare data for submission
+function submitToGoogleSheets(examData) {
+    // Format data for submission
     const formattedData = formatDataForSheet(examData);
     
-    // Submit to Google Sheets
-    await gapi.client.sheets.spreadsheets.values.append({
-        spreadsheetId: EXAM_SUBMISSIONS_SPREADSHEET_ID,
-        range: 'Submissions!A:Z',
-        valueInputOption: 'USER_ENTERED',
-        resource: {
-            values: [formattedData]
+    // Debug log to verify data is formatted correctly
+    console.log('Submitting data to sheet:', formattedData);
+    
+    // Try to verify the spreadsheet exists and is accessible first
+    return gapi.client.sheets.spreadsheets.get({
+        spreadsheetId: EXAM_SUBMISSIONS_SPREADSHEET_ID
+    }).then(() => {
+        // Spreadsheet exists and is accessible, proceed with submission
+        return gapi.client.sheets.spreadsheets.values.append({
+            spreadsheetId: EXAM_SUBMISSIONS_SPREADSHEET_ID,
+            range: 'Submissions!A:Z',
+            valueInputOption: 'USER_ENTERED',
+            insertDataOption: 'INSERT_ROWS',
+            resource: {
+                values: [formattedData]
+            }
+        });
+    }).catch(error => {
+        console.error('Error with spreadsheet access:', error);
+        
+        // Check if this is a permission error
+        if (error.status === 403) {
+            throw new Error('Permission denied. You do not have access to the submissions spreadsheet.');
+        } else if (error.status === 404) {
+            throw new Error('Submissions spreadsheet not found. Please verify the spreadsheet ID.');
+        } else {
+            throw error;
         }
     });
 }
