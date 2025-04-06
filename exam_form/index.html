@@ -566,11 +566,18 @@
     </footer>
 
 <script>
+// Add error tracking to debug function issues
+window.onerror = function(msg, url, line, col, error) {
+    console.error("ERROR:", msg, "at line:", line, "column:", col);
+    console.error("Stack trace:", error && error.stack);
+    return false; // Let default handler run
+};
+
 // Configuration
 const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
 const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
-const EXAM_CONFIG_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw'; // Replace with your actual spreadsheet ID
-const EXAM_SUBMISSIONS_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw'; // Replace with your actual submissions spreadsheet ID
+const EXAM_CONFIG_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw'; 
+const EXAM_SUBMISSIONS_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw';
 
 // API client configuration
 const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4", "https://www.googleapis.com/discovery/v1/apis/oauth2/v2/rest"];
@@ -627,86 +634,6 @@ function handleAuthRedirect() {
 }
 
 /**
- * Handle auth redirect and token in URL.
- */
-function handleAuthRedirect() {
-    console.log('Processing auth redirect with token');
-    
-    // Parse the hash parameters
-    const params = {};
-    window.location.hash.substring(1).split('&').forEach(pair => {
-        const [key, value] = pair.split('=');
-        params[key] = decodeURIComponent(value);
-    });
-    
-    if (params.access_token) {
-        console.log('Successfully extracted access token');
-        showNotification('success', 'Authentication Successful', 'Successfully signed in with your EPOKA mail.');
-        
-        // Set the token in gapi client
-        gapi.client.setToken({ access_token: params.access_token });
-        localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-        isSignedIn = true;
-        
-        // Fetch user info and update form
-        fetchUserInfo();
-        
-        // Update sign-in button
-        updateSignInButton(true);
-        
-        // Fetch exam config
-        fetchExamConfig();
-        
-        // Clean up the URL to remove the token (for security)
-        if (history.replaceState) {
-            history.replaceState(null, null, window.location.pathname);
-        } else {
-            window.location.hash = '';
-        }
-    }
-}
-
-/**
- * Handle auth redirect and token in URL.
- */
-function handleAuthRedirect() {
-    console.log('Processing auth redirect with token');
-    
-    // Parse the hash parameters
-    const params = {};
-    window.location.hash.substring(1).split('&').forEach(pair => {
-        const [key, value] = pair.split('=');
-        params[key] = decodeURIComponent(value);
-    });
-    
-    if (params.access_token) {
-        console.log('Successfully extracted access token');
-        showNotification('success', 'Authentication Successful', 'Successfully signed in with your EPOKA mail.');
-        
-        // Set the token in gapi client
-        gapi.client.setToken({ access_token: params.access_token });
-        localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-        isSignedIn = true;
-        
-        // Fetch user info and update form
-        fetchUserInfo();
-        
-        // Update sign-in button
-        updateSignInButton(true);
-        
-        // Fetch exam config
-        fetchExamConfig();
-        
-        // Clean up the URL to remove the token (for security)
-        if (history.replaceState) {
-            history.replaceState(null, null, window.location.pathname);
-        } else {
-            window.location.hash = '';
-        }
-    }
-}
-
-/**
  * Initialize the application.
  */
 function init() {
@@ -720,7 +647,7 @@ function init() {
     const storedToken = localStorage.getItem('gapi_token');
     if (storedToken) {
         try {
-            JSON.parse(storedToken); // Validate JSON format
+            JSON.parse(storedToken);
             isSignedIn = true;
             console.log('Found saved session token');
         } catch (e) {
@@ -896,24 +823,51 @@ function doAuth() {
 }
 
 /**
- * Handle token response from Google OAuth.
+ * Update sign-in button state
  */
-function handleTokenResponse(resp) {
-    console.log('Received token response');
+function updateSignInButton(isSignedIn) {
+    const signInBtn = document.getElementById('epoka-sign-in');
+    if (!signInBtn) return;
     
-    if (resp.error !== undefined) {
-        console.error('Token response error:', resp.error);
-        showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
-        return;
+    if (isSignedIn) {
+        signInBtn.innerHTML = '<i class="fas fa-check-circle"></i> Signed In Successfully';
+        signInBtn.style.backgroundColor = '#43a047';
+        signInBtn.disabled = true;
+    } else {
+        signInBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign in with EPOKA Mail';
+        signInBtn.style.backgroundColor = '#2196F3';
+        signInBtn.disabled = false;
     }
+}
+
+/**
+ * Fetch user profile information
+ */
+function fetchUserInfo() {
+    if (!isSignedIn) return;
     
-    // User is signed in
-    isSignedIn = true;
+    console.log('Fetching user info...');
     
-    // Fetch exam config
-    fetchExamConfig();
-    
-    showMainContent();
+    gapi.client.request({
+        'path': 'https://www.googleapis.com/oauth2/v2/userinfo',
+        'method': 'GET'
+    }).then(function(response) {
+        const data = response.result;
+        console.log('Got user info:', data);
+        
+        // Update form fields with user information
+        if (data.name) {
+            document.getElementById('student-name').value = data.name;
+            document.getElementById('student-name').readOnly = true;
+        }
+        
+        if (data.email) {
+            document.getElementById('student-email').value = data.email;
+            document.getElementById('student-email').readOnly = true;
+        }
+    }, function(error) {
+        console.error('Error fetching user info:', error);
+    });
 }
 
 /**
