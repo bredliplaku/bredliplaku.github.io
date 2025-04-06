@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Exam Portal</title>
-		<link rel="icon" type="image/png" href="https://bredliplaku.github.io/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
 	<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
     <script src="https://apis.google.com/js/api.js" async defer></script>
 	<script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
-        /* --- CSS (minimized - use full CSS from previous responses if needed) --- */
+        /* --- Full CSS from previous responses should be included here --- */
+        /* --- Using minimized version for brevity --- */
         :root { --primary-color: #3949ab; --primary-dark: #1a237e; --success-color: #43a047; --warning-color: #fb8c00; --info-color: #2196F3; --danger-color: #f44336; --text-light: #fff; }
 		*, *::before, *::after { box-sizing: border-box; }
         body, html { margin: 0; padding: 0; font-family: 'Roboto', sans-serif; background: #ffffff; color: #333; } .container { max-width: 1000px; margin: 20px auto; padding: 20px; }
@@ -65,15 +65,15 @@
 
 <script>
 	// === Configuration ===
-	const ADMIN_EMAILS = [];
-	const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com'; // Provided
-	const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE'; // Provided
-	const EXAM_SPREADSHEET_ID = '14SgW9V3ZLYDqqoAutkvHEuLvcogpJ2hMEj_qj72wmEw'; // Provided
+	const ADMIN_EMAILS = []; // Keep empty if no admin features needed
+	const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
+	const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
+	const EXAM_SPREADSHEET_ID = '14SgW9V3ZLYDqqoAutkvHEuLvcogpJ2hMEj_qj72wmEw';
     const EXAM_DETAILS_SHEET_NAME = 'Exams'; // Needs PIN, code, name, duration, deadline, mode, questions
-    const EXAM_ATTEMPTS_SHEET_NAME = 'Attempts'; // Logs attempts
+    const EXAM_ATTEMPTS_SHEET_NAME = 'Attempts'; // Logs: Timestamp, Name(Q), Email(Q), PIN, CourseCode, StudentExamID(E), Status, Answers, Fingerprint
 
 	const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
-	// *** IMPORTANT: Using write scope now - requires user consent on first login ***
+	// *** Using Write Scope - User MUST Consent on first login after this change ***
     const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
 	// === App State ===
@@ -83,15 +83,14 @@
     let tokenClient = null;
 	let isOnline = navigator.onLine;
     let isSyncing = false;
-    let isInitializing = true; // Fixed: Declared
-    let examDetails = null; // Stores { PIN, Code, Name, Duration, Deadline, Mode, Questions }
-    let studentPINEntered = ''; // PIN entered by student
+    let isInitializing = true; // Fixed: Declared globally
+    let examDetails = null;
+    let studentPINEntered = '';
     let studentExamIdEntered = ''; // 5-char ID entered ONLY in Exam mode
     let examTimerInterval = null;
     let examEndTime = null;
 
 	// === DOM Elements ===
-    // (Assume these match the HTML above)
     const loadingIndicator = document.getElementById('app-loading');
     const mainContainer = document.getElementById('main-container');
     const syncStatus = document.getElementById('sync-status');
@@ -107,8 +106,7 @@
     const examCodeDisplay = document.getElementById('exam-code-display');
     const examDurationDisplay = document.getElementById('exam-duration-display');
     const examDeadlineDisplay = document.getElementById('exam-deadline-display');
-    const officialIdDisplayItem = document.getElementById('official-id-display-item'); // Hidden for now
-    const officialIdDisplay = document.getElementById('official-id-display');
+    // OfficialExamID elements removed from DOM cache as they are removed from HTML
     const signinPromptModule = document.getElementById('signin-prompt-module');
     const examStartModule = document.getElementById('exam-start-module');
     const studentNameInput = document.getElementById('student-name');
@@ -121,7 +119,6 @@
     const examDetailsDisplay = document.getElementById('exam-details-display');
     const examNameDetail = document.getElementById('exam-name-detail');
     const examCourseCodeDetail = document.getElementById('exam-course-code-detail');
-    const officialExamIdDetail = document.getElementById('official-exam-id-detail');
     const examModeDetail = document.getElementById('exam-mode-detail');
     const examDurationDetail = document.getElementById('exam-duration-detail');
     const examDeadlineDetail = document.getElementById('exam-deadline-detail');
@@ -138,49 +135,59 @@
 
 	function init() {
 	    console.log("Initializing...");
-	    document.body.classList.remove('content-hidden');
+	    // Make body visible earlier to avoid long blank screen if API load slow
+	    if (document.body) document.body.classList.remove('content-hidden');
+        if (mainContainer) mainContainer.classList.add('content-visible'); // Use visible class
+
 	    updateYear();
 	    setupEventListeners();
-	    updateOnlineStatus();
+	    updateOnlineStatus(); // Initial status check
 	    window.addEventListener('online', updateOnlineStatus);
 	    window.addEventListener('offline', updateOnlineStatus);
+	    // Init Google API slightly later
 	    setTimeout(() => {
 	        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
 	            initGoogleApi();
 	        } else {
 	            handleApiInitError(new Error("Google API objects not loaded"));
 	        }
-	    }, 500);
+	    }, 500); // Short delay
 	}
 
     function setupEventListeners() {
-        loginBtn.addEventListener('click', handleAuthClick);
-        logoutBtn.addEventListener('click', handleSignoutClick);
-        loadExamBtn.addEventListener('click', handleLoadExam);
-        startExamBtn.addEventListener('click', handleStartExam);
-        submitExamBtn.addEventListener('click', () => handleSubmitExam(false));
-        examPinInput.addEventListener('input', () => {
-            loadExamBtn.disabled = examPinInput.value.trim() === '' || !isSignedIn || !isOnline;
-        });
-        studentExamIdInput.addEventListener('input', validateStudentExamIdInput);
+        // Ensure elements exist before adding listeners
+        if (loginBtn) loginBtn.addEventListener('click', handleAuthClick);
+        if (logoutBtn) logoutBtn.addEventListener('click', handleSignoutClick);
+        if (loadExamBtn) loadExamBtn.addEventListener('click', handleLoadExam);
+        if (startExamBtn) startExamBtn.addEventListener('click', handleStartExam);
+        if (submitExamBtn) submitExamBtn.addEventListener('click', () => handleSubmitExam(false));
+        if (examPinInput) {
+            examPinInput.addEventListener('input', () => {
+                if(loadExamBtn) loadExamBtn.disabled = examPinInput.value.trim() === '' || !isSignedIn || !isOnline;
+            });
+        }
+        if (studentExamIdInput) studentExamIdInput.addEventListener('input', validateStudentExamIdInput);
+
         // Initial states
-        loadExamBtn.disabled = true;
-        startExamBtn.disabled = true;
-        submitExamBtn.disabled = true;
+        if (loadExamBtn) loadExamBtn.disabled = true;
+        if (startExamBtn) startExamBtn.disabled = true;
+        if (submitExamBtn) submitExamBtn.disabled = true;
     }
 
     function showAppContent() {
-        loadingIndicator.classList.add('hidden');
-        mainContainer.classList.add('content-visible');
+        // Hides loading overlay
+        if (loadingIndicator) loadingIndicator.classList.add('hidden');
+        // Ensure main content is visible (redundant if body class removed early, but safe)
+        if (mainContainer) mainContainer.classList.add('content-visible');
         console.log("App content shown.");
     }
 
-    function updateYear() {
-        const yearElement = document.getElementById('currentYear');
-        if (yearElement) {
+    function updateYear() { // Definition included
+		const yearElement = document.getElementById('currentYear');
+		if (yearElement) {
             yearElement.textContent = new Date().getFullYear();
         }
-    }
+	}
 
 	// === Google API & Auth ===
 	function initGoogleApi() {
@@ -188,386 +195,518 @@
 	    try {
 	        tokenClient = google.accounts.oauth2.initTokenClient({
 	            client_id: CLIENT_ID,
-	            scope: SCOPES,
+	            scope: SCOPES, // Using potentially write-enabled scope
 	            callback: handleTokenResponse
 	        });
-	        gapi.load('client', async () => {
+	        gapi.load('client', async () => { // Load GAPI client library after GSI
 	            try {
 	                await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
 	                console.log('GAPI client initialized.');
 	                const savedToken = localStorage.getItem('gapi_token');
-	                if (savedToken) {
+	                if (savedToken) { // Check for saved token
 	                    const token = JSON.parse(savedToken);
-	                    if (token?.access_token && !isTokenExpired(token)) {
-	                        gapi.client.setToken(token);
+	                    if (token?.access_token && !isTokenExpired(token)) { // Check validity
+	                        gapi.client.setToken(token); // Use saved token
 	                        console.log("Using saved token.");
-	                        await tokenObtained(token);
-	                    } else {
+	                        await tokenObtained(token); // Proceed as logged in
+	                    } else { // Saved token is bad
 	                        console.log("Saved token invalid/expired.");
 	                        localStorage.removeItem('gapi_token');
-	                        updateAuthUI(); showAppContent();
+	                        updateAuthUI(); showAppContent(); // Show login prompt
 	                    }
-	                } else {
+	                } else { // No saved token
 	                    console.log("No saved token found.");
-	                    updateAuthUI(); showAppContent();
+	                    updateAuthUI(); showAppContent(); // Show login prompt
 	                }
-	            } catch (error) { handleApiInitError(error); }
+	            } catch (error) { handleApiInitError(error); } // Handle GAPI init error
 	        });
-	    } catch (error) {
+	    } catch (error) { // Handle GSI init error
 	        handleApiInitError(error);
 	    }
 	}
 
     function handleApiInitError(error) {
+        // Central handler for API initialization errors
         console.error('API Init Error:', error);
         showImprovedNotification('error', 'API Load Error', `Failed to load Google services: ${error.message}`, 0);
-        updateAuthUI();
-        showAppContent();
+        updateAuthUI(); // Show login button etc.
+        showAppContent(); // Ensure page content is visible
     }
 
     function isTokenExpired(token) {
-        // Placeholder for expiry check
+        // Placeholder - Needs proper implementation if token includes expiry info
         return false;
     }
 
     function handleAuthClick() {
+        // Initiates Google Sign-In flow
         if (tokenClient) {
             showImprovedNotification('info', 'Signing In', 'Opening Google Sign-In...');
-            // Use 'select_account' to allow switching users easily
-            // Use 'consent' if you change scopes and need re-approval
+            // Recommend 'select_account' to allow switching users
+            // Use 'consent' prompt if you change SCOPES and need explicit re-approval
             tokenClient.requestAccessToken({ prompt: 'select_account' });
         } else {
-            console.error('Token client not init.');
-            showImprovedNotification('error', 'Auth Error', 'Auth service not ready.');
+            console.error('Token client not initialized.');
+            showImprovedNotification('error', 'Auth Error', 'Authentication service not ready.');
         }
     }
 
     function handleTokenResponse(resp) {
-        if (resp.error) {
+        // Callback function after Google Sign-In attempt
+        if (resp.error) { // Handle errors
             console.error('Token response error:', resp);
             let msg = `Failed: ${resp.error}`;
             if(resp.error === 'popup_closed_by_user') msg = 'Sign-in cancelled.';
-            if(resp.error === 'access_denied') msg = 'Permission denied. Required permissions must be allowed.';
+            if(resp.error === 'access_denied') msg = 'Permission denied. Please allow access.';
             showImprovedNotification('error', 'Auth Error', msg);
             updateAuthUI(); showAppContent();
             return;
         }
-        console.log('Token received.');
-        localStorage.setItem('gapi_token', JSON.stringify(resp));
-        gapi.client.setToken(resp);
-        tokenObtained(resp);
+        // Success
+        console.log('Token received successfully.');
+        localStorage.setItem('gapi_token', JSON.stringify(resp)); // Store token
+        gapi.client.setToken(resp); // Set token for GAPI calls
+        tokenObtained(resp); // Proceed with logged-in flow
     }
 
     async function tokenObtained(token) {
+        // Central function called when a valid token is available
         console.log("Token available.");
         isSignedIn = true;
-        await fetchUserInfo();
-        updateAuthUI(); // Update UI AFTER user info is fetched
-        showAppContent();
+        await fetchUserInfo(); // Get user details
+        updateAuthUI(); // Update UI based on login state
+        showAppContent(); // Ensure content visible
     }
 
 	async function fetchUserInfo() {
-	    if (!gapi.client.getToken()?.access_token) { console.warn("fetchUserInfo: No token."); return; }
+        // Fetches user profile info using the access token
+	    if (!gapi.client.getToken()?.access_token) { console.warn("fetchUserInfo: No valid token."); return; }
 	    console.log('Fetching user info...');
 	    try {
 	        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}` } });
-	        if (!r.ok) { if (r.status === 401) { handleSignoutClick(); return; } throw new Error(`(${r.status}) ${await r.text()}`); }
+	        if (!r.ok) { // Handle errors, especially 401 Unauthorized
+                if (r.status === 401) { console.warn("User info fetch failed (401), signing out."); handleSignoutClick(); return; }
+                throw new Error(`(${r.status}) ${await r.text()}`);
+            }
 	        const ui = await r.json();
-	        currentUser = { id: ui.sub, name: ui.name||'N/A', email: ui.email||'N/A', picture: ui.picture||'' };
+	        currentUser = { id: ui.sub, name: ui.name||'N/A', email: ui.email||'N/A', picture: ui.picture||'' }; // Store user info
 	        console.log('User fetched:', currentUser.email);
+	        // Populate UI elements with user data
             if(studentNameInput) studentNameInput.value = currentUser.name;
             if(studentEmailInput) studentEmailInput.value = currentUser.email;
             if(userAvatar) userAvatar.src = currentUser.picture;
             if(userName) userName.textContent = currentUser.name;
-	        isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+	        isAdmin = ADMIN_EMAILS.includes(currentUser.email); // Check if admin
 	        document.body.classList.toggle('is-admin', isAdmin);
-            if(examPinInput) examPinInput.disabled = false;
-            if(loadExamBtn) loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline;
+            if(examPinInput) examPinInput.disabled = false; // Enable PIN input now user is logged in
+            if(loadExamBtn) loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline; // Update load button state
 	    } catch (e) {
 	        console.error('Fetch user info error:', e);
-	        showImprovedNotification('error','User Info Error',`Could not get details: ${e.message}.`);
-	        currentUser = null;
-            updateAuthUI(); // Rerun to potentially reset UI if fetch failed
+	        showImprovedNotification('error','User Info Error',`Could not get user details: ${e.message}.`);
+	        currentUser = null; // Clear user object on error
+            updateAuthUI(); // Re-run UI update, will likely reset to logged-out state
 	    }
 	}
 
 	function handleSignoutClick() {
+        // Logs the user out, revokes token, clears state
 	    console.log("Signing out...");
 	    const t = gapi.client.getToken();
 	    if (t?.access_token) { try { google.accounts.oauth2.revoke(t.access_token, () => console.log('Token revoked.')); } catch (e) { console.warn("Revoke error:", e); } gapi.client.setToken(''); }
 	    localStorage.removeItem('gapi_token');
+        // Reset all application state variables
         isSignedIn = false; isAdmin = false; currentUser = null; examDetails = null; studentPINEntered = ''; studentExamIdEntered = '';
-        stopTimer();
-        resetExamState();
-	    updateAuthUI();
+        stopTimer(); // Stop timer if running
+        resetExamState(); // Reset UI elements
+	    updateAuthUI(); // Update controls based on new state
 	    showImprovedNotification('info', 'Signed Out', 'Signed out.');
 	}
 
     // === UI State & Reset ===
     function resetExamState() {
+        // Resets the UI to the initial, pre-login/pre-exam state
         console.log("Resetting UI to initial state.");
         if (examStartModule) examStartModule.classList.add('hidden');
         if (examDetailsModule) examDetailsModule.classList.add('hidden');
         if (examQuestionsModule) examQuestionsModule.classList.add('hidden');
         if (submissionConfirmationModule) submissionConfirmationModule.classList.add('hidden');
         if (studentExamIdGroup) studentExamIdGroup.classList.add('hidden');
-        if (signinPromptModule) signinPromptModule.classList.remove('hidden');
+        if (signinPromptModule) signinPromptModule.classList.remove('hidden'); // Show sign-in prompt
 
-        if(examPinInput) { examPinInput.value = ''; examPinInput.disabled = true; }
-        if(studentExamIdInput) studentExamIdInput.value = '';
-        if(studentNameInput) studentNameInput.value = '';
-        if(studentEmailInput) studentEmailInput.value = '';
+        // Clear inputs and disable them
+        if (examPinInput) { examPinInput.value = ''; examPinInput.disabled = true; }
+        if (studentExamIdInput) studentExamIdInput.value = '';
+        if (studentNameInput) studentNameInput.value = '';
+        if (studentEmailInput) studentEmailInput.value = '';
 
-        if(loadExamBtn) loadExamBtn.disabled = true;
-        if(startExamBtn) startExamBtn.disabled = true;
-        if(submitExamBtn) { submitExamBtn.disabled = true; submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam'; }
+        // Disable buttons
+        if (loadExamBtn) loadExamBtn.disabled = true;
+        if (startExamBtn) startExamBtn.disabled = true;
+        if (submitExamBtn) { submitExamBtn.disabled = true; submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam'; }
 
+        // Reset header info
         const na = 'N/A';
         if (examCodeDisplay) examCodeDisplay.textContent = na;
         if (examDurationDisplay) examDurationDisplay.textContent = na;
         if (examDeadlineDisplay) examDeadlineDisplay.textContent = na;
         if (examNameHeader) examNameHeader.textContent = 'Please sign in to load the exam';
-        if (officialIdDisplayItem) officialIdDisplayItem.style.display = 'none';
-        if (officialIdDisplay) officialIdDisplay.textContent = '';
 
+        // Reset details module content
         if (examNameDetail) examNameDetail.textContent = '';
         if (examCourseCodeDetail) examCourseCodeDetail.textContent = '';
         if (examModeDetail) examModeDetail.textContent = '';
         if (examDurationDetail) examDurationDetail.textContent = '';
         if (examDeadlineDetail) examDeadlineDetail.textContent = '';
 
+        // Reset questions area and timer
         if (examQuestionsArea) examQuestionsArea.innerHTML = '<p>Exam questions will appear here...</p>';
         stopTimer();
         if (timerDisplay) timerDisplay.textContent = '--:--';
     }
 
     function updateAuthUI() {
+        // Controls UI visibility based on login status and currentUser object
         console.log('Updating Auth UI - SignedIn:', isSignedIn, 'CurrentUser:', !!currentUser);
-        document.body.classList.toggle('is-admin', isAdmin);
+        if (document.body) document.body.classList.toggle('is-admin', isAdmin);
 
-        if (isSignedIn && currentUser) {
+        if (isSignedIn && currentUser) { // User is signed in AND user info was fetched successfully
             console.log('Showing logged-in UI.');
             if(loginContainer) loginContainer.style.display = 'none';
             if(userContainer) userContainer.style.display = 'flex';
             if (signinPromptModule) signinPromptModule.classList.add('hidden');
-            // Show PIN input module only if no exam process is active
-            if (examStartModule && examDetailsModule.classList.contains('hidden') && examQuestionsModule.classList.contains('hidden')) {
+            // Show PIN input module only if no exam process is active yet
+            if (examStartModule && examDetailsModule?.classList.contains('hidden') && examQuestionsModule?.classList.contains('hidden')) {
                 examStartModule.classList.remove('hidden');
             }
-            if(examPinInput) examPinInput.disabled = false;
-            if(loadExamBtn) loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline;
-            // Populate user details
+            if(examPinInput) examPinInput.disabled = false; // Enable PIN input
+            if(loadExamBtn) loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline; // Enable load btn if PIN has text & online
+            // Populate user details display fields
             if(studentNameInput) studentNameInput.value = currentUser.name || 'N/A';
             if(studentEmailInput) studentEmailInput.value = currentUser.email || 'N/A';
             if(userName) userName.textContent = currentUser.name || '';
             if(userAvatar) userAvatar.src = currentUser.picture || '';
-        } else {
+        } else { // User is not signed in OR user info fetch failed
             console.log('Showing logged-out UI or state after user fetch error.');
             if(loginContainer) loginContainer.style.display = 'flex';
             if(userContainer) userContainer.style.display = 'none';
             resetExamState(); // Reset everything
-            if(signinPromptModule) signinPromptModule.classList.remove('hidden');
+            if(signinPromptModule) signinPromptModule.classList.remove('hidden'); // Ensure sign-in prompt is visible
         }
     }
 
+
     // === Google Sheets Interaction ===
     async function getSheetData(spreadsheetId, range) {
+        // Fetches data from the specified sheet range
         if (!isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API Error', 'Not signed in or Sheets API not ready.'); return null; }
         if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot fetch data offline.'); return null; }
         console.log(`Workspaceing: ${spreadsheetId}, Range: ${range}`); setSyncing(true);
-        try { const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range }); console.log(`Workspaceed ${range}`); return response.result.values || []; }
-        catch (err) { console.error(`Error fetching ${range}:`, err); showImprovedNotification('error', 'Sheet Read Error', `Could not fetch data: ${err.result?.error?.message || err.message}`); return null; }
-        finally { setSyncing(false); }
+        try {
+            const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range });
+            console.log(`Workspaceed ${range}`);
+            return response.result.values || []; // Return empty array if range is empty
+        } catch (err) {
+            console.error(`Error fetching ${range}:`, err);
+            showImprovedNotification('error', 'Sheet Read Error', `Could not fetch data: ${err.result?.error?.message || err.message}`);
+            return null; // Return null on error
+        } finally {
+            setSyncing(false); // Update sync status indicator
+        }
     }
 
-    async function appendSheetData(spreadsheetId, sheetName, values) { // Changed range to sheetName
+    async function appendSheetData(spreadsheetId, sheetName, values) {
+        // Appends rows to the specified sheet
         if (!isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API Error', 'Not signed in or Sheets API not ready.'); return false; }
-        if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets") ) { console.warn("Read-only scope. Cannot write. Data:", values); showImprovedNotification('warning', 'Read-Only Mode', 'Cannot save attempt (read-only).'); return true; }
-        if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot save data offline.'); return false; }
+        // Check scope before attempting write
+        if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets") ) {
+             console.warn("Read-only scope detected. Cannot write attempt. Data:", values);
+             showImprovedNotification('warning', 'Read-Only Mode', 'Cannot save attempt (read-only access). Check SCOPES constant.');
+             // Simulate success for UI flow if writing is optional. Change to false if writing is mandatory.
+             return true;
+        }
+        if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot save data offline.'); return false; } // Cannot append if offline
         console.log(`Appending to Sheet: ${spreadsheetId}, Name: ${sheetName}`); setSyncing(true);
         try {
-            // Use sheetName directly - Sheets API appends after the last row with data
             const response = await gapi.client.sheets.spreadsheets.values.append({
                 spreadsheetId: spreadsheetId,
-                range: sheetName, // Just the sheet name
+                range: sheetName, // Append to the sheet by name
                 valueInputOption: 'USER_ENTERED',
                 insertDataOption: 'INSERT_ROWS',
                 resource: { values: values }
             });
-            console.log('Append success:', response.result); return true;
-        } catch (err) {
+            console.log('Append success:', response.result);
+            return true; // Indicate success
+        } catch (err) { // Handle errors during append operation
             console.error(`Error appending to ${sheetName}:`, err);
             const errDetail = err.result?.error;
             showImprovedNotification('error', `Sheet Write Error (${errDetail?.status || 'Unknown'})`, `Could not save data: ${errDetail?.message || err.message}`);
-            return false;
+            return false; // Indicate failure
         } finally {
-            setSyncing(false);
+            setSyncing(false); // Update sync status indicator
         }
     }
-
 
     // === Exam Logic ===
     async function handleLoadExam() {
-        studentPINEntered = examPinInput.value.trim(); if (!studentPINEntered) { showImprovedNotification('warning', 'Missing PIN', 'Enter Exam PIN.'); return; }
+        // Triggered when "Load Exam Details" button is clicked
+        studentPINEntered = examPinInput.value.trim();
+        if (!studentPINEntered) { showImprovedNotification('warning', 'Missing PIN', 'Enter Exam PIN.'); return; }
         loadExamBtn.disabled = true; loadExamBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
-        await fetchExamDetails(studentPINEntered);
+        await fetchExamDetails(studentPINEntered); // Fetch details using the entered PIN
         loadExamBtn.disabled = false; loadExamBtn.innerHTML = '<i class="fas fa-download"></i> Load Exam Details';
-        if(startExamBtn) startExamBtn.disabled = !examDetails; // Keep start disabled if load failed
+        // Start button state is handled within fetchExamDetails based on Mode and validation
     }
 
     async function fetchExamDetails(pin) {
+        // Fetches exam details from sheet based on PIN, handles Mode logic
         showImprovedNotification('info', 'Fetching Exam', `Loading details for PIN: ${pin}...`);
         // Columns A-G: PIN, code, name, duration, deadline, mode, questions
-        const range = `${EXAM_DETAILS_SHEET_NAME}!A:G`;
-        const data = await getSheetData(EXAM_SPREADSHEET_ID, range); examDetails = null; if (data === null) return;
+        const range = `${EXAM_DETAILS_SHEET_NAME}!A:G`; // Updated range
+        const data = await getSheetData(EXAM_SPREADSHEET_ID, range);
+        examDetails = null; // Reset details first
+        if (data === null) return; // Error already shown by getSheetData
 
-        if (data.length > 1) {
+        if (data.length > 1) { // Check if any data rows exist (row 0 is header)
             const header = data[0].map(h => String(h).trim().toLowerCase());
+            // Define indices based on expected headers
             const indices = { pin: header.indexOf('pin'), code: header.indexOf('code'), name: header.indexOf('name'), duration: header.indexOf('duration'), deadline: header.indexOf('deadline'), mode: header.indexOf('mode'), questions: header.indexOf('questions') };
 
-            if (Object.values(indices).includes(-1)) {
-                 console.error("Missing headers in Exams Sheet. Need: pin, code, name, duration, deadline, mode, questions. Found:", header); showImprovedNotification('error', 'Sheet Format Error', 'The "Exams" sheet columns are incorrect.'); return;
+            // Validate required columns exist
+             if (indices.pin === -1 || indices.code === -1 || indices.name === -1 || indices.duration === -1 || indices.deadline === -1 || indices.mode === -1 || indices.questions === -1) {
+                 console.error("Missing headers in Exams Sheet. Need: pin, code, name, duration, deadline, mode, questions. Found:", header);
+                 showImprovedNotification('error', 'Sheet Format Error', 'The "Exams" sheet columns are incorrect.');
+                 return;
             }
-            const examRow = data.slice(1).find(row => row[indices.pin] === pin);
-            if (examRow) {
-                const duration = parseInt(examRow[indices.duration], 10); const mode = String(examRow[indices.mode] || 'Quiz').trim().toLowerCase();
+
+            const examRow = data.slice(1).find(row => row[indices.pin] === pin); // Find the row matching the entered PIN
+
+            if (examRow) { // Exam found
+                const duration = parseInt(examRow[indices.duration], 10);
+                const mode = String(examRow[indices.mode] || 'Quiz').trim().toLowerCase(); // Default to 'quiz', lowercase
                 if (isNaN(duration) || duration <= 0) { showImprovedNotification('error', 'Invalid Data', `Exam duration invalid.`); return; }
-                examDetails = { PIN: examRow[indices.pin], Code: examRow[indices.code], Name: examRow[indices.name], Duration: duration, Deadline: examRow[indices.deadline], Mode: mode, Questions: examRow[indices.questions] };
+
+                // Store loaded exam details
+                examDetails = {
+                    PIN: examRow[indices.pin], Code: examRow[indices.code], Name: examRow[indices.name],
+                    Duration: duration, Deadline: examRow[indices.deadline], Mode: mode,
+                    Questions: examRow[indices.questions]
+                    // No OfficialExamID fetched from here
+                };
                 console.log("Exam details loaded:", examDetails);
-                displayExamDetails(); examDetailsModule.classList.remove('hidden'); examStartModule.classList.add('hidden');
+
+                displayExamDetails(); // Update UI with details
+                examDetailsModule.classList.remove('hidden'); // Show details module
+                examStartModule.classList.add('hidden'); // Hide PIN input module
                 showImprovedNotification('success', 'Exam Loaded', `"${examDetails.Name}" loaded.`);
-                 if (examDetails.Mode === 'exam') { studentExamIdGroup.classList.remove('hidden'); studentExamIdInput.value = ''; startExamBtn.disabled = true; validateStudentExamIdInput(); }
-                 else { studentExamIdGroup.classList.add('hidden'); studentExamIdInput.value = ''; studentExamIdEntered = ''; startExamBtn.disabled = !isOnline; }
-            } else { showImprovedNotification('error', 'Invalid PIN', `Exam PIN not found.`); examDetailsModule.classList.add('hidden'); examStartModule.classList.remove('hidden'); }
-        } else { showImprovedNotification('error', 'No Exams Found', 'No exams in sheet.'); examDetailsModule.classList.add('hidden'); examStartModule.classList.remove('hidden'); }
+
+                // Handle UI based on Exam Mode
+                 if (examDetails.Mode === 'exam') {
+                     studentExamIdGroup.classList.remove('hidden'); // Show the 5-char ID input
+                     studentExamIdInput.value = ''; // Clear previous input
+                     startExamBtn.disabled = true; // Disable Start until 5-char ID is valid
+                     validateStudentExamIdInput(); // Run validation check immediately
+                 } else { // Quiz mode
+                     studentExamIdGroup.classList.add('hidden'); // Hide 5-char ID input
+                     studentExamIdInput.value = ''; // Clear value
+                     studentExamIdEntered = ''; // Clear state variable
+                     startExamBtn.disabled = !isOnline; // Enable Start button directly if online
+                 }
+            } else { // PIN not found
+                 showImprovedNotification('error', 'Invalid PIN', `Exam PIN not found.`);
+                 examDetailsModule.classList.add('hidden');
+                 examStartModule.classList.remove('hidden'); // Show PIN input again
+            }
+        } else { // No exam data rows in sheet
+            showImprovedNotification('error', 'No Exams Found', 'No exams in sheet.');
+            examDetailsModule.classList.add('hidden');
+            examStartModule.classList.remove('hidden');
+        }
     }
 
     function validateStudentExamIdInput() {
-        if (examDetails?.Mode === 'exam') {
-            const idVal = studentExamIdInput.value.trim(); const isValid = idVal.length === 5;
-            startExamBtn.disabled = !isValid || !isOnline;
-            studentExamIdInput.style.borderColor = isValid || idVal === '' ? '#ccc' : 'red';
-        } else {
-            startExamBtn.disabled = !examDetails || !isOnline;
-        }
+        // Validates the 5-char Student Exam ID input and enables/disables Start button accordingly
+         if (examDetails?.Mode === 'exam') { // Only relevant in Exam mode
+             const idVal = studentExamIdInput.value.trim();
+             const isValid = idVal.length === 5;
+             startExamBtn.disabled = !isValid || !isOnline; // Enable Start only if valid 5 chars AND online
+             // Visual feedback for the input field
+             studentExamIdInput.style.borderColor = isValid || idVal === '' ? '#ccc' : 'red';
+         } else {
+             // In Quiz mode, button state depends only on details loaded & online status
+             startExamBtn.disabled = !examDetails || !isOnline;
+         }
     }
 
-function displayExamDetails() {
-        // Updates the UI elements in the header and details module with loaded exam data
-        if (!examDetails) {
-            console.error("displayExamDetails called but examDetails is null");
-            return;
-        }
-        // Update header displays
-        if(examCodeDisplay) examCodeDisplay.textContent = examDetails.Code || 'N/A'; // Show Course Code
+    function displayExamDetails() {
+        // Updates UI elements with loaded exam data
+        if (!examDetails) return;
+        if(examCodeDisplay) examCodeDisplay.textContent = examDetails.Code || 'N/A';
         if(examDurationDisplay) examDurationDisplay.textContent = `${examDetails.Duration} minutes`;
         if(examDeadlineDisplay) examDeadlineDisplay.textContent = examDetails.Deadline || 'N/A';
         if(examNameHeader) examNameHeader.textContent = examDetails.Name || 'Exam';
-
         // Populate details module
         if(examNameDetail) examNameDetail.textContent = examDetails.Name || 'N/A';
-        if(examCourseCodeDetail) examCourseCodeDetail.textContent = examDetails.Code || 'N/A'; // Show Course Code here too
-        if(examModeDetail) examModeDetail.textContent = examDetails.Mode ? (examDetails.Mode.charAt(0).toUpperCase() + examDetails.Mode.slice(1)) : 'N/A'; // Capitalize Mode
-
+        if(examCourseCodeDetail) examCourseCodeDetail.textContent = examDetails.Code || 'N/A';
+        if(examModeDetail) examModeDetail.textContent = examDetails.Mode ? (examDetails.Mode.charAt(0).toUpperCase() + examDetails.Mode.slice(1)) : 'N/A';
+        // OfficialExamID elements are removed
         if(examDurationDetail) examDurationDetail.textContent = `${examDetails.Duration} minutes`;
         if(examDeadlineDetail) examDeadlineDetail.textContent = examDetails.Deadline || 'N/A';
-
-        // Start button state is handled by fetchExamDetails/validateStudentExamIdInput based on mode/online status
-        // Do not enable it here directly.
-        console.log("Exam details displayed in UI.");
+        // Start button state handled by mode logic/validation
     }
 
     function handleStartExam() {
+        // Starts the exam after necessary checks
         if (!examDetails || !currentUser) { showImprovedNotification('error', 'Error', 'Cannot start.'); return; }
-        if (examDetails.Mode === 'exam') { studentExamIdEntered = studentExamIdInput.value.trim(); if (studentExamIdEntered.length !== 5) { showImprovedNotification('error', 'Invalid ID', 'Enter 5-character Student Exam ID.'); studentExamIdInput.focus(); return; } console.log("Starting Exam Mode, Student Exam ID:", studentExamIdEntered); }
-        else { studentExamIdEntered = ''; console.log("Starting Quiz Mode."); }
-        /* Deadline Check? */ try { const deadlineTime = new Date(examDetails.Deadline).getTime(); if (!isNaN(deadlineTime) && Date.now() > deadlineTime) { showImprovedNotification('error', 'Deadline Passed', 'Cannot start exam.'); return; } } catch (e) { console.warn("Deadline check error:", e); }
-        console.log("Starting exam UI..."); examDetailsModule.classList.add('hidden'); examQuestionsModule.classList.remove('hidden'); submissionConfirmationModule.classList.add('hidden'); if(submitExamBtn) submitExamBtn.disabled = !isOnline;
-        displayQuestions(examDetails.Questions); startTimer(examDetails.Duration); recordExamAttempt('start');
+        // Validate and capture Student Exam ID ONLY if in Exam mode
+        if (examDetails.Mode === 'exam') {
+            studentExamIdEntered = studentExamIdInput.value.trim();
+            if (studentExamIdEntered.length !== 5) {
+                showImprovedNotification('error', 'Invalid ID', 'Enter the 5-character Student Exam ID.');
+                studentExamIdInput.focus(); return;
+            }
+            console.log("Starting Exam Mode, Student Exam ID:", studentExamIdEntered);
+        } else { // Quiz mode
+             studentExamIdEntered = ''; console.log("Starting Quiz Mode.");
+        }
+        // Optional: Deadline Check
+        try { const deadlineTime = new Date(examDetails.Deadline).getTime(); if (!isNaN(deadlineTime) && Date.now() > deadlineTime) { showImprovedNotification('error', 'Deadline Passed', 'Cannot start exam.'); return; } } catch (e) { console.warn("Deadline check error:", e); }
+
+        console.log("Starting exam UI...");
+        examDetailsModule.classList.add('hidden'); // Hide details
+        examQuestionsModule.classList.remove('hidden'); // Show questions
+        submissionConfirmationModule.classList.add('hidden'); // Hide confirmation
+        if(submitExamBtn) submitExamBtn.disabled = !isOnline; // Enable submit if online
+
+        displayQuestions(examDetails.Questions); // Render questions
+        startTimer(examDetails.Duration); // Start timer
+        recordExamAttempt('start'); // Log start event
     }
 
-    function displayQuestions(questionsJsonString) { /* ... Same robust JSON parsing ... */ console.log("Displaying questions..."); examQuestionsArea.innerHTML = ''; try { let qArray = []; try { qArray = JSON.parse(questionsJsonString); if (!Array.isArray(qArray)) throw new Error("Not array."); } catch (e) { console.warn("Not JSON:", e); qArray = [{ type: "long_answer", prompt: "Exam Instructions/Questions:", content: questionsJsonString }]; } qArray.forEach((q, i) => { const qNum = i + 1; const div = document.createElement('div'); div.className = 'question form-group'; let inputHtml = ''; const prompt = q.prompt || `Q${qNum}`; const id = `ans-${qNum}`; const name = `ans-${qNum}`; switch (q.type) { case 'short_answer': inputHtml = `<input type="text" id="${id}" name="${name}" class="form-control" placeholder="Short answer">`; break; case 'long_answer': inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="5" placeholder="Detailed answer">${q.content||''}</textarea>`; break; case 'code': const lang=q.language?`(${q.language})`:''; inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="8" placeholder="Code here${lang}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`; break; case 'attachment': const types=q.allowed_types||[]; const accept=types.join(','); const maxBytes=q.max_size_mb?q.max_size_mb*1024*1024:null; inputHtml=`<input type="file" id="${id}" name="${name}" class="form-control" accept="${accept}" ${maxBytes?`data-max-size="${maxBytes}"`:''} data-allowed-types='${JSON.stringify(types)}'><small class="file-helper-text">Allowed: ${accept||'any'}${maxBytes?`, Max: ${q.max_size_mb}MB`:''}</small>`; setTimeout(()=>addAttachmentValidation(id),0); break; default: inputHtml = `<p style="color:red;">Unsupported type: ${q.type}</p><p>${q.content||''}</p>`; } div.innerHTML = `<label for="${id}">${prompt}</label>${inputHtml}`; examQuestionsArea.appendChild(div); }); } catch (e) { console.error("Display questions error:", e); examQuestionsArea.innerHTML = `<p style="color:red;">Err loading questions: ${e.message}</p>`; showImprovedNotification('error','Question Load Error',`Cannot display: ${e.message}`); } }
-    function addAttachmentValidation(inputId) { /* ... Same validation ... */ const fi=document.getElementById(inputId);if(!fi||fi.type!=='file')return;fi.addEventListener('change',(e)=>{const f=e.target.files[0];if(!f)return;const max=parseInt(fi.getAttribute('data-max-size'),10);const types=JSON.parse(fi.getAttribute('data-allowed-types')||'[]');if(max&&f.size>max){showImprovedNotification('error','File Too Large',`"${f.name}" > ${max/(1024*1024)}MB`);fi.value='';return;}if(types.length>0&&!types.includes(f.type)){showImprovedNotification('error','Invalid Type',`"${f.name}" type (${f.type}) not allowed: ${types.join(', ')}`);fi.value='';return;}showImprovedNotification('success','File Selected',`"${f.name}" (${(f.size/1024).toFixed(1)}KB)`);}); }
-    function startTimer(durationMinutes) { /* ... Same ... */ stopTimer(); if(isNaN(durationMinutes)||durationMinutes<=0){console.error("Invalid duration:",durationMinutes);timerDisplay.textContent="N/A";return;} const ms=durationMinutes*60*1000; examEndTime=Date.now()+ms; console.log(`Timer started: ${durationMinutes}m. Ends: ${new Date(examEndTime).toLocaleTimeString()}`); updateTimerDisplay(); examTimerInterval=setInterval(updateTimerDisplay,1000); }
-    function updateTimerDisplay() { /* ... Same ... */ const now=Date.now(); const left=Math.max(0,examEndTime-now); const m=Math.floor((left/(1000*60))%60); const s=Math.floor((left/1000)%60); timerDisplay.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; if(left<=0){console.log("Time up!");stopTimer();showImprovedNotification('warning','Time Up!','Submitting automatically.',0);handleSubmitExam(true);} }
-    function stopTimer() { /* ... Same ... */ if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null;console.log("Timer stopped.");} }
-    function getFingerprintData() { /* ... Same basic fingerprinting ... */ const d={ua:navigator.userAgent||'N/A',scr:`${screen.width||0}x${screen.height||0}x${screen.colorDepth||0}`,lang:navigator.language||'N/A',tz:new Date().getTimezoneOffset(),ts:Date.now()}; console.log("Fingerprint Data:", d); return JSON.stringify(d); }
+    function displayQuestions(questionsJsonString) {
+        // Parses JSON from sheet and renders appropriate HTML for questions
+        console.log("Displaying questions...");
+        if (!examQuestionsArea) return;
+        examQuestionsArea.innerHTML = ''; // Clear previous
+        try {
+            let questionsArray = [];
+            try { questionsArray = JSON.parse(questionsJsonString); if (!Array.isArray(questionsArray)) throw new Error("Not array."); }
+            catch (jsonError) { console.warn("Not JSON:", jsonError); questionsArray = [{ type: "long_answer", prompt: "Exam Instructions / Questions", content: questionsJsonString }]; }
+
+            questionsArray.forEach((q, i) => {
+                const qNum = i + 1; const div = document.createElement('div'); div.className = 'question form-group'; let inputHtml = '';
+                const prompt = q.prompt || `Question ${qNum}`; const id = `ans-${qNum}`; const name = `ans-${qNum}`;
+                switch (q.type) {
+                    case 'short_answer': inputHtml = `<input type="text" id="${id}" name="${name}" class="form-control" placeholder="Short answer">`; break;
+                    case 'long_answer': inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="5" placeholder="Detailed answer">${q.content||''}</textarea>`; break;
+                    case 'code': const lang=q.language?`(${q.language})`:''; inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="8" placeholder="Code here${lang}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`; break;
+                    case 'attachment': const types=q.allowed_types||[]; const accept=types.join(','); const maxBytes=q.max_size_mb?q.max_size_mb*1024*1024:null; inputHtml=`<input type="file" id="${id}" name="${name}" class="form-control" accept="${accept}" ${maxBytes?`data-max-size="${maxBytes}"`:''} data-allowed-types='${JSON.stringify(types)}'><small class="file-helper-text">Allowed: ${accept||'any'}${maxBytes?`, Max: ${q.max_size_mb}MB`:''}</small>`; setTimeout(()=>addAttachmentValidation(id),0); break;
+                    default: inputHtml = `<p style="color:red;">Unsupported type: ${q.type}</p><p>${q.content||''}</p>`;
+                }
+                div.innerHTML = `<label for="${id}">${prompt}</label>${inputHtml}`;
+                examQuestionsArea.appendChild(div);
+            });
+        } catch (e) { console.error("Display questions error:", e); examQuestionsArea.innerHTML = `<p style="color:red;">Err loading questions: ${e.message}</p>`; showImprovedNotification('error','Question Load Error',`Cannot display: ${e.message}`); }
+    }
+
+    function addAttachmentValidation(inputId) {
+        // Adds client-side validation for file inputs
+        const fi=document.getElementById(inputId); if(!fi||fi.type!=='file')return;
+        fi.addEventListener('change',(e)=>{ const f=e.target.files[0];if(!f)return;const max=parseInt(fi.getAttribute('data-max-size'),10);const types=JSON.parse(fi.getAttribute('data-allowed-types')||'[]');if(max&&f.size>max){showImprovedNotification('error','File Too Large',`"${f.name}" > ${max/(1024*1024)}MB`);fi.value='';return;}if(types.length>0&&!types.includes(f.type)){showImprovedNotification('error','Invalid Type',`"${f.name}" type (${f.type}) not allowed: ${types.join(', ')}`);fi.value='';return;}showImprovedNotification('success','File Selected',`"${f.name}" (${(f.size/1024).toFixed(1)}KB)`); });
+    }
+
+    function startTimer(durationMinutes) {
+        // Starts the exam countdown timer
+        stopTimer(); if(isNaN(durationMinutes)||durationMinutes<=0){console.error("Invalid duration:",durationMinutes);timerDisplay.textContent="N/A";return;}
+        const ms=durationMinutes*60*1000; examEndTime=Date.now()+ms; console.log(`Timer started: ${durationMinutes}m. Ends: ${new Date(examEndTime).toLocaleTimeString()}`);
+        updateTimerDisplay(); examTimerInterval=setInterval(updateTimerDisplay,1000);
+    }
+
+    function updateTimerDisplay() {
+        // Updates the timer display every second
+        const now=Date.now(); const left=Math.max(0,examEndTime-now); const m=Math.floor((left/(1000*60))%60); const s=Math.floor((left/1000)%60);
+        if(timerDisplay) timerDisplay.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        if(left<=0){ console.log("Time up!"); stopTimer(); showImprovedNotification('warning','Time Up!','Submitting automatically.',0); handleSubmitExam(true); } // Auto-submit
+    }
+
+    function stopTimer() {
+        // Clears the timer interval
+        if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null;console.log("Timer stopped.");}
+    }
+
+    function getFingerprintData() {
+        // Collects basic browser/system info for logging
+        const data = { ua: navigator.userAgent || 'N/A', scr: `${screen.width || 0}x${screen.height || 0}x${screen.colorDepth || 0}`, lang: navigator.language || 'N/A', tz: new Date().getTimezoneOffset(), ts: Date.now() };
+        console.log("Fingerprint Data:", data);
+        return JSON.stringify(data); // Return as JSON string
+    }
 
     async function handleSubmitExam(isAutoSubmit = false) {
         // Handles the exam submission process
-        stopTimer(); submitExamBtn.disabled=true; submitExamBtn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Submitting...';
-        if(!isAutoSubmit && !confirm("Submit exam? Cannot be undone.")){submitExamBtn.disabled=false;submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';if(examEndTime&&Date.now()<examEndTime){startTimer(Math.ceil((examEndTime-Date.now())/60000));}return;}
+        stopTimer(); if(submitExamBtn) { submitExamBtn.disabled=true; submitExamBtn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Submitting...'; }
+        if(!isAutoSubmit && !confirm("Submit exam? Cannot be undone.")){ if(submitExamBtn){ submitExamBtn.disabled=false; submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';} if(examEndTime&&Date.now()<examEndTime){startTimer(Math.ceil((examEndTime-Date.now())/60000));}return;}
         console.log("Submitting exam..."); let ans={};const els=examForm.elements;const files=[];const fp=getFingerprintData();
         // Collect answers
-        for(let i=0;i<els.length;i++){const el=els[i];if(el.name?.startsWith('ans-')){if(el.type==='file'){if(el.files.length>0){const f=el.files[0];console.log(`File: ${f.name}`);ans[el.name]=`FILE:${f.name}`;/* TODO: Upload file */}else{ans[el.name]='';}}else{ans[el.name]=el.value;}}}
-        /* if(files.length>0) { await Promise.all(files); } */ // Uncomment if implementing file uploads
+        for(let i=0;i<els.length;i++){ const el=els[i]; if(el.name?.startsWith('ans-')){ if(el.type==='file'){if(el.files.length>0){const f=el.files[0];console.log(`File: ${f.name}`);ans[el.name]=`FILE:${f.name}`;/* TODO: Upload file */}else{ans[el.name]='';}}else{ans[el.name]=el.value;} } }
+        /* if(files.length>0) { await Promise.all(files); } */ // File upload logic placeholder
         console.log("Collected Answers:", ans);
         const success=await recordExamAttempt('submit',ans,fp); // Record attempt
-        if(success){showImprovedNotification('success','Exam Submitted','Submission recorded.',0);examQuestionsModule.classList.add('hidden');submissionConfirmationModule.classList.remove('hidden');}
-        else{showImprovedNotification('error','Submission Error','Could not record submission.',0);submitExamBtn.disabled=false;submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';}
+        if(success){showImprovedNotification('success','Exam Submitted','Submission recorded.',0);if(examQuestionsModule)examQuestionsModule.classList.add('hidden');if(submissionConfirmationModule)submissionConfirmationModule.classList.remove('hidden');}
+        else{showImprovedNotification('error','Submission Error','Could not record submission.',0);if(submitExamBtn){submitExamBtn.disabled=false;submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';}}
     }
 
-     async function recordExamAttempt(status, answers = null, fingerprint = '{}') {
-         // Records the attempt details to the Attempts sheet based on mode
-         if (!currentUser || !examDetails || !studentPINEntered) { console.error("Missing data for recording attempt."); return false; }
-         const timestamp = new Date().toISOString();
-         const isQuizMode = examDetails.Mode.toLowerCase() === 'quiz';
-         // Data order MUST match the columns defined for 'Attempts' sheet
-         // Columns: Timestamp, Name(Q), Email(Q), PIN, CourseCode, StudentExamID(E), Status, Answers, Fingerprint
-         let dataRow = [
-             timestamp, // A
-             isQuizMode ? String(currentUser.name) : '',    // B - Name (Quiz only)
-             isQuizMode ? String(currentUser.email) : '',   // C - Email (Quiz only)
-             String(studentPINEntered),                     // D - Entered PIN
-             String(examDetails.Code),                      // E - Actual Course Code
-             isQuizMode ? '' : String(studentExamIdEntered),// F - Student Exam ID (Exam only)
-             // G - OfficialExamID removed
-             String(status),                                // G
-             answers ? JSON.stringify(answers) : '',        // H
-             fingerprint                                    // I
-         ];
-         console.log("Recording attempt:", dataRow);
-         const range = `${EXAM_ATTEMPTS_SHEET_NAME}`; // Append will add to the next empty row
-         return await appendSheetData(EXAM_SPREADSHEET_ID, range, [dataRow]);
-     }
+    async function recordExamAttempt(status, answers = null, fingerprint = '{}') {
+        // Records the attempt details to the Attempts sheet based on mode
+        if (!currentUser || !examDetails || !studentPINEntered) { console.error("Missing data for recording attempt."); return false; }
+        const timestamp = new Date().toISOString();
+        const isQuizMode = examDetails.Mode.toLowerCase() === 'quiz';
+        // Data order MUST match the columns defined for 'Attempts' sheet
+        // Cols: Timestamp, Name(Q), Email(Q), PIN, CourseCode, StudentExamID(E), Status, Answers, Fingerprint
+        let dataRow = [
+            timestamp, // A
+            isQuizMode ? String(currentUser.name) : '',    // B
+            isQuizMode ? String(currentUser.email) : '',   // C
+            String(studentPINEntered),                     // D
+            String(examDetails.Code),                      // E
+            isQuizMode ? '' : String(studentExamIdEntered),// F
+            String(status),                                // G
+            answers ? JSON.stringify(answers) : '',        // H
+            fingerprint                                    // I
+        ];
+        console.log("Recording attempt:", dataRow);
+        const range = `${EXAM_ATTEMPTS_SHEET_NAME}`; // Append to sheet by name
+        return await appendSheetData(EXAM_SPREADSHEET_ID, range, [dataRow]);
+    }
 
 	// === UI Updates ===
     function updateOnlineStatus() {
         // Updates online status indicator and button states
-        isOnline=navigator.onLine; console.log('Connection:',isOnline?'Online':'Offline'); const si=syncStatus.querySelector('i');
-        if(isOnline){syncStatus.className='sync-status online';if(si)si.style.color='var(--success-color)';syncText.textContent='Online';}
-        else{syncStatus.className='sync-status offline';if(si)si.style.color='var(--warning-color)';syncText.textContent='Offline';if(!isInitializing)showImprovedNotification('warning','Offline','Functionality disabled.',5000);}
+        isOnline=navigator.onLine; console.log('Connection:',isOnline?'Online':'Offline'); const si=syncStatus?.querySelector('i');
+        if(isOnline){ if(syncStatus) syncStatus.className='sync-status online';if(si)si.style.color='var(--success-color)';if(syncText)syncText.textContent='Online';}
+        else{ if(syncStatus) syncStatus.className='sync-status offline';if(si)si.style.color='var(--warning-color)';if(syncText)syncText.textContent='Offline';if(!isInitializing)showImprovedNotification('warning','Offline','Functionality disabled.',5000);}
         if(si&&!isSyncing)si.className='fas fa-circle'; // Update icon if not syncing
 
-        // Update button disabled states based on multiple factors
-        if(loadExamBtn)loadExamBtn.disabled=!isOnline||!isSignedIn||(examPinInput && examPinInput.value.trim()===''); // Check examPinInput exists
+        // Update button disabled states
+        if(loadExamBtn) loadExamBtn.disabled = !isOnline||!isSignedIn||(examPinInput && examPinInput.value.trim()==='');
 
-        let startDisabled = !isOnline || !isSignedIn || !examDetails; // Base conditions
-        if(examDetails && examDetails.Mode.toLowerCase() === 'exam') { // Exam mode requires valid 5-char ID
-            startDisabled = startDisabled || (studentExamIdInput && studentExamIdInput.value.trim().length !== 5);
-        }
+        let startDisabled = !isOnline || !isSignedIn || !examDetails;
+        if(examDetails && examDetails.Mode === 'exam') { startDisabled = startDisabled || (studentExamIdInput && studentExamIdInput.value.trim().length !== 5); }
         if(startExamBtn) startExamBtn.disabled = startDisabled;
 
-        // Submit button enabled only when exam questions are visible AND online/signed in
-        if(submitExamBtn)submitExamBtn.disabled=!isOnline||!isSignedIn||!examDetails||examQuestionsModule.classList.contains('hidden');
+        if(submitExamBtn) submitExamBtn.disabled = !isOnline || !isSignedIn || !examDetails || examQuestionsModule.classList.contains('hidden');
 
-        // Mark as initialized after first run - Moved this check here
-        if (isInitializing && (typeof gapi !== 'undefined')) { // Only set to false after first online/offline check AND gapi loaded attempt
-             isInitializing = false;
-             console.log("Initialization flag set to false.");
-         }
+        // Mark initialized after first run
+        if (isInitializing && (typeof gapi !== 'undefined')) { isInitializing = false; console.log("Initialization flag set."); }
     }
 
     function setSyncing(syncing){
         // Shows/hides visual indicator during sheet operations
-        isSyncing = syncing; console.log("Syncing:",isSyncing); const si = syncStatus.querySelector('i');
-        if(syncing){ si.className = 'fas fa-spinner fa-spin'; si.style.color = 'var(--info-color)'; syncText.textContent = 'Syncing...';}
-        else{ updateOnlineStatus(); } // Restore online/offline status display
+        isSyncing = syncing; console.log("Syncing:",isSyncing); const si = syncStatus?.querySelector('i');
+        if(si){ if(syncing){ si.className = 'fas fa-spinner fa-spin'; si.style.color = 'var(--info-color)'; if(syncText) syncText.textContent = 'Syncing...';} else{ updateOnlineStatus(); } } // Restore online/offline status display
     }
 
     function showImprovedNotification(type,title,message,duration=5000){
         // Displays temporary messages to the user
-        const container = document.getElementById('in-page-notification-area');
+        const container = notificationArea; // Use cached variable
         if (!container) { console.error("Notification area not found"); return; }
         const n = document.createElement('div'); n.className = `in-page-notification in-page-notification-${type}`; let i;
         switch(type){ case 'success':i='fa-check-circle';break; case 'error':i='fa-times-circle';break; case 'warning':i='fa-exclamation-triangle';break; default:i='fa-info-circle'; }
@@ -576,7 +715,7 @@ function displayExamDetails() {
         const cb = n.querySelector('.notification-close');
         const remove = () => { n.classList.add('removing'); setTimeout(() => { if(n.parentNode) n.parentNode.removeChild(n); }, 300); };
         cb.addEventListener('click', (e) => { e.stopPropagation(); remove(); });
-        if (duration > 0) setTimeout(remove, duration); // duration 0 = persistent
+        if (duration > 0) setTimeout(remove, duration);
     }
 
 </script>
