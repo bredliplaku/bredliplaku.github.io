@@ -795,9 +795,6 @@ function handleAuthRedirect() {
         
         // Collect device fingerprint
         collectDeviceFingerprint();
-        
-        // Initialize connection monitoring (add this line)
-        initConnectionMonitoring();
     }
 
 /**
@@ -867,6 +864,14 @@ function initConnectionMonitoring() {
     // Monitor online/offline events
     window.addEventListener('online', handleOnlineStatusChange);
     window.addEventListener('offline', handleOnlineStatusChange);
+	
+	// Set up activity monitoring
+	document.addEventListener('mousemove', resetActivityTimer);
+	document.addEventListener('keypress', resetActivityTimer);
+	document.addEventListener('click', resetActivityTimer);
+
+	// Start activity timeout check
+	activityTimeout = setInterval(checkActivityTimeout, 60 * 1000);
     
     // Set up sync button
     document.getElementById('sync-button').addEventListener('click', manualSync);
@@ -879,6 +884,7 @@ function initConnectionMonitoring() {
     
     // Check if any saved answers in localStorage
     restoreSavedAnswers();
+	
 }
 
 function updateConnectionStatus() {
@@ -1328,6 +1334,42 @@ function processExamConfig(values) {
     
     // Generate question forms
     generateQuestionForms();
+}
+
+async function saveAnswers(syncToServer = false) {
+  try {
+    const examData = await collectAnswers();
+    
+    // Save to localStorage
+    localStorage.setItem('exam_answers', JSON.stringify({
+      studentInfo: {
+        name: examData.studentName,
+        id: examData.studentId,
+        email: examData.studentEmail
+      },
+      questionResponses: examData.questionResponses,
+      examCode: examConfig.code,
+      lastSaved: new Date().toISOString()
+    }));
+    
+    if (syncToServer && isOnline && isSignedIn) {
+      try {
+        await saveResponsesToServer(examData);
+        showNotification('success', 'Sync Complete', 'Your answers have been saved online.', 2000);
+        return true;
+      } catch (error) {
+        console.error('Error syncing to server:', error);
+        showNotification('warning', 'Sync Failed', 'Could not sync to server.', 3000);
+        return false;
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error saving answers:', error);
+    showNotification('error', 'Save Error', 'Failed to save your answers.', 3000);
+    return false;
+  }
 }
 
 /**
@@ -2003,16 +2045,5 @@ function updateYear() {
 // Initialize the application when window loads
 window.addEventListener('load', init);
 </script>
-<div id="auth-expired-modal" class="auth-expired-modal">
-    <div class="auth-expired-content">
-        <i class="fas fa-exclamation-triangle"></i>
-        <h2>Session Expired</h2>
-        <p>Your session has expired due to inactivity. Your answers have been saved locally.</p>
-        <p>Please sign in again to continue your exam.</p>
-        <button id="auth-signin-btn" class="btn-submit" style="background-color: #2196F3;">
-            <i class="fas fa-sign-in-alt"></i> Sign In Again
-        </button>
-    </div>
-</div>
 </body>
 </html>
