@@ -779,26 +779,26 @@
         // === Initialisation ===
         window.addEventListener('load', init);
 
-        function init() {
-            console.log("Initialising...");
-            document.body.classList.remove('content-hidden');
-            mainContainer.classList.add('content-visible');
-            updateYear();
-            setupEventListeners();
-            loadAppState(); // Load any saved state early
-            updateOnlineStatus();
-            window.addEventListener('online', updateOnlineStatus);
-            window.addEventListener('offline', updateOnlineStatus);
+    function init() {
+        console.log("Initialising...");
+        document.body.classList.remove('content-hidden');
+        mainContainer.classList.add('content-visible');
+        updateYear();
+        setupEventListeners();
+        loadAppState(); // Load any saved state early
+        updateOnlineStatus();
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
 
-            // Delay API init slightly to ensure scripts are loaded
-            setTimeout(() => {
-                if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-                    initGoogleApi();
-                } else {
-                    handleApiInitError(new Error("Google API objects not loaded"));
-                }
-            }, 500);
-        }
+        // Delay API init slightly
+        setTimeout(() => {
+            if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+                initGoogleApi();
+            } else {
+                handleApiInitError(new Error("Google API objects not loaded"));
+            }
+        }, 500);
+    }
 
         function setupEventListeners() {
             loginBtn?.addEventListener('click', handleAuthClick);
@@ -840,68 +840,65 @@
 
 // === Google API & Auth === (Simplified)
 function initGoogleApi() {
-    console.log('Initialising Google Sign-In...'); // Changed log message
-    try {
-        tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: CLIENT_ID,
-            scope: SCOPES, // Keep scopes needed for profile/email if using Sign-In
-            callback: handleTokenResponse
-        });
+        console.log('Initialising Google Sign-In and GAPI client...');
+        try {
+            // Initialize the token client first
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: handleTokenResponse
+            });
 
-        // --- REMOVED gapi.load('client', ...) section ---
-        // We no longer need to initialize gapi.client if only using Sign-In
+            // Load the base GAPI client library. This is needed for gapi.client.setToken/getToken.
+            // We don't need to init specific APIs like 'sheets' here anymore.
+            gapi.load('client', async () => {
+                console.log('GAPI client library loaded.');
+                // No need for gapi.client.init({apiKey: ..., discoveryDocs: ...}) here
+                // unless you use other gapi.client services later.
 
-        // Check for existing token immediately (logic moved from gapi.load callback)
-        const savedToken = localStorage.getItem('gapi_token');
-        if (savedToken) {
-            const token = JSON.parse(savedToken);
-            if (token?.access_token /* && !isTokenExpired(token) */) {
-                // We still need to set the token for potential fetchUserInfo call
-                // Need a minimal gapi object setup for setToken, or handle auth differently.
-                // Let's assume gapi object exists from api.js script tag
-                // If gapi.client.setToken fails, fetchUserInfo needs adjustment
-                try {
-                    // Minimal check if gapi and gapi.client exist before setting token
-                    if (typeof gapi !== 'undefined' && typeof gapi.client !== 'undefined') {
-                         gapi.client.setToken(token); // Set token if gapi.client exists
-                         console.log("Using saved token.");
-                         tokenObtained(token); // Process the existing token (calls fetchUserInfo)
-                    } else {
-                         console.warn("gapi.client not fully loaded, cannot set saved token automatically. Proceeding without pre-set token.");
-                         // Proceed without setting the token here; fetchUserInfo might fail or need adjustment
-                         // For simplicity, let's just update UI and show content
-                         updateAuthUI(); // Might show logged out initially
+                // Now that 'client' is loaded, check for saved token
+                checkSavedTokenAndProceed();
+            });
+
+        } catch (error) {
+            handleApiInitError(error);
+        }
+    }
+	
+	async function checkSavedTokenAndProceed() {
+         const savedToken = localStorage.getItem('gapi_token');
+            if (savedToken) {
+                const token = JSON.parse(savedToken);
+                if (token?.access_token /* && !isTokenExpired(token) */) {
+                    try {
+                        // gapi.client should be available now
+                        gapi.client.setToken(token); // Set token for potential use (like fetchUserInfo originally did)
+                        console.log("Using saved token.");
+                        await tokenObtained(token); // Process the existing token
+                    } catch (e) {
+                         console.warn("Error setting saved token even after gapi.load:", e);
+                         updateAuthUI(); // Show logged out UI if token can't be set
                          showAppContent();
-                         // Consider prompting sign-in again if saved token exists but can't be applied
                     }
-                } catch (e) {
-                     console.warn("Error setting saved token (gapi.client might be partially loaded):", e);
-                     updateAuthUI();
-                     showAppContent();
+                } else {
+                    localStorage.removeItem('gapi_token');
+                    console.log("Saved token invalid or expired.");
+                    updateAuthUI();
+                    showAppContent();
                 }
             } else {
-                localStorage.removeItem('gapi_token');
-                console.log("Saved token invalid or expired.");
-                updateAuthUI();
-                showAppContent();
+                 console.log("No saved token found.");
+                 updateAuthUI();
+                 showAppContent();
             }
-        } else {
-             console.log("No saved token found.");
-             updateAuthUI();
-             showAppContent();
-        }
-
-    } catch (error) {
-        handleApiInitError(error); // Handle Token Client init errors
     }
-}
 
-        function handleApiInitError(error) {
-            console.error('API Initialisation Error:', error);
-            showImprovedNotification('error', 'API Load Error', `Failed to load Google services: ${error.message}`);
-            updateAuthUI(); // Update UI to reflect potential issues (e.g., disable buttons)
-            showAppContent(); // Ensure content is visible even if API fails
-        }
+    function handleApiInitError(error) { // Keep as is
+        console.error('API Initialisation Error:', error);
+        showImprovedNotification('error', 'API Load Error', `Failed to load Google services: ${error.message}`);
+        updateAuthUI();
+        showAppContent();
+    }
 
         // Placeholder for a proper token expiry check if needed
         function isTokenExpired(token) {
@@ -933,18 +930,27 @@ function initGoogleApi() {
                 return;
             }
             console.log('Access token received.');
-            localStorage.setItem('gapi_token', JSON.stringify(resp)); // Save token
+			localStorage.setItem('gapi_token', JSON.stringify(resp)); // Save token
+
+        // Ensure gapi.client is loaded before setting token
+        if (typeof gapi !== 'undefined' && typeof gapi.client !== 'undefined') {
             gapi.client.setToken(resp); // Set token for GAPI client
             tokenObtained(resp); // Proceed with obtained token
+        } else {
+            console.error("handleTokenResponse: gapi.client not ready when token received!");
+            // Handle error - perhaps try again after a short delay or show error message
+            showImprovedNotification('error', 'Auth Error', 'Failed to process token immediately. Please try reloading.');
+        }
         }
 
         // Called after a token is successfully obtained (new or saved)
         async function tokenObtained(token) {
-            console.log("Token available, proceeding...");
-            isSignedIn = true;
-            await fetchUserInfo(); // Get user profile details
-            updateAuthUI(); // Update UI to logged-in state
-            showAppContent(); // Ensure content is visible
+			console.log("Token available, proceeding...");
+			isSignedIn = true;
+			// Pass the token object directly to fetchUserInfo
+			await fetchUserInfo(token);
+			updateAuthUI(); // Update UI to logged-in state
+			showAppContent();
 
             // Check if there's a saved exam state for this user
             const loadedState = JSON.parse(localStorage.getItem(appStateKey) || '{}');
@@ -961,76 +967,99 @@ function initGoogleApi() {
             }
         }
 
-        async function fetchUserInfo() {
-            if (!gapi.client.getToken()?.access_token) {
-                console.warn("fetchUserInfo called without an access token.");
-                return;
-            }
-            console.log('Fetching user information...');
-            try {
-                // Use the Google User Info endpoint
-                const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                    headers: {
-                        'Authorization': `Bearer ${gapi.client.getToken().access_token}`
-                    }
-                });
-                if (!response.ok) {
-                    // Handle specific errors like 401 Unauthorized (token expired/revoked)
-                    if (response.status === 401) {
-                        console.warn("User Info fetch failed (401 - Unauthorized). Signing out.");
-                        handleSignoutClick(); // Force sign out if token is invalid
-                        return;
-                    }
-                    throw new Error(`(${response.status}) ${await response.text()}`);
-                }
-                const userInfo = await response.json();
-                currentUser = {
-                    id: userInfo.sub,
-                    name: userInfo.name || 'N/A',
-                    email: userInfo.email || 'N/A',
-                    picture: userInfo.picture || ''
-                };
-                console.log('User details fetched:', currentUser.email);
+// Modified to accept token object and use its access_token
+    async function fetchUserInfo(tokenObject) { // Accepts token object
+        // Use the access_token from the passed object
+        const accessToken = tokenObject?.access_token;
 
-                // Update UI elements with user info
-                if (studentNameInput) studentNameInput.value = currentUser.name;
-                if (studentEmailInput) studentEmailInput.value = currentUser.email;
-                if (userAvatar) userAvatar.src = currentUser.picture;
-                if (userName) userName.textContent = currentUser.name;
-
-                // Check admin status
-                isAdmin = ADMIN_EMAILS.includes(currentUser.email);
-                document.body.classList.toggle('is-admin', isAdmin);
-
-                // Enable PIN input now that user is signed in
-                if (examPinInput) examPinInput.disabled = false;
-
-                // Re-evaluate load button state
-                if (loadExamBtn) {
-                    loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline;
-                }
-            } catch (e) {
-                console.error('Fetch user info error:', e);
-                showImprovedNotification('error', 'User Info Error', `Could not get user details: ${e.message}. Please try signing in again.`);
-                currentUser = null; // Clear user info on error
-                updateAuthUI(); // Update UI to reflect error state
-            }
+        if (!accessToken) {
+            console.warn("fetchUserInfo called without a valid access token in tokenObject.");
+            // Handle error - maybe sign out?
+            // Consider showing an error notification before signing out
+            showImprovedNotification('error', 'Auth Error', 'Missing access token. Signing out.');
+            handleSignoutClick(); // Force sign out if token is missing
+            return;
         }
+
+        console.log('Fetching user information using provided token...');
+        try {
+            // Use the browser's standard fetch API with the User Info endpoint
+            const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: {
+                    // Use the access token directly from the function argument
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
+
+            // Check if the fetch request itself was successful
+            if (!response.ok) {
+                // Handle specific errors like 401 Unauthorized (token expired/revoked)
+                if (response.status === 401) {
+                    console.warn("User Info fetch failed (401 - Unauthorized). Token might be invalid/expired. Signing out.");
+                    showImprovedNotification('error', 'Auth Expired', 'Your session has expired. Please sign in again.');
+                    handleSignoutClick(); // Force sign out if token is invalid
+                    return;
+                }
+                // Throw an error for other HTTP issues
+                throw new Error(`(${response.status}) ${await response.text()}`);
+            }
+
+            // Parse the user information from the response
+            const userInfo = await response.json();
+
+            // Store the user details in the global currentUser variable
+            currentUser = {
+                id: userInfo.sub,
+                name: userInfo.name || 'N/A',
+                email: userInfo.email || 'N/A',
+                picture: userInfo.picture || ''
+            };
+            console.log('User details fetched:', currentUser.email);
+
+            // Update UI elements with the fetched user info
+            if (studentNameInput) studentNameInput.value = currentUser.name;
+            if (studentEmailInput) studentEmailInput.value = currentUser.email;
+            if (userAvatar) userAvatar.src = currentUser.picture;
+            if (userName) userName.textContent = currentUser.name;
+
+            // Check admin status based on the fetched email
+            isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+            document.body.classList.toggle('is-admin', isAdmin);
+
+            // Enable PIN input now that user is signed in and info is fetched
+            if (examPinInput) examPinInput.disabled = false;
+
+            // Re-evaluate load button state based on PIN input and online status
+            if (loadExamBtn) {
+                loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline;
+            }
+
+        } catch (e) {
+            // Handle any errors during the fetch or processing
+            console.error('Fetch user info error:', e);
+            showImprovedNotification('error', 'User Info Error', `Could not get user details: ${e.message}. Please try signing in again.`);
+            currentUser = null; // Clear user info on error
+            updateAuthUI(); // Update UI to reflect error state (likely show logged out)
+        }
+    }
 
         function handleSignoutClick() {
             console.log("Signing out...");
-            const token = gapi.client.getToken();
-            if (token?.access_token) {
-                try {
-                    // Revoke the token on Google's side
-                    google.accounts.oauth2.revoke(token.access_token, () => console.log('Token revoked successfully.'));
-                } catch (e) {
-                    console.warn("Error revoking token:", e);
-                }
-                gapi.client.setToken(''); // Clear token from GAPI client
-            }
-            localStorage.removeItem('gapi_token'); // Clear saved token
-            localStorage.removeItem(appStateKey); // Clear saved exam state
+            const token = localStorage.getItem('gapi_token'); // Get token from storage
+		if (token) {
+             const parsedToken = JSON.parse(token);
+             if(parsedToken?.access_token && typeof google !== 'undefined' && google.accounts?.oauth2) {
+                 try {
+                     google.accounts.oauth2.revoke(parsedToken.access_token, () => console.log('Token revoked successfully.'));
+                 } catch (e) { console.warn("Error revoking token:", e); }
+             }
+        }
+        // Clear token from gapi.client if it exists
+        if (typeof gapi !== 'undefined' && typeof gapi.client !== 'undefined') {
+             try { gapi.client.setToken(''); } catch(e) { console.warn("Error clearing gapi token on signout", e);}
+        }
+        localStorage.removeItem('gapi_token');
+        localStorage.removeItem(appStateKey);
 
             // Reset application state variables
             isSignedIn = false;
