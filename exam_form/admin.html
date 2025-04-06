@@ -1448,66 +1448,93 @@
         }
         
 /**
- * Initialize Google API client with modern Identity Services
+ * Handle auth redirect and token in URL
+ */
+function handleAuthRedirect() {
+    const params = {};
+    window.location.hash.substring(1).split('&').forEach(pair => {
+        const [key, value] = pair.split('=');
+        params[key] = decodeURIComponent(value);
+    });
+    
+    if (params.access_token) {
+        gapi.client.setToken({ access_token: params.access_token });
+        localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
+        
+        getUserInfo().then(user => {
+            currentUser = user;
+            if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
+                showDashboard();
+                loadDashboardData();
+            } else {
+                signOut();
+                showLoginScreen();
+                showToast('error', 'You do not have admin privileges');
+            }
+        }).catch(error => {
+            console.error('Error fetching user info:', error);
+            showLoginScreen();
+        });
+        
+        // Clean up URL
+        if (history.replaceState) {
+            history.replaceState(null, null, window.location.pathname);
+        } else {
+            window.location.hash = '';
+        }
+    }
+}		
+		
+/**
+ * Initialize Google API client
  */
 function initGoogleApi() {
-    console.log('Initializing Google API with modern Identity Services...');
-    
-    gapi.load('client', async () => {
-        try {
-            await gapi.client.init({
-                apiKey: CONFIG.API_KEY,
-                discoveryDocs: DISCOVERY_DOCS
-            });
-            
+    // Check for token in URL hash on page load
+    if (window.location.hash && window.location.hash.includes('access_token=')) {
+        handleAuthRedirect();
+        return;
+    }
+
+    gapi.load('client', () => {
+        gapi.client.init({
+            apiKey: CONFIG.API_KEY,
+            discoveryDocs: DISCOVERY_DOCS
+        }).then(() => {
             console.log('GAPI client initialized successfully');
-            
-            // Initialize Google Identity Services
-            initializeGIS();
-            
-            // Check if user is already signed in (from a previous session)
             checkStoredAuth();
-            
-        } catch (error) {
-            console.error('Error initializing Google API client:', error);
+        }).catch(error => {
+            console.error('Error initializing GAPI client:', error);
             showToast('error', 'Failed to initialize API');
-        }
+            showLoginScreen();
+        });
     });
 }
 
 /**
- * Check for stored authentication from previous sessions
+ * Check for stored auth token
  */
 function checkStoredAuth() {
     const storedToken = localStorage.getItem('gapi_token');
     if (storedToken) {
         try {
-            const tokenInfo = JSON.parse(storedToken);
+            const tokenObj = JSON.parse(storedToken);
+            gapi.client.setToken(tokenObj);
             
-            // Set the token for the client
-            gapi.client.setToken(tokenInfo);
-            
-            // Verify token is still valid
             getUserInfo().then(user => {
                 currentUser = user;
-                
-                // Check if user is admin
                 if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
-                    // Show admin dashboard
                     showDashboard();
                     loadDashboardData();
                 } else {
-                    // Not an admin, show error
                     signOut();
                     showLoginScreen();
                     showToast('error', 'You do not have admin privileges');
                 }
             }).catch(error => {
-                console.error('Error verifying token:', error);
+                console.error('Error verifying stored token:', error);
                 localStorage.removeItem('gapi_token');
                 showLoginScreen();
             });
-            
         } catch (e) {
             console.error('Invalid token in localStorage:', e);
             localStorage.removeItem('gapi_token');
@@ -1518,122 +1545,42 @@ function checkStoredAuth() {
     }
 }
 
-
-
-
 /**
- * Initialize Google Identity Services for authentication
- */
-function initializeGIS() {
-    // Check if google object and Identity Services are loaded
-    if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
-        console.error('Google Identity Services not available');
-        showToast('error', 'Authentication services not loaded. Please refresh the page.');
-        return;
-    }
-    
-    // Log the client ID to verify it exists
-    console.log('Using client ID:', CONFIG.CLIENT_ID);
-    
-    // Initialize the tokenClient with explicit client ID
-    tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CONFIG.CLIENT_ID, // Make sure this is the exact property name in CONFIG
-        scope: SCOPES,
-        callback: handleTokenResponse
-    });
-    
-    // Set up sign-in button
-    document.getElementById('login-button').addEventListener('click', requestAccessToken);
-}
-
-/**
- * Handle token response from Google Identity Services
- */
-function handleTokenResponse(response) {
-    if (response.error !== undefined) {
-        console.error('Error getting token:', response);
-        showToast('error', 'Authentication failed');
-        return;
-    }
-    
-    console.log('Token received successfully');
-    
-    // Store token in localStorage for future sessions
-    localStorage.setItem('gapi_token', JSON.stringify(response));
-    
-    // Get user info and update sign-in status
-    getUserInfo().then(user => {
-        currentUser = user;
-        
-        // Check if user is admin
-        if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
-            // Show admin dashboard
-            showDashboard();
-            loadDashboardData();
-        } else {
-            // Not an admin, show error
-            signOut();
-            showLoginScreen();
-            showToast('error', 'You do not have admin privileges');
-        }
-    });
-}
-
-/**
- * Handle sign-out
+ * Sign out user
  */
 function signOut() {
-    // Clear token from localStorage
     localStorage.removeItem('gapi_token');
-    
-    // Clear token from gapi client
     gapi.client.setToken(null);
-    
-    // Show login screen
     showLoginScreen();
 }
 
-/**
- * Handle sign-in button click (replace old handleSignIn)
- */
-function handleSignIn() {
-    requestAccessToken();
-}
-
-/**
- * Request access token using Google Identity Services
- */
-function requestAccessToken() {
-    // Request an access token
-    tokenClient.requestAccessToken();
-}
         
-        /**
-         * Update sign-in status
-         */
-        function updateSignInStatus(isSignedIn) {
-            if (isSignedIn) {
-                // User is signed in
-                getUserInfo().then(user => {
-                    currentUser = user;
-                    
-                    // Check if user is admin
-                    if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
-                        // Show admin dashboard
-                        showDashboard();
-                        loadDashboardData();
-                    } else {
-                        // Not an admin, show error
-                        gapi.auth2.getAuthInstance().signOut();
-                        showLoginScreen();
-                        showToast('error', 'You do not have admin privileges');
-                    }
-                });
-            } else {
-                // User is signed out
-                showLoginScreen();
-            }
-        }
+/**
+ * Update sign-in status
+ */
+function updateSignInStatus(isSignedIn) {
+	if (isSignedIn) {
+		// User is signed in
+		getUserInfo().then(user => {
+			currentUser = user;
+			
+			// Check if user is admin
+			if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
+				// Show admin dashboard
+				showDashboard();
+				loadDashboardData();
+			} else {
+				// Not an admin, show error
+				gapi.auth2.getAuthInstance().signOut();
+				showLoginScreen();
+				showToast('error', 'You do not have admin privileges');
+			}
+		});
+	} else {
+		// User is signed out
+		showLoginScreen();
+	}
+}
         
 /**
  * Load questions for a specific exam
@@ -2316,12 +2263,24 @@ function deleteSubmission(submissionId) {
             }
         }
         
-        /**
-         * Handle sign-in button click
-         */
-        function handleSignIn() {
-            gapi.auth2.getAuthInstance().signIn();
-        }
+/**
+ * Handle sign-in button click
+ */
+function handleSignIn() {
+    // Create Google OAuth URL with scopes
+    const scopes = encodeURIComponent(SCOPES);
+    const redirectUri = encodeURIComponent(window.location.href.split('#')[0]);
+    
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                   `client_id=${CONFIG.CLIENT_ID}&` +
+                   `redirect_uri=${redirectUri}&` +
+                   `response_type=token&` +
+                   `prompt=select_account&` +
+                   `scope=${scopes}`;
+    
+    // Open Google auth in same window
+    window.location.href = authUrl;
+}
         
         /**
          * Show login screen
