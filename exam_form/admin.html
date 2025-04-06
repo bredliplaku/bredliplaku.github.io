@@ -1488,25 +1488,59 @@ function handleAuthRedirect() {
 /**
  * Initialize Google API client
  */
+// Replace the entire initGoogleApi function
 function initGoogleApi() {
-    // Check for token in URL hash on page load
-    if (window.location.hash && window.location.hash.includes('access_token=')) {
-        handleAuthRedirect();
-        return;
-    }
-
-    gapi.load('client', () => {
+    gapi.load('client:auth2', () => {
         gapi.client.init({
             apiKey: CONFIG.API_KEY,
-            discoveryDocs: DISCOVERY_DOCS
+            clientId: CONFIG.CLIENT_ID,
+            discoveryDocs: DISCOVERY_DOCS,
+            scope: SCOPES
         }).then(() => {
-            console.log('GAPI client initialized successfully');
-            checkStoredAuth();
+            // Check URL hash for token
+            if (window.location.hash && window.location.hash.includes('access_token=')) {
+                const params = {};
+                window.location.hash.substring(1).split('&').forEach(pair => {
+                    const [key, value] = pair.split('=');
+                    params[key] = decodeURIComponent(value);
+                });
+                
+                if (params.access_token) {
+                    gapi.client.setToken({ access_token: params.access_token });
+                    localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
+                    checkAdmin();
+                }
+                history.replaceState(null, null, window.location.pathname);
+            } else {
+                const token = localStorage.getItem('gapi_token');
+                if (token) {
+                    gapi.client.setToken(JSON.parse(token));
+                    checkAdmin();
+                } else {
+                    showLoginScreen();
+                }
+            }
         }).catch(error => {
-            console.error('Error initializing GAPI client:', error);
-            showToast('error', 'Failed to initialize API');
+            console.error('Error initializing API:', error);
             showLoginScreen();
         });
+    });
+}
+
+// Add this helper function
+function checkAdmin() {
+    getUserInfo().then(user => {
+        if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
+            showDashboard();
+            loadDashboardData();
+        } else {
+            localStorage.removeItem('gapi_token');
+            showLoginScreen();
+            showToast('error', 'Not authorized');
+        }
+    }).catch(() => {
+        localStorage.removeItem('gapi_token');
+        showLoginScreen();
     });
 }
 
