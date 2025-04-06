@@ -458,84 +458,98 @@
     }
 
     async function fetchExamDetails(pin) {
-        // Fetches exam details from sheet based on PIN, handles Mode logic
-        showImprovedNotification('info', 'Fetching Exam', `Loading details for PIN: ${pin}...`);
-        // Columns A-G: PIN, code, name, duration, deadline, mode, questions
-        const range = `${EXAM_DETAILS_SHEET_NAME}!A:G`; // Updated range
-        const data = await getSheetData(EXAM_SPREADSHEET_ID, range);
-        examDetails = null; // Reset details first
-        if (data === null) return; // Error already shown by getSheetData
+    // Fetches exam details from sheet using PIN, handles Quiz/Exam mode UI
+    showImprovedNotification('info', 'Fetching Exam', `Loading details for PIN: ${pin}...`);
+    const range = `${EXAM_DETAILS_SHEET_NAME}!A:G`; // PIN, code, name, duration, deadline, mode, questions
+    const data = await getSheetData(EXAM_SPREADSHEET_ID, range);
+    examDetails = null; // Reset details first
+    if (data === null) { // Error handled by getSheetData
+        if(loadExamBtn) loadExamBtn.disabled = !isOnline; // Re-enable load btn if online (unless already disabled)
+         return;
+    }
 
-        if (data.length > 1) { // Check if any data rows exist (row 0 is header)
-            const header = data[0].map(h => String(h).trim().toLowerCase());
-            // Define indices based on expected headers
-            const indices = { pin: header.indexOf('pin'), code: header.indexOf('code'), name: header.indexOf('name'), duration: header.indexOf('duration'), deadline: header.indexOf('deadline'), mode: header.indexOf('mode'), questions: header.indexOf('questions') };
+    if (data.length > 1) {
+        const header = data[0].map(h => String(h).trim().toLowerCase());
+        const indices = { pin: header.indexOf('pin'), code: header.indexOf('code'), name: header.indexOf('name'), duration: header.indexOf('duration'), deadline: header.indexOf('deadline'), mode: header.indexOf('mode'), questions: header.indexOf('questions') };
 
-            // Validate required columns exist
-             if (indices.pin === -1 || indices.code === -1 || indices.name === -1 || indices.duration === -1 || indices.deadline === -1 || indices.mode === -1 || indices.questions === -1) {
-                 console.error("Missing headers in Exams Sheet. Need: pin, code, name, duration, deadline, mode, questions. Found:", header);
-                 showImprovedNotification('error', 'Sheet Format Error', 'The "Exams" sheet columns are incorrect.');
-                 return;
-            }
-
-            const examRow = data.slice(1).find(row => row[indices.pin] === pin); // Find the row matching the entered PIN
-
-            if (examRow) { // Exam found
-                const duration = parseInt(examRow[indices.duration], 10);
-                const mode = String(examRow[indices.mode] || 'Quiz').trim().toLowerCase(); // Default to 'quiz', lowercase
-                if (isNaN(duration) || duration <= 0) { showImprovedNotification('error', 'Invalid Data', `Exam duration invalid.`); return; }
-
-                // Store loaded exam details
-                examDetails = {
-                    PIN: examRow[indices.pin], Code: examRow[indices.code], Name: examRow[indices.name],
-                    Duration: duration, Deadline: examRow[indices.deadline], Mode: mode,
-                    Questions: examRow[indices.questions]
-                    // No OfficialExamID fetched from here
-                };
-                console.log("Exam details loaded:", examDetails);
-
-                displayExamDetails(); // Update UI with details
-                examDetailsModule.classList.remove('hidden'); // Show details module
-                examStartModule.classList.add('hidden'); // Hide PIN input module
-                showImprovedNotification('success', 'Exam Loaded', `"${examDetails.Name}" loaded.`);
-
-                // Handle UI based on Exam Mode
-                 if (examDetails.Mode === 'exam') {
-                     studentExamIdGroup.classList.remove('hidden'); // Show the 5-char ID input
-                     studentExamIdInput.value = ''; // Clear previous input
-                     startExamBtn.disabled = true; // Disable Start until 5-char ID is valid
-                     validateStudentExamIdInput(); // Run validation check immediately
-                 } else { // Quiz mode
-                     studentExamIdGroup.classList.add('hidden'); // Hide 5-char ID input
-                     studentExamIdInput.value = ''; // Clear value
-                     studentExamIdEntered = ''; // Clear state variable
-                     startExamBtn.disabled = !isOnline; // Enable Start button directly if online
-                 }
-            } else { // PIN not found
-                 showImprovedNotification('error', 'Invalid PIN', `Exam PIN not found.`);
-                 examDetailsModule.classList.add('hidden');
-                 examStartModule.classList.remove('hidden'); // Show PIN input again
-            }
-        } else { // No exam data rows in sheet
-            showImprovedNotification('error', 'No Exams Found', 'No exams in sheet.');
-            examDetailsModule.classList.add('hidden');
-            examStartModule.classList.remove('hidden');
+        if (Object.values(indices).slice(0, 6).includes(-1) || indices.questions === -1) {
+             console.error("Missing headers in Exams Sheet. Need: pin, code, name, duration, deadline, mode, questions. Found:", header);
+             showImprovedNotification('error', 'Sheet Format Error', 'The "Exams" sheet columns are incorrect.');
+             if(loadExamBtn) loadExamBtn.disabled = !isOnline;
+             return;
         }
-    }
+        const examRow = data.slice(1).find(row => row[indices.pin] === pin);
 
-    function validateStudentExamIdInput() {
-        // Validates the 5-char Student Exam ID input and enables/disables Start button accordingly
-         if (examDetails?.Mode === 'exam') { // Only relevant in Exam mode
-             const idVal = studentExamIdInput.value.trim();
-             const isValid = idVal.length === 5;
-             startExamBtn.disabled = !isValid || !isOnline; // Enable Start only if valid 5 chars AND online
-             // Visual feedback for the input field
-             studentExamIdInput.style.borderColor = isValid || idVal === '' ? '#ccc' : 'red';
-         } else {
-             // In Quiz mode, button state depends only on details loaded & online status
-             startExamBtn.disabled = !examDetails || !isOnline;
-         }
+        if (examRow) { // Exam found
+            const duration = parseInt(examRow[indices.duration], 10);
+            const mode = String(examRow[indices.mode] || 'Quiz').trim().toLowerCase();
+            if (isNaN(duration) || duration <= 0) { showImprovedNotification('error', 'Invalid Data', `Exam duration invalid.`); if(loadExamBtn) loadExamBtn.disabled = !isOnline; return; }
+
+            examDetails = { PIN: examRow[indices.pin], Code: examRow[indices.code], Name: examRow[indices.name], Duration: duration, Deadline: examRow[indices.deadline], Mode: mode, Questions: examRow[indices.questions] };
+            console.log("Exam details loaded:", examDetails);
+
+            displayExamDetailsHeader(); // Only update header info for now
+            showImprovedNotification('success', 'Exam Details Loaded', `"${examDetails.Name}" loaded. Please complete required fields.`);
+
+             if (examDetails.Mode === 'exam') {
+                 console.log("Exam Mode detected: Showing Student Exam ID input.");
+                 if(examStartModule) examStartModule.classList.remove('hidden'); // Ensure start module is visible
+                 if(studentExamIdGroup) studentExamIdGroup.classList.remove('hidden'); // Show the 5-char ID input
+                 if(studentExamIdInput) studentExamIdInput.value = ''; // Clear previous input
+                 if(examDetailsModule) examDetailsModule.classList.add('hidden'); // Keep details module hidden for now
+                 if(startExamBtn) startExamBtn.disabled = true; // Ensure start is disabled initially
+                 validateStudentExamIdInput(); // Validate (will keep start disabled until 5 chars entered)
+                 if(loadExamBtn) loadExamBtn.disabled = true; // Disable load button after successful load
+             } else { // Quiz mode
+                 console.log("Quiz Mode detected: Showing details and enabling Start Exam.");
+                 if(studentExamIdGroup) studentExamIdGroup.classList.add('hidden'); // Hide 5-char ID input
+                 if(studentExamIdInput) studentExamIdInput.value = '';
+                 studentExamIdEntered = '';
+                 if(examStartModule) examStartModule.classList.add('hidden'); // Hide start module
+                 displayExamDetailsFull(); // Update the details module content
+                 if(examDetailsModule) examDetailsModule.classList.remove('hidden'); // Show details module
+                 if(startExamBtn) startExamBtn.disabled = !isOnline; // Enable Start button if online
+                 if(loadExamBtn) loadExamBtn.disabled = true; // Disable load button
+             }
+        } else { // PIN not found
+             showImprovedNotification('error', 'Invalid PIN', `Exam PIN not found.`);
+             if(examDetailsModule) examDetailsModule.classList.add('hidden');
+             if(examStartModule) examStartModule.classList.remove('hidden'); // Ensure PIN input is visible
+             if(loadExamBtn) loadExamBtn.disabled = !isOnline;
+        }
+    } else { // No exams in sheet
+        showImprovedNotification('error', 'No Exams Found', 'No exams in sheet.');
+        if(examDetailsModule) examDetailsModule.classList.add('hidden');
+        if(examStartModule) examStartModule.classList.remove('hidden');
+         if(loadExamBtn) loadExamBtn.disabled = !isOnline;
     }
+}
+
+function displayExamDetailsFull() {
+    // Updates only the top header info items
+    if (!examDetails) return;
+    if(examCodeDisplay) examCodeDisplay.textContent = examDetails.Code || 'N/A';
+    if(examDurationDisplay) examDurationDisplay.textContent = `${examDetails.Duration} minutes`;
+    if(examDeadlineDisplay) examDeadlineDisplay.textContent = examDetails.Deadline || 'N/A';
+    if(examNameHeader) examNameHeader.textContent = examDetails.Name || 'Exam Loaded';
+    // Do not display OfficialExamID in header
+    if(officialIdDisplayItem) officialIdDisplayItem.style.display = 'none';
+}
+
+function validateStudentExamIdInput() {
+    // Validates 5-char Student Exam ID and enables/disables Start button (wherever it is)
+    if (!startExamBtn || !studentExamIdInput || !examDetails) return; // Safety check
+
+     if (examDetails.Mode === 'exam') {
+         const idVal = studentExamIdInput.value.trim();
+         const isValid = idVal.length === 5;
+         // Enable the Start Exam button (in the hidden details module) if ID is valid and online
+         startExamBtn.disabled = !isValid || !isOnline;
+         // Visual feedback for the input field
+         studentExamIdInput.style.borderColor = isValid || idVal === '' ? '#ccc' : 'red';
+     }
+     // No action needed for Quiz mode here, start button enabled elsewhere
+}
 
     function displayExamDetails() {
         // Updates UI elements with loaded exam data
@@ -554,33 +568,34 @@
         // Start button state handled by mode logic/validation
     }
 
-    function handleStartExam() {
-        // Starts the exam after necessary checks
-        if (!examDetails || !currentUser) { showImprovedNotification('error', 'Error', 'Cannot start.'); return; }
-        // Validate and capture Student Exam ID ONLY if in Exam mode
-        if (examDetails.Mode === 'exam') {
-            studentExamIdEntered = studentExamIdInput.value.trim();
-            if (studentExamIdEntered.length !== 5) {
-                showImprovedNotification('error', 'Invalid ID', 'Enter the 5-character Student Exam ID.');
-                studentExamIdInput.focus(); return;
-            }
-            console.log("Starting Exam Mode, Student Exam ID:", studentExamIdEntered);
-        } else { // Quiz mode
-             studentExamIdEntered = ''; console.log("Starting Quiz Mode.");
-        }
-        // Optional: Deadline Check
-        try { const deadlineTime = new Date(examDetails.Deadline).getTime(); if (!isNaN(deadlineTime) && Date.now() > deadlineTime) { showImprovedNotification('error', 'Deadline Passed', 'Cannot start exam.'); return; } } catch (e) { console.warn("Deadline check error:", e); }
+function handleStartExam() {
+    // Starts the exam after necessary checks
+     if (!examDetails || !currentUser) { showImprovedNotification('error', 'Error', 'Cannot start.'); return; }
 
-        console.log("Starting exam UI...");
-        examDetailsModule.classList.add('hidden'); // Hide details
-        examQuestionsModule.classList.remove('hidden'); // Show questions
-        submissionConfirmationModule.classList.add('hidden'); // Hide confirmation
-        if(submitExamBtn) submitExamBtn.disabled = !isOnline; // Enable submit if online
+     // Capture the validated Student Exam ID if in Exam mode
+     if (examDetails.Mode === 'exam') {
+         studentExamIdEntered = studentExamIdInput.value.trim();
+         if (studentExamIdEntered.length !== 5) { // Re-validate just in case
+             showImprovedNotification('error', 'Invalid ID', 'Enter 5-character Student Exam ID.');
+             studentExamIdInput.focus(); return;
+         }
+         console.log("Starting Exam Mode, Student Exam ID:", studentExamIdEntered);
+     } else {
+          studentExamIdEntered = ''; console.log("Starting Quiz Mode.");
+     }
+    /* Deadline Check? */ try { const deadlineTime = new Date(examDetails.Deadline).getTime(); if (!isNaN(deadlineTime) && Date.now() > deadlineTime) { showImprovedNotification('error', 'Deadline Passed', 'Cannot start exam.'); return; } } catch (e) { console.warn("Deadline check error:", e); }
 
-        displayQuestions(examDetails.Questions); // Render questions
-        startTimer(examDetails.Duration); // Start timer
-        recordExamAttempt('start'); // Log start event
-    }
+    console.log("Starting exam UI...");
+    if(examStartModule) examStartModule.classList.add('hidden'); // Hide the start module now
+    if(examDetailsModule) examDetailsModule.classList.add('hidden'); // Ensure details module is hidden
+    if(examQuestionsModule) examQuestionsModule.classList.remove('hidden'); // Show questions
+    if(submissionConfirmationModule) submissionConfirmationModule.classList.add('hidden');
+    if(submitExamBtn) submitExamBtn.disabled = !isOnline;
+
+    displayQuestions(examDetails.Questions);
+    startTimer(examDetails.Duration);
+    recordExamAttempt('start');
+}
 
     function displayQuestions(questionsJsonString) {
         // Parses JSON from sheet and renders appropriate HTML for questions
