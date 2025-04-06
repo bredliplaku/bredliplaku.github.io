@@ -1357,27 +1357,23 @@
          * Initialize the application
          */
         function init() {
-            // Load saved configuration if available
-             loadConfig();
-			document.getElementById('login-button').addEventListener('click', handleSignIn);
-			document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
-			document.getElementById('save-exam-btn').addEventListener('click', saveExam);
-			document.getElementById('save-question-btn').addEventListener('click', saveQuestion);
+		  // Load saved configuration if available
+		  loadConfig();
+		  
+		  // Only attach these listeners once
+		  document.getElementById('login-button').addEventListener('click', handleSignIn);
+		  document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
+		  document.getElementById('save-exam-btn').addEventListener('click', saveExam);
+		  document.getElementById('save-question-btn').addEventListener('click', saveQuestion);
+		  
+		  // Initialize Google API
+		  initGoogleApi();
             
-            // Initialize Google API
-            initGoogleApi();
-            
-            // Attach event listeners
-            document.getElementById('login-button').addEventListener('click', handleSignIn);
-            document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
-            document.getElementById('save-exam-btn').addEventListener('click', saveExam);
-            document.getElementById('save-question-btn').addEventListener('click', saveQuestion);
-            
-            // Set current year in footer if exists
-            const yearElement = document.getElementById('currentYear');
-            if (yearElement) {
-                yearElement.textContent = new Date().getFullYear();
-            }
+		  // Set current year in footer if exists
+		  const yearElement = document.getElementById('currentYear');
+		  if (yearElement) {
+			yearElement.textContent = new Date().getFullYear();
+		  }
 		    // Check if gapi is loaded before initializing
     if (typeof gapi !== 'undefined') {
         initGoogleApi();
@@ -1467,7 +1463,168 @@ function initGoogleApi() {
         });
     });
 }
+
+function showAddQuestionModal() {
+  document.getElementById('question-modal-title').textContent = 'Add Question';
+  
+  // Clear form
+  document.getElementById('question-text').value = '';
+  document.getElementById('question-type').value = 'text';
+  document.getElementById('question-points').value = '5';
+  
+  // Hide options container
+  document.getElementById('multiple-choice-options').style.display = 'none';
+  
+  // Reset options
+  document.getElementById('options-container').innerHTML = `
+    <div class="form-group" style="display: flex; gap: 10px;">
+      <input type="text" class="form-control option-input" placeholder="Option 1">
+      <button class="btn btn-danger btn-icon option-remove" onclick="removeOption(this)">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="form-group" style="display: flex; gap: 10px;">
+      <input type="text" class="form-control option-input" placeholder="Option 2">
+      <button class="btn btn-danger btn-icon option-remove" onclick="removeOption(this)">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+  `;
+  
+  // Show modal
+  document.getElementById('question-modal').style.display = 'block';
+}
+
+function closeQuestionModal() {
+  document.getElementById('question-modal').style.display = 'none';
+}
+
+function toggleQuestionOptions() {
+  const questionType = document.getElementById('question-type').value;
+  const optionsContainer = document.getElementById('multiple-choice-options');
+  
+  if (questionType === 'multiple_choice') {
+    optionsContainer.style.display = 'block';
+  } else {
+    optionsContainer.style.display = 'none';
+  }
+}
+
+function addOption() {
+  const container = document.getElementById('options-container');
+  const optionCount = container.children.length + 1;
+  
+  const optionGroup = document.createElement('div');
+  optionGroup.className = 'form-group';
+  optionGroup.style.display = 'flex';
+  optionGroup.style.gap = '10px';
+  
+  optionGroup.innerHTML = `
+    <input type="text" class="form-control option-input" placeholder="Option ${optionCount}">
+    <button class="btn btn-danger btn-icon option-remove" onclick="removeOption(this)">
+      <i class="fas fa-times"></i>
+    </button>
+  `;
+  
+  container.appendChild(optionGroup);
+}
+
+function removeOption(button) {
+  const container = document.getElementById('options-container');
+  if (container.children.length <= 2) {
+    showToast('warning', 'Minimum Options', 'Multiple choice questions need at least 2 options');
+    return;
+  }
+  
+  button.parentNode.remove();
+}
         
+function saveQuestion() {
+  const questionText = document.getElementById('question-text').value.trim();
+  const questionType = document.getElementById('question-type').value;
+  const questionPoints = parseInt(document.getElementById('question-points').value);
+  
+  if (!questionText) {
+    showToast('error', 'Please enter question text');
+    return;
+  }
+  
+  let options = [];
+  if (questionType === 'multiple_choice') {
+    const optionInputs = document.querySelectorAll('.option-input');
+    options = Array.from(optionInputs).map(input => input.value.trim()).filter(val => val);
+    
+    if (options.length < 2) {
+      showToast('error', 'Multiple choice questions need at least 2 options');
+      return;
+    }
+  }
+  
+  const question = {
+    type: questionType,
+    text: questionText,
+    points: questionPoints,
+    options: options
+  };
+  
+  currentQuestions.push(question);
+  updateQuestionsList();
+  closeQuestionModal();
+}
+
+function updateQuestionsList() {
+  const container = document.getElementById('question-list');
+  const emptyState = document.getElementById('empty-questions');
+
+  if (currentQuestions.length === 0) {
+    emptyState.style.display = 'block';
+    return;
+  }
+
+  emptyState.style.display = 'none';
+
+  // Clear existing questions except empty state
+  while (container.children.length > 1) {
+    container.removeChild(container.lastChild);
+  }
+
+  // Add questions
+  currentQuestions.forEach((question, index) => {
+    const questionItem = document.createElement('div');
+    questionItem.className = 'question-item';
+
+    // Build options HTML separately to avoid nested template literal issues.
+    let optionsHtml = '';
+    if (question.options.length > 0) {
+      optionsHtml = '<div class="option-list">' +
+        question.options.map(opt => `<div class="option-item">${opt}</div>`).join('') +
+        '</div>';
+    }
+
+    questionItem.innerHTML = `
+      <div class="question-header">
+        <div>
+          <span class="question-type">${question.type}</span>
+          <span class="question-points">${question.points} points</span>
+        </div>
+      </div>
+      <div class="question-text">${question.text}</div>
+      ${optionsHtml}
+      <div class="question-actions">
+        <button class="btn btn-sm btn-primary" onclick="editQuestion(${index})">
+          <i class="fas fa-edit"></i> Edit
+        </button>
+        <button class="btn btn-sm btn-danger" onclick="removeQuestion(${index})">
+          <i class="fas fa-trash"></i> Remove
+        </button>
+      </div>
+    `;
+    
+    container.appendChild(questionItem);
+  });
+}
+		
+		
         /**
          * Update sign-in status
          */
