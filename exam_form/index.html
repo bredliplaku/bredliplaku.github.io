@@ -746,6 +746,7 @@ function handleAuthRedirect() {
  */
     function init() {
         updateYear();
+		initConnectionMonitoring();
         
         // Show loading screen
         const loadingIndicator = document.getElementById('app-loading');
@@ -858,68 +859,52 @@ function initGoogleApi() {
     });
 }
 
-   /**
-     * Initialize online/offline monitoring and sync functionality
-     */
-    function initConnectionMonitoring() {
-        // Set initial connection status
-        updateConnectionStatus();
-        
-        // Monitor online/offline events
-        window.addEventListener('online', handleOnlineStatusChange);
-        window.addEventListener('offline', handleOnlineStatusChange);
-        
-        // Set up activity monitoring
-        document.addEventListener('mousemove', resetActivityTimer);
-        document.addEventListener('keypress', resetActivityTimer);
-        document.addEventListener('click', resetActivityTimer);
-        
-        // Set up sync button
-        document.getElementById('sync-button').addEventListener('click', manualSync);
-        
-        // Start auto-sync interval (every 2 minutes)
-        syncInterval = setInterval(autoSync, 2 * 60 * 1000);
-        
-        // Start activity timeout check
-        activityTimeout = setInterval(checkActivityTimeout, 60 * 1000);
-        
-        // Check if any saved answers in localStorage
-        restoreSavedAnswers();
-        
-        // Set up auth expired modal button
-        document.getElementById('auth-signin-btn').addEventListener('click', doAuth);
-    }
+function initConnectionMonitoring() {
+    // Set initial connection status
+    isOnline = navigator.onLine;
+    updateConnectionStatus();
     
-    /**
-     * Update the connection status indicator
-     */
-    function updateConnectionStatus() {
-        const statusIndicator = document.querySelector('.status-indicator');
-        const statusText = document.querySelector('.status-text');
-        
-        if (isOnline) {
-            statusIndicator.className = 'status-indicator online';
-            statusText.textContent = 'Online';
-        } else {
-            statusIndicator.className = 'status-indicator offline';
-            statusText.textContent = 'Offline';
-        }
-    }
+    // Monitor online/offline events
+    window.addEventListener('online', handleOnlineStatusChange);
+    window.addEventListener('offline', handleOnlineStatusChange);
     
-    /**
-     * Handle online/offline status changes
-     */
-    function handleOnlineStatusChange() {
-        isOnline = navigator.onLine;
-        updateConnectionStatus();
-        
-        if (isOnline) {
-            showNotification('info', 'Connection Restored', 'You are now online. Your answers will be synced.', 3000);
-            autoSync();
-        } else {
-            showNotification('warning', 'Connection Lost', 'You are offline. Your answers are saved locally.', 5000);
-        }
+    // Set up sync button
+    document.getElementById('sync-button').addEventListener('click', manualSync);
+    
+    // Set up auth expired modal button
+    document.getElementById('auth-signin-btn').addEventListener('click', doAuth);
+    
+    // Start auto-sync interval (every 2 minutes)
+    syncInterval = setInterval(autoSync, 2 * 60 * 1000);
+    
+    // Check if any saved answers in localStorage
+    restoreSavedAnswers();
+}
+
+function updateConnectionStatus() {
+    const statusIndicator = document.querySelector('.status-indicator');
+    const statusText = document.querySelector('.status-text');
+    
+    if (isOnline) {
+        statusIndicator.className = 'status-indicator online';
+        statusText.textContent = 'Online';
+    } else {
+        statusIndicator.className = 'status-indicator offline';
+        statusText.textContent = 'Offline';
     }
+}
+
+function handleOnlineStatusChange() {
+    isOnline = navigator.onLine;
+    updateConnectionStatus();
+    
+    if (isOnline) {
+        showNotification('info', 'Connection Restored', 'You are now online.');
+        autoSync();
+    } else {
+        showNotification('warning', 'Connection Lost', 'You are offline. Answers saved locally.');
+    }
+}
     
     /**
      * Reset the activity timer
@@ -1000,94 +985,71 @@ function initGoogleApi() {
     /**
      * Manual sync triggered by the sync button
      */
-    function manualSync() {
-        const syncButton = document.getElementById('sync-button');
-        
-        // Add spinning animation to the icon
-        syncButton.classList.add('syncing');
-        syncButton.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Syncing...';
-        
-        // Try to validate token first
-        validateToken().then(valid => {
-            if (valid && isOnline) {
-                // If token is valid and we're online, save with sync
-                saveAnswers(true).then(() => {
-                    // Update button after sync
-                    setTimeout(() => {
-                        syncButton.classList.remove('syncing');
-                        syncButton.innerHTML = '<i class="fas fa-check"></i> Synced';
-                        
-                        // Reset button after 2 seconds
-                        setTimeout(() => {
-                            syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> SYNC';
-                        }, 2000);
-                    }, 1000);
-                });
-            } else {
-                // If token is invalid or offline, just save locally
-                saveAnswers(false);
-                
-                // Update button accordingly
-                setTimeout(() => {
-                    syncButton.classList.remove('syncing');
-                    
-                    if (!isOnline) {
-                        syncButton.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Offline';
-                        showNotification('warning', 'Offline Mode', 'Your answers are saved locally only.', 3000);
-                    } else {
-                        syncButton.innerHTML = '<i class="fas fa-times"></i> Not Signed In';
-                        showAuthExpiredModal();
-                    }
-                    
-                    // Reset button after 2 seconds
-                    setTimeout(() => {
-                        syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> SYNC';
-                    }, 2000);
-                }, 1000);
-            }
-        });
-    }
+function manualSync() {
+    const syncButton = document.getElementById('sync-button');
+    syncButton.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Syncing...';
+    
+    saveAnswers(isOnline && isSignedIn).then(success => {
+        setTimeout(() => {
+            syncButton.innerHTML = success ? 
+                '<i class="fas fa-check"></i> Synced' : 
+                '<i class="fas fa-exclamation-triangle"></i> Failed';
+            
+            setTimeout(() => {
+                syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> SYNC';
+            }, 2000);
+        }, 1000);
+    });
+}
     
     /**
      * Save answers to localStorage and optionally to server
      */
-    async function saveAnswers(syncToServer = false) {
-        try {
-            const examData = await collectAnswers(false); // Don't try to read file data for local storage
-            
-            // Always save to localStorage
-            localStorage.setItem('exam_answers', JSON.stringify({
-                studentInfo: {
-                    name: examData.studentName,
-                    id: examData.studentId,
-                    email: examData.studentEmail
-                },
-                questionResponses: examData.questionResponses,
-                examCode: examConfig.code,
-                lastSaved: new Date().toISOString()
-            }));
-            
-            // If sync to server is requested and we're online and signed in
-            if (syncToServer && isOnline && isSignedIn) {
-                try {
-                    // Save responses to server (update this based on your server API)
-                    await saveResponsesToServer(examData);
-                    showNotification('success', 'Sync Complete', 'Your answers have been saved online.', 2000);
-                    return true;
-                } catch (error) {
-                    console.error('Error syncing to server:', error);
-                    showNotification('warning', 'Sync Failed', 'Could not sync to server. Your answers are saved locally.', 3000);
-                    return false;
-                }
-            }
-            
-            return true;
-        } catch (error) {
-            console.error('Error saving answers:', error);
-            showNotification('error', 'Save Error', 'Failed to save your answers. Please try again.', 3000);
-            return false;
-        }
+/**
+ * Save responses to server without full submission
+ */
+async function saveResponsesToServer(examData) {
+    // Generate a temporary submission ID if none exists
+    if (!examData.submissionId) {
+        examData.submissionId = `temp-${examData.studentId}-${Date.now()}`;
     }
+    
+    // Use modified version of your existing submitToGoogleSheets logic
+    const formattedData = formatDataForSheet(examData);
+    
+    // Check if a partial submission already exists
+    const response = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: EXAM_SUBMISSIONS_SPREADSHEET_ID,
+        range: 'Submissions!A:A'
+    });
+    
+    const submissionIds = response.result.values || [];
+    const rowIndex = submissionIds.findIndex(row => row[0] === examData.submissionId);
+    
+    if (rowIndex > 0) {
+        // Update existing partial submission
+        await gapi.client.sheets.spreadsheets.values.update({
+            spreadsheetId: EXAM_SUBMISSIONS_SPREADSHEET_ID,
+            range: `Submissions!A${rowIndex+1}:Z${rowIndex+1}`,
+            valueInputOption: 'USER_ENTERED',
+            resource: {
+                values: [formattedData]
+            }
+        });
+    } else {
+        // Create new partial submission
+        await gapi.client.sheets.spreadsheets.values.append({
+            spreadsheetId: EXAM_SUBMISSIONS_SPREADSHEET_ID,
+            range: 'Submissions!A:Z',
+            valueInputOption: 'USER_ENTERED',
+            resource: {
+                values: [formattedData]
+            }
+        });
+    }
+    
+    return true;
+}
     
     /**
      * Save responses to server
