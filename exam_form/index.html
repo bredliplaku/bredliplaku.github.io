@@ -48,7 +48,8 @@
                  <button id="start-exam-btn-alt" class="btn-green hidden" disabled><i class="fas fa-play"></i> Start Exam</button>
             </div>
         </div>
-        <div id="exam-details-module" class="module hidden"> <div class="module-header"> <span class="module-title"><i class="fas fa-info-circle"></i> Exam Information</span> </div>
+        <div id="exam-details-module" class="module hidden">
+             <div class="module-header"> <span class="module-title"><i class="fas fa-info-circle"></i> Exam Information</span> </div>
             <div class="module-content" id="exam-details-display">
                 <p><strong>Exam Name:</strong> <span id="exam-name-detail"></span></p> <p><strong>Course Code:</strong> <span id="exam-course-code-detail"></span></p> <p><strong>Mode:</strong> <span id="exam-mode-detail"></span></p> <p><strong>Duration:</strong> <span id="exam-duration-detail"></span></p> <p><strong>Available From:</strong> <span id="exam-start-time-detail"></span></p>
                 <button id="start-exam-btn" class="btn-green" disabled><i class="fas fa-play"></i> Start Exam</button>
@@ -68,11 +69,11 @@
 	const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
 	const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
 	const EXAM_SPREADSHEET_ID = '14SgW9V3ZLYDqqoAutkvHEuLvcogpJ2hMEj_qj72wmEw';
-    const EXAM_DETAILS_SHEET_NAME = 'Exams'; // Needs PIN, code, name, duration, startDate, startTime, mode, questions
-    const EXAM_ATTEMPTS_SHEET_NAME = 'Attempts'; // Needs Timestamp, Name(Q), Email(Q), PIN, CourseCode, StudentExamID(E), Status, Answers, Fingerprint
+    const EXAM_DETAILS_SHEET_NAME = 'Exams'; // Needs: PIN, code, name, duration, startDate(YYYY-MM-DD), startTime(HH:MM:SS), mode, questions
+    const EXAM_ATTEMPTS_SHEET_NAME = 'Attempts'; // Needs headers matching dataRow in recordExamAttempt
 
 	const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
-	// ** IMPORTANT: Using write scope - requires consent **
+	// *** IMPORTANT: Using write scope - requires consent ***
     const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
 	// === App State ===
@@ -82,13 +83,13 @@
     let tokenClient = null;
 	let isOnline = navigator.onLine;
     let isSyncing = false;
-    let isInitializing = true; // Declared
+    let isInitializing = true; // Declared globally
     let examDetails = null;
     let studentPINEntered = '';
     let studentExamIdEntered = ''; // 5-char ID ONLY for Exam mode
     let examTimerInterval = null;
-    let examEndTime = null;
-    const appStateKey = 'examAppState'; // For localStorage
+    let examEndTime = null; // Stores the absolute end time (timestamp)
+    const appStateKey = 'examAppState';
 
 	// === DOM Elements ===
     const loadingIndicator = document.getElementById('app-loading');
@@ -121,8 +122,8 @@
     const examModeDetail = document.getElementById('exam-mode-detail');
     const examDurationDetail = document.getElementById('exam-duration-detail');
     const examStartTimeDetail = document.getElementById('exam-start-time-detail');
-    const startExamBtn = document.getElementById('start-exam-btn'); // In details module (Quiz)
-    const startExamBtnAlt = document.getElementById('start-exam-btn-alt'); // In start module (Exam)
+    const startExamBtn = document.getElementById('start-exam-btn'); // Quiz mode button
+    const startExamBtnAlt = document.getElementById('start-exam-btn-alt'); // Exam mode button
     const examQuestionsModule = document.getElementById('exam-questions-module');
     const examForm = document.getElementById('exam-form');
     const examQuestionsArea = document.getElementById('exam-questions-area');
@@ -144,16 +145,13 @@
 	    window.addEventListener('online', updateOnlineStatus);
 	    window.addEventListener('offline', updateOnlineStatus);
 	    setTimeout(() => {
-	        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-	            initGoogleApi();
-	        } else {
-	            handleApiInitError(new Error("Google API objects not loaded"));
-	        }
+	        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') { initGoogleApi(); }
+	        else { handleApiInitError(new Error("Google API objects not loaded")); }
 	    }, 500);
 	}
 
     function setupEventListeners() {
-        // Add event listeners safely checking if elements exist
+        // Add event listeners safely
         if(loginBtn) loginBtn.addEventListener('click', handleAuthClick);
         if(logoutBtn) logoutBtn.addEventListener('click', handleSignoutClick);
         if(loadExamBtn) loadExamBtn.addEventListener('click', handleLoadExam);
@@ -166,7 +164,7 @@
             });
         }
         if(studentExamIdInput) studentExamIdInput.addEventListener('input', validateStudentExamIdInput);
-        // Initial button states
+        // Initial states
         if(loadExamBtn) loadExamBtn.disabled = true;
         if(startExamBtn) startExamBtn.disabled = true;
         if(startExamBtnAlt) startExamBtnAlt.classList.add('hidden');
@@ -179,7 +177,7 @@
         console.log("App content shown.");
     }
 
-    function updateYear() { // Definition included
+    function updateYear() {
 		const yearElement = document.getElementById('currentYear');
 		if (yearElement) { yearElement.textContent = new Date().getFullYear(); }
 	}
@@ -193,70 +191,42 @@
 	            try {
 	                await gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS });
 	                console.log('GAPI client initialized.');
-	                if (!isSignedIn) { // Check token only if not restored from localStorage state
-	                    const savedToken = localStorage.getItem('gapi_token');
-	                    if (savedToken) { const token = JSON.parse(savedToken); if (token?.access_token && !isTokenExpired(token)) { gapi.client.setToken(token); console.log("Using saved token."); await tokenObtained(token); } else { localStorage.removeItem('gapi_token'); console.log("Saved token invalid."); updateAuthUI(); showAppContent(); } }
-                        else { console.log("No saved token found."); updateAuthUI(); showAppContent(); }
-	                } else { console.log("App state loaded, already signed in."); showAppContent(); }
+	                if (!isSignedIn) { const savedToken = localStorage.getItem('gapi_token'); if (savedToken) { const token = JSON.parse(savedToken); if (token?.access_token && !isTokenExpired(token)) { gapi.client.setToken(token); console.log("Using saved token."); await tokenObtained(token); } else { localStorage.removeItem('gapi_token'); console.log("Saved token invalid."); updateAuthUI(); showAppContent(); } } else { console.log("No saved token."); updateAuthUI(); showAppContent(); } }
+                    else { console.log("App state loaded, signed in."); showAppContent(); }
 	            } catch (error) { handleApiInitError(error); }
 	        });
 	    } catch (error) { handleApiInitError(error); }
 	}
 
-    function handleApiInitError(error) {
-        console.error('API Init Error:', error);
-        showImprovedNotification('error', 'API Load Error', `Failed to load Google services: ${error.message}`, 0);
-        updateAuthUI(); showAppContent();
-    }
-
+    function handleApiInitError(error) { /* ... Same error handling ... */ console.error('API Init Error:', error); showImprovedNotification('error', 'API Load Error', `Failed to load Google services: ${error.message}`, 0); updateAuthUI(); showAppContent(); }
     function isTokenExpired(token) { return false; } // Placeholder
 
-    function handleAuthClick() {
-        if (tokenClient) { showImprovedNotification('info', 'Signing In', 'Opening Google Sign-In...'); tokenClient.requestAccessToken({ prompt: 'select_account' }); }
-        else { console.error('Token client not init.'); showImprovedNotification('error', 'Auth Error', 'Auth service not ready.'); }
-    }
+    function handleAuthClick() { /* ... Same sign-in trigger ... */ if (tokenClient) { showImprovedNotification('info', 'Signing In', 'Opening Google Sign-In...'); tokenClient.requestAccessToken({ prompt: 'select_account' }); } else { console.error('Token client not init.'); showImprovedNotification('error', 'Auth Error', 'Auth service not ready.'); } }
 
-    function handleTokenResponse(resp) {
-        if (resp.error) { console.error('Token response error:', resp); let msg = `Failed: ${resp.error}`; if(resp.error === 'popup_closed_by_user') msg = 'Sign-in cancelled.'; if(resp.error === 'access_denied') msg = 'Permission denied.'; showImprovedNotification('error', 'Auth Error', msg); updateAuthUI(); showAppContent(); return; }
-        console.log('Token received.'); localStorage.setItem('gapi_token', JSON.stringify(resp)); gapi.client.setToken(resp);
-        tokenObtained(resp);
-    }
+    function handleTokenResponse(resp) { /* ... Same token handling ... */ if (resp.error) { console.error('Token response error:', resp); let msg = `Failed: ${resp.error}`; if(resp.error === 'popup_closed_by_user') msg = 'Sign-in cancelled.'; if(resp.error === 'access_denied') msg = 'Permission denied.'; showImprovedNotification('error', 'Auth Error', msg); updateAuthUI(); showAppContent(); return; } console.log('Token received.'); localStorage.setItem('gapi_token', JSON.stringify(resp)); gapi.client.setToken(resp); tokenObtained(resp); }
 
     async function tokenObtained(token) {
+        // Runs after login/token validation
         console.log("Token available."); isSignedIn = true; await fetchUserInfo(); updateAuthUI(); showAppContent();
         const loadedState = JSON.parse(localStorage.getItem(appStateKey) || '{}');
+        // Check if loaded state matches current user and exam is still active
         if (currentUser && loadedState.currentUserEmail === currentUser.email && loadedState.examEndTime && Date.now() < loadedState.examEndTime) {
-            console.log("Attempting to restore active exam session for matching user.");
-            restoreAppState(loadedState);
-        } else { saveAppState(); } // Save basic login state if not restoring exam
+            console.log("Attempting to restore active exam session.");
+            restoreAppState(loadedState); // Try restoring state
+        } else {
+             if (loadedState.currentUserEmail) console.log("Saved state invalid or expired for current user.");
+             localStorage.removeItem(appStateKey); // Clear invalid/old state
+             saveAppState(); // Save basic login state
+        }
     }
 
-	async function fetchUserInfo() {
-	    if (!gapi.client.getToken()?.access_token) { console.warn("fetchUserInfo: No token."); return; }
-	    console.log('Fetching user info...');
-	    try {
-	        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}` } });
-	        if (!r.ok) { if (r.status === 401) { handleSignoutClick(); return; } throw new Error(`(${r.status}) ${await r.text()}`); }
-	        const ui = await r.json();
-	        currentUser = { id: ui.sub, name: ui.name||'N/A', email: ui.email||'N/A', picture: ui.picture||'' };
-	        console.log('User fetched:', currentUser.email);
-            if(studentNameInput) studentNameInput.value = currentUser.name; if(studentEmailInput) studentEmailInput.value = currentUser.email; if(userAvatar) userAvatar.src = currentUser.picture; if(userName) userName.textContent = currentUser.name;
-	        isAdmin = ADMIN_EMAILS.includes(currentUser.email); if(document.body) document.body.classList.toggle('is-admin', isAdmin);
-            if(examPinInput) examPinInput.disabled = false; if(loadExamBtn) loadExamBtn.disabled = (examPinInput?.value.trim() === '') || !isOnline;
-	    } catch (e) { console.error('Fetch user info error:', e); showImprovedNotification('error','User Info Error',`Could not get details: ${e.message}.`); currentUser = null; updateAuthUI(); }
-	}
+	async function fetchUserInfo() { /* ... Same user info fetch ... */ if (!gapi.client.getToken()?.access_token) { console.warn("fetchUserInfo: No token."); return; } console.log('Fetching user info...'); try { const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}` } }); if (!r.ok) { if (r.status === 401) { handleSignoutClick(); return; } throw new Error(`(${r.status}) ${await r.text()}`); } const ui = await r.json(); currentUser = { id: ui.sub, name: ui.name||'N/A', email: ui.email||'N/A', picture: ui.picture||'' }; console.log('User fetched:', currentUser.email); if(studentNameInput) studentNameInput.value = currentUser.name; if(studentEmailInput) studentEmailInput.value = currentUser.email; if(userAvatar) userAvatar.src = currentUser.picture; if(userName) userName.textContent = currentUser.name; isAdmin = ADMIN_EMAILS.includes(currentUser.email); if(document.body) document.body.classList.toggle('is-admin', isAdmin); if(examPinInput) examPinInput.disabled = false; if(loadExamBtn) loadExamBtn.disabled = (examPinInput?.value.trim() === '') || !isOnline; } catch (e) { console.error('Fetch user info error:', e); showImprovedNotification('error','User Info Error',`Could not get details: ${e.message}.`); currentUser = null; updateAuthUI(); } }
 
-	function handleSignoutClick() {
-	    console.log("Signing out..."); const t = gapi.client.getToken(); if (t?.access_token) { try { google.accounts.oauth2.revoke(t.access_token, () => console.log('Token revoked.')); } catch (e) { console.warn("Revoke error:", e); } gapi.client.setToken(''); }
-	    localStorage.removeItem('gapi_token'); localStorage.removeItem(appStateKey);
-        isSignedIn = false; isAdmin = false; currentUser = null; examDetails = null; studentPINEntered = ''; studentExamIdEntered = '';
-        stopTimer(); resetExamState(); updateAuthUI();
-	    showImprovedNotification('info', 'Signed Out', 'Signed out.');
-	}
+	function handleSignoutClick() { /* ... Same sign out logic ... */ console.log("Signing out..."); const t = gapi.client.getToken(); if (t?.access_token) { try { google.accounts.oauth2.revoke(t.access_token, () => console.log('Token revoked.')); } catch (e) { console.warn("Revoke error:", e); } gapi.client.setToken(''); } localStorage.removeItem('gapi_token'); localStorage.removeItem(appStateKey); isSignedIn = false; isAdmin = false; currentUser = null; examDetails = null; studentPINEntered = ''; studentExamIdEntered = ''; stopTimer(); resetExamState(); updateAuthUI(); showImprovedNotification('info', 'Signed Out', 'Signed out.'); }
 
     // === UI State & Reset ===
-    function resetExamState() { /* ... Same as previous response ... */ console.log("Resetting UI."); if (examStartModule) examStartModule.classList.add('hidden'); if (examDetailsModule) examDetailsModule.classList.add('hidden'); if (examQuestionsModule) examQuestionsModule.classList.add('hidden'); if (submissionConfirmationModule) submissionConfirmationModule.classList.add('hidden'); if (studentExamIdGroup) studentExamIdGroup.classList.add('hidden'); if (signinPromptModule) signinPromptModule.classList.remove('hidden'); if(examPinInput) { examPinInput.value = ''; examPinInput.disabled = true; } if(studentExamIdInput) studentExamIdInput.value = ''; if(studentNameInput) studentNameInput.value = ''; if(studentEmailInput) studentEmailInput.value = ''; if(loadExamBtn) { loadExamBtn.disabled = true; loadExamBtn.classList.remove('hidden'); } if(startExamBtn) startExamBtn.disabled = true; if(startExamBtnAlt) { startExamBtnAlt.classList.add('hidden'); startExamBtnAlt.disabled = true; } if(submitExamBtn) { submitExamBtn.disabled = true; submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam'; } const na = 'N/A'; if (examCodeDisplay) examCodeDisplay.textContent = na; if (examDurationDisplay) examDurationDisplay.textContent = na; if (examStartTimeDisplay) examStartTimeDisplay.textContent = na; if (examNameHeader) examNameHeader.textContent = 'Please sign in to load the exam'; if (examNameDetail) examNameDetail.textContent = ''; if (examCourseCodeDetail) examCourseCodeDetail.textContent = ''; if (examModeDetail) examModeDetail.textContent = ''; if (examDurationDetail) examDurationDetail.textContent = ''; if (examStartTimeDetail) examStartTimeDetail.textContent = ''; if (examQuestionsArea) examQuestionsArea.innerHTML = '<p>Exam questions will appear here...</p>'; stopTimer(); if (timerDisplay) timerDisplay.textContent = '--:--'; }
-    function updateAuthUI() { /* ... Same as previous response ... */ console.log('Updating Auth UI - SignedIn:', isSignedIn, 'CurrentUser:', !!currentUser, 'ExamDetails:', !!examDetails); if(document.body) document.body.classList.toggle('is-admin', isAdmin); if (isSignedIn && currentUser) { console.log('Showing logged-in UI.'); if(loginContainer) loginContainer.style.display = 'none'; if(userContainer) userContainer.style.display = 'flex'; if (signinPromptModule) signinPromptModule.classList.add('hidden'); if (examStartModule && !examDetails && examQuestionsModule?.classList.contains('hidden')) { examStartModule.classList.remove('hidden'); } if(examPinInput) examPinInput.disabled = false; if(loadExamBtn) loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline; if(studentNameInput) studentNameInput.value = currentUser.name || 'N/A'; if(studentEmailInput) studentEmailInput.value = currentUser.email || 'N/A'; if(userName) userName.textContent = currentUser.name || ''; if(userAvatar) userAvatar.src = currentUser.picture || ''; } else { console.log('Showing logged-out UI.'); if(loginContainer) loginContainer.style.display = 'flex'; if(userContainer) userContainer.style.display = 'none'; resetExamState(); if(signinPromptModule) signinPromptModule.classList.remove('hidden'); } }
+    function resetExamState() { /* ... Same reset logic ... */ console.log("Resetting UI."); if (examStartModule) examStartModule.classList.add('hidden'); if (examDetailsModule) examDetailsModule.classList.add('hidden'); if (examQuestionsModule) examQuestionsModule.classList.add('hidden'); if (submissionConfirmationModule) submissionConfirmationModule.classList.add('hidden'); if (studentExamIdGroup) studentExamIdGroup.classList.add('hidden'); if (signinPromptModule) signinPromptModule.classList.remove('hidden'); if(examPinInput) { examPinInput.value = ''; examPinInput.disabled = true; } if(studentExamIdInput) studentExamIdInput.value = ''; if(studentNameInput) studentNameInput.value = ''; if(studentEmailInput) studentEmailInput.value = ''; if(loadExamBtn) { loadExamBtn.disabled = true; loadExamBtn.classList.remove('hidden'); } if(startExamBtn) startExamBtn.disabled = true; if(startExamBtnAlt) { startExamBtnAlt.classList.add('hidden'); startExamBtnAlt.disabled = true; } if(submitExamBtn) { submitExamBtn.disabled = true; submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam'; } const na = 'N/A'; if (examCodeDisplay) examCodeDisplay.textContent = na; if (examDurationDisplay) examDurationDisplay.textContent = na; if (examStartTimeDisplay) examStartTimeDisplay.textContent = na; if (examNameHeader) examNameHeader.textContent = 'Please sign in'; if (examNameDetail) examNameDetail.textContent = ''; if (examCourseCodeDetail) examCourseCodeDetail.textContent = ''; if (examModeDetail) examModeDetail.textContent = ''; if (examDurationDetail) examDurationDetail.textContent = ''; if (examStartTimeDetail) examStartTimeDetail.textContent = ''; if (examQuestionsArea) examQuestionsArea.innerHTML = '<p>Exam questions...</p>'; stopTimer(); if (timerDisplay) timerDisplay.textContent = '--:--'; }
+    function updateAuthUI() { /* ... Same UI update logic ... */ console.log('Updating Auth UI - SignedIn:', isSignedIn, 'CurrentUser:', !!currentUser, 'ExamDetails:', !!examDetails); if(document.body) document.body.classList.toggle('is-admin', isAdmin); if (isSignedIn && currentUser) { console.log('Showing logged-in UI.'); if(loginContainer) loginContainer.style.display = 'none'; if(userContainer) userContainer.style.display = 'flex'; if (signinPromptModule) signinPromptModule.classList.add('hidden'); if (examStartModule && !examDetails && examQuestionsModule?.classList.contains('hidden')) { examStartModule.classList.remove('hidden'); } if(examPinInput) examPinInput.disabled = false; if(loadExamBtn) loadExamBtn.disabled = examPinInput.value.trim() === '' || !isOnline; if(studentNameInput) studentNameInput.value = currentUser.name || 'N/A'; if(studentEmailInput) studentEmailInput.value = currentUser.email || 'N/A'; if(userName) userName.textContent = currentUser.name || ''; if(userAvatar) userAvatar.src = currentUser.picture || ''; } else { console.log('Showing logged-out UI.'); if(loginContainer) loginContainer.style.display = 'flex'; if(userContainer) userContainer.style.display = 'none'; resetExamState(); if(signinPromptModule) signinPromptModule.classList.remove('hidden'); } }
 
     // === Google Sheets Interaction ===
     async function getSheetData(spreadsheetId, range) { /* ... Same ... */ if (!isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API Error', 'Not signed in or Sheets API not ready.'); return null; } if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot fetch data offline.'); return null; } console.log(`Workspaceing: ${spreadsheetId}, Range: ${range}`); setSyncing(true); try { const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range }); console.log(`Workspaceed ${range}`); return response.result.values || []; } catch (err) { console.error(`Error fetching ${range}:`, err); showImprovedNotification('error', 'Sheet Read Error', `Could not fetch data: ${err.result?.error?.message || err.message}`); return null; } finally { setSyncing(false); } }
@@ -267,7 +237,7 @@
 
     async function fetchExamDetails(pin) { // Fetches using PIN, handles Mode UI
         showImprovedNotification('info', 'Fetching Exam', `Loading details for PIN: ${pin}...`);
-        // Columns A-H: PIN, code, name, duration, startDate, startTime, mode, questions
+        // Cols A-H: PIN, code, name, duration, startDate, startTime, mode, questions
         const range = `${EXAM_DETAILS_SHEET_NAME}!A:H`;
         const data = await getSheetData(EXAM_SPREADSHEET_ID, range); examDetails = null; if (data === null) { if(loadExamBtn) loadExamBtn.disabled = !isOnline; return; }
 
@@ -291,38 +261,31 @@
                  if (examDetails.Mode === 'exam') {
                      console.log("Exam Mode: Showing Student ID input.");
                      if(examStartModule) examStartModule.classList.remove('hidden');
-                     if(studentExamIdGroup) studentExamIdGroup.classList.remove('hidden'); // Show ID input
+                     if(studentExamIdGroup) studentExamIdGroup.classList.remove('hidden');
                      if(studentExamIdInput) studentExamIdInput.value = '';
                      if(examDetailsModule) examDetailsModule.classList.add('hidden');
                      if(startExamBtnAlt) startExamBtnAlt.classList.remove('hidden'); // Show ALT start button
                      if(startExamBtn) startExamBtn.disabled = true;
-                     if(loadExamBtn) loadExamBtn.classList.add('hidden'); // **Hide Load button**
-                     validateStudentExamIdInput();
+                     if(loadExamBtn) loadExamBtn.classList.add('hidden'); // Hide Load button
+                     validateStudentExamIdInput(); // Validate (disables alt start button initially)
                  } else { // Quiz mode
                      console.log("Quiz Mode: Showing details module.");
                      if(studentExamIdGroup) studentExamIdGroup.classList.add('hidden'); if(studentExamIdInput) studentExamIdInput.value = ''; studentExamIdEntered = '';
                      if(examStartModule) examStartModule.classList.add('hidden');
-                     displayExamDetailsFull();
-                     if(examDetailsModule) examDetailsModule.classList.remove('hidden');
-                     if(startExamBtnAlt) startExamBtnAlt.classList.add('hidden');
-                     if(startExamBtn) startExamBtn.disabled = !isOnline;
+                     displayExamDetailsFull(); // Display full details
+                     if(examDetailsModule) examDetailsModule.classList.remove('hidden'); // Show details module
+                     if(startExamBtnAlt) startExamBtnAlt.classList.add('hidden'); // Hide alt start button
+                     if(startExamBtn) startExamBtn.disabled = !isOnline; // Enable main Start button if online
                      if(loadExamBtn) loadExamBtn.disabled = true;
                  }
-                 saveAppState();
+                 saveAppState(); // Save state after successful load
             } else { showImprovedNotification('error', 'Invalid PIN', `Exam PIN not found.`); if(examDetailsModule) examDetailsModule.classList.add('hidden'); if(examStartModule) examStartModule.classList.remove('hidden'); if(loadExamBtn) loadExamBtn.disabled = !isOnline; }
         } else { showImprovedNotification('error', 'No Exams Found', 'No exams in sheet.'); if(examDetailsModule) examDetailsModule.classList.add('hidden'); if(examStartModule) examStartModule.classList.remove('hidden'); if(loadExamBtn) loadExamBtn.disabled = !isOnline; }
     }
 
-    function validateStudentExamIdInput() { // Validates 5-char ID & enables ALT Start button
-        const startButtonToUse = startExamBtnAlt;
-        if (!startButtonToUse || !studentExamIdInput || !examDetails || examDetails.Mode !== 'exam') return;
-        const idVal = studentExamIdInput.value.trim(); const isValid = idVal.length === 5;
-        startButtonToUse.disabled = !isValid || !isOnline;
-        studentExamIdInput.style.borderColor = isValid || idVal === '' ? '#ccc' : 'red';
-    }
-
-    function displayExamDetailsHeader() { /* ... Same ... */ if (!examDetails) return; if(examCodeDisplay) examCodeDisplay.textContent = examDetails.Code || 'N/A'; if(examDurationDisplay) examDurationDisplay.textContent = `${examDetails.Duration} minutes`; const startTimeString = `${examDetails.StartDate || ''} ${examDetails.StartTime || ''}`.trim(); if(examStartTimeDisplay) examStartTimeDisplay.textContent = startTimeString || 'N/A'; if(examNameHeader) examNameHeader.textContent = examDetails.Name || 'Exam Loaded'; }
-    function displayExamDetailsFull() { /* ... Same ... */ if (!examDetails) return; if(examNameDetail) examNameDetail.textContent = examDetails.Name || 'N/A'; if(examCourseCodeDetail) examCourseCodeDetail.textContent = examDetails.Code || 'N/A'; if(examModeDetail) examModeDetail.textContent = examDetails.Mode ? (examDetails.Mode.charAt(0).toUpperCase() + examDetails.Mode.slice(1)) : 'N/A'; if(examDurationDetail) examDurationDetail.textContent = `${examDetails.Duration} minutes`; const startTimeString = `${examDetails.StartDate || ''} ${examDetails.StartTime || ''}`.trim(); if(examStartTimeDetail) examStartTimeDetail.textContent = startTimeString || 'N/A'; }
+    function validateStudentExamIdInput() { /* ... Same validation logic ... */ const startButtonToUse = startExamBtnAlt; if (!startButtonToUse || !studentExamIdInput || !examDetails || examDetails.Mode !== 'exam') return; const idVal = studentExamIdInput.value.trim(); const isValid = idVal.length === 5; startButtonToUse.disabled = !isValid || !isOnline; studentExamIdInput.style.borderColor = isValid || idVal === '' ? '#ccc' : 'red'; }
+    function displayExamDetailsHeader() { /* ... Same header update logic ... */ if (!examDetails) return; if(examCodeDisplay) examCodeDisplay.textContent = examDetails.Code || 'N/A'; if(examDurationDisplay) examDurationDisplay.textContent = `${examDetails.Duration} minutes`; const startTimeString = `${examDetails.StartDate || ''} ${examDetails.StartTime || ''}`.trim(); if(examStartTimeDisplay) examStartTimeDisplay.textContent = startTimeString || 'N/A'; if(examNameHeader) examNameHeader.textContent = examDetails.Name || 'Exam Loaded'; }
+    function displayExamDetailsFull() { /* ... Same details module update logic ... */ if (!examDetails) return; if(examNameDetail) examNameDetail.textContent = examDetails.Name || 'N/A'; if(examCourseCodeDetail) examCourseCodeDetail.textContent = examDetails.Code || 'N/A'; if(examModeDetail) examModeDetail.textContent = examDetails.Mode ? (examDetails.Mode.charAt(0).toUpperCase() + examDetails.Mode.slice(1)) : 'N/A'; if(examDurationDetail) examDurationDetail.textContent = `${examDetails.Duration} minutes`; const startTimeString = `${examDetails.StartDate || ''} ${examDetails.StartTime || ''}`.trim(); if(examStartTimeDetail) examStartTimeDetail.textContent = startTimeString || 'N/A'; }
 
     async function handleStartExam() {
         // Starts exam after checks (Retake, Start Time, Student Exam ID)
@@ -330,7 +293,7 @@
 
          console.log("HandleStartExam: Checking if attempt exists...");
          const alreadyAttempted = await checkIfAttemptExists(currentUser.email, examDetails.PIN);
-         console.log("HandleStartExam: alreadyAttempted result:", alreadyAttempted);
+         console.log("HandleStartExam: check result: alreadyAttempted =", alreadyAttempted); // Added log
          if (alreadyAttempted) {
              showImprovedNotification('error', 'Already Attempted', 'An attempt for this exam PIN has already been recorded.', 0);
              return; // Stop execution
@@ -338,20 +301,27 @@
 
          // Start Time Window Check
          try {
-             // **CRITICAL**: Ensure sheet format is YYYY-MM-DD and HH:MM:SS
-             const startDateTimeStr = `${examDetails.StartDate}T${examDetails.StartTime}`; // ISO-like format
+             const startDateStr = String(examDetails.StartDate || '').trim();
+             const startTimeStr = String(examDetails.StartTime || '').trim();
+             // ** CRITICAL **: Ensure sheet format is YYYY-MM-DD and HH:MM:SS
+             if (!/^\d{4}-\d{2}-\d{2}$/.test(startDateStr) || !/^\d{2}:\d{2}:\d{2}$/.test(startTimeStr)) {
+                 throw new Error(`Invalid date/time format in sheet: Date='${startDateStr}', Time='${startTimeStr}'. Required: YYYY-MM-DD HH:MM:SS`);
+             }
+             const startDateTimeStr = `${startDateStr}T${startTimeStr}`; // Build ISO-like string
              const startTime = new Date(startDateTimeStr).getTime();
-             console.log(`Parsed Start Time: ${startTime} from ${startDateTimeStr}`); // Debug parsing
+             console.log(`[TIMER DEBUG] Parsed Start Time from sheet: ${startTime} (from ${startDateTimeStr})`);
+
              if (isNaN(startTime)) {
-                 console.warn("Invalid start date/time format in sheet:", examDetails.StartDate, examDetails.StartTime);
-                 showImprovedNotification('warning', 'Invalid Start Time', 'Cannot parse exam start time. Check sheet format (YYYY-MM-DD / HH:MM:SS). Proceeding anyway.');
-                 // Decide if you want to block or allow if parsing fails
-                 // return; // Block if strict
+                 console.warn("Could not parse start date/time string:", startDateTimeStr);
+                 showImprovedNotification('warning', 'Invalid Start Time', 'Cannot parse exam start time. Check sheet format (YYYY-MM-DD / HH:MM:SS).');
+                 // Decide whether to block or proceed if parsing fails
+                 // return; // Block if strict parsing required
              } else if (Date.now() < startTime) {
                  showImprovedNotification('error', 'Exam Not Available', `Exam starts at ${new Date(startTime).toLocaleString()}.`);
                  return; // Prevent starting early
              }
-         } catch (e) { console.warn("Start time check error:", e); }
+             // Proceed even if parsing fails for now, but log warning
+         } catch (e) { console.warn("Start time check error:", e); showImprovedNotification('warning', 'Start Time Warning', `Could not verify start time: ${e.message}`); }
 
          // Validate and capture Student Exam ID ONLY if in Exam mode
          if (examDetails.Mode === 'exam') {
@@ -370,85 +340,87 @@
         displayQuestions(examDetails.Questions);
         startTimer(examDetails.Duration); // Start timer using Duration from sheet
         await recordExamAttempt('start'); // Log start event
-        saveAppState();
+        saveAppState(); // Save state after starting
     }
 
     async function checkIfAttemptExists(email, pin) {
         // Checks the Attempts sheet for a previous entry
-        if (!email || !pin) { console.error("checkIfAttemptExists: Missing info."); return true; } // Block
-        // **CONFIRM:** Email=Col C(idx 2), PIN=Col D(idx 3) in 'Attempts'?
+        if (!email || !pin) { console.error("checkIfAttemptExists: Missing info."); return true; }
+        // **CONFIRM:** Attempts sheet has Email in Col C (idx 2), PIN in Col D (idx 3)
         const range = `${EXAM_ATTEMPTS_SHEET_NAME}!C:D`;
-        console.log(`Checking for previous attempts for PIN "${pin}" by "${email}" in ${range}...`);
+        console.log(`RETAKE CHECK: Searching for PIN="${pin.toLowerCase()}" by Email="${email.toLowerCase()}" in ${range}...`);
         const data = await getSheetData(EXAM_SPREADSHEET_ID, range);
-        if (data === null) { showImprovedNotification('warning', 'Check Failed', 'Could not check previous attempts.'); return true; } // Block on error
-        console.log(`Found ${data.length - 1} records to check.`);
-        for (let i = 1; i < data.length; i++) { const row = data[i]; if (row && row.length >= 4) { const sheetEmail = String(row[2] || '').trim().toLowerCase(); const sheetPin = String(row[3] || '').trim().toLowerCase(); if (sheetEmail === email.toLowerCase() && sheetPin === pin.toLowerCase()) { console.log(`Previous attempt FOUND in row ${i+1}!`); return true; } } } // Use lowercase comparison
-        console.log("No previous matching attempt found."); return false;
+        if (data === null) { showImprovedNotification('warning', 'Retake Check Failed', 'Could not check previous attempts.'); return true; } // Block on error
+        console.log(`RETAKE CHECK: Found ${data.length - 1} records to check.`);
+
+        for (let i = 1; i < data.length; i++) { // Start from 1 to skip header
+            const row = data[i];
+            if (row && row.length >= 4) {
+                const sheetEmail = String(row[2] || '').trim().toLowerCase();
+                const sheetPin = String(row[3] || '').trim().toLowerCase();
+                console.log(`RETAKE CHECK: Row ${i+1}: Comparing ('${sheetEmail}'==='${email.toLowerCase()}' && '${sheetPin}'==='${pin.toLowerCase()}')`); // Log comparison
+                if (sheetEmail === email.toLowerCase() && sheetPin === pin.toLowerCase()) {
+                    console.log(`RETAKE CHECK: Previous attempt FOUND in sheet row ${i+1}!`);
+                    return true; // Found a match
+                }
+            }
+        }
+        console.log("RETAKE CHECK: No previous matching attempt found.");
+        return false; // No match found
     }
 
-    function displayQuestions(questionsJsonString) { /* ... Same JSON parsing logic ... */ console.log("Displaying questions..."); if (!examQuestionsArea) return; examQuestionsArea.innerHTML = ''; try { let qArray = []; try { qArray = JSON.parse(questionsJsonString); if (!Array.isArray(qArray)) throw new Error("Not array."); } catch (e) { console.warn("Not JSON:", e); qArray = [{ type: "long_answer", prompt: "Exam Instructions / Questions", content: questionsJsonString }]; } qArray.forEach((q, i) => { const qNum = i + 1; const div = document.createElement('div'); div.className = 'question form-group'; let inputHtml = ''; const prompt = q.prompt || `Q${qNum}`; const id = `ans-${qNum}`; const name = `ans-${qNum}`; switch (q.type) { case 'short_answer': inputHtml = `<input type="text" id="${id}" name="${name}" class="form-control" placeholder="Short answer">`; break; case 'long_answer': inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="5" placeholder="Detailed answer">${q.content||''}</textarea>`; break; case 'code': const lang = q.language?`(${q.language})`:''; inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="8" placeholder="Code here${lang}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`; break; case 'attachment': const types=q.allowed_types||[]; const accept=types.join(','); const maxBytes=q.max_size_mb?q.max_size_mb*1024*1024:null; inputHtml=`<input type="file" id="${id}" name="${name}" class="form-control" accept="${accept}" ${maxBytes?`data-max-size="${maxBytes}"`:''} data-allowed-types='${JSON.stringify(types)}'><small class="file-helper-text">Allowed: ${accept||'any'}${maxBytes?`, Max: ${q.max_size_mb}MB`:''}</small>`; setTimeout(()=>addAttachmentValidation(id),0); break; default: inputHtml = `<p style="color:red;">Unsupported type: ${q.type}</p><p>${q.content||''}</p>`; } div.innerHTML = `<label for="${id}">${prompt}</label>${inputHtml}`; examQuestionsArea.appendChild(div); }); } catch (e) { console.error("Display questions error:", e); examQuestionsArea.innerHTML = `<p style="color:red;">Err loading questions: ${e.message}</p>`; showImprovedNotification('error','Question Load Error',`Cannot display: ${e.message}`); } }
+    function displayQuestions(questionsJsonString) { /* ... Same JSON parsing ... */ console.log("Displaying questions..."); if (!examQuestionsArea) return; examQuestionsArea.innerHTML = ''; try { let qArray = []; try { qArray = JSON.parse(questionsJsonString); if (!Array.isArray(qArray)) throw new Error("Not array."); } catch (e) { console.warn("Not JSON:", e); qArray = [{ type: "long_answer", prompt: "Instructions:", content: questionsJsonString }]; } qArray.forEach((q, i) => { const qNum = i + 1; const div = document.createElement('div'); div.className = 'question form-group'; let inputHtml = ''; const prompt = q.prompt || `Q${qNum}`; const id = `ans-${qNum}`; const name = `ans-${qNum}`; switch (q.type) { case 'short_answer': inputHtml = `<input type="text" id="${id}" name="${name}" class="form-control" pl="Short answer">`; break; case 'long_answer': inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="5" pl="Detailed answer">${q.content||''}</textarea>`; break; case 'code': const lang=q.language?`(${q.language})`:''; inputHtml = `<textarea id="${id}" name="${name}" class="form-control" rows="8" pl="Code here${lang}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`; break; case 'attachment': const types=q.allowed_types||[]; const accept=types.join(','); const maxBytes=q.max_size_mb?q.max_size_mb*1024*1024:null; inputHtml=`<input type="file" id="${id}" name="${name}" class="form-control" accept="${accept}" ${maxBytes?`data-max-size="${maxBytes}"`:''} data-allowed-types='${JSON.stringify(types)}'><small class="file-helper-text">Allowed: ${accept||'any'}${maxBytes?`, Max: ${q.max_size_mb}MB`:''}</small>`; setTimeout(()=>addAttachmentValidation(id),0); break; default: inputHtml = `<p style="color:red;">Unsupported type: ${q.type}</p><p>${q.content||''}</p>`; } div.innerHTML = `<label for="${id}">${prompt}</label>${inputHtml}`; examQuestionsArea.appendChild(div); }); } catch (e) { console.error("Display Qs error:", e); examQuestionsArea.innerHTML = `<p style="color:red;">Err loading Qs: ${e.message}</p>`; showImprovedNotification('error','Question Load Error',`Cannot display: ${e.message}`); } }
     function addAttachmentValidation(inputId) { /* ... Same validation ... */ const fi=document.getElementById(inputId);if(!fi||fi.type!=='file')return;fi.addEventListener('change',(e)=>{const f=e.target.files[0];if(!f)return;const max=parseInt(fi.getAttribute('data-max-size'),10);const types=JSON.parse(fi.getAttribute('data-allowed-types')||'[]');if(max&&f.size>max){showImprovedNotification('error','File Too Large',`"${f.name}" > ${max/(1024*1024)}MB`);fi.value='';return;}if(types.length>0&&!types.includes(f.type)){showImprovedNotification('error','Invalid Type',`"${f.name}" type (${f.type}) not allowed: ${types.join(', ')}`);fi.value='';return;}showImprovedNotification('success','File Selected',`"${f.name}" (${(f.size/1024).toFixed(1)}KB)`);}); }
 
     function startTimer(durationMinutes) {
         // Starts the exam countdown timer ONLY if not already running
-        if (examTimerInterval) { console.warn("Timer already running!"); return; }
-        if(isNaN(durationMinutes) || durationMinutes <= 0){ console.error("Invalid duration:", durationMinutes); if(timerDisplay) timerDisplay.textContent = "Error"; return; }
+        if (examTimerInterval) { console.warn("TIMER DEBUG: startTimer called but examTimerInterval already exists. Preventing restart."); return; }
+        if(isNaN(durationMinutes) || durationMinutes <= 0){ console.error("TIMER DEBUG: Invalid duration passed to startTimer:", durationMinutes); if(timerDisplay) timerDisplay.textContent = "Error"; return; }
+
         const durationMillis = durationMinutes * 60 * 1000;
-        examEndTime = Date.now() + durationMillis; // Set end time based on current time + duration
-        console.log(`======= TIMER STARTED =======\nDuration: ${durationMinutes} mins (${durationMillis}ms)\nStart Time: ${new Date(Date.now()).toLocaleTimeString()}\nCalculated End Time: ${examEndTime} (${new Date(examEndTime).toLocaleTimeString()})\n===========================`);
-        updateTimerDisplay(); examTimerInterval = setInterval(updateTimerDisplay, 1000);
+        // Set end time based on CURRENT time + duration. This IS the correct way for a countdown.
+        examEndTime = Date.now() + durationMillis;
+
+        console.log(`======= TIMER DEBUG: START =======`);
+        console.log(`Duration from Sheet: ${durationMinutes} minutes`);
+        console.log(`Current Timestamp (Start Click): ${Date.now()}`);
+        console.log(`Calculated examEndTime: ${examEndTime} (${new Date(examEndTime).toLocaleString()})`);
+        console.log(`===============================`);
+
+        updateTimerDisplay(); // Show initial time
+        examTimerInterval = setInterval(updateTimerDisplay, 1000); // Update every second
         saveAppState(); // Save state including end time
     }
 
     function updateTimerDisplay() {
         // Updates the timer display every second using the fixed end time
-        if (!examEndTime) { console.warn("updateTimerDisplay: examEndTime not set."); stopTimer(); if(timerDisplay) timerDisplay.textContent = "--:--"; return; }
-        const now = Date.now(); const timeLeft = Math.max(0, examEndTime - now);
-        // console.log(`Tick: Now=${now}, EndTime=${examEndTime}, TimeLeft=${timeLeft}`); // Debug log
-        const minutes = Math.floor((timeLeft / (1000 * 60)) % 60); const seconds = Math.floor((timeLeft / 1000) % 60);
+        if (!examEndTime) { console.warn("TIMER DEBUG: updateTimerDisplay called but examEndTime is not set."); stopTimer(); if(timerDisplay) timerDisplay.textContent = "--:--"; return; }
+
+        const now = Date.now();
+        const timeLeft = Math.max(0, examEndTime - now); // Time remaining in ms
+
+        // --- DEBUG LOG ---
+        console.log(`TIMER DEBUG Tick: Now=${now}, EndTime=${examEndTime} (Stable?), TimeLeft=${timeLeft}`);
+        // ---
+
+        const minutes = Math.floor((timeLeft / (1000 * 60)) % 60);
+        const seconds = Math.floor((timeLeft / 1000) % 60);
         if(timerDisplay) timerDisplay.textContent=`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
-        if (timeLeft <= 0) { console.log("Time's up!"); stopTimer(); showImprovedNotification('warning','Time Up!','Submitting automatically.',0); handleSubmitExam(true); }
+
+        if (timeLeft <= 0) { console.log("TIMER DEBUG: Time's up!"); stopTimer(); showImprovedNotification('warning','Time Up!','Submitting automatically.',0); handleSubmitExam(true); }
     }
 
-    function stopTimer() {
-        // Clears the timer interval
-        if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; console.log("Timer stopped."); }
-    }
+    function stopTimer() { /* ... Same ... */ if(examTimerInterval){clearInterval(examTimerInterval);examTimerInterval=null;console.log("Timer stopped.");} }
+    function getFingerprintData() { /* ... Same basic fingerprinting with more fields ... */ const data = { ua: navigator.userAgent || 'N/A', lang: navigator.language || 'N/A', platform: navigator.platform || 'N/A', vendor: navigator.vendor || 'N/A', scr: `${screen.width || 0}x${screen.height || 0}x${screen.colorDepth || 0}`, availScr: `${screen.availWidth || 0}x${screen.availHeight || 0}`, win: `${window.innerWidth || 0}x${window.innerHeight || 0}`, tz: new Date().getTimezoneOffset(), ts: Date.now() /*, cores: navigator.hardwareConcurrency || undefined, memory: navigator.deviceMemory || undefined */ }; console.log("Fingerprint Data:", data); return JSON.stringify(data); }
+    function downloadJsonBackup(data, filename) { /* ... Same ... */ try { const jsonString = JSON.stringify(data, null, 2); const blob = new Blob([jsonString], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); console.log("JSON backup download triggered:", filename); showImprovedNotification('info', 'Backup Saved', 'A JSON backup file download has started.'); } catch (e) { console.error("Error creating JSON backup:", e); showImprovedNotification('error', 'Backup Error', 'Could not create backup file.'); } }
 
-    function getFingerprintData() {
-        // Collects basic browser/system info
-        const data = { ua: navigator.userAgent || 'N/A', lang: navigator.language || 'N/A', platform: navigator.platform || 'N/A', vendor: navigator.vendor || 'N/A', scr: `${screen.width || 0}x${screen.height || 0}x${screen.colorDepth || 0}`, availScr: `${screen.availWidth || 0}x${screen.availHeight || 0}`, win: `${window.innerWidth || 0}x${window.innerHeight || 0}`, tz: new Date().getTimezoneOffset(), ts: Date.now() };
-        console.log("Fingerprint Data:", data); return JSON.stringify(data);
-    }
-
-    function downloadJsonBackup(data, filename) {
-        // Creates and triggers download of a JSON file as backup
-        try { const jsonString = JSON.stringify(data, null, 2); const blob = new Blob([jsonString], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); console.log("JSON backup download triggered:", filename); showImprovedNotification('info', 'Backup Saved', 'A JSON backup file download has started.'); }
-        catch (e) { console.error("Error creating JSON backup:", e); showImprovedNotification('error', 'Backup Error', 'Could not create backup file.'); }
-    }
-
-    async function handleSubmitExam(isAutoSubmit = false) {
-        // Handles exam submission
-        stopTimer(); if(submitExamBtn) { submitExamBtn.disabled=true; submitExamBtn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Submitting...'; }
-        if(!isAutoSubmit && !confirm("Submit exam? Cannot be undone.")){ if(submitExamBtn){ submitExamBtn.disabled=false; submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';} if(examEndTime&&Date.now()<examEndTime){startTimer(Math.ceil((examEndTime-Date.now())/60000));}return;}
-        console.log("Submitting exam..."); let ans={}; const els=examForm.elements; const fp=getFingerprintData();
-        // Collect answers
-        for(let i=0;i<els.length;i++){ const el=els[i]; if(el.name?.startsWith('ans-')){ if(el.type==='file'){if(el.files.length>0){const f=el.files[0];console.log(`File: ${f.name}`);ans[el.name]=`FILE:${f.name}`;/* TODO: Upload file */}else{ans[el.name]='';}}else{ans[el.name]=el.value;} } }
-        console.log("Collected Answers:", ans);
-
-        const backupData = { timestamp: new Date().toISOString(), examDetails: examDetails, studentInfo: { pinEntered: studentPINEntered, studentExamId: examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined, name: examDetails?.Mode === 'quiz' ? currentUser?.name : undefined, email: examDetails?.Mode === 'quiz' ? currentUser?.email : undefined, }, answers: ans, fingerprint: JSON.parse(fp) };
-        downloadJsonBackup(backupData, `exam_backup_${examDetails?.PIN || 'unknown'}_${currentUser?.email || 'anon'}.json`); // Backup first
-
-        const success=await recordExamAttempt('submit',ans,fp); // Then try to record online
-        if(success){ showImprovedNotification('success','Exam Submitted','Submission recorded.',0); if(examQuestionsModule)examQuestionsModule.classList.add('hidden'); if(submissionConfirmationModule)submissionConfirmationModule.classList.remove('hidden'); localStorage.removeItem(appStateKey); }
-        else{ showImprovedNotification('error','Submission Error','Could not record online (backup downloaded).',0); if(submitExamBtn){submitExamBtn.disabled=false;submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';} }
-    }
+    async function handleSubmitExam(isAutoSubmit = false) { /* ... Same submission logic ... */ stopTimer(); if(submitExamBtn) { submitExamBtn.disabled=true; submitExamBtn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Submitting...'; } if(!isAutoSubmit && !confirm("Submit exam? Cannot be undone.")){ if(submitExamBtn){ submitExamBtn.disabled=false; submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';} if(examEndTime&&Date.now()<examEndTime){startTimer(Math.ceil((examEndTime-Date.now())/60000));}return;} console.log("Submitting exam..."); let ans={}; const els=examForm.elements; const fp=getFingerprintData(); for(let i=0;i<els.length;i++){ const el=els[i]; if(el.name?.startsWith('ans-')){ if(el.type==='file'){if(el.files.length>0){const f=el.files[0];console.log(`File: ${f.name}`);ans[el.name]=`FILE:${f.name}`;/* TODO: Upload file */}else{ans[el.name]='';}}else{ans[el.name]=el.value;} } } console.log("Collected Answers:", ans); const backupData = { timestamp: new Date().toISOString(), examDetails: examDetails, studentInfo: { pinEntered: studentPINEntered, studentExamId: examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined, name: examDetails?.Mode === 'quiz' ? currentUser?.name : undefined, email: examDetails?.Mode === 'quiz' ? currentUser?.email : undefined, }, answers: ans, fingerprint: JSON.parse(fp) }; downloadJsonBackup(backupData, `exam_backup_${examDetails?.PIN || 'unknown'}_${currentUser?.email || 'anon'}.json`); const success=await recordExamAttempt('submit',ans,fp); if(success){ showImprovedNotification('success','Exam Submitted','Submission recorded.',0); if(examQuestionsModule)examQuestionsModule.classList.add('hidden'); if(submissionConfirmationModule)submissionConfirmationModule.classList.remove('hidden'); localStorage.removeItem(appStateKey); } else{ showImprovedNotification('error','Submission Error','Could not record online (backup downloaded).',0); if(submitExamBtn){submitExamBtn.disabled=false;submitExamBtn.innerHTML='<i class="fas fa-check-circle"></i> Submit Exam';} } }
 
      async function recordExamAttempt(status, answers = null, fingerprint = '{}') {
-         // Records attempt details to Attempts sheet based on mode
+         // Records attempt details to Attempts sheet
          if (!currentUser || !examDetails || !studentPINEntered) { console.error("Missing data for recording attempt."); return false; }
          const timestamp = new Date().toISOString(); const isQuizMode = examDetails.Mode.toLowerCase() === 'quiz';
-         // Order MUST match Attempts sheet columns: A-I
+         // Data order MUST match Attempts sheet columns: A-I
          let dataRow = [ timestamp, // A
              isQuizMode ? String(currentUser.name) : '',    // B - Name (Quiz only)
              isQuizMode ? String(currentUser.email) : '',   // C - Email (Quiz only)
@@ -459,92 +431,22 @@
              answers ? JSON.stringify(answers) : '',        // H - Answers JSON
              fingerprint                                    // I - Fingerprint Data
          ];
-         console.log("Recording attempt:", dataRow); const range = `${EXAM_ATTEMPTS_SHEET_NAME}`;
-         return await appendSheetData(EXAM_SPREADSHEET_ID, range, [dataRow]);
+         console.log("RECORDING ATTEMPT:", dataRow);
+         const success = await appendSheetData(EXAM_SPREADSHEET_ID, EXAM_ATTEMPTS_SHEET_NAME, [dataRow]);
+         console.log("appendSheetData result:", success); // Log success/failure
+         return success;
      }
 
 	// === UI Updates ===
-    function updateOnlineStatus() {
-        // Updates online status indicator and button states
-        isOnline=navigator.onLine; console.log('Connection:',isOnline?'Online':'Offline'); const si=syncStatus?.querySelector('i');
-        if(isOnline){ if(syncStatus) syncStatus.className='sync-status online'; if(si) si.style.color='var(--success-color)'; if(syncText) syncText.textContent='Online';}
-        else{ if(syncStatus) syncStatus.className='sync-status offline'; if(si) si.style.color='var(--warning-color)'; if(syncText) syncText.textContent='Offline'; if(!isInitializing)showImprovedNotification('warning','Offline','Functionality disabled.',5000);}
-        if(si && !isSyncing) si.className='fas fa-circle';
+    function updateOnlineStatus() { /* ... Same as v7 ... */ isOnline=navigator.onLine; console.log('Connection:',isOnline?'Online':'Offline'); const si=syncStatus?.querySelector('i'); if(isOnline){ if(syncStatus) syncStatus.className='sync-status online';if(si) si.style.color='var(--success-color)';if(syncText)syncText.textContent='Online';} else{ if(syncStatus) syncStatus.className='sync-status offline';if(si) si.style.color='var(--warning-color)';if(syncText)syncText.textContent='Offline';if(!isInitializing)showImprovedNotification('warning','Offline','Functionality disabled.',5000);} if(si&&!isSyncing)si.className='fas fa-circle'; if(loadExamBtn)loadExamBtn.disabled=!isOnline||!isSignedIn||(examPinInput && examPinInput.value.trim()===''); let startDisabled = !isOnline || !isSignedIn || !examDetails; const usingAltStartButton = examDetails && examDetails.Mode === 'exam'; if (usingAltStartButton) { startDisabled = startDisabled || (studentExamIdInput && studentExamIdInput.value.trim().length !== 5); if(startExamBtnAlt) startExamBtnAlt.disabled = startDisabled; if(startExamBtn) startExamBtn.disabled = true; } else { if(startExamBtn) startExamBtn.disabled = startDisabled; if(startExamBtnAlt) startExamBtnAlt.classList.add('hidden'); } if(submitExamBtn)submitExamBtn.disabled=!isOnline||!isSignedIn||!examDetails||(examQuestionsModule && examQuestionsModule.classList.contains('hidden')); if(isInitializing && (typeof gapi !== 'undefined')){ isInitializing = false; console.log("Init flag set."); } }
+    function setSyncing(syncing){ /* ... Same as v7 ... */ isSyncing=syncing; console.log("Syncing:",isSyncing); const si = syncStatus?.querySelector('i'); if(si){ if(syncing){ si.className = 'fas fa-spinner fa-spin'; si.style.color = 'var(--info-color)'; if(syncText) syncText.textContent = 'Syncing...';} else{ updateOnlineStatus(); } } }
+    function showImprovedNotification(type,title,message,duration=5000){ /* ... Same as v7 ... */ const container = notificationArea; if (!container) { console.error("Notification area not found"); return; } const n = document.createElement('div'); n.className = `in-page-notification in-page-notification-${type}`; let i; switch(type){ case 'success':i='fa-check-circle';break; case 'error':i='fa-times-circle';break; case 'warning':i='fa-exclamation-triangle';break; default:i='fa-info-circle'; } n.innerHTML = `<i class="fas ${i} fa-icon"></i><div class="notification-content"><strong>${title}</strong><br>${message.replace(/\n/g,'<br>')}</div><button class="notification-close" aria-label="Close">&times;</button>`; container.appendChild(n); const cb = n.querySelector('.notification-close'); const remove = () => { n.classList.add('removing'); setTimeout(() => { if(n.parentNode) n.parentNode.removeChild(n); }, 300); }; if(cb) cb.addEventListener('click', (e) => { e.stopPropagation(); remove(); }); if (duration > 0) setTimeout(remove, duration); }
 
-        if(loadExamBtn) loadExamBtn.disabled = !isOnline||!isSignedIn||(examPinInput && examPinInput.value.trim()==='');
-
-        let startDisabled = !isOnline || !isSignedIn || !examDetails;
-        const usingAltStartButton = examDetails && examDetails.Mode === 'exam';
-        if (usingAltStartButton) { startDisabled = startDisabled || (studentExamIdInput && studentExamIdInput.value.trim().length !== 5); if(startExamBtnAlt) startExamBtnAlt.disabled = startDisabled; if(startExamBtn) startExamBtn.disabled = true; }
-        else { if(startExamBtn) startExamBtn.disabled = startDisabled; if(startExamBtnAlt) startExamBtnAlt.classList.add('hidden'); }
-
-        if(submitExamBtn) submitExamBtn.disabled = !isOnline || !isSignedIn || !examDetails || (examQuestionsModule && examQuestionsModule.classList.contains('hidden'));
-
-        if (isInitializing && (typeof gapi !== 'undefined')) { isInitializing = false; console.log("Init flag set."); }
-    }
-
-    function setSyncing(syncing){
-        // Shows/hides visual indicator during sheet operations
-        isSyncing = syncing; console.log("Syncing:",isSyncing); const si = syncStatus?.querySelector('i');
-        if(si){ if(syncing){ si.className = 'fas fa-spinner fa-spin'; si.style.color = 'var(--info-color)'; if(syncText) syncText.textContent = 'Syncing...';} else{ updateOnlineStatus(); } }
-    }
-
-    function showImprovedNotification(type,title,message,duration=5000){
-        // Displays temporary messages
-        const container = notificationArea; if (!container) { console.error("Notification area not found"); return; }
-        const n = document.createElement('div'); n.className = `in-page-notification in-page-notification-${type}`; let i;
-        switch(type){ case 'success':i='fa-check-circle';break; case 'error':i='fa-times-circle';break; case 'warning':i='fa-exclamation-triangle';break; default:i='fa-info-circle'; }
-        n.innerHTML = `<i class="fas ${i} fa-icon"></i><div class="notification-content"><strong>${title}</strong><br>${message.replace(/\n/g,'<br>')}</div><button class="notification-close" aria-label="Close">&times;</button>`;
-        container.appendChild(n);
-        const cb = n.querySelector('.notification-close');
-        const remove = () => { n.classList.add('removing'); setTimeout(() => { if(n.parentNode) n.parentNode.removeChild(n); }, 300); };
-        if(cb) cb.addEventListener('click', (e) => { e.stopPropagation(); remove(); });
-        if (duration > 0) setTimeout(remove, duration);
-    }
-
-    // === State Persistence (STUBS - Requires Implementation) ===
-    function saveAppState() {
-        // Saves key variables to localStorage if an exam is active
-        if (!examDetails || (examQuestionsModule && examQuestionsModule.classList.contains('hidden'))) {
-            // Only save if exam details loaded AND questions are visible (exam started)
-             // localStorage.removeItem(appStateKey); // Clear if not active? Careful not to clear too early.
-            return;
-        }
-        try {
-            // TODO: Implement collecting answers from the form to save state
-            // let currentAnswersData = collectCurrentAnswers();
-            const state = {
-                isSignedIn: isSignedIn, currentUserEmail: currentUser?.email, examDetails: examDetails,
-                studentPINEntered: studentPINEntered, studentExamIdEntered: studentExamIdEntered,
-                examEndTime: examEndTime // Save the calculated end time
-                // currentAnswers: currentAnswersData
-            };
-            localStorage.setItem(appStateKey, JSON.stringify(state));
-            console.log("App state saved.");
-        } catch (e) { console.error("Error saving app state:", e); }
-    }
-
-    function loadAppState() {
-        // Attempts to load state from localStorage on page load
-        const savedState = localStorage.getItem(appStateKey);
-        if (!savedState) { console.log("No saved app state found."); return; }
-        try {
-            const state = JSON.parse(savedState);
-            console.log("Found saved state:", state);
-            // ** CRITICAL TODO **: Full state restoration needs careful integration
-            // with the login flow (`tokenObtained` function is a good place).
-            // It needs to verify the logged-in user matches the saved state,
-            // check if examEndTime is valid, then bypass normal UI flow, show questions,
-            // restore answers, and restart the timer correctly.
-            console.warn("State loading implemented as stub only.");
-            // Basic restore for now (might be overwritten by login flow)
-            // examDetails = state.examDetails; studentPINEntered = state.studentPINEntered;
-            // studentExamIdEntered = state.studentExamIdEntered; examEndTime = state.examEndTime;
-        } catch (e) { console.error("Error loading app state:", e); localStorage.removeItem(appStateKey); }
-    }
-
-    // TODO: function collectCurrentAnswers() { /* ... iterate form, return answers object ... */ return {}; }
-    // TODO: function restoreAnswers(savedAnswers) { /* ... iterate form, populate values ... */ }
+    // === State Persistence (STUBS - Requires Full Implementation) ===
+    function saveAppState() { /* ... Same Stub ... */ if (!examDetails || (examQuestionsModule && examQuestionsModule.classList.contains('hidden'))) { return; } try { const state = { isSignedIn: isSignedIn, currentUserEmail: currentUser?.email, examDetails: examDetails, studentPINEntered: studentPINEntered, studentExamIdEntered: studentExamIdEntered, examEndTime: examEndTime, /* currentAnswers: collectCurrentAnswers() */ }; localStorage.setItem(appStateKey, JSON.stringify(state)); console.log("App state saved."); } catch (e) { console.error("Error saving app state:", e); } }
+    function loadAppState() { /* ... Same Stub ... */ const savedState = localStorage.getItem(appStateKey); if (!savedState) { console.log("No saved app state found."); return; } try { const state = JSON.parse(savedState); console.log("Found saved state:", state); console.warn("State loading implemented as stub only."); /* TODO: Full restore logic needed */ } catch (e) { console.error("Error loading app state:", e); localStorage.removeItem(appStateKey); } }
+    // TODO: function collectCurrentAnswers() { /* ... */ return {}; }
+    // TODO: function restoreAnswers(savedAnswers) { /* ... */ }
 
 </script>
 
