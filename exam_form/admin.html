@@ -1502,6 +1502,668 @@ function initGoogleApi() {
             }
         }
         
+/**
+ * Load questions for a specific exam
+ */
+function loadExamQuestions(examId) {
+    const exam = examData.find(e => e.id === examId);
+    if (!exam) {
+        showToast('error', 'Exam not found');
+        return;
+    }
+    
+    currentQuestions = []; // Reset current questions
+    
+    // Show loading state
+    document.getElementById('question-list').innerHTML = '<div class="loading-spinner"></div>';
+    
+    // Fetch questions for this exam from the spreadsheet
+    gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: CONFIG.EXAM_CONFIG_SPREADSHEET_ID,
+        range: `Questions!A:E` // Adjust range based on your sheet structure
+    }).then(response => {
+        const data = response.result;
+        
+        if (data.values && data.values.length > 0) {
+            // Filter questions that belong to this exam (assuming column A contains exam ID)
+            const examQuestions = data.values.filter(row => row[0] == examId);
+            
+            if (examQuestions.length > 0) {
+                currentQuestions = examQuestions.map((row, index) => ({
+                    id: index + 1,
+                    examId: examId,
+                    type: row[1] || 'text',
+                    text: row[2] || '',
+                    points: parseInt(row[3]) || 0,
+                    options: row[4] ? row[4].split('|') : []
+                }));
+                
+                // Update question list UI
+                updateQuestionList();
+            } else {
+                document.getElementById('question-list').innerHTML = `
+                    <div class="empty-state" id="empty-questions" style="text-align: center; padding: 20px;">
+                        <p>No questions found for this exam. Click the button below to add your first question.</p>
+                    </div>
+                `;
+            }
+        } else {
+            document.getElementById('question-list').innerHTML = `
+                <div class="empty-state" id="empty-questions" style="text-align: center; padding: 20px;">
+                    <p>No questions found. Click the button below to add your first question.</p>
+                </div>
+            `;
+        }
+    }).catch(error => {
+        console.error('Error fetching questions:', error);
+        showToast('error', 'Failed to load questions');
+        
+        document.getElementById('question-list').innerHTML = `
+            <div class="empty-state" id="empty-questions" style="text-align: center; padding: 20px;">
+                <p>Error loading questions. Please try again.</p>
+            </div>
+        `;
+    });
+}
+
+/**
+ * Update the question list UI
+ */
+function updateQuestionList() {
+    const container = document.getElementById('question-list');
+    
+    if (currentQuestions.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" id="empty-questions" style="text-align: center; padding: 20px;">
+                <p>No questions added yet. Click the button below to add your first question.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    currentQuestions.forEach(question => {
+        html += `
+            <div class="question-item">
+                <div class="question-header">
+                    <div>
+                        <span class="question-type">${question.type}</span>
+                        <span class="question-points">${question.points} points</span>
+                    </div>
+                    <div class="question-actions">
+                        <button class="btn btn-sm btn-primary" onclick="editQuestion(${question.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteQuestion(${question.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="question-text">${question.text}</div>
+        `;
+        
+        // Add options for multiple choice questions
+        if (question.type === 'multiple_choice' && question.options.length > 0) {
+            html += '<div class="option-list">';
+            question.options.forEach((option, index) => {
+                html += `<div class="option-item">${index + 1}. ${option}</div>`;
+            });
+            html += '</div>';
+        }
+        
+        html += '</div>';
+    });
+    
+    container.innerHTML = html;
+    
+    // Hide empty state if questions exist
+    const emptyState = document.getElementById('empty-questions');
+    if (emptyState) {
+        emptyState.style.display = 'none';
+    }
+}
+
+/**
+ * Add a new question option
+ */
+function addOption() {
+    const container = document.getElementById('options-container');
+    const optionCount = container.querySelectorAll('.option-input').length;
+    
+    const optionDiv = document.createElement('div');
+    optionDiv.className = 'form-group';
+    optionDiv.style.display = 'flex';
+    optionDiv.style.gap = '10px';
+    
+    optionDiv.innerHTML = `
+        <input type="text" class="form-control option-input" placeholder="Option ${optionCount + 1}">
+        <button class="btn btn-danger btn-icon option-remove" onclick="removeOption(this)">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    
+    container.appendChild(optionDiv);
+}
+
+/**
+ * Remove a question option
+ */
+function removeOption(button) {
+    const optionDiv = button.parentNode;
+    if (optionDiv && optionDiv.parentNode) {
+        optionDiv.parentNode.removeChild(optionDiv);
+    }
+}
+
+/**
+ * Toggle question options based on question type
+ */
+function toggleQuestionOptions() {
+    const questionType = document.getElementById('question-type').value;
+    const optionsContainer = document.getElementById('multiple-choice-options');
+    
+    if (questionType === 'multiple_choice') {
+        optionsContainer.style.display = 'block';
+    } else {
+        optionsContainer.style.display = 'none';
+    }
+}
+
+/**
+ * Show the add question modal
+ */
+function showAddQuestionModal() {
+    document.getElementById('question-modal-title').textContent = 'Add Question';
+    
+    // Clear form
+    document.getElementById('question-text').value = '';
+    document.getElementById('question-type').value = 'text';
+    document.getElementById('question-points').value = '5';
+    
+    // Reset options
+    document.getElementById('options-container').innerHTML = `
+        <div class="form-group" style="display: flex; gap: 10px;">
+            <input type="text" class="form-control option-input" placeholder="Option 1">
+            <button class="btn btn-danger btn-icon option-remove" onclick="removeOption(this)">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="form-group" style="display: flex; gap: 10px;">
+            <input type="text" class="form-control option-input" placeholder="Option 2">
+            <button class="btn btn-danger btn-icon option-remove" onclick="removeOption(this)">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+    
+    // Hide options for non-multiple choice questions
+    toggleQuestionOptions();
+    
+    // Setup save button event
+    document.getElementById('save-question-btn').textContent = 'Add Question';
+    document.getElementById('save-question-btn').onclick = saveQuestion;
+    
+    // Show modal
+    document.getElementById('question-modal').style.display = 'block';
+}
+
+/**
+ * Save question
+ */
+function saveQuestion() {
+    const questionText = document.getElementById('question-text').value.trim();
+    const questionType = document.getElementById('question-type').value;
+    const questionPoints = parseInt(document.getElementById('question-points').value) || 5;
+    
+    if (!questionText) {
+        showToast('error', 'Please enter question text');
+        return;
+    }
+    
+    let options = [];
+    if (questionType === 'multiple_choice') {
+        const optionInputs = document.querySelectorAll('.option-input');
+        optionInputs.forEach(input => {
+            const optionText = input.value.trim();
+            if (optionText) {
+                options.push(optionText);
+            }
+        });
+        
+        if (options.length < 2) {
+            showToast('error', 'Multiple choice questions need at least 2 options');
+            return;
+        }
+    }
+    
+    // Create question object
+    const newQuestion = {
+        id: currentQuestions.length + 1,
+        examId: currentExam.id,
+        type: questionType,
+        text: questionText,
+        points: questionPoints,
+        options: options
+    };
+    
+    // Add to questions array
+    currentQuestions.push(newQuestion);
+    
+    // Update UI
+    updateQuestionList();
+    
+    // Close modal
+    closeQuestionModal();
+    
+    showToast('success', 'Question added successfully');
+}
+
+/**
+ * Close question modal
+ */
+function closeQuestionModal() {
+    document.getElementById('question-modal').style.display = 'none';
+}
+
+/**
+ * Refresh submissions data
+ */
+function refreshSubmissions() {
+    showToast('info', 'Refreshing submissions...');
+    loadSubmissions().then(() => {
+        showToast('success', 'Submissions refreshed successfully');
+    }).catch(error => {
+        console.error('Error refreshing submissions:', error);
+        showToast('error', 'Failed to refresh submissions');
+    });
+}
+
+/**
+ * Refresh students data
+ */
+function refreshStudents() {
+    showToast('info', 'Refreshing students...');
+    loadSubmissions().then(() => {
+        processStudentsData();
+        showToast('success', 'Students refreshed successfully');
+    }).catch(error => {
+        console.error('Error refreshing students:', error);
+        showToast('error', 'Failed to refresh students');
+    });
+}
+
+/**
+ * Apply filters to submissions
+ */
+function applyFilters() {
+    const examFilter = document.getElementById('filter-exam').value;
+    const studentFilter = document.getElementById('filter-student').value.toLowerCase();
+    const dateFilter = document.getElementById('filter-date').value;
+    
+    // Filter submissions
+    const filteredSubmissions = submissionsData.filter(submission => {
+        // Filter by exam
+        if (examFilter && submission.examCode !== examFilter) {
+            return false;
+        }
+        
+        // Filter by student (name or ID)
+        if (studentFilter && !submission.studentName.toLowerCase().includes(studentFilter) && 
+            !submission.studentId.toLowerCase().includes(studentFilter)) {
+            return false;
+        }
+        
+        // Filter by date
+        if (dateFilter) {
+            const submissionDate = new Date(submission.timestamp).toISOString().split('T')[0];
+            if (submissionDate !== dateFilter) {
+                return false;
+            }
+        }
+        
+        return true;
+    });
+    
+    // Update submissions table with filtered data
+    const container = document.getElementById('all-submissions');
+    if (!container) return;
+    
+    if (filteredSubmissions.length === 0) {
+        container.innerHTML = '<tr><td colspan="6" class="text-center">No submissions found matching the filters</td></tr>';
+        return;
+    }
+    
+    let html = '';
+    filteredSubmissions.forEach(submission => {
+        const formattedDate = new Date(submission.timestamp).toLocaleString();
+        const durationMins = submission.duration || 'N/A';
+        
+        html += `
+            <tr>
+                <td>${submission.id}</td>
+                <td>${submission.studentName}<br><small>${submission.studentId}</small></td>
+                <td>${submission.examTitle}<br><small>${submission.examCode}</small></td>
+                <td>${formattedDate}</td>
+                <td>${durationMins} mins</td>
+                <td class="table-actions">
+                    <button class="btn btn-sm btn-primary" onclick="viewSubmission('${submission.id}')">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteSubmission('${submission.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    container.innerHTML = html;
+    
+    showToast('info', `Showing ${filteredSubmissions.length} submissions`);
+}
+
+/**
+ * Download submissions as CSV
+ */
+function downloadSubmissions() {
+    // Create CSV content
+    let csvContent = "data:text/csv;charset=utf-8,";
+    
+    // Add headers
+    csvContent += "ID,Student Name,Student ID,Email,Timestamp,Exam,Exam Code,Duration,Answers\n";
+    
+    // Add data rows
+    submissionsData.forEach(submission => {
+        const row = [
+            submission.id,
+            `"${submission.studentName}"`,
+            submission.studentId,
+            submission.studentEmail,
+            submission.timestamp,
+            `"${submission.examTitle}"`,
+            submission.examCode,
+            submission.duration
+        ];
+        
+        // Add answers
+        submission.answers.forEach(answer => {
+            row.push(`"${answer.replace(/"/g, '""')}"`);
+        });
+        
+        csvContent += row.join(',') + '\n';
+    });
+    
+    // Create download link
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "exam_submissions.csv");
+    document.body.appendChild(link);
+    
+    // Trigger download
+    link.click();
+    
+    // Clean up
+    document.body.removeChild(link);
+}
+
+/**
+ * Download students list as CSV
+ */
+function downloadStudentsList() {
+    // Create CSV content
+    let csvContent = "data:text/csv;charset=utf-8,";
+    
+    // Add headers
+    csvContent += "Student ID,Name,Email,Exams Taken,Last Activity\n";
+    
+    // Add data rows
+    studentsData.forEach(student => {
+        const row = [
+            student.id,
+            `"${student.name}"`,
+            student.email,
+            student.submissions.length,
+            student.lastActivity.toISOString()
+        ];
+        
+        csvContent += row.join(',') + '\n';
+    });
+    
+    // Create download link
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "students_list.csv");
+    document.body.appendChild(link);
+    
+    // Trigger download
+    link.click();
+    
+    // Clean up
+    document.body.removeChild(link);
+}
+
+/**
+ * View submission details
+ */
+function viewSubmission(submissionId) {
+    // Find the submission
+    const submission = submissionsData.find(s => s.id === submissionId);
+    if (!submission) {
+        showToast('error', 'Submission not found');
+        return;
+    }
+    
+    // Set current submission
+    currentSubmission = submission;
+    
+    // Populate submission details
+    document.getElementById('submission-id').textContent = submission.id;
+    document.getElementById('submission-date').textContent = new Date(submission.timestamp).toLocaleString();
+    document.getElementById('submission-student-name').textContent = submission.studentName;
+    document.getElementById('submission-student-id').textContent = submission.studentId;
+    document.getElementById('submission-exam').textContent = `${submission.examTitle} (${submission.examCode})`;
+    document.getElementById('submission-duration').textContent = `${submission.duration || 'N/A'} minutes`;
+    
+    // Populate answers
+    const answersContainer = document.getElementById('submission-answers-container');
+    
+    // Find the corresponding exam to get questions
+    const exam = examData.find(e => e.code === submission.examCode);
+    if (exam) {
+        // Load exam questions
+        gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: CONFIG.EXAM_CONFIG_SPREADSHEET_ID,
+            range: `Questions!A:E`
+        }).then(response => {
+            const data = response.result;
+            
+            if (data.values && data.values.length > 0) {
+                // Filter questions for this exam
+                const examQuestions = data.values.filter(row => row[0] == exam.id);
+                
+                let html = '';
+                examQuestions.forEach((question, index) => {
+                    const questionText = question[2] || `Question ${index + 1}`;
+                    const questionType = question[1] || 'text';
+                    const points = parseInt(question[3]) || 0;
+                    const answer = submission.answers[index] || 'No answer provided';
+                    
+                    html += `
+                        <div class="question-item">
+                            <div class="question-header">
+                                <div>
+                                    <span class="question-type">${questionType}</span>
+                                    <span class="question-points">${points} points</span>
+                                </div>
+                            </div>
+                            <div class="question-text">${questionText}</div>
+                            <div style="margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px;">
+                                <div style="font-weight: 500; margin-bottom: 5px;">Answer:</div>
+                                <div>${answer}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                answersContainer.innerHTML = html;
+            } else {
+                answersContainer.innerHTML = '<p class="text-center">No questions found for this exam.</p>';
+            }
+        }).catch(error => {
+            console.error('Error fetching exam questions:', error);
+            answersContainer.innerHTML = '<p class="text-center">Error loading questions.</p>';
+        });
+    } else {
+        // If exam not found, just show answers
+        let html = '';
+        submission.answers.forEach((answer, index) => {
+            html += `
+                <div class="question-item">
+                    <div class="question-text">Question ${index + 1}</div>
+                    <div style="margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 4px;">
+                        <div style="font-weight: 500; margin-bottom: 5px;">Answer:</div>
+                        <div>${answer}</div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        answersContainer.innerHTML = html;
+    }
+    
+    // Show first tab
+    showSubmissionTab('details');
+    
+    // Show modal
+    document.getElementById('submission-modal').style.display = 'block';
+}
+
+/**
+ * Close submission modal
+ */
+function closeSubmissionModal() {
+    document.getElementById('submission-modal').style.display = 'none';
+}
+
+/**
+ * Download current submission
+ */
+function downloadSubmission() {
+    if (!currentSubmission) {
+        showToast('error', 'No submission selected');
+        return;
+    }
+    
+    // Create JSON data
+    const jsonData = JSON.stringify(currentSubmission, null, 2);
+    
+    // Create download link
+    const blob = new Blob([jsonData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `submission_${currentSubmission.id}.json`);
+    document.body.appendChild(link);
+    
+    // Trigger download
+    link.click();
+    
+    // Clean up
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * View student's submissions
+ */
+function viewStudentSubmissions(studentId) {
+    // Show submissions tab
+    showTab('submissions');
+    
+    // Set student filter
+    document.getElementById('filter-student').value = studentId;
+    
+    // Apply filters
+    applyFilters();
+    
+    // Scroll to submissions
+    document.getElementById('all-submissions').scrollIntoView({
+        behavior: 'smooth'
+    });
+}
+
+/**
+ * Delete submission
+ */
+function deleteSubmission(submissionId) {
+    if (!confirm('Are you sure you want to delete this submission? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        showLoading(true);
+        
+        // Find the submission index
+        const submissionIndex = submissionsData.findIndex(s => s.id === submissionId);
+        if (submissionIndex === -1) {
+            showToast('error', 'Submission not found');
+            showLoading(false);
+            return;
+        }
+        
+        // Delete from spreadsheet
+        // Note: This assumes submissions are in a single sheet starting from row 2
+        // Row index = submission index + 2 (to account for header row)
+        const rowIndex = submissionIndex + 2;
+        
+        gapi.client.sheets.spreadsheets.batchUpdate({
+            spreadsheetId: CONFIG.SUBMISSIONS_SPREADSHEET_ID,
+            resource: {
+                requests: [
+                    {
+                        deleteDimension: {
+                            range: {
+                                sheetId: 1, // Assuming Submissions is the second sheet (index 1)
+                                dimension: 'ROWS',
+                                startIndex: rowIndex - 1,
+                                endIndex: rowIndex
+                            }
+                        }
+                    }
+                ]
+            }
+        }).then(() => {
+            // Remove from local data
+            submissionsData.splice(submissionIndex, 1);
+            
+            // Update UI
+            updateSubmissionsTable();
+            
+            // Update dashboard stats
+            updateDashboardStats();
+            
+            // Update recent submissions
+            updateRecentSubmissions();
+            
+            // Reprocess students data
+            processStudentsData();
+            
+            showLoading(false);
+            showToast('success', 'Submission deleted successfully');
+        }).catch(error => {
+            console.error('Error deleting submission:', error);
+            showToast('error', 'Failed to delete submission');
+            showLoading(false);
+        });
+    } catch (error) {
+        console.error('Error in deleteSubmission:', error);
+        showToast('error', 'An error occurred');
+        showLoading(false);
+    }
+}
+		
         /**
          * Get user information
          */
