@@ -714,7 +714,7 @@
 
 
         // --- !!! ADD YOUR DEPLOYED APPS SCRIPT URL HERE !!! ---
-        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzXi9UDeq9xY0polFsD-tkLeg3KObg6bCriJ4PmsBMbM79wFjgnoAdU0SFhayGiQCL5/exec';
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzYC3zgM5FJbjx-AOibYW4Eh9c7u8lNM-Z6HGAMgtlkMOFBvg5Vx8faB0y00XazLbgm/exec';
 
 
         // === App State ===
@@ -1102,7 +1102,7 @@ function initGoogleApi() {
             if (loadExamBtn) {
                 loadExamBtn.disabled = true;
                 loadExamBtn.classList.remove('hidden');
-                loadExamBtn.innerHTML = '<i class="fas fa-download"></i> Load Exam Details';
+                loadExamBtn.innerHTML = '<i class="fas fa-download"></i> Load Exam';
             }
             if (startExamBtn) startExamBtn.disabled = true;
             if (startExamBtnAlt) {
@@ -1219,7 +1219,7 @@ function initGoogleApi() {
 
         // === Exam Logic === (Most logic remains, but submission changes)
 
-        // Triggered when the "Load Exam Details" button is clicked (Keep as is)
+        // Triggered when the "Load Exam" button is clicked (Keep as is)
         async function handleLoadExam() {
             studentPINEntered = examPinInput.value.trim();
             if (!studentPINEntered) {
@@ -1232,97 +1232,82 @@ function initGoogleApi() {
             await fetchExamDetails(studentPINEntered); // Fetch details FROM BACKEND NOW
 
             loadExamBtn.disabled = false;
-            loadExamBtn.innerHTML = '<i class="fas fa-download"></i> Load Exam Details';
+            loadExamBtn.innerHTML = '<i class="fas fa-download"></i> Load Exam';
 
             if (startExamBtn) startExamBtn.disabled = !examDetails || !isOnline;
             if (startExamBtnAlt) startExamBtnAlt.disabled = !examDetails || !isOnline;
         }
 
         // Fetches exam configuration from the 'Exams' sheet based on PIN (Keep as is)
-async function fetchExamDetails(pin) {
-            showImprovedNotification('info', 'Fetching Exam', `Loading details for PIN: ${pin}...`);
-            setSyncing(true); // Indicate network activity
+    async function fetchExamDetails(pin) {
+        showImprovedNotification('info', 'Fetching Exam', `Loading details for PIN: ${pin}...`);
+        setSyncing(true);
 
-            examDetails = null; // Reset previous details
-            examEndTime = null; // Reset end time
+        examDetails = null; // Reset previous details
+        examEndTime = null; // Reset end time
 
-            try {
-                 // Construct URL with PIN parameter for GET request
-                 const fetchUrl = `${BACKEND_URL}?pin=${encodeURIComponent(pin)}`;
-                 console.log(`Workspaceing exam details from backend: ${fetchUrl}`);
+        try {
+            const fetchUrl = `${BACKEND_URL}?pin=${encodeURIComponent(pin)}&action=getDetails`; // Ensure action=getDetails is sent if needed
+            console.log(`Workspaceing exam details from backend: ${fetchUrl}`);
 
-                 const response = await fetch(fetchUrl, {
-                     method: 'GET',
-                     headers: {
-                         'Accept': 'application/json'
-                     }
-                 });
+            const response = await fetch(fetchUrl, { /* ... GET request as before ... */ });
 
-                 if (!response.ok) {
-                     // Try to get error message from backend response body
-                     let errorMsg = `HTTP error! Status: ${response.status}`;
-                     try {
-                         const errorData = await response.json();
-                         errorMsg = errorData.message || errorMsg; // Use backend message if available
-                     } catch (e) { /* Ignore parsing error */ }
-                     throw new Error(errorMsg);
-                 }
+            if (!response.ok) { /* ... handle HTTP errors ... */ }
 
-                 const result = await response.json();
-                 console.log("Backend response (Exam Details):", result);
+            const result = await response.json();
+            console.log("Backend response (Exam Details):", result);
 
-                 if (result.success && result.examData) {
-                     // --- Process successful response ---
-                     const fetchedData = result.examData;
+            if (result.success && result.examData) {
+                const fetchedData = result.examData;
 
-                     // Validate essential data returned from backend
-                     const duration = parseInt(fetchedData.Duration, 10);
-                     const startDateStr = String(fetchedData.StartDate || '').trim();
-                     const startTimeStr = String(fetchedData.StartTime || '').trim();
-                     const mode = String(fetchedData.Mode || 'Quiz').trim().toLowerCase();
-                     const questionsJson = String(fetchedData.Questions || '[]').trim();
-
-                     if (isNaN(duration) || duration <= 0) throw new Error("Invalid exam duration received from backend.");
-                     // Basic date/time format check (backend should ideally ensure format)
-                     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDateStr) || !/^\d{2}:\d{2}:\d{2}$/.test(startTimeStr)) {
-                         console.warn("Potentially invalid date/time format received from backend:", startDateStr, startTimeStr);
-                         // Decide if this should be a hard error or just a warning
-                         // throw new Error(`Invalid Date ('${startDateStr}') or Time ('${startTimeStr}') format received.`);
-                     }
-                     // Basic JSON check
-                      try {
-                         const parsedQuestions = JSON.parse(questionsJson);
-                         if (!Array.isArray(parsedQuestions)) throw new Error("Questions data is not a valid JSON array.");
-                     } catch (e) { throw new Error(`Invalid questions JSON received from backend: ${e.message}`); }
+                // Validate essential data
+                const duration = parseInt(fetchedData.Duration, 10);
+                const startTimestampUTC = fetchedData.StartTimestampUTC; // Get the timestamp
+                const mode = String(fetchedData.Mode || 'Quiz').trim().toLowerCase();
+                const questionsJson = String(fetchedData.Questions || '[]').trim();
+                // Keep formatted date/time strings for display if needed
+                const startDateStr = String(fetchedData.StartDate || '').trim();
+                const startTimeStr = String(fetchedData.StartTime || '').trim();
 
 
-                     // Calculate exam end time (same logic as before)
-                     try {
-                         const startDateTimeStr = `${startDateStr}T${startTimeStr}`;
-                         const startTimeFromSheet = new Date(startDateTimeStr).getTime();
-                         if (isNaN(startTimeFromSheet)) throw new Error("Cannot parse start date/time from backend data.");
-                         const durationMillis = duration * 60 * 1000;
-                         examEndTime = startTimeFromSheet + durationMillis;
-                         console.log(`[TIMER CALC] StartDate: ${startDateStr}, StartTime: ${startTimeStr}, Parsed Start TS: ${startTimeFromSheet}, Duration(ms): ${durationMillis}, Calculated End TS: ${examEndTime} (${new Date(examEndTime).toLocaleString()})`);
-                     } catch (e) { throw new Error(`Could not calculate exam end time: ${e.message}`); }
+                if (isNaN(duration) || duration <= 0) throw new Error("Invalid exam duration received from backend.");
+                if (typeof startTimestampUTC !== 'number' || isNaN(startTimestampUTC)) {
+                    throw new Error("Invalid StartTimestampUTC received from backend.");
+                }
+                // Basic JSON check for questions
+                try { JSON.parse(questionsJson); } catch (e) { throw new Error(`Invalid questions JSON received: ${e.message}`); }
 
 
-                     // Store the loaded exam details
-                     examDetails = {
-                         PIN: fetchedData.PIN, // Use PIN from response
-                         Code: fetchedData.Code,
-                         Name: fetchedData.Name,
-                         Duration: duration, // Use parsed duration
-                         StartDate: startDateStr,
-                         StartTime: startTimeStr,
-                         Mode: mode, // Use parsed mode
-                         Questions: questionsJson, // Store the raw JSON string
-                         OriginalOrderMap: null // Will be populated when questions are displayed
-                     };
-                     console.log("Exam details processed successfully:", examDetails);
+                // --- Calculate exam end time using the UTC timestamp ---
+                try {
+                    const startTimeFromSheet = startTimestampUTC; // USE THE TIMESTAMP DIRECTLY!
+                    const durationMillis = duration * 60 * 1000;
+                    examEndTime = startTimeFromSheet + durationMillis; // Calculate end timestamp in UTC ms
 
-                     displayExamDetailsHeader(); // Update header info
-                     showImprovedNotification('success', 'Exam Loaded', `Details for "${examDetails.Name}" loaded successfully.`);
+                    // Log using the reliable timestamp and formatted strings for clarity
+                    console.log(`[TIMER CALC] StartDate: ${startDateStr}, StartTime: ${startTimeStr}, Received Start TS (UTC ms): ${startTimeFromSheet}, Duration(ms): ${durationMillis}, Calculated End TS (UTC ms): ${examEndTime} (${new Date(examEndTime).toLocaleString()})`); // Log local string representation of end time
+                } catch (e) {
+                    throw new Error(`Could not calculate exam end time: ${e.message}`);
+                }
+
+
+                // Store the loaded exam details
+                examDetails = {
+                    PIN: fetchedData.PIN,
+                    Code: fetchedData.Code,
+                    Name: fetchedData.Name,
+                    Duration: duration,
+                    StartDate: startDateStr, // Keep formatted string for display
+                    StartTime: startTimeStr, // Keep formatted string for display
+                    Mode: mode,
+                    Questions: questionsJson,
+                    OriginalOrderMap: null,
+                    StartTimestampUTC: startTimestampUTC // Store timestamp if needed elsewhere
+                };
+                console.log("Exam details processed successfully:", examDetails);
+
+                displayExamDetailsHeader(); // Update header info (uses formatted strings)
+                showImprovedNotification('success', 'Exam Loaded', `Details for "${examDetails.Name}" loaded successfully.`);
 
                      // Adjust UI based on exam mode (same logic as before)
                      if (examDetails.Mode === 'exam') {
@@ -1548,43 +1533,84 @@ async function checkIfAttemptExists(email, pin, studentExamId, mode) {
 
         // Triggered when "Start Exam" button (Quiz or Exam mode) is clicked (Keep mostly as is)
 async function handleStartExam() {
-            if (!examDetails || !currentUser) { /* ... error handling ... */ return; }
-            const currentMode = examDetails.Mode.toLowerCase();
-            let currentStudentExamId = '';
-            if (currentMode === 'exam') { /* ... validate/get studentExamIdEntered ... */ } else { studentExamIdEntered = ''; }
-
-            console.log("Performing pre-start checks...");
-
-            // --- UNCOMMENTED SECTION ---
-            // 1. Check if already SUBMITTED (Calls backend now)
-            const alreadySubmitted = await checkIfAttemptExists(
-                currentUser.email,
-                examDetails.PIN,
-                studentExamIdEntered, // Use the ID entered/validated
-                currentMode
-            );
-            if (alreadySubmitted) {
-                showImprovedNotification('error', 'Already Submitted', `This exam (${examDetails.PIN}) has already been submitted and cannot be retaken.`, 0);
-                if (startExamBtn) startExamBtn.disabled = true;
-                if (startExamBtnAlt) startExamBtnAlt.disabled = true;
-                return; // Stop if already submitted
-            }
-            // --- End Uncommented Section ---
-
-
-            // 2. Check Exam Timing (Keep this check)
-            try { /* ... timing check logic ... */ } catch (e) { /* ... timing error handling ... */ }
-
-            // Proceed to show questions
-            console.log(`Starting ${currentMode} mode. PIN: ${examDetails.PIN}` /* ... */);
-            confirmedQuestionsCount = 0;
-            examStartModule.classList.add('hidden'); examDetailsModule.classList.add('hidden');
-            examQuestionsModule.classList.remove('hidden'); submissionConfirmationModule.classList.add('hidden');
-            displayQuestions(examDetails.Questions);
-            startTimer();
-            saveAppState();
-            checkAllConfirmed();
+        if (!examDetails || !currentUser) {
+            showImprovedNotification('error', 'Start Error', 'Cannot start the exam. User or exam details are missing.');
+            return;
         }
+
+        const currentMode = examDetails.Mode.toLowerCase();
+        let identifierForCheck = null; // Variable to hold email or studentExamId
+
+        // Validate and store Student Exam ID if in Exam mode
+        if (currentMode === 'exam') {
+            const currentStudentExamId = studentExamIdInput.value.trim(); // Read input value
+            if (currentStudentExamId.length !== 5) {
+                showImprovedNotification('error', 'Invalid ID', 'Please enter the 5-character Student Exam ID.');
+                studentExamIdInput.focus(); // Focus the input for correction
+                return;
+            }
+            // Store the validated ID globally AND use it for the check
+            studentExamIdEntered = currentStudentExamId;
+            identifierForCheck = studentExamIdEntered; // Use the ID for the check
+            console.log(`Exam Mode: Using StudentExamID '${identifierForCheck}' for existence check.`);
+        } else {
+            // Quiz mode: Use email for the check
+            studentExamIdEntered = ''; // Ensure global variable is clear for quiz mode
+            identifierForCheck = currentUser.email;
+             console.log(`Quiz Mode: Using Email '${identifierForCheck}' for existence check.`);
+        }
+
+        console.log("Performing pre-start checks...");
+
+        // --- Check if already SUBMITTED (Uses the correct identifier now) ---
+        const alreadySubmitted = await checkIfAttemptExists(
+            currentUser.email, // Keep passing email for potential logging or future use
+            examDetails.PIN,
+            identifierForCheck, // Pass the correct identifier (email or studentExamId)
+            currentMode
+        );
+        if (alreadySubmitted) {
+            showImprovedNotification('error', 'Already Submitted', `This exam (${examDetails.PIN}) has already been submitted and cannot be retaken.`, 0);
+            if (startExamBtn) startExamBtn.disabled = true;
+            if (startExamBtnAlt) startExamBtnAlt.disabled = true;
+            return; // Stop if already submitted
+        }
+        // --- End Check ---
+
+
+        // 2. Check Exam Timing (Keep this check)
+        try {
+            // ... existing timing check logic ...
+            const startTimestampUTC = examDetails.StartTimestampUTC; // Use stored timestamp
+            if (!startTimestampUTC || isNaN(startTimestampUTC)) { throw new Error("Start timestamp missing or invalid.");}
+            const startTime = startTimestampUTC; // Already in UTC ms
+
+            if (Date.now() < startTime) {
+                 showImprovedNotification('error', 'Exam Not Yet Available', `This exam is scheduled to start at ${new Date(startTime).toLocaleString()}. Please wait.`);
+                 return;
+            }
+            if (!examEndTime || isNaN(examEndTime)) { throw new Error("Could not determine the exam end time."); }
+            if (Date.now() >= examEndTime) {
+                 showImprovedNotification('error', 'Exam Deadline Passed', `The deadline (${new Date(examEndTime).toLocaleString()}) for starting or resuming this exam has passed.`, 0);
+                 return;
+             }
+        } catch (e) {
+             console.error("Exam timing check error:", e);
+             showImprovedNotification('warning', 'Timing Check Warning', `Could not fully verify exam timing: ${e.message}. Proceeding cautiously.`);
+        }
+
+        // Proceed to show questions
+        console.log(`Starting ${currentMode} mode. PIN: ${examDetails.PIN}` + (currentMode === 'exam' ? `, Student Exam ID: ${studentExamIdEntered}` : ''));
+        confirmedQuestionsCount = 0;
+        examStartModule.classList.add('hidden');
+        examDetailsModule.classList.add('hidden');
+        examQuestionsModule.classList.remove('hidden');
+        submissionConfirmationModule.classList.add('hidden');
+        displayQuestions(examDetails.Questions);
+        startTimer();
+        saveAppState();
+        checkAllConfirmed();
+    }
 
         // Parses the JSON string and displays questions in the UI (Keep as is)
         function displayQuestions(questionsJsonString) {
