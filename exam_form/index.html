@@ -597,7 +597,17 @@ function init() {
     loadingIndicator.style.display = 'flex';
     
     // Check for saved token in localStorage
-    checkSavedSession();
+    const storedToken = localStorage.getItem('gapi_token');
+    if (storedToken) {
+        try {
+            JSON.parse(storedToken); // Validate JSON format
+            isSignedIn = true;
+            console.log('Found saved session token');
+        } catch (e) {
+            console.error('Invalid token format in localStorage');
+            localStorage.removeItem('gapi_token');
+        }
+    }
     
     // Initialize Google API
     setTimeout(() => {
@@ -624,23 +634,6 @@ function init() {
     
     // Collect device fingerprint
     collectDeviceFingerprint();
-}
-
-/**
- * Check for saved session in localStorage
- */
-function checkSavedSession() {
-    const storedToken = localStorage.getItem('gapi_token');
-    if (storedToken) {
-        try {
-            JSON.parse(storedToken); // Validate JSON format
-            isSignedIn = true;
-            console.log('Found saved session token');
-        } catch (e) {
-            console.error('Invalid token format in localStorage');
-            localStorage.removeItem('gapi_token');
-        }
-    }
 }
 
 /**
@@ -688,8 +681,10 @@ function initGoogleApi() {
             // Try to access the spreadsheet without authentication first
             const success = await tryPublicAccess();
             
-            // Check for auth token in URL (must be done after GAPI is initialized)
-            processAuthRedirect();
+            // Process token in URL if present
+            if (window.location.hash && window.location.hash.includes('access_token=')) {
+                handleAuthRedirect();
+            }
             
             showMainContent();
         } catch (error) {
@@ -715,12 +710,33 @@ async function tryPublicAccess() {
             if (data.values && data.values.length > 0) {
                 processExamConfig(data.values);
                 
-                // Even if public access works, we still need auth for submissions
-                // So make the sign-in button visible but not mandatory yet
-                const signInBtn = document.getElementById('epoka-sign-in');
-                if (signInBtn) {
-                    signInBtn.style.backgroundColor = '#fb8c00';
-                    signInBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign in to Submit';
+                // Also check if we have stored credentials
+                const storedToken = localStorage.getItem('gapi_token');
+                if (storedToken) {
+                    try {
+                        const tokenObj = JSON.parse(storedToken);
+                        console.log('Restoring session from stored token');
+                        
+                        gapi.client.setToken(tokenObj);
+                        isSignedIn = true;
+                        
+                        // Fetch user info and update form
+                        fetchUserInfo();
+                        
+                        // Update sign-in button
+                        updateSignInButton(true);
+                    } catch (e) {
+                        console.error('Error restoring token:', e);
+                        localStorage.removeItem('gapi_token');
+                    }
+                } else {
+                    // Even if public access works, we still need auth for submissions
+                    // So make the sign-in button visible but not mandatory yet
+                    const signInBtn = document.getElementById('epoka-sign-in');
+                    if (signInBtn) {
+                        signInBtn.style.backgroundColor = '#fb8c00';
+                        signInBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign in to Submit';
+                    }
                 }
                 
                 return true;
