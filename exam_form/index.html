@@ -714,7 +714,7 @@
 
 
         // --- !!! ADD YOUR DEPLOYED APPS SCRIPT URL HERE !!! ---
-        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyoUDad9qkQ0N9_7udIU8xG2T7QM9x23PIbaWJG16khnyZNfmyLwhkbv8Z7z7ep6Bs/exec';
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzXi9UDeq9xY0polFsD-tkLeg3KObg6bCriJ4PmsBMbM79wFjgnoAdU0SFhayGiQCL5/exec';
 
 
         // === App State ===
@@ -838,52 +838,63 @@
             }
         }
 
-        // === Google API & Auth === (Keep for Sign-in and potential Read operations)
-        function initGoogleApi() {
-            console.log('Initialising Google API...');
-            try {
-                tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
-                    scope: SCOPES, // Use modified scopes
-                    callback: handleTokenResponse // This function will be called when the user grants access
-                });
+// === Google API & Auth === (Simplified)
+function initGoogleApi() {
+    console.log('Initialising Google Sign-In...'); // Changed log message
+    try {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CLIENT_ID,
+            scope: SCOPES, // Keep scopes needed for profile/email if using Sign-In
+            callback: handleTokenResponse
+        });
 
-                gapi.load('client', async () => {
-                    try {
-                        await gapi.client.init({
-                            apiKey: API_KEY,
-                            discoveryDocs: DISCOVERY_DOCS
-                        });
-                        console.log('GAPI client initialised.');
+        // --- REMOVED gapi.load('client', ...) section ---
+        // We no longer need to initialize gapi.client if only using Sign-In
 
-                        // Check for existing token (e.g., from previous session)
-                        const savedToken = localStorage.getItem('gapi_token');
-                        if (savedToken) {
-                            const token = JSON.parse(savedToken);
-                            // Basic check if token exists; add expiry check if needed
-                            if (token?.access_token /* && !isTokenExpired(token) */) {
-                                gapi.client.setToken(token);
-                                console.log("Using saved token.");
-                                await tokenObtained(token); // Process the existing token
-                            } else {
-                                localStorage.removeItem('gapi_token'); // Remove invalid token
-                                console.log("Saved token invalid or expired.");
-                                updateAuthUI();
-                                showAppContent();
-                            }
-                        } else {
-                             console.log("No saved token found.");
-                             updateAuthUI(); // Update UI for logged-out state
-                             showAppContent(); // Show content now that API init is done
-                        }
-                    } catch (error) {
-                        handleApiInitError(error); // Handle GAPI client init errors
+        // Check for existing token immediately (logic moved from gapi.load callback)
+        const savedToken = localStorage.getItem('gapi_token');
+        if (savedToken) {
+            const token = JSON.parse(savedToken);
+            if (token?.access_token /* && !isTokenExpired(token) */) {
+                // We still need to set the token for potential fetchUserInfo call
+                // Need a minimal gapi object setup for setToken, or handle auth differently.
+                // Let's assume gapi object exists from api.js script tag
+                // If gapi.client.setToken fails, fetchUserInfo needs adjustment
+                try {
+                    // Minimal check if gapi and gapi.client exist before setting token
+                    if (typeof gapi !== 'undefined' && typeof gapi.client !== 'undefined') {
+                         gapi.client.setToken(token); // Set token if gapi.client exists
+                         console.log("Using saved token.");
+                         tokenObtained(token); // Process the existing token (calls fetchUserInfo)
+                    } else {
+                         console.warn("gapi.client not fully loaded, cannot set saved token automatically. Proceeding without pre-set token.");
+                         // Proceed without setting the token here; fetchUserInfo might fail or need adjustment
+                         // For simplicity, let's just update UI and show content
+                         updateAuthUI(); // Might show logged out initially
+                         showAppContent();
+                         // Consider prompting sign-in again if saved token exists but can't be applied
                     }
-                });
-            } catch (error) {
-                handleApiInitError(error); // Handle Token Client init errors
+                } catch (e) {
+                     console.warn("Error setting saved token (gapi.client might be partially loaded):", e);
+                     updateAuthUI();
+                     showAppContent();
+                }
+            } else {
+                localStorage.removeItem('gapi_token');
+                console.log("Saved token invalid or expired.");
+                updateAuthUI();
+                showAppContent();
             }
+        } else {
+             console.log("No saved token found.");
+             updateAuthUI();
+             showAppContent();
         }
+
+    } catch (error) {
+        handleApiInitError(error); // Handle Token Client init errors
+    }
+}
 
         function handleApiInitError(error) {
             console.error('API Initialisation Error:', error);
