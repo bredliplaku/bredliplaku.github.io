@@ -66,6 +66,95 @@
         font-size: 1.0em;
     }
     
+	   .connection-status {
+        display: flex;
+        align-items: center;
+        background-color: rgba(255,255,255,0.2);
+        padding: 10px 15px;
+        border-radius: 10px;
+        margin-top: 15px;
+        font-size: 0.9em;
+    }
+    
+    .status-indicator {
+        margin-right: 8px;
+        font-size: 12px;
+    }
+    
+    .status-indicator.online i {
+        color: #4CAF50;
+    }
+    
+    .status-indicator.offline i {
+        color: #F44336;
+    }
+    
+    .status-text {
+        font-weight: 500;
+    }
+    
+    .sync-button {
+        margin-left: auto;
+        background-color: rgba(255,255,255,0.3);
+        color: white;
+        font-size: 0.8em;
+        padding: 5px 10px;
+        border-radius: 15px;
+    }
+    
+    .sync-button:hover {
+        background-color: rgba(255,255,255,0.4);
+        transform: scale(1.05);
+    }
+    
+    .sync-button.syncing {
+        pointer-events: none;
+    }
+    
+    /* Auth expired modal styles */
+    .auth-expired-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.7);
+        z-index: 9999;
+        animation: fadeIn 0.3s;
+    }
+    
+    .auth-expired-content {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: white;
+        padding: 30px;
+        border-radius: 10px;
+        max-width: 500px;
+        width: 90%;
+        text-align: center;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    
+    .auth-expired-content i {
+        font-size: 50px;
+        color: #F44336;
+        margin-bottom: 20px;
+    }
+    
+    .auth-expired-content h2 {
+        font-size: 1.6em;
+        margin-bottom: 15px;
+        color: #333;
+    }
+    
+    .auth-expired-content p {
+        margin-bottom: 20px;
+        color: #666;
+    }
+	
     .exam-info {
         display: flex;
         justify-content: flex-start;
@@ -319,6 +408,11 @@
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
     }
+	
+	    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
     
     .loading-spinner {
         border: 5px solid rgba(57, 73, 171, 0.2);
@@ -501,6 +595,13 @@
             <div class="time-remaining" id="time-remaining">
                 Time Remaining: <span id="countdown">--:--:--</span>
             </div>
+			<div class="connection-status" id="connection-status">
+				<span class="status-indicator online"><i class="fas fa-circle"></i></span>
+				<span class="status-text">Online</span>
+				<button id="sync-button" class="sync-button">
+					<i class="fas fa-sync-alt"></i> SYNC
+				</button>
+			</div>
         </div>
         
         <div id="notification-area" class="in-page-notifications"></div>
@@ -592,6 +693,11 @@ let countdownInterval = null;
 let isSubmitting = false;
 let hasSubmitted = false;
 let deviceFingerprint = {};
+let isOnline = navigator.onLine;
+let lastActivity = Date.now();
+let syncInterval = null;
+let activityTimeout = null;
+let sessionTimeout = 20 * 60 * 1000; // 20 minutes for session expiration
 
 /**
  * Handle auth redirect and token in URL.
@@ -636,57 +742,60 @@ function handleAuthRedirect() {
 /**
  * Initialize the application.
  */
-function init() {
-    updateYear();
-    
-    // Show loading screen
-    const loadingIndicator = document.getElementById('app-loading');
-    loadingIndicator.style.display = 'flex';
-    
-    // Check for saved token in localStorage
-    const storedToken = localStorage.getItem('gapi_token');
-    if (storedToken) {
-        try {
-            JSON.parse(storedToken);
-            isSignedIn = true;
-            console.log('Found saved session token');
-        } catch (e) {
-            console.error('Invalid token format in localStorage');
-            localStorage.removeItem('gapi_token');
+    function init() {
+        updateYear();
+        
+        // Show loading screen
+        const loadingIndicator = document.getElementById('app-loading');
+        loadingIndicator.style.display = 'flex';
+        
+        // Check for saved token in localStorage
+        const storedToken = localStorage.getItem('gapi_token');
+        if (storedToken) {
+            try {
+                JSON.parse(storedToken);
+                isSignedIn = true;
+                console.log('Found saved session token');
+            } catch (e) {
+                console.error('Invalid token format in localStorage');
+                localStorage.removeItem('gapi_token');
+            }
         }
-    }
-    
-    // Handle auth redirect if there's a hash in the URL
-    if (window.location.hash && window.location.hash.includes('access_token=')) {
-        console.log('Found token in URL, will process after initialization');
-    }
-    
-    // Initialize Google API
-    setTimeout(() => {
-        if (typeof gapi !== 'undefined') {
-            initGoogleApi();
-        } else {
-            console.warn('Google API objects not available yet, waiting longer...');
-            setTimeout(() => {
-                if (typeof gapi !== 'undefined') {
-                    console.log('Google API objects loaded after extended wait');
-                    initGoogleApi();
-                } else {
-                    console.error('Google API objects still not available after extended wait');
-                    showNotification('error', 'API Error', 'Google API libraries not loaded. Check your internet connection or try using a different browser.');
-                    showMainContent();
-                }
-            }, 3000);
+        
+        // Handle auth redirect if there's a hash in the URL
+        if (window.location.hash && window.location.hash.includes('access_token=')) {
+            console.log('Found token in URL, will process after initialization');
         }
-    }, 1000);
-    
-    // Attach event listeners to buttons
-    document.getElementById('submit-exam').addEventListener('click', submitExam);
-    document.getElementById('epoka-sign-in').addEventListener('click', doAuth);
-    
-    // Collect device fingerprint
-    collectDeviceFingerprint();
-}
+        
+        // Initialize Google API
+        setTimeout(() => {
+            if (typeof gapi !== 'undefined') {
+                initGoogleApi();
+            } else {
+                console.warn('Google API objects not available yet, waiting longer...');
+                setTimeout(() => {
+                    if (typeof gapi !== 'undefined') {
+                        console.log('Google API objects loaded after extended wait');
+                        initGoogleApi();
+                    } else {
+                        console.error('Google API objects still not available after extended wait');
+                        showNotification('error', 'API Error', 'Google API libraries not loaded. Check your internet connection or try using a different browser.');
+                        showMainContent();
+                    }
+                }, 3000);
+            }
+        }, 1000);
+        
+        // Attach event listeners to buttons
+        document.getElementById('submit-exam').addEventListener('click', submitExam);
+        document.getElementById('epoka-sign-in').addEventListener('click', doAuth);
+        
+        // Collect device fingerprint
+        collectDeviceFingerprint();
+        
+        // Initialize connection monitoring (add this line)
+        initConnectionMonitoring();
+    }
 
 /**
  * Show the main content when ready
@@ -746,6 +855,335 @@ function initGoogleApi() {
         }
     });
 }
+
+   /**
+     * Initialize online/offline monitoring and sync functionality
+     */
+    function initConnectionMonitoring() {
+        // Set initial connection status
+        updateConnectionStatus();
+        
+        // Monitor online/offline events
+        window.addEventListener('online', handleOnlineStatusChange);
+        window.addEventListener('offline', handleOnlineStatusChange);
+        
+        // Set up activity monitoring
+        document.addEventListener('mousemove', resetActivityTimer);
+        document.addEventListener('keypress', resetActivityTimer);
+        document.addEventListener('click', resetActivityTimer);
+        
+        // Set up sync button
+        document.getElementById('sync-button').addEventListener('click', manualSync);
+        
+        // Start auto-sync interval (every 2 minutes)
+        syncInterval = setInterval(autoSync, 2 * 60 * 1000);
+        
+        // Start activity timeout check
+        activityTimeout = setInterval(checkActivityTimeout, 60 * 1000);
+        
+        // Check if any saved answers in localStorage
+        restoreSavedAnswers();
+        
+        // Set up auth expired modal button
+        document.getElementById('auth-signin-btn').addEventListener('click', doAuth);
+    }
+    
+    /**
+     * Update the connection status indicator
+     */
+    function updateConnectionStatus() {
+        const statusIndicator = document.querySelector('.status-indicator');
+        const statusText = document.querySelector('.status-text');
+        
+        if (isOnline) {
+            statusIndicator.className = 'status-indicator online';
+            statusText.textContent = 'Online';
+        } else {
+            statusIndicator.className = 'status-indicator offline';
+            statusText.textContent = 'Offline';
+        }
+    }
+    
+    /**
+     * Handle online/offline status changes
+     */
+    function handleOnlineStatusChange() {
+        isOnline = navigator.onLine;
+        updateConnectionStatus();
+        
+        if (isOnline) {
+            showNotification('info', 'Connection Restored', 'You are now online. Your answers will be synced.', 3000);
+            autoSync();
+        } else {
+            showNotification('warning', 'Connection Lost', 'You are offline. Your answers are saved locally.', 5000);
+        }
+    }
+    
+    /**
+     * Reset the activity timer
+     */
+    function resetActivityTimer() {
+        lastActivity = Date.now();
+        
+        // If the auth expired modal is showing and the user is active, check if we're online
+        // and if so, allow them to continue without requiring re-auth
+        if (document.getElementById('auth-expired-modal').style.display === 'block' && isOnline) {
+            // Try to validate the token silently
+            validateToken().then(valid => {
+                if (valid) {
+                    document.getElementById('auth-expired-modal').style.display = 'none';
+                    showNotification('success', 'Session Restored', 'Your session has been restored.', 3000);
+                }
+            });
+        }
+    }
+    
+    /**
+     * Check for activity timeout
+     */
+    function checkActivityTimeout() {
+        const inactiveTime = Date.now() - lastActivity;
+        
+        // If inactive for session timeout duration, show auth expired modal
+        if (inactiveTime >= sessionTimeout) {
+            showAuthExpiredModal();
+        }
+    }
+    
+    /**
+     * Show the auth expired modal
+     */
+    function showAuthExpiredModal() {
+        // Save answers first
+        saveAnswers();
+        
+        // Show the modal
+        document.getElementById('auth-expired-modal').style.display = 'block';
+        
+        // If auth actually expired, update the token status
+        isSignedIn = false;
+        updateSignInButton(false);
+    }
+    
+    /**
+     * Try to validate the current token
+     */
+    async function validateToken() {
+        if (!isSignedIn) return false;
+        
+        try {
+            // Try to make a simple API call to validate the token
+            await gapi.client.request({
+                'path': 'https://www.googleapis.com/oauth2/v2/userinfo',
+                'method': 'GET'
+            });
+            return true;
+        } catch (error) {
+            console.error('Token validation failed:', error);
+            return false;
+        }
+    }
+    
+    /**
+     * Automatic sync of answers
+     */
+    function autoSync() {
+        if (isOnline && isSignedIn) {
+            saveAnswers(true);
+        } else {
+            saveAnswers(false);
+        }
+    }
+    
+    /**
+     * Manual sync triggered by the sync button
+     */
+    function manualSync() {
+        const syncButton = document.getElementById('sync-button');
+        
+        // Add spinning animation to the icon
+        syncButton.classList.add('syncing');
+        syncButton.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Syncing...';
+        
+        // Try to validate token first
+        validateToken().then(valid => {
+            if (valid && isOnline) {
+                // If token is valid and we're online, save with sync
+                saveAnswers(true).then(() => {
+                    // Update button after sync
+                    setTimeout(() => {
+                        syncButton.classList.remove('syncing');
+                        syncButton.innerHTML = '<i class="fas fa-check"></i> Synced';
+                        
+                        // Reset button after 2 seconds
+                        setTimeout(() => {
+                            syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> SYNC';
+                        }, 2000);
+                    }, 1000);
+                });
+            } else {
+                // If token is invalid or offline, just save locally
+                saveAnswers(false);
+                
+                // Update button accordingly
+                setTimeout(() => {
+                    syncButton.classList.remove('syncing');
+                    
+                    if (!isOnline) {
+                        syncButton.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Offline';
+                        showNotification('warning', 'Offline Mode', 'Your answers are saved locally only.', 3000);
+                    } else {
+                        syncButton.innerHTML = '<i class="fas fa-times"></i> Not Signed In';
+                        showAuthExpiredModal();
+                    }
+                    
+                    // Reset button after 2 seconds
+                    setTimeout(() => {
+                        syncButton.innerHTML = '<i class="fas fa-sync-alt"></i> SYNC';
+                    }, 2000);
+                }, 1000);
+            }
+        });
+    }
+    
+    /**
+     * Save answers to localStorage and optionally to server
+     */
+    async function saveAnswers(syncToServer = false) {
+        try {
+            const examData = await collectAnswers(false); // Don't try to read file data for local storage
+            
+            // Always save to localStorage
+            localStorage.setItem('exam_answers', JSON.stringify({
+                studentInfo: {
+                    name: examData.studentName,
+                    id: examData.studentId,
+                    email: examData.studentEmail
+                },
+                questionResponses: examData.questionResponses,
+                examCode: examConfig.code,
+                lastSaved: new Date().toISOString()
+            }));
+            
+            // If sync to server is requested and we're online and signed in
+            if (syncToServer && isOnline && isSignedIn) {
+                try {
+                    // Save responses to server (update this based on your server API)
+                    await saveResponsesToServer(examData);
+                    showNotification('success', 'Sync Complete', 'Your answers have been saved online.', 2000);
+                    return true;
+                } catch (error) {
+                    console.error('Error syncing to server:', error);
+                    showNotification('warning', 'Sync Failed', 'Could not sync to server. Your answers are saved locally.', 3000);
+                    return false;
+                }
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('Error saving answers:', error);
+            showNotification('error', 'Save Error', 'Failed to save your answers. Please try again.', 3000);
+            return false;
+        }
+    }
+    
+    /**
+     * Save responses to server
+     */
+    async function saveResponsesToServer(examData) {
+        // Use existing spreadsheet logic, but don't submit the full exam
+        const formattedData = formatDataForSheet(examData);
+        
+        // Instead of submitting, just validate by making a small request
+        await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: EXAM_CONFIG_SPREADSHEET_ID,
+            range: 'A1:A1'
+        });
+        
+        // If that doesn't throw an error, we're good
+        return true;
+    }
+    
+    /**
+     * Restore saved answers from localStorage
+     */
+    function restoreSavedAnswers() {
+        const savedData = localStorage.getItem('exam_answers');
+        if (!savedData) return;
+        
+        try {
+            const data = JSON.parse(savedData);
+            
+            // Check if the saved data is for the current exam
+            if (data.examCode === examConfig.code) {
+                // Restore student info
+                if (data.studentInfo) {
+                    if (!document.getElementById('student-name').value) {
+                        document.getElementById('student-name').value = data.studentInfo.name || '';
+                    }
+                    if (!document.getElementById('student-id').value) {
+                        document.getElementById('student-id').value = data.studentInfo.id || '';
+                    }
+                    if (!document.getElementById('student-email').value) {
+                        document.getElementById('student-email').value = data.studentInfo.email || '';
+                    }
+                }
+                
+                // Restore question answers
+                if (data.questionResponses) {
+                    Object.entries(data.questionResponses).forEach(([questionId, answer]) => {
+                        const element = document.getElementById(`question-${questionId}`);
+                        
+                        if (element) {
+                            const question = examConfig.questions.find(q => q.id == questionId);
+                            
+                            if (question) {
+                                if (question.type === 'multiple_choice') {
+                                    const options = document.querySelectorAll(`input[name="question-${questionId}"]`);
+                                    options.forEach(option => {
+                                        if (option.value === answer) {
+                                            option.checked = true;
+                                        }
+                                    });
+                                } else if (question.type !== 'file') { // Skip files for now
+                                    element.value = answer;
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Show a notification that answers were restored
+                const lastSaved = new Date(data.lastSaved);
+                const timeAgo = formatTimeAgo(lastSaved);
+                showNotification('info', 'Answers Restored', `Your previous answers (saved ${timeAgo}) have been restored.`, 5000);
+            }
+        } catch (error) {
+            console.error('Error restoring saved answers:', error);
+        }
+    }
+    
+    /**
+     * Format time ago in a human-readable format
+     */
+    function formatTimeAgo(date) {
+        const now = new Date();
+        const diffMs = now - date;
+        const diffSec = Math.floor(diffMs / 1000);
+        const diffMin = Math.floor(diffSec / 60);
+        const diffHour = Math.floor(diffMin / 60);
+        const diffDay = Math.floor(diffHour / 24);
+        
+        if (diffSec < 60) {
+            return 'just now';
+        } else if (diffMin < 60) {
+            return `${diffMin} minute${diffMin !== 1 ? 's' : ''} ago`;
+        } else if (diffHour < 24) {
+            return `${diffHour} hour${diffHour !== 1 ? 's' : ''} ago`;
+        } else {
+            return `${diffDay} day${diffDay !== 1 ? 's' : ''} ago`;
+        }
+    }
 
 /**
  * Try to access the spreadsheet without authentication first
@@ -1312,6 +1750,19 @@ async function submitExam(autoSubmit = false) {
     if (isSubmitting || hasSubmitted) {
         return;
     }
+	
+	// Check if online and authenticated
+	if (!isOnline) {
+		showNotification('error', 'Offline Mode', 'You cannot submit your exam while offline. Please connect to the internet.', 5000);
+		return;
+	}
+	
+	// Validate token before submission
+	const tokenValid = await validateToken();
+	if (!tokenValid) {
+		showAuthExpiredModal();
+		return;
+	}
     
     // Set submitting flag
     isSubmitting = true;
@@ -1588,5 +2039,16 @@ function updateYear() {
 // Initialize the application when window loads
 window.addEventListener('load', init);
 </script>
+<div id="auth-expired-modal" class="auth-expired-modal">
+    <div class="auth-expired-content">
+        <i class="fas fa-exclamation-triangle"></i>
+        <h2>Session Expired</h2>
+        <p>Your session has expired due to inactivity. Your answers have been saved locally.</p>
+        <p>Please sign in again to continue your exam.</p>
+        <button id="auth-signin-btn" class="btn-submit" style="background-color: #2196F3;">
+            <i class="fas fa-sign-in-alt"></i> Sign In Again
+        </button>
+    </div>
+</div>
 </body>
 </html>
