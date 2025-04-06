@@ -9,7 +9,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
     <!-- Google API client library -->
 <script src="https://apis.google.com/js/api.js"></script>
-<script src="https://accounts.google.com/gsi/client"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         :root {
             --primary-color: #3949ab;
@@ -1450,29 +1450,155 @@
             showToast('success', 'Settings saved successfully');
         }
         
-        /**
-         * Initialize Google API client
-         */
+/**
+ * Initialize Google API client with modern Identity Services
+ */
 function initGoogleApi() {
-    return new Promise((resolve, reject) => {
-        gapi.load('client:auth2', () => {
-            gapi.client.init({
+    console.log('Initializing Google API with modern Identity Services...');
+    
+    gapi.load('client', async () => {
+        try {
+            await gapi.client.init({
                 apiKey: CONFIG.API_KEY,
-                clientId: CONFIG.CLIENT_ID,
-                discoveryDocs: DISCOVERY_DOCS,
-                scope: SCOPES
-            }).then(() => {
-                // Handle sign-in state
-                gapi.auth2.getAuthInstance().isSignedIn.listen(updateSignInStatus);
-                updateSignInStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
-                resolve();
-            }).catch(error => {
-                console.error('Error initializing Google API client:', error);
-                showToast('error', 'Failed to initialize API');
-                reject(error);
+                discoveryDocs: DISCOVERY_DOCS
             });
-        });
+            
+            console.log('GAPI client initialized successfully');
+            
+            // Initialize Google Identity Services
+            initializeGIS();
+            
+            // Check if user is already signed in (from a previous session)
+            checkStoredAuth();
+            
+        } catch (error) {
+            console.error('Error initializing Google API client:', error);
+            showToast('error', 'Failed to initialize API');
+        }
     });
+}
+
+/**
+ * Check for stored authentication from previous sessions
+ */
+function checkStoredAuth() {
+    const storedToken = localStorage.getItem('gapi_token');
+    if (storedToken) {
+        try {
+            const tokenInfo = JSON.parse(storedToken);
+            
+            // Set the token for the client
+            gapi.client.setToken(tokenInfo);
+            
+            // Verify token is still valid
+            getUserInfo().then(user => {
+                currentUser = user;
+                
+                // Check if user is admin
+                if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
+                    // Show admin dashboard
+                    showDashboard();
+                    loadDashboardData();
+                } else {
+                    // Not an admin, show error
+                    signOut();
+                    showLoginScreen();
+                    showToast('error', 'You do not have admin privileges');
+                }
+            }).catch(error => {
+                console.error('Error verifying token:', error);
+                localStorage.removeItem('gapi_token');
+                showLoginScreen();
+            });
+            
+        } catch (e) {
+            console.error('Invalid token in localStorage:', e);
+            localStorage.removeItem('gapi_token');
+            showLoginScreen();
+        }
+    } else {
+        showLoginScreen();
+    }
+}
+
+
+
+
+/**
+ * Initialize Google Identity Services for authentication
+ */
+function initializeGIS() {
+    // Initialize the tokenClient
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.CLIENT_ID,
+        scope: SCOPES,
+        callback: handleTokenResponse
+    });
+    
+    // Set up sign-in button
+    document.getElementById('login-button').addEventListener('click', requestAccessToken);
+}
+
+/**
+ * Handle token response from Google Identity Services
+ */
+function handleTokenResponse(response) {
+    if (response.error !== undefined) {
+        console.error('Error getting token:', response);
+        showToast('error', 'Authentication failed');
+        return;
+    }
+    
+    console.log('Token received successfully');
+    
+    // Store token in localStorage for future sessions
+    localStorage.setItem('gapi_token', JSON.stringify(response));
+    
+    // Get user info and update sign-in status
+    getUserInfo().then(user => {
+        currentUser = user;
+        
+        // Check if user is admin
+        if (CONFIG.ADMIN_EMAILS.includes(user.email)) {
+            // Show admin dashboard
+            showDashboard();
+            loadDashboardData();
+        } else {
+            // Not an admin, show error
+            signOut();
+            showLoginScreen();
+            showToast('error', 'You do not have admin privileges');
+        }
+    });
+}
+
+/**
+ * Handle sign-out
+ */
+function signOut() {
+    // Clear token from localStorage
+    localStorage.removeItem('gapi_token');
+    
+    // Clear token from gapi client
+    gapi.client.setToken(null);
+    
+    // Show login screen
+    showLoginScreen();
+}
+
+/**
+ * Handle sign-in button click (replace old handleSignIn)
+ */
+function handleSignIn() {
+    requestAccessToken();
+}
+
+/**
+ * Request access token using Google Identity Services
+ */
+function requestAccessToken() {
+    // Request an access token
+    tokenClient.requestAccessToken();
 }
         
         /**
