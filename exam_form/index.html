@@ -373,24 +373,48 @@
             justify-content: flex-end; /* Align buttons to the right */
         }
 
-        /* Styling for confirmed (faded/uneditable) state */
-        .question.confirmed .form-control,
-        .question.confirmed .checkbox-group input[type="checkbox"] + label,
-        .question.confirmed .checkbox-item { /* Apply fade to checkbox item wrapper */
-            opacity: 0.5; /* Fade effect */
-            background-color: #f8f8f8; /* Slightly different background */
-            pointer-events: none; /* Prevent interaction */
-        }
-         .question.confirmed .checkbox-group input[type="checkbox"] { /* Ensure checkbox itself is disabled */
-            pointer-events: none;
-        }
+/* --- Enhanced Styling for Confirmed State --- */
+.question.confirmed {
+     background-color: #fafafa; /* Slightly different overall background */
+}
 
-        /* Hide edit button by default */
-        .btn-edit { display: none; }
-        /* Show edit button when confirmed */
-        .question.confirmed .btn-edit { display: inline-flex; }
-        /* Hide confirm button when confirmed */
-        .question.confirmed .btn-confirm { display: none; }
+/* Style inputs/textareas/checkbox items when confirmed */
+.question.confirmed .form-control,
+.question.confirmed .checkbox-item {
+    opacity: 0.1 !important; /* Significantly lower opacity */
+    background-color: #f0f0f0 !important; /* Light background */
+    color: transparent !important; /* Make text invisible */
+    text-shadow: none !important; /* Remove text shadow if any */
+    pointer-events: none !important; /* Disable interaction */
+    cursor: default !important; /* Change cursor */
+    border-color: #e0e0e0 !important; /* Lighter border */
+}
+
+/* Ensure text placeholders also become invisible */
+ .question.confirmed .form-control::placeholder {
+     color: transparent !important;
+     opacity: 1 !important; /* Override browser default placeholder opacity if needed */
+ }
+
+/* Ensure labels next to checkboxes are also affected */
+.question.confirmed .checkbox-item label {
+     color: transparent !important; /* Make label text invisible */
+     cursor: default !important;
+     opacity: 0.2 !important; /* Apply some opacity to the label too */
+}
+
+ /* Ensure checkbox itself looks disabled and blends */
+ .question.confirmed .form-control-checkbox {
+     cursor: default !important;
+     opacity: 0.1 !important;
+ }
+
+/* Hide edit button by default */
+.btn-edit { display: none; }
+/* Show edit button when confirmed */
+.question.confirmed .btn-edit { display: inline-flex; }
+/* Hide confirm button when confirmed */
+.question.confirmed .btn-confirm { display: none; }
 
         /* Multiple Select Checkbox Styling */
         .checkbox-group {
@@ -643,6 +667,8 @@
         let examTimerInterval = null;   // Interval ID for the countdown timer
         let examEndTime = null;         // Absolute end time (timestamp in ms)
         const appStateKey = 'examAppState'; // Key for localStorage
+		let totalQuestions = 0; // To track total number of questions displayed
+		let confirmedQuestionsCount = 0; // To track confirmed questions
 
         // === DOM Elements ===
         const loadingIndicator      = document.getElementById('app-loading');
@@ -944,60 +970,65 @@
 
 
         // === UI State & Reset ===
-        function resetExamState() {
-            console.log("Resetting UI to initial state.");
-            // Hide modules related to active exam
-            examStartModule?.classList.add('hidden');
-            examDetailsModule?.classList.add('hidden');
-            examQuestionsModule?.classList.add('hidden');
-            submissionConfirmationModule?.classList.add('hidden');
-            studentExamIdGroup?.classList.add('hidden'); // Hide Student ID input
+        // === UI State & Reset ===
+function resetExamState() {
+    console.log("Resetting UI to initial state.");
+    // Hide modules related to active exam
+    examStartModule?.classList.add('hidden');
+    examDetailsModule?.classList.add('hidden');
+    examQuestionsModule?.classList.add('hidden');
+    submissionConfirmationModule?.classList.add('hidden');
+    studentExamIdGroup?.classList.add('hidden'); // Hide Student ID input
 
-            // Show the initial sign-in prompt if it exists
-            signinPromptModule?.classList.remove('hidden');
+    // Show the initial sign-in prompt if it exists
+    signinPromptModule?.classList.remove('hidden');
 
-            // Reset input fields
-            if (examPinInput) {
-                examPinInput.value = '';
-                examPinInput.disabled = true; // Disable until signed in
-            }
-            if (studentExamIdInput) studentExamIdInput.value = '';
-            if (studentNameInput) studentNameInput.value = '';
-            if (studentEmailInput) studentEmailInput.value = '';
+    // Reset input fields
+    if (examPinInput) {
+        examPinInput.value = '';
+        examPinInput.disabled = true; // Disable until signed in
+    }
+    if (studentExamIdInput) studentExamIdInput.value = '';
+    if (studentNameInput) studentNameInput.value = '';
+    if (studentEmailInput) studentEmailInput.value = '';
 
-            // Reset buttons to initial state
-            if (loadExamBtn) {
-                loadExamBtn.disabled = true;
-                loadExamBtn.classList.remove('hidden');
-                loadExamBtn.innerHTML = '<i class="fas fa-download"></i> Load Exam Details';
-            }
-            if (startExamBtn) startExamBtn.disabled = true;
-            if (startExamBtnAlt) {
-                startExamBtnAlt.classList.add('hidden');
-                startExamBtnAlt.disabled = true;
-            }
-            if (submitExamBtn) {
-                submitExamBtn.disabled = true;
-                submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam';
-            }
+    // Reset buttons to initial state
+    if (loadExamBtn) {
+        loadExamBtn.disabled = true;
+        loadExamBtn.classList.remove('hidden');
+        loadExamBtn.innerHTML = '<i class="fas fa-download"></i> Load Exam Details';
+    }
+    if (startExamBtn) startExamBtn.disabled = true;
+    if (startExamBtnAlt) {
+        startExamBtnAlt.classList.add('hidden');
+        startExamBtnAlt.disabled = true;
+    }
+     if (submitExamBtn) { // Ensure submit button is reset correctly
+         submitExamBtn.disabled = true;
+         submitExamBtn.innerHTML = '<i class="fas fa-lock"></i> Submit Exam (Confirm All First)';
+     }
 
-            // Reset header/details display
-            const na = 'N/A';
-            if (examCodeDisplay) examCodeDisplay.textContent = na;
-            if (examDurationDisplay) examDurationDisplay.textContent = na;
-            if (examStartTimeDisplay) examStartTimeDisplay.textContent = na;
-            if (examNameHeader) examNameHeader.textContent = 'Please sign in to load the exam';
-            if (examNameDetail) examNameDetail.textContent = '';
-            if (examCourseCodeDetail) examCourseCodeDetail.textContent = '';
-            if (examModeDetail) examModeDetail.textContent = '';
-            if (examDurationDetail) examDurationDetail.textContent = '';
-            if (examStartTimeDetail) examStartTimeDetail.textContent = '';
+    // Reset header/details display
+    const na = 'N/A';
+    if (examCodeDisplay) examCodeDisplay.textContent = na;
+    if (examDurationDisplay) examDurationDisplay.textContent = na;
+    if (examStartTimeDisplay) examStartTimeDisplay.textContent = na;
+    if (examNameHeader) examNameHeader.textContent = 'Please sign in to load the exam';
+    if (examNameDetail) examNameDetail.textContent = '';
+    if (examCourseCodeDetail) examCourseCodeDetail.textContent = '';
+    if (examModeDetail) examModeDetail.textContent = '';
+    if (examDurationDetail) examDurationDetail.textContent = '';
+    if (examStartTimeDetail) examStartTimeDetail.textContent = '';
 
-            // Clear questions area and timer
-            if (examQuestionsArea) examQuestionsArea.innerHTML = '<p>Exam questions will appear here...</p>';
-            stopTimer();
-            if (timerDisplay) timerDisplay.textContent = '--:--';
-        }
+    // Clear questions area and timer
+    if (examQuestionsArea) examQuestionsArea.innerHTML = '<p>Exam questions will appear here...</p>';
+    stopTimer();
+    if (timerDisplay) timerDisplay.textContent = '--:--';
+    // Reset confirmation counts
+    totalQuestions = 0;
+    confirmedQuestionsCount = 0;
+}
+
 
         function updateAuthUI() {
             console.log('Updating Auth UI - SignedIn:', isSignedIn, 'CurrentUser:', !!currentUser);
@@ -1381,6 +1412,34 @@
              return null; // No matching record found
          }
 
+// Checks if all questions are confirmed and updates the main submit button
+function checkAllConfirmed() {
+    // Only proceed if the questions area is visible and we know the total count
+    if (!examQuestionsArea || examQuestionsModule.classList.contains('hidden') || totalQuestions <= 0) {
+        if(submitExamBtn) {
+            submitExamBtn.disabled = true;
+            submitExamBtn.innerHTML = '<i class="fas fa-lock"></i> Submit Exam (Confirm All First)';
+        }
+        return;
+    }
+
+    const allConfirmed = confirmedQuestionsCount === totalQuestions;
+    console.log(`Confirmed <span class="math-inline">\{confirmedQuestionsCount\}/</span>{totalQuestions} questions. All confirmed: ${allConfirmed}`);
+
+    if (submitExamBtn) {
+        // Enable button only if all questions are confirmed AND user is online
+        submitExamBtn.disabled = !allConfirmed || !isOnline;
+
+        // Update button text for clarity
+        if (allConfirmed && isOnline) {
+            submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam Now';
+        } else if (!isOnline) {
+             submitExamBtn.innerHTML = '<i class="fas fa-wifi"></i> Submit Exam (Offline)';
+         } else {
+             submitExamBtn.innerHTML = `<i class="fas fa-lock"></i> Submit Exam (<span class="math-inline">\{confirmedQuestionsCount\}/</span>{totalQuestions} Confirmed)`;
+         }
+    }
+}
 
         // Validates the 5-character input for Student Exam ID in Exam mode
         function validateStudentExamIdInput() {
@@ -1443,287 +1502,266 @@
              }
          }
 
-        // Triggered when "Start Exam" button (Quiz or Exam mode) is clicked
-        async function handleStartExam() {
-            if (!examDetails || !currentUser) {
-                showImprovedNotification('error', 'Start Error', 'Cannot start the exam. User or exam details are missing.');
-                return;
-            }
+// Triggered when "Start Exam" button (Quiz or Exam mode) is clicked
+async function handleStartExam() {
+    if (!examDetails || !currentUser) {
+        showImprovedNotification('error', 'Start Error', 'Cannot start the exam. User or exam details are missing.');
+        return;
+    }
 
-            const currentMode = examDetails.Mode.toLowerCase();
-            let currentStudentExamId = '';
+    const currentMode = examDetails.Mode.toLowerCase();
+    let currentStudentExamId = '';
 
-            // Validate and store Student Exam ID if in Exam mode
-            if (currentMode === 'exam') {
-                 currentStudentExamId = studentExamIdInput.value.trim();
-                 if (currentStudentExamId.length !== 5) {
-                     showImprovedNotification('error', 'Invalid ID', 'Please enter the 5-character Student Exam ID.');
-                     studentExamIdInput.focus(); // Focus the input for correction
-                     return;
-                 }
-                 studentExamIdEntered = currentStudentExamId; // Store the validated ID for later use (submission)
-            } else {
-                 studentExamIdEntered = ''; // Ensure it's clear for Quiz mode
-            }
+    // Validate and store Student Exam ID if in Exam mode
+    if (currentMode === 'exam') {
+         currentStudentExamId = studentExamIdInput.value.trim();
+         if (currentStudentExamId.length !== 5) {
+             showImprovedNotification('error', 'Invalid ID', 'Please enter the 5-character Student Exam ID.');
+             studentExamIdInput.focus(); // Focus the input for correction
+             return;
+         }
+         studentExamIdEntered = currentStudentExamId; // Store the validated ID for later use (submission)
+    } else {
+         studentExamIdEntered = ''; // Ensure it's clear for Quiz mode
+    }
 
-            console.log("Performing pre-start checks...");
+    console.log("Performing pre-start checks...");
 
-            // 1. Check if already SUBMITTED
-            const alreadySubmitted = await checkIfAttemptExists(
-                currentUser.email,
-                examDetails.PIN,
-                studentExamIdEntered, // Use the ID entered/validated just now
-                currentMode
-            );
-            if (alreadySubmitted) {
-                showImprovedNotification('error', 'Already Submitted', `This exam (${examDetails.PIN}) has already been submitted and cannot be retaken.`, 0); // 0 duration = persistent
-                // Optionally disable start buttons again or reset UI further
-                if (startExamBtn) startExamBtn.disabled = true;
-                if (startExamBtnAlt) startExamBtnAlt.disabled = true;
-                return;
-            }
+    // 1. Check if already SUBMITTED
+    const alreadySubmitted = await checkIfAttemptExists(
+        currentUser.email,
+        examDetails.PIN,
+        studentExamIdEntered, // Use the ID entered/validated just now
+        currentMode
+    );
+    if (alreadySubmitted) {
+        showImprovedNotification('error', 'Already Submitted', `This exam (${examDetails.PIN}) has already been submitted and cannot be retaken.`, 0); // 0 duration = persistent
+        // Optionally disable start buttons again or reset UI further
+        if (startExamBtn) startExamBtn.disabled = true;
+        if (startExamBtnAlt) startExamBtnAlt.disabled = true;
+        return;
+    }
 
-            // 2. Check Exam Timing (Start availability and Deadline)
-            try {
-                const startDateTimeStr = `${examDetails.StartDate}T${examDetails.StartTime}`;
-                const startTime = new Date(startDateTimeStr).getTime();
-                if (isNaN(startTime)) throw new Error("Invalid start date/time format in sheet.");
+    // 2. Check Exam Timing (Start availability and Deadline)
+    try {
+        const startDateTimeStr = `${examDetails.StartDate}T${examDetails.StartTime}`;
+        const startTime = new Date(startDateTimeStr).getTime();
+        if (isNaN(startTime)) throw new Error("Invalid start date/time format in sheet.");
 
-                // Check if exam hasn't started yet
-                if (Date.now() < startTime) {
-                    showImprovedNotification('error', 'Exam Not Yet Available', `This exam is scheduled to start at ${new Date(startTime).toLocaleString()}. Please wait.`);
-                    return;
-                }
-
-                // Check if exam end time is valid and hasn't passed
-                if (!examEndTime || isNaN(examEndTime)) {
-                   console.error("Exam end time calculation failed earlier.");
-                   showImprovedNotification('error', 'Configuration Error', 'Could not determine the exam end time. Cannot start.');
-                   return;
-                 }
-                 if (Date.now() >= examEndTime) {
-                     showImprovedNotification('error', 'Exam Deadline Passed', `The deadline (${new Date(examEndTime).toLocaleString()}) for starting or resuming this exam has passed.`, 0);
-                     return;
-                 }
-
-            } catch (e) {
-                console.warn("Exam timing check error:", e);
-                showImprovedNotification('warning', 'Timing Check Warning', `Could not fully verify exam timing: ${e.message}. Proceeding cautiously.`);
-                // Allow proceeding but log the warning
-            }
-
-
-            // --- Record 'start' or find existing 'start' ---
-            // We need to ensure only one 'start' record exists per attempt.
-             console.log("Checking for existing 'start' record...");
-             const existingStartRecordInfo = await findAttemptRecord(
-                 currentUser.email,
-                 examDetails.PIN,
-                 studentExamIdEntered, // Use the entered/validated ID
-                 currentMode,
-                 'start' // Look specifically for 'start' status
-             );
-
-             if (!existingStartRecordInfo) {
-                 // Only record 'start' if no 'start' record exists yet for this attempt
-                 console.log("No existing 'start' record found. Recording exam start...");
-                 const startRecorded = await recordExamAttempt('start'); // Record the start event
-                 if (!startRecorded) {
-                     showImprovedNotification('error', 'Start Record Failed', 'Could not record the exam start online. Please check connection and try again.', 0);
-                     return; // Prevent starting if the initial record fails
-                 }
-             } else {
-                 console.log(`Existing 'start' record found at row ${existingStartRecordInfo.rowNumber}. Resuming session, not adding duplicate 'start' record.`);
-                 // Optionally load previous answers if implementing resume functionality
-             }
-             // --- End 'start' record check ---
-
-
-            // Proceed to show questions and start the timer
-            console.log(`Starting ${currentMode} mode. PIN: ${examDetails.PIN}` + (currentMode === 'exam' ? `, Student Exam ID: ${studentExamIdEntered}` : ''));
-
-            // Update UI: Hide setup modules, show questions module
-            examStartModule.classList.add('hidden');
-            examDetailsModule.classList.add('hidden');
-            examQuestionsModule.classList.remove('hidden');
-            submissionConfirmationModule.classList.add('hidden'); // Ensure confirmation is hidden
-            submitExamBtn.disabled = !isOnline; // Enable submit button (subject to online status)
-
-            displayQuestions(examDetails.Questions); // Parse and display questions
-            startTimer(); // Start or restart the countdown timer
-            saveAppState(); // Save the active exam state (including potentially restored state)
+        // Check if exam hasn't started yet
+        if (Date.now() < startTime) {
+            showImprovedNotification('error', 'Exam Not Yet Available', `This exam is scheduled to start at ${new Date(startTime).toLocaleString()}. Please wait.`);
+            return;
         }
 
-        // Parses the JSON string and displays questions in the UI
-        function displayQuestions(questionsJsonString) {
-            console.log("Parsing and displaying exam questions...");
-            examQuestionsArea.innerHTML = ''; // Clear previous questions
-            try {
-                let questionsArray = [];
-                // Robust JSON parsing
-                try {
-                    questionsArray = JSON.parse(questionsJsonString);
-                    if (!Array.isArray(questionsArray)) {
-                        throw new Error("Parsed questions data is not an array.");
-                    }
-                } catch (parseError) {
-                     // Fallback if JSON is invalid: treat the whole string as a single instruction block
-                     console.warn("Could not parse questions JSON. Displaying as single block.", parseError);
-                     questionsArray = [{
-                         type: "long_answer", // Or a specific "instruction" type if needed
-                         prompt: "Exam Instructions / Questions",
-                         content: questionsJsonString // Display the raw string
-                     }];
-                }
+        // Check if exam end time is valid and hasn't passed
+        if (!examEndTime || isNaN(examEndTime)) {
+           console.error("Exam end time calculation failed earlier.");
+           showImprovedNotification('error', 'Configuration Error', 'Could not determine the exam end time. Cannot start.');
+           return;
+         }
+         if (Date.now() >= examEndTime) {
+             showImprovedNotification('error', 'Exam Deadline Passed', `The deadline (${new Date(examEndTime).toLocaleString()}) for starting or resuming this exam has passed.`, 0);
+             return;
+         }
 
-                 // **NEW: Randomize Question Order**
-                 // Create a mapping of original index to shuffled index
-                 const originalIndices = questionsArray.map((_, index) => index);
-                 // Shuffle the original indices array (Fisher-Yates shuffle)
-                 for (let i = originalIndices.length - 1; i > 0; i--) {
-                     const j = Math.floor(Math.random() * (i + 1));
-                     [originalIndices[i], originalIndices[j]] = [originalIndices[j], originalIndices[i]];
-                 }
-                 console.log("Original question indices:", questionsArray.map((_, i) => i));
-                 console.log("Shuffled display order (indices):", originalIndices);
-
-                 // Store the mapping for submission ordering
-                 // We need { originalIndex: questionData } for submission
-                 examDetails.OriginalOrderMap = {};
-                 questionsArray.forEach((q, index) => {
-                     examDetails.OriginalOrderMap[index] = q; // Store original question object by original index
-                 });
+    } catch (e) {
+        console.warn("Exam timing check error:", e);
+        showImprovedNotification('warning', 'Timing Check Warning', `Could not fully verify exam timing: ${e.message}. Proceeding cautiously.`);
+        // Allow proceeding but log the warning
+    }
 
 
-                // **Display questions in the shuffled order**
-                originalIndices.forEach((originalIndex, displayIndex) => {
-                    const q = questionsArray[originalIndex]; // Get question data using original index
-                    const displayQNum = displayIndex + 1; // Number shown to student (1-based)
-                    const originalQNum = originalIndex + 1; // Original question number for ID/Name
+    // --- Record 'start' or find existing 'start' ---
+    // We need to ensure only one 'start' record exists per attempt.
+     console.log("Checking for existing 'start' record...");
+     const existingStartRecordInfo = await findAttemptRecord(
+         currentUser.email,
+         examDetails.PIN,
+         studentExamIdEntered, // Use the entered/validated ID
+         currentMode,
+         'start' // Look specifically for 'start' status
+     );
 
-                    const questionId = `q-${originalQNum}`; // Unique ID for the question container
-                    const answerId = `ans-${originalQNum}`; // Unique ID for the answer input(s)
-                    const answerName = `ans-${originalQNum}`; // Name attribute for form submission
+     if (!existingStartRecordInfo) {
+         // Only record 'start' if no 'start' record exists yet for this attempt
+         console.log("No existing 'start' record found. Recording exam start...");
+         const startRecorded = await recordExamAttempt('start'); // Record the start event
+         if (!startRecorded) {
+             showImprovedNotification('error', 'Start Record Failed', 'Could not record the exam start online. Please check connection and try again.', 0);
+             return; // Prevent starting if the initial record fails
+         }
+     } else {
+         console.log(`Existing 'start' record found at row ${existingStartRecordInfo.rowNumber}. Resuming session, not adding duplicate 'start' record.`);
+         // Optionally load previous answers if implementing resume functionality
+     }
+     // --- End 'start' record check ---
 
-                    const questionDiv = document.createElement('div');
-                    questionDiv.className = 'question form-group';
-                    questionDiv.id = questionId; // Add ID to the question container
-                    // Store original index for potential reordering later if needed
-                    questionDiv.dataset.originalIndex = originalIndex;
 
-                    let inputHtml = '';
-                    const promptText = q.prompt || `Question ${displayQNum}`; // Use display number for prompt
+    // Proceed to show questions and start the timer
+    console.log(`Starting ${currentMode} mode. PIN: ${examDetails.PIN}` + (currentMode === 'exam' ? `, Student Exam ID: ${studentExamIdEntered}` : ''));
 
-                    // Use a wrapper for the actual input elements
-                    let questionContentHtml = '<div class="question-content">';
+    // Reset confirmation count for the new session
+    confirmedQuestionsCount = 0;
 
-                    switch (q.type) {
-                        case 'short_answer':
-                            questionContentHtml += `<input type="text" id="${answerId}" name="${answerName}" class="form-control" placeholder="Enter your answer">`;
-                            break;
-                        case 'long_answer':
-                            questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${q.content || ''}</textarea>`;
-                            break;
-                        case 'code':
-                            const langHint = q.language ? `(${q.language})` : '';
-                            questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="8" placeholder="Enter your code here ${langHint}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`;
-                             // Add note about potential character limits for very long code
-                             questionContentHtml += `<small class="form-text text-muted">Note: Very long code submissions might be truncated by spreadsheet limits.</small>`;
-                            break;
-                        case 'attachment':
-                             const allowedTypes = q.allowed_types || [];
-                             const acceptAttr = allowedTypes.join(',');
-                             const maxSizeMB = q.max_size_mb;
-                             const maxBytes = maxSizeMB ? maxSizeMB * 1024 * 1024 : null;
-                             questionContentHtml += `<input type="file" id="${answerId}" name="${answerName}" class="form-control" accept="${acceptAttr}" ${maxBytes ? `data-max-size="${maxBytes}"` : ''} data-allowed-types='${JSON.stringify(allowedTypes)}'>
-                                          <small class="file-helper-text">Allowed types: ${acceptAttr || 'any'}${maxSizeMB ? `, Max size: ${maxSizeMB}MB` : ''}</small>`;
-                             // Add validation listener after element is added to DOM
-                             setTimeout(() => addAttachmentValidation(answerId), 0);
-                             break;
-                        case 'multiple_select': // **NEW Question Type**
-                             questionContentHtml += `<div class="checkbox-group" id="${answerId}">`; // Use ID on the group
-                             if (Array.isArray(q.options)) {
-                                 q.options.forEach((option, optIndex) => {
-                                     const optionId = `${answerId}-opt${optIndex}`;
-                                     // Assign a common name but unique value/ID
-                                     questionContentHtml += `<div class="checkbox-item">
-                                                        <input type="checkbox" id="${optionId}" name="${answerName}" value="${option}" class="form-control-checkbox">
-                                                        <label for="${optionId}">${option}</label>
-                                                      </div>`;
-                                 });
-                             } else {
-                                 questionContentHtml += `<p style="color:red;">Error: Options missing or invalid for multiple_select.</p>`;
-                             }
-                             questionContentHtml += `</div>`;
-                             break;
-                        default:
-                             questionContentHtml += `<p style="color:red;">Unsupported question type: ${q.type}</p><p>${q.content || ''}</p>`;
-                    }
-                    questionContentHtml += '</div>'; // End question-content wrapper
+    // Update UI: Hide setup modules, show questions module
+    examStartModule.classList.add('hidden');
+    examDetailsModule.classList.add('hidden');
+    examQuestionsModule.classList.remove('hidden');
+    submissionConfirmationModule.classList.add('hidden'); // Ensure confirmation is hidden
 
-                    // **Add Confirm/Edit Buttons**
-                    const actionsHtml = `<div class="question-actions">
-                                          <button type="button" class="btn-confirm btn-orange btn-sm" onclick="confirmAnswer('${questionId}')">
-                                              <i class="fas fa-check"></i> Confirm
-                                          </button>
-                                          <button type="button" class="btn-edit btn-grey btn-sm" onclick="editAnswer('${questionId}')">
-                                              <i class="fas fa-pencil-alt"></i> Edit
-                                          </button>
-                                       </div>`;
+    displayQuestions(examDetails.Questions); // Parse and display questions
+    startTimer(); // Start or restart the countdown timer
+    saveAppState(); // Save the active exam state
+    // Initial check of button state after questions displayed
+    checkAllConfirmed();
+}
 
-                    // Assemble the full question block
-                    questionDiv.innerHTML = `<label>${promptText}</label>${questionContentHtml}${actionsHtml}`;
-                    examQuestionsArea.appendChild(questionDiv);
-                });
-
-            } catch (e) {
-                console.error("Error processing or displaying questions:", e);
-                examQuestionsArea.innerHTML = `<p style="color:red;">Error loading questions: ${e.message}. Please contact support.</p>`;
-                showImprovedNotification('error', 'Question Display Error', `Could not display questions: ${e.message}`);
-                // Consider disabling submission if questions fail to load
-                if (submitExamBtn) submitExamBtn.disabled = true;
+// Parses the JSON string and displays questions in the UI
+function displayQuestions(questionsJsonString) {
+    console.log("Parsing and displaying exam questions...");
+    examQuestionsArea.innerHTML = ''; // Clear previous questions
+    totalQuestions = 0; // Reset count for this display run
+    try {
+        let questionsArray = [];
+        // Robust JSON parsing
+        try {
+            questionsArray = JSON.parse(questionsJsonString);
+            if (!Array.isArray(questionsArray)) {
+                throw new Error("Parsed questions data is not an array.");
             }
+        } catch (parseError) {
+             // Fallback if JSON is invalid
+             console.warn("Could not parse questions JSON. Displaying as single block.", parseError);
+             questionsArray = [{ type: "long_answer", prompt: "Exam Instructions / Questions", content: questionsJsonString }];
         }
 
+        totalQuestions = questionsArray.length; // Store the total number of questions
+        console.log(`Total questions loaded: ${totalQuestions}`);
 
-        // **NEW: JavaScript functions for Confirm/Edit**
-        function confirmAnswer(questionId) {
-            const questionDiv = document.getElementById(questionId);
-            if (!questionDiv) return;
+         // **Randomize Question Order**
+         const originalIndices = questionsArray.map((_, index) => index);
+         for (let i = originalIndices.length - 1; i > 0; i--) {
+             const j = Math.floor(Math.random() * (i + 1));
+             [originalIndices[i], originalIndices[j]] = [originalIndices[j], originalIndices[i]];
+         }
+         console.log("Shuffled display order (indices):", originalIndices);
 
-            questionDiv.classList.add('confirmed'); // Add class to trigger CSS changes (fade, etc.)
+         // Store Original Order Map for submission
+         examDetails.OriginalOrderMap = {};
+         questionsArray.forEach((q, index) => { examDetails.OriginalOrderMap[index] = q; });
 
-            // Disable all relevant input elements within this question
-            const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
-            inputs.forEach(input => {
-                 // For checkboxes, disable the input itself
-                 if (input.type === 'checkbox') {
-                    input.disabled = true;
-                 } else {
-                     input.disabled = true; // Disable text inputs, textareas, file inputs
-                 }
-            });
+        // **Display questions in the shuffled order**
+        originalIndices.forEach((originalIndex, displayIndex) => {
+            const q = questionsArray[originalIndex];
+            const displayQNum = displayIndex + 1;
+            const originalQNum = originalIndex + 1;
+            const questionId = `q-${originalQNum}`; // Unique ID for the question container div
+            const answerId = `ans-${originalQNum}`;
+            const answerName = `ans-${originalQNum}`;
 
-             // Ensure labels associated with disabled checkboxes also get pointer-events: none via CSS
-             // This is handled by the `.question.confirmed .checkbox-item` CSS rule
+            const questionDiv = document.createElement('div');
+            questionDiv.className = 'question form-group'; // Add 'form-group' if needed for styling
+            questionDiv.id = questionId;
+            questionDiv.dataset.originalIndex = originalIndex;
 
-            console.log(`Confirmed answer for question: ${questionId}`);
-        }
+            let inputHtml = '';
+            const promptText = q.prompt || `Question ${displayQNum}`;
+            let questionContentHtml = '<div class="question-content">';
 
-        function editAnswer(questionId) {
-            const questionDiv = document.getElementById(questionId);
-            if (!questionDiv) return;
+            switch (q.type) {
+                case 'short_answer':
+                    questionContentHtml += `<input type="text" id="${answerId}" name="${answerName}" class="form-control" placeholder="Enter your answer">`;
+                    break;
+                case 'long_answer':
+                    questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${q.content || ''}</textarea>`;
+                    break;
+                case 'code':
+                    const langHint = q.language ? `(${q.language})` : '';
+                    questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="8" placeholder="Enter your code here ${langHint}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`;
+                    // Generic note about length limits
+                    questionContentHtml += `<small class="length-limit-note">Note: Very long code submissions might have length limitations.</small>`;
+                    break;
+                case 'attachment':
+                     const allowedTypes = q.allowed_types || []; const acceptAttr = allowedTypes.join(',');
+                     const maxSizeMB = q.max_size_mb; const maxBytes = maxSizeMB ? maxSizeMB * 1024 * 1024 : null;
+                     questionContentHtml += `<input type="file" id="${answerId}" name="${answerName}" class="form-control" accept="${acceptAttr}" ${maxBytes ? `data-max-size="${maxBytes}"` : ''} data-allowed-types='${JSON.stringify(allowedTypes)}'> <small class="file-helper-text">Allowed: ${acceptAttr || 'any'}${maxSizeMB ? `, Max: ${maxSizeMB}MB` : ''}</small>`;
+                     setTimeout(() => addAttachmentValidation(answerId), 0);
+                     break;
+                case 'multiple_select':
+                     questionContentHtml += `<div class="checkbox-group" id="${answerId}">`;
+                     if (Array.isArray(q.options)) {
+                         q.options.forEach((option, optIndex) => {
+                             const optionId = `${answerId}-opt${optIndex}`;
+                             // Use 'form-control-checkbox' for consistency if needed by confirm/edit logic
+                             questionContentHtml += `<div class="checkbox-item"><input type="checkbox" id="${optionId}" name="${answerName}" value="${option}" class="form-control-checkbox"><label for="${optionId}">${option}</label></div>`;
+                         });
+                     } else { questionContentHtml += `<p style="color:red;">Error: Options missing.</p>`; }
+                     questionContentHtml += `</div>`;
+                     break;
+                default:
+                     questionContentHtml += `<p style="color:red;">Unsupported type: ${q.type}</p><p>${q.content || ''}</p>`;
+            }
+            questionContentHtml += '</div>'; // End question-content
 
-            questionDiv.classList.remove('confirmed'); // Remove class to revert CSS changes
+            // Add Confirm/Edit Buttons
+            const actionsHtml = `<div class="question-actions">
+                                  <button type="button" class="btn-confirm btn-orange btn-sm" onclick="confirmAnswer('${questionId}')"><i class="fas fa-check"></i> Confirm</button>
+                                  <button type="button" class="btn-edit btn-grey btn-sm" onclick="editAnswer('${questionId}')"><i class="fas fa-pencil-alt"></i> Edit</button>
+                               </div>`;
 
-            // Re-enable all relevant input elements
-            const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
-            inputs.forEach(input => {
-                 input.disabled = false;
-            });
+            // Assemble the full question block
+            // Ensure the prompt label targets the primary input ID where appropriate
+            const labelTargetId = (q.type === 'multiple_select' || q.type === 'attachment') ? questionId : answerId; // Target group or main input
+            questionDiv.innerHTML = `<label for="${labelTargetId}">${promptText}</label>${questionContentHtml}${actionsHtml}`;
+            examQuestionsArea.appendChild(questionDiv);
+        });
 
-            console.log(`Enabled editing for question: ${questionId}`);
-        }
+    } catch (e) {
+        console.error("Error processing or displaying questions:", e);
+        examQuestionsArea.innerHTML = `<p style="color:red;">Error loading questions: ${e.message}.</p>`;
+        showImprovedNotification('error', 'Question Display Error', `Could not display questions: ${e.message}`);
+        if (submitExamBtn) submitExamBtn.disabled = true;
+        totalQuestions = 0; // Ensure count is 0 on error
+    }
+    checkAllConfirmed(); // Initial check after displaying questions or on error
+}
+
+
+ // Confirms an answer
+function confirmAnswer(questionId) {
+    const questionDiv = document.getElementById(questionId);
+    // Ignore if not found or already confirmed to prevent double counting
+    if (!questionDiv || questionDiv.classList.contains('confirmed')) return;
+
+    questionDiv.classList.add('confirmed');
+    confirmedQuestionsCount++; // Increment count *only when confirming*
+
+    // Disable all relevant input elements within this question
+    const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
+    inputs.forEach(input => { input.disabled = true; });
+
+    console.log(`Confirmed answer for question: ${questionId}`);
+    checkAllConfirmed(); // Update overall submit button status
+}
+
+// Enables editing for an answer
+function editAnswer(questionId) {
+    const questionDiv = document.getElementById(questionId);
+     // Ignore if not found or not currently confirmed to prevent incorrect decrement
+     if (!questionDiv || !questionDiv.classList.contains('confirmed')) return;
+
+    questionDiv.classList.remove('confirmed');
+    confirmedQuestionsCount--; // Decrement count *only when un-confirming*
+
+    // Re-enable all relevant input elements
+    const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
+    inputs.forEach(input => { input.disabled = false; });
+
+    console.log(`Enabled editing for question: ${questionId}`);
+    checkAllConfirmed(); // Update overall submit button status
+}
+
 
 
         // Adds validation listeners to file input elements
@@ -1907,211 +1945,152 @@ function getWebglFingerprint() {
             }
         }
 
-        // Handles the final exam submission process
-        async function handleSubmitExam(isAutoSubmit = false) {
-            const timeIsUp = examEndTime && Date.now() >= examEndTime;
+// Handles the final exam submission process
+async function handleSubmitExam(isAutoSubmit = false) {
+    const timeIsUp = examEndTime && Date.now() >= examEndTime;
+     if (timeIsUp && !isAutoSubmit) {
+         console.warn("Manual submit clicked after deadline. Treating as auto-submit.");
+         showImprovedNotification('warning', 'Deadline Passed', 'Time expired. Submitting automatically.');
+         isAutoSubmit = true;
+     }
 
-             // If time is up but this wasn't called by the timer, force it into the auto-submit path
-             if (timeIsUp && !isAutoSubmit) {
-                 console.warn("Manual submit clicked after deadline. Treating as auto-submit.");
-                 showImprovedNotification('warning', 'Deadline Passed', 'Time expired. Submitting automatically.');
-                 isAutoSubmit = true; // Force the auto-submit logic
-             }
+    stopTimer(); // Stop the timer immediately
 
+    // Disable submit button and show submitting state (always)
+    submitExamBtn.disabled = true;
+    submitExamBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
 
-            stopTimer(); // Stop the timer immediately
+    // --- Mandatory Confirmation Check for MANUAL submit ---
+    if (!isAutoSubmit) {
+        if (confirmedQuestionsCount !== totalQuestions) {
+            showImprovedNotification('error', 'Not All Confirmed', `Please confirm all ${totalQuestions} questions before submitting. You have confirmed ${confirmedQuestionsCount}.`, 5000);
+             // Do not re-enable timer here, just update button state
+            checkAllConfirmed(); // This will keep it disabled but update text
+            return; // Stop submission
+        }
+        // If all confirmed manually, ask for final user confirmation
+        if (!confirm("You have confirmed all answers. Are you absolutely sure you want to submit your exam?\nThis action cannot be undone.")) {
+             checkAllConfirmed(); // Re-enable button if online/all confirmed
+             // Restart timer only if time still remains
+             if (examEndTime && Date.now() < examEndTime) { startTimer(); }
+             return; // Abort submission
+         }
+    }
+    // --- End Manual Confirmation Check ---
 
-            // Disable submit button and show submitting state
-            submitExamBtn.disabled = true;
-            submitExamBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    console.log("Processing submission..." + (isAutoSubmit ? " (Auto)" : " (Manual - All Confirmed)"));
+    const answers = {}; // Object to hold answers
+    const fingerprint = getFingerprintData(); // Get fingerprint (make sure this function exists and is synchronous)
 
-             // Confirmation for manual submission only
-             if (!isAutoSubmit) {
-                  // Using native confirm for simplicity, replace with a custom modal if desired
-                 if (!confirm("Are you absolutely sure you want to submit your exam?\nThis action cannot be undone.")) {
-                     submitExamBtn.disabled = !isOnline; // Re-enable based on connection status
-                     submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam';
-                     // Restart timer only if time hasn't actually run out
-                     if (examEndTime && Date.now() < examEndTime) {
-                          startTimer();
-                     }
-                     return; // Abort submission
-                 }
-             }
+    // Collect Answers - respecting ORIGINAL order AND confirmation status for auto-submit
+    if (!examDetails || !examDetails.OriginalOrderMap || totalQuestions <= 0) {
+        showImprovedNotification('error', 'Submission Error', 'Cannot collect answers. Exam data or question count is invalid.', 0);
+        // Leave button disabled as something is wrong
+        return;
+    }
 
+    const originalIndices = Object.keys(examDetails.OriginalOrderMap).map(Number).sort((a, b) => a - b);
 
-            console.log("Processing exam submission...");
-            const answers = {}; // Object to hold answers { 'ans-1': value, 'ans-2': value,... }
-            const fingerprint = getFingerprintData(); // Get browser fingerprint
+    originalIndices.forEach(originalIndex => {
+        const originalQNum = originalIndex + 1;
+        const questionData = examDetails.OriginalOrderMap[originalIndex];
+        const answerName = `ans-${originalQNum}`;
+        const questionDivId = `q-${originalQNum}`;
+        const questionDiv = document.getElementById(questionDivId);
+        // Check confirmation status *reliably*
+        const isConfirmed = questionDiv ? questionDiv.classList.contains('confirmed') : false;
 
-             // **Collect Answers respecting ORIGINAL order**
-             // Iterate through the *original* question order stored in examDetails.OriginalOrderMap
-             if (!examDetails || !examDetails.OriginalOrderMap) {
-                 showImprovedNotification('error', 'Submission Error', 'Cannot collect answers. Exam data is missing.', 0);
-                 // Re-enable button if not auto-submit
-                 if (!isAutoSubmit) {
-                     submitExamBtn.disabled = !isOnline;
-                     submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam';
-                 }
-                 return;
-             }
-
-             const originalIndices = Object.keys(examDetails.OriginalOrderMap).map(Number).sort((a, b) => a - b);
-
-             originalIndices.forEach(originalIndex => {
-                 const originalQNum = originalIndex + 1;
-                 const questionData = examDetails.OriginalOrderMap[originalIndex];
-                 const answerName = `ans-${originalQNum}`; // Name used in the form elements
-                 const formElementsWithName = examForm.elements[answerName];
-
-                 if (formElementsWithName) {
-                     switch (questionData.type) {
-                         case 'attachment':
-                             const fileInput = formElementsWithName;
-                             if (fileInput.files && fileInput.files.length > 0) {
-                                 const file = fileInput.files[0];
-                                 console.log(`File selected for ${answerName}: ${file.name} (Type: ${file.type}, Size: ${file.size})`);
-                                 // **IMPORTANT:** Saving actual files requires a backend/server-side process.
-                                 // Here, we only record the filename as a placeholder.
-                                 answers[answerName] = `FILE_UPLOADED:${file.name}`;
-                             } else {
-                                 answers[answerName] = ''; // No file selected
-                             }
-                             break;
-                         case 'multiple_select':
-                             const checkboxes = Array.isArray(formElementsWithName) ? formElementsWithName : [formElementsWithName]; // Handle single vs multiple checkboxes with same name
-                             const selectedValues = [];
-                             checkboxes.forEach(cb => {
-                                 if (cb.checked) {
-                                     selectedValues.push(cb.value);
-                                 }
-                             });
-                             answers[answerName] = selectedValues; // Store as an array of selected values
-                             break;
-                         default: // Handles short_answer, long_answer, code
-                             answers[answerName] = formElementsWithName.value;
-                             break;
-                     }
-                 } else {
-                     console.warn(`Could not find form element for answer: ${answerName}`);
-                     answers[answerName] = 'ERROR_ELEMENT_NOT_FOUND';
-                 }
-             });
-
-
-            const answersJson = JSON.stringify(answers); // Convert collected answers to JSON string for Sheet
-            console.log("Collected Answers (Original Order):", answersJson);
-
-            // --- Create Backup Data ---
-            const backupData = {
-                submissionTimestamp: new Date().toISOString(),
-                examDetails: { // Include key exam details
-                    PIN: examDetails?.PIN,
-                    Name: examDetails?.Name,
-                    Mode: examDetails?.Mode,
-                    Code: examDetails?.Code,
-                },
-                studentInfo: { // Include student identifiers
-                    pinEntered: studentPINEntered, // PIN they used
-                    studentExamId: examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined, // Include only if Exam mode
-                    name: currentUser?.name,
-                    email: currentUser?.email,
-                },
-                answers: answers, // Store the raw answers object in the backup
-                fingerprint: JSON.parse(fingerprint), // Store the parsed fingerprint object
-                submittedLate: timeIsUp // Flag if submission happened after the deadline
-            };
-            const backupFilename = `exam_backup_${examDetails?.PIN || 'unknown'}_${(currentUser?.email || studentExamIdEntered || 'anon').replace(/@.*/, '')}_${Date.now()}.json`;
-            downloadJsonBackup(backupData, backupFilename); // Trigger backup download
-
-
-            // --- Update or Append Logic ---
-            let submissionSuccess = false;
-            if (!currentUser || !examDetails) {
-                 showImprovedNotification('error', 'Submission Error', 'Cannot submit. Critical user or exam details are missing.', 0);
-                 if (!isAutoSubmit) {
-                     submitExamBtn.disabled = !isOnline;
-                     submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam';
-                 }
-                 return;
-            }
-
-            const currentMode = examDetails.Mode.toLowerCase();
-
-            // 1. Find the existing 'start' record for this attempt
-            console.log("Looking for existing 'start' record to update with submission details...");
-            const startRecordInfo = await findAttemptRecord(
-                currentUser.email,
-                examDetails.PIN,
-                studentExamIdEntered, // Use the ID stored when exam started/validated
-                currentMode,
-                'start' // Look for the 'start' status record
-            );
-
-            if (startRecordInfo) {
-                // 2a. Found 'start' record -> UPDATE it with 'submit' status and answers
-                const rowToUpdate = startRecordInfo.rowNumber;
-                console.log(`Found 'start' record at row ${rowToUpdate}. Updating status to 'submit', adding answers, and fingerprint...`);
-                // Define the range for update: Status (Col G), Answers (Col H), Fingerprint (Col I)
-                const updateRange = `${EXAM_ATTEMPTS_SHEET_NAME}!G${rowToUpdate}:I${rowToUpdate}`;
-                const updateValues = [[
-                    'submit',      // New Status for Col G
-                    answersJson,   // Answers JSON string for Col H
-                    fingerprint    // Fingerprint JSON string for Col I
-                ]];
-                submissionSuccess = await updateSheetData(EXAM_SPREADSHEET_ID, updateRange, updateValues);
-                 if (!submissionSuccess) {
-                     // Error message shown by updateSheetData
-                     showImprovedNotification('error', 'Submission Failed', 'Failed to update the attempt record online. Your answers have been downloaded as a backup.', 0);
-                 }
-
+        // For AUTO submit, ONLY collect CONFIRMED answers.
+        // For MANUAL submit, collect ALL (we already checked they are all confirmed).
+        if (isAutoSubmit && !isConfirmed) {
+            answers[answerName] = "[NOT CONFIRMED]"; // Mark unconfirmed answers explicitly
+            console.log(`Auto-submit: Answer for ${answerName} was not confirmed.`);
+        } else {
+            // Collect answer normally (manual submit OR confirmed auto-submit)
+            const formElementsWithName = examForm.elements[answerName];
+            if (formElementsWithName) {
+                switch (questionData.type) {
+                    case 'attachment':
+                        const fileInput = formElementsWithName;
+                        answers[answerName] = (fileInput.files && fileInput.files.length > 0)
+                            ? `FILE_UPLOADED:${fileInput.files[0].name}` // Placeholder
+                            : '';
+                        break;
+                    case 'multiple_select':
+                        const checkboxes = Array.isArray(formElementsWithName) ? formElementsWithName : [formElementsWithName];
+                        answers[answerName] = checkboxes.filter(cb => cb.checked).map(cb => cb.value);
+                        break;
+                    default: // short_answer, long_answer, code
+                        // Ensure element has a 'value' property (e.g., not a fieldset)
+                        answers[answerName] = (typeof formElementsWithName.value !== 'undefined') ? formElementsWithName.value : 'ERROR_NO_VALUE_PROP';
+                        break;
+                }
             } else {
-                // 2b. No 'start' record found (should be rare, indicates start might have failed silently)
-                // Fallback: APPEND a new record with 'submit' status and all details
-                console.warn("Could not find the initial 'start' record for this attempt. Appending a new 'submit' record as a fallback.");
-                showImprovedNotification('warning','Submission Warning','Could not find the initial start record. Creating a new submission entry. Please inform your instructor if issues persist.');
-                // Use recordExamAttempt to append, passing the final data
-                submissionSuccess = await recordExamAttempt('submit', answers, fingerprint); // Pass answers object and fingerprint string
-                 if (!submissionSuccess) {
-                     // Error message shown by recordExamAttempt (which calls appendSheetData)
-                     showImprovedNotification('error', 'Submission Failed', 'Failed to save a new attempt record online. Your answers have been downloaded as a backup.', 0);
-                 }
-            }
-            // --- End Update or Append Logic ---
-
-
-            // --- Final UI Update ---
-            if (submissionSuccess) {
-                showImprovedNotification('success', 'Exam Submitted Successfully!', 'Your submission has been recorded. You may now close this window.', 0);
-                // Hide questions, show confirmation message
-                examQuestionsModule.classList.add('hidden');
-                submissionConfirmationModule.classList.remove('hidden');
-                localStorage.removeItem(appStateKey); // Clear the saved state on successful submission
-
-                // Reset critical state variables to prevent accidental reuse
-                 examDetails = null;
-                 studentPINEntered = '';
-                 studentExamIdEntered = '';
-                 examEndTime = null;
-                 // Buttons should already be disabled or hidden
-
-            } else {
-                 // Submission failed even after trying update/append
-                 console.error("Online submission failed after backup.");
-                 // Error notifications were already shown by update/append functions.
-                 // Re-enable button ONLY if it wasn't an auto-submission, allowing manual retry
-                 if (!isAutoSubmit) {
-                     submitExamBtn.disabled = !isOnline;
-                     submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam';
-                      // Optionally restart timer if time still remains (though unlikely path if submission fails)
-                      // if (examEndTime && Date.now() < examEndTime) startTimer();
-                 } else {
-                     // Auto-submit failed, show persistent error
-                     showImprovedNotification('error', 'Auto-Submission Failed', 'Could not automatically save your submission online. Your answers have been downloaded as a backup. Please contact your instructor.', 0);
-                     // Keep button disabled in this case
-                 }
+                console.warn(`Could not find form element for answer: ${answerName}`);
+                answers[answerName] = 'ERROR_ELEMENT_NOT_FOUND';
             }
         }
+    });
+
+
+    const answersJson = JSON.stringify(answers);
+    console.log("Collected Answers for Submission:", answersJson);
+
+    // --- Create Backup Data ---
+     const backupData = {
+         submissionTimestamp: new Date().toISOString(),
+         examDetails: { PIN: examDetails?.PIN, Name: examDetails?.Name, Mode: examDetails?.Mode, Code: examDetails?.Code },
+         studentInfo: { pinEntered: studentPINEntered, studentExamId: examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined, name: currentUser?.name, email: currentUser?.email },
+         answers: answers, // Keep raw answers object
+         fingerprint: JSON.parse(fingerprint), // Keep parsed object
+         submittedLate: timeIsUp,
+         autoSubmitted: isAutoSubmit, // Flag if it was an auto-submit
+         confirmedCountOnSubmit: confirmedQuestionsCount, // Record how many were confirmed
+         totalQuestionsOnSubmit: totalQuestions // Record total questions
+     };
+     const backupFilename = `exam_backup_${examDetails?.PIN || 'unknown'}_${(currentUser?.email || studentExamIdEntered || 'anon').replace(/@.*/, '')}_${Date.now()}.json`;
+     downloadJsonBackup(backupData, backupFilename);
+
+
+    // --- Update or Append Logic ---
+    let submissionSuccess = false;
+    if (!currentUser || !examDetails) { /* Error handling */ return; }
+    const currentMode = examDetails.Mode.toLowerCase();
+    console.log("Looking for existing 'start' record to update...");
+    const startRecordInfo = await findAttemptRecord( currentUser.email, examDetails.PIN, studentExamIdEntered, currentMode, 'start' );
+    if (startRecordInfo) {
+         const rowToUpdate = startRecordInfo.rowNumber; console.log(`Found 'start' record at row ${rowToUpdate}. Updating...`);
+         const updateRange = `${EXAM_ATTEMPTS_SHEET_NAME}!G${rowToUpdate}:I${rowToUpdate}`;
+         const updateValues = [[ 'submit', answersJson, fingerprint ]];
+         submissionSuccess = await updateSheetData(EXAM_SPREADSHEET_ID, updateRange, updateValues);
+         if (!submissionSuccess) { showImprovedNotification('error', 'Submission Failed', 'Failed to update attempt record online (backup downloaded).', 0); }
+    } else {
+         console.warn("No 'start' record found. Appending 'submit' record as fallback.");
+         showImprovedNotification('warning','Submission Warning','Could not find start record. Creating new submission entry.');
+         submissionSuccess = await recordExamAttempt('submit', answers, fingerprint); // Pass answers OBJECT
+         if (!submissionSuccess) { showImprovedNotification('error', 'Submission Failed', 'Failed to save new attempt record online (backup downloaded).', 0); }
+    }
+
+    // --- Final UI Update ---
+    if (submissionSuccess) {
+        showImprovedNotification('success', 'Exam Submitted Successfully!', `Your submission (${isAutoSubmit ? confirmedQuestionsCount + '/' + totalQuestions + ' confirmed answers' : 'all answers confirmed'}) has been recorded.`, 0);
+        examQuestionsModule.classList.add('hidden');
+        submissionConfirmationModule.classList.remove('hidden');
+        localStorage.removeItem(appStateKey);
+        // Reset state variables fully
+        examDetails = null; studentPINEntered = ''; studentExamIdEntered = ''; examEndTime = null; totalQuestions = 0; confirmedQuestionsCount = 0;
+    } else {
+         console.error("Online submission failed after backup.");
+         // Error notifications already shown
+         // Re-enable button ONLY if manual submit failed, allowing retry
+         if (!isAutoSubmit) {
+             checkAllConfirmed(); // Update button state (will likely remain disabled if offline)
+         } else {
+             showImprovedNotification('error', 'Auto-Submit Failed', 'Could not automatically save submission online. Backup downloaded.', 0);
+             // Keep button disabled
+         }
+    }
+}
 
 
         // Records an attempt by APPENDING a new row (used for 'start' or fallback 'submit')
@@ -2161,63 +2140,52 @@ function getWebglFingerprint() {
              return success; // Return success status
          }
 
-        // === UI Updates (Sync/Online Status, Notifications) ===
+// Updates online status and related UI elements
+function updateOnlineStatus() {
+    isOnline = navigator.onLine;
+    console.log('Connection Status:', isOnline ? 'Online' : 'Offline');
+    const statusIcon = syncStatus?.querySelector('i');
 
-        function updateOnlineStatus() {
-            isOnline = navigator.onLine;
-            console.log('Connection Status:', isOnline ? 'Online' : 'Offline');
-            const statusIcon = syncStatus?.querySelector('i');
+    if (isOnline) {
+        syncStatus.className = 'sync-status online';
+        if (statusIcon) statusIcon.style.color = 'var(--success-color)';
+        if (syncText) syncText.textContent = 'Online';
+    } else {
+        syncStatus.className = 'sync-status offline';
+        if (statusIcon) statusIcon.style.color = 'var(--warning-color)';
+        if (syncText) syncText.textContent = 'Offline';
+         if (!isInitializing) {
+            showImprovedNotification('warning', 'Offline', 'You are currently offline. Saving and submission are disabled.', 5000);
+         }
+    }
 
-            if (isOnline) {
-                syncStatus.className = 'sync-status online';
-                if (statusIcon) statusIcon.style.color = 'var(--success-color)';
-                if (syncText) syncText.textContent = 'Online';
-            } else {
-                syncStatus.className = 'sync-status offline';
-                if (statusIcon) statusIcon.style.color = 'var(--warning-color)';
-                if (syncText) syncText.textContent = 'Offline';
-                 // Show warning only after initial load is complete
-                 if (!isInitializing) {
-                    showImprovedNotification('warning', 'Offline', 'You are currently offline. Saving and submission are disabled.', 5000);
-                 }
-            }
+    if (statusIcon && !isSyncing) {
+        statusIcon.className = 'fas fa-circle';
+    }
 
-            // Reset icon if not currently syncing
-            if (statusIcon && !isSyncing) {
-                statusIcon.className = 'fas fa-circle'; // Solid circle
-            }
+    // Update button states based on online status
+    if (loadExamBtn) {
+         loadExamBtn.disabled = !isOnline || !isSignedIn || (examPinInput && examPinInput.value.trim() === '');
+     }
+     let startDisabled = !isOnline || !isSignedIn || !examDetails;
+     const isExamModeActive = examDetails && examDetails.Mode === 'exam';
+     if (isExamModeActive) {
+         startDisabled = startDisabled || (studentExamIdInput && studentExamIdInput.value.trim().length !== 5);
+         if (startExamBtnAlt) startExamBtnAlt.disabled = startDisabled;
+         if (startExamBtn) startExamBtn.disabled = true;
+     } else {
+         if (startExamBtn) startExamBtn.disabled = startDisabled;
+         if (startExamBtnAlt && examDetails) startExamBtnAlt.classList.add('hidden');
+    }
 
-            // Update button disabled states based on online status and other conditions
-            if (loadExamBtn) { // Load button
-                 loadExamBtn.disabled = !isOnline || !isSignedIn || (examPinInput && examPinInput.value.trim() === '');
-             }
+    // Let checkAllConfirmed handle the submit button state considering online status
+    checkAllConfirmed();
 
-             // Start buttons (Quiz and Exam modes)
-             let startDisabled = !isOnline || !isSignedIn || !examDetails;
-             const isExamModeActive = examDetails && examDetails.Mode === 'exam';
-
-             if (isExamModeActive) { // Exam mode specifics
-                 startDisabled = startDisabled || (studentExamIdInput && studentExamIdInput.value.trim().length !== 5);
-                 if (startExamBtnAlt) startExamBtnAlt.disabled = startDisabled; // Control Exam mode button
-                 if (startExamBtn) startExamBtn.disabled = true; // Ensure Quiz mode button is disabled
-             } else { // Quiz mode specifics
-                 if (startExamBtn) startExamBtn.disabled = startDisabled; // Control Quiz mode button
-                 // Ensure Exam mode button is hidden/disabled if details loaded are for Quiz mode
-                 if (startExamBtnAlt && examDetails) startExamBtnAlt.classList.add('hidden');
-            }
-
-            if (submitExamBtn) { // Submit button
-                 // Disabled if offline, not signed in, no exam loaded, or questions not visible
-                 submitExamBtn.disabled = !isOnline || !isSignedIn || !examDetails || (examQuestionsModule && examQuestionsModule.classList.contains('hidden'));
-             }
-
-
-            // Mark initialization complete after first online status check (if GAPI is potentially loaded)
-            if (isInitializing && (typeof gapi !== 'undefined')) {
-                isInitializing = false;
-                console.log("Initialisation process complete.");
-            }
-        }
+    if (isInitializing && (typeof gapi !== 'undefined')) {
+        isInitializing = false;
+        console.log("Initialisation process complete.");
+    }
+}
 
         // Updates the sync status indicator UI
         function setSyncing(syncing) {
