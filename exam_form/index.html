@@ -734,6 +734,7 @@
                 examDetailsModule.classList.remove('hidden');
                 examStartModule.classList.add('hidden');
                 showImprovedNotification('success', 'Exam Loaded', `Details for "${examDetails.Name}" loaded. Ready to start.`);
+				if (startExamBtn) startExamBtn.disabled = !isOnline; // Enable if online
             } else {
                  showImprovedNotification('error', 'Exam Not Found', `No exam found with Code: ${examCode}`);
                  examDetails = null;
@@ -797,55 +798,97 @@
          recordExamAttempt('start');
     }
 
-    function displayQuestions(questionsContent) {
-         console.log("Displaying questions content...");
-         // Reset area
-         examQuestionsArea.innerHTML = '';
+function displayQuestions(questionsJsonString) {
+    console.log("Parsing questions JSON...");
+    examQuestionsArea.innerHTML = ''; // Clear previous questions
 
-         // --- TODO: Implement your question display logic ---
-         // This depends heavily on how 'Questions' is stored in your sheet.
+    try {
+        const questionsArray = JSON.parse(questionsJsonString);
 
-         // **Example 1: Simple Text with numbered questions**
-         // Assumes questionsContent is like "1. Question one?\n2. Question two?"
-         /*
-         const questions = questionsContent.split('\n').filter(q => q.trim() !== '');
-         questions.forEach((q, index) => {
-             const qNum = index + 1;
-             const questionDiv = document.createElement('div');
-             questionDiv.className = 'question form-group';
-             questionDiv.innerHTML = `
-                 <label for="answer-${qNum}">${q}</label>
-                 <textarea id="answer-${qNum}" name="answer-${qNum}" class="form-control" rows="5" placeholder="Enter your answer for question ${qNum}"></textarea>
-             `;
-             examQuestionsArea.appendChild(questionDiv);
-         });
-         */
+        if (!Array.isArray(questionsArray)) {
+            throw new Error("Questions data is not an array.");
+        }
 
-         // **Example 2: Content is a link to Google Forms/Docs**
-         /*
-         if (questionsContent.startsWith('http')) {
-             examQuestionsArea.innerHTML = `<p>Please complete the exam at the following link:</p><p><a href="${questionsContent}" target="_blank" rel="noopener noreferrer">${questionsContent}</a></p><p>Return here to click "Submit Exam" when finished.</p>`;
-             // Note: You might not need answer fields if using an external form.
-             // Consider how to confirm submission if external.
-         } else {
-              examQuestionsArea.innerHTML = '<p>Error: Invalid question format link.</p>';
-         }
-         */
+        questionsArray.forEach((question, index) => {
+            const qNum = index + 1;
+            const questionDiv = document.createElement('div');
+            questionDiv.className = 'question form-group';
+            let inputHtml = '';
 
-         // **Example 3: Placeholder if logic not implemented**
-         examQuestionsArea.innerHTML = `
-             <p><strong>Instructions:</strong> Please answer the questions below.</p>
-             <div class="question form-group">
-                 <label for="answer-1">Question 1 (Placeholder)</label>
-                 <textarea id="answer-1" name="answer-1" class="form-control" rows="5"></textarea>
-             </div>
-              <div class="question form-group">
-                 <label for="answer-2">Question 2 (Placeholder)</label>
-                 <textarea id="answer-2" name="answer-2" class="form-control" rows="5"></textarea>
-             </div>
-             <p style="color: red; font-weight: bold;">Developer TODO: Implement question loading logic in displayQuestions().</p>
-         `;
+            // --- Generate HTML based on question type ---
+            switch (question.type) {
+                case 'short_answer':
+                    inputHtml = `<input type="text" id="answer-${qNum}" name="answer-${qNum}" class="form-control" placeholder="Short answer">`;
+                    break;
+                case 'long_answer':
+                    inputHtml = `<textarea id="answer-${qNum}" name="answer-${qNum}" class="form-control" rows="5" placeholder="Detailed answer"></textarea>`;
+                    break;
+                case 'code':
+                    // Using textarea for code, maybe add language hint
+                    const langHint = question.language ? ` (${question.language})` : '';
+                    inputHtml = `<textarea id="answer-${qNum}" name="answer-${qNum}" class="form-control" rows="8" placeholder="Enter your code here${langHint}" style="font-family: monospace;"></textarea>`;
+                    break;
+                case 'attachment':
+                    const acceptTypes = question.allowed_types && Array.isArray(question.allowed_types)
+                        ? question.allowed_types.join(',')
+                        : '*/*'; // Default to any file type if not specified
+                    const maxSize = question.max_size_mb ? question.max_size_mb * 1024 * 1024 : null; // Size in bytes
+
+                    // Add data attributes for validation
+                    inputHtml = `<input type="file" id="answer-${qNum}" name="answer-${qNum}" class="form-control"
+                                    accept="${acceptTypes}"
+                                    ${maxSize ? `data-max-size="${maxSize}"` : ''}
+                                    data-allowed-types='${JSON.stringify(question.allowed_types || [])}'>
+                                 <small style="display: block; margin-top: 5px; color: #666;">Allowed: ${acceptTypes.replace(/,/g, ', ')}${maxSize ? `, Max size: ${question.max_size_mb}MB` : ''}</small>`;
+                     // Add client-side validation listener
+                     setTimeout(() => addAttachmentValidation(`answer-${qNum}`), 0); // Delay to ensure element exists
+                    break;
+                default:
+                    inputHtml = `<p style="color: red;">Unsupported question type: ${question.type}</p>`;
+            }
+
+            questionDiv.innerHTML = `
+                <label for="answer-${qNum}">${qNum}. ${question.prompt || 'Missing prompt'}</label>
+                ${inputHtml}
+            `;
+            examQuestionsArea.appendChild(questionDiv);
+        });
+
+    } catch (error) {
+        console.error("Error parsing or displaying questions:", error);
+        examQuestionsArea.innerHTML = `<p style="color: red;">Error loading questions. Please check the format in the spreadsheet. (${error.message})</p>`;
+         showImprovedNotification('error', 'Question Load Error', `Could not parse questions: ${error.message}`);
     }
+}
+
+// Helper function for attachment validation (add this function to your script)
+function addAttachmentValidation(inputId) {
+    const fileInput = document.getElementById(inputId);
+    if (!fileInput || fileInput.type !== 'file') return;
+
+    fileInput.addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (!file) return; // No file selected
+
+        const maxSize = parseInt(fileInput.getAttribute('data-max-size'), 10);
+        const allowedTypes = JSON.parse(fileInput.getAttribute('data-allowed-types') || '[]');
+
+        // Check file size
+        if (maxSize && file.size > maxSize) {
+            showImprovedNotification('error', 'File Too Large', `File "${file.name}" exceeds the maximum size of ${maxSize / (1024*1024)}MB.`);
+            fileInput.value = ''; // Clear the invalid selection
+            return;
+        }
+
+        // Check file type
+        if (allowedTypes.length > 0 && !allowedTypes.includes(file.type)) {
+             showImprovedNotification('error', 'Invalid File Type', `File "${file.name}" has an unsupported type (${file.type}). Allowed types: ${allowedTypes.join(', ')}`);
+             fileInput.value = ''; // Clear the invalid selection
+             return;
+        }
+         showImprovedNotification('success', 'File Selected', `Selected "${file.name}" (${(file.size / 1024).toFixed(1)} KB).`);
+    });
+}
 
     function startTimer(durationMinutes) {
         stopTimer();
@@ -1003,7 +1046,7 @@ function updateAuthUI() {
         if (submissionConfirmationModule) submissionConfirmationModule.classList.add('hidden');
 
     } else {
-        // --- Debugging Log Inside 'else' ---
+		// --- Debugging Log Inside 'else' ---
          console.log('Condition FALSE: Resetting UI for logged-out state (or currentUser not ready).');
          // --- End Debugging Log ---
 
@@ -1025,24 +1068,51 @@ function updateAuthUI() {
     // }
 }
 
-	function updateOnlineStatus() {
-		isOnline = navigator.onLine;
-		console.log('Connection status:', isOnline ? 'Online' : 'Offline');
-		const statusIconClass = isOnline ? 'fas fa-circle' : 'fas fa-circle'; // Keep icon consistent
-        const statusColor = isOnline ? 'var(--success-color)' : 'var(--warning-color)';
-        syncStatus.className = `sync-status ${isOnline ? 'online' : 'offline'}`;
-		syncStatus.querySelector('i').className = statusIconClass;
-        syncStatus.querySelector('i').style.color = statusColor;
-		syncText.textContent = isOnline ? 'Online' : 'Offline';
+function updateOnlineStatus() {
+    isOnline = navigator.onLine;
+    console.log('Connection status updated:', isOnline ? 'Online' : 'Offline');
 
-		if (!isOnline) {
-            showImprovedNotification('warning', 'Offline', 'You are currently offline. Functionality requiring internet access (loading/submitting exams) is disabled.', 5000);
-		}
-        // Update button states based on online status
+    // Update the status text and icon color
+    const statusIconElement = syncStatus.querySelector('i');
+    if (isOnline) {
+        syncStatus.className = 'sync-status online';
+        if (statusIconElement) statusIconElement.style.color = 'var(--success-color)';
+        syncText.textContent = 'Online';
+    } else {
+        syncStatus.className = 'sync-status offline';
+        if (statusIconElement) statusIconElement.style.color = 'var(--warning-color)';
+        syncText.textContent = 'Offline';
+        // Show a warning only when going offline
+        if (!isInitializing) { // Avoid showing on initial load if starting offline
+             showImprovedNotification('warning', 'Offline', 'You are currently offline. Loading or submitting exams is disabled.', 5000);
+        }
+    }
+     if (statusIconElement && !isSyncing) { // Ensure spinner isn't overridden if syncing
+         statusIconElement.className = isOnline ? 'fas fa-circle' : 'fas fa-circle';
+     }
+
+
+    // --- Update Exam Button States ---
+    // Load Exam Button: Enabled only if online, signed in, AND Exam ID has text
+    if (loadExamBtn) {
         loadExamBtn.disabled = !isOnline || !isSignedIn || examIdInput.value.trim() === '';
+    }
+    // Start Exam Button: Enabled only if online, signed in, AND examDetails have been loaded
+    if (startExamBtn) {
         startExamBtn.disabled = !isOnline || !isSignedIn || !examDetails;
-        submitExamBtn.disabled = !isOnline || !isSignedIn || !examDetails;
-	}
+    }
+    // Submit Exam Button: Enabled only if online, signed in, AND examDetails have been loaded (i.e., exam is active)
+    if (submitExamBtn) {
+        // It should really only be enabled after the exam starts, handle that logic elsewhere (like in handleStartExam).
+        // Here, we mainly disable it if offline or not signed in or no details loaded.
+         submitExamBtn.disabled = !isOnline || !isSignedIn || !examDetails;
+    }
+
+    // Note: isInitializing is usually set to false after the initial load sequence in the 'init' function.
+     if (isInitializing) {
+         isInitializing = false;
+     }
+}
 
     function setSyncing(syncing) {
         isSyncing = syncing;
