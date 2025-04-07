@@ -2003,44 +2003,49 @@ case 'multiple_select':
                     // Collect answer normally (manual submit OR confirmed auto-submit)
                     const formElementsWithName = examForm.elements[answerName];
                     if (formElementsWithName) {
-                        switch (questionData.type) {
-                            case 'attachment':
-                                const fileInput = formElementsWithName;
-                                // Handle file uploads - Backend needs logic to actually receive the file if needed.
-                                // For now, just send the filename as a placeholder.
-                                answers[answerName] = (fileInput.files && fileInput.files.length > 0)
-                                    ? `FILE_UPLOADED:${fileInput.files[0].name}` // Placeholder for backend
-                                    : '';
-                                break;
-						if (radioButtons) {
-                        // RadioNodeList should have a 'value' property holding the checked value
-                        if (radioButtons.value) {
-                            selectedValue = radioButtons.value;
-                        }
-                        // As a fallback check individual buttons (might be needed in older browsers?)
-                        else if (radioButtons.length) {
-                             for (const rb of radioButtons) {
-                                 if (rb.checked) {
-                                     selectedValue = rb.value;
-                                     break; // Found the selected one
-                                 }
-                             }
-                         }
-                         // Check if it's a single radio button element (less common)
-                         else if (radioButtons.checked) {
-                             selectedValue = radioButtons.value;
-                         }
-                    }
+                switch (questionData.type) {
+                    case 'attachment':
+                        const fileInput = formElementsWithName;
+                        answers[answerName] = (fileInput.files && fileInput.files.length > 0)
+                            ? `FILE_UPLOADED:${fileInput.files[0].name}`
+                            : '';
+                        console.log(`Collected answer for ${answerName} (attachment):`, answers[answerName]);
+                        break; // Ends attachment case
 
-                    // Store the single selected value (or null if none was checked)
-                    answers[answerName] = selectedValue;
-                    console.log(`Collected answer for ${answerName} (radio):`, selectedValue); // Add log
-                    break;
+                    case 'multiple_select': // Handles RADIO BUTTONS
+                        const radioGroup = formElementsWithName;
+                        let selectedValue = null; // Default to null
+
+                        if (radioGroup && typeof radioGroup.value !== 'undefined') {
+                            if (radioGroup.value !== "") {
+                                selectedValue = radioGroup.value;
+                            }
+                        } else {
+                             console.warn(`Could not find radio button group or its value property for name: "${answerName}"`);
                         }
-                    } else {
-                        console.warn(`Could not find form element for answer: ${answerName}`);
-                        answers[answerName] = 'ERROR_ELEMENT_NOT_FOUND';
-                    }
+                        answers[answerName] = selectedValue;
+                        console.log(`Collected answer for ${answerName} (radio):`, selectedValue);
+                        break; // Ends multiple_select case
+
+                    // Add cases for other types if you have them (e.g., checkbox if you re-add it)
+
+                    default: // Handles short_answer, long_answer, code, etc.
+                        if (typeof formElementsWithName.value !== 'undefined') {
+                            answers[answerName] = formElementsWithName.value;
+                             console.log(`Collected answer for ${answerName} (default): "${answers[answerName].substring(0,50)}..."`);
+                        } else {
+                            console.warn(`Element "${answerName}" found but has no 'value' property.`);
+                            answers[answerName] = 'ERROR_NO_VALUE_PROP';
+                        }
+                        break; // Ends default case
+                }
+                // --- End of switch statement ---
+
+            } else {
+                // This block executes if element not found (Keep this)
+                console.warn(`Could not find form element for answer name: "${answerName}"`);
+                answers[answerName] = 'ERROR_ELEMENT_NOT_FOUND';
+            }
                 }
             });
 
@@ -2138,8 +2143,6 @@ case 'multiple_select':
                  }
             }
         }
-
-        // --- REMOVED: recordExamAttempt function ---
 
 
         // Updates online status and related UI elements (Keep as is)
