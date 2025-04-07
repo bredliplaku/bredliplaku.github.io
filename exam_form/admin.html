@@ -292,7 +292,49 @@
         // === Admin Data Loading & Display === (Grouping logic included)
         async function loadExamsData() { /* Same grouping logic */ if (!isAdminAllowed) return; console.log("Loading exams data..."); examsLoading.style.display = 'block'; refreshExamsBtn.disabled = true; examsTableBody.innerHTML = ''; allExamsData = []; const data = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_DETAILS_SHEET_NAME}!A:H`); examsLoading.style.display = 'none'; refreshExamsBtn.disabled = !isOnline; if (data && data.length > 1) { allExamsData = data.slice(1).map((row, index) => ({ data: row, originalIndex: index })); allExamsData.sort((a, b) => { const codeA = a.data[1] || ''; const codeB = b.data[1] || ''; const pinA = a.data[0] || ''; const pinB = b.data[0] || ''; const codeCompare = codeA.localeCompare(codeB); if (codeCompare !== 0) { return codeCompare; } return pinA.localeCompare(pinB); }); populateExamsTable(allExamsData); resetSortIcon(examsTable); } else if (data) { examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`; } else { examsTableBody.innerHTML = `<tr><td colspan="9">Failed to load exam data.</td></tr>`; } }
         function populateExamsTable(groupedData) { /* Added action buttons */ if (!groupedData || groupedData.length === 0) { examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`; return; } let currentCourseCode = null; let rowsHtml = ''; groupedData.forEach(item => { const row = item.data; const originalIndex = item.originalIndex; const sheetRowNumber = originalIndex + 2; const pin = row[0] || ''; const courseCode = row[1] || ''; const name = row[2] || ''; const duration = row[3] || ''; const startDate = row[4] || ''; const startTime = row[5] || ''; const mode = row[6] || ''; const questionsRaw = row[7] || ''; let questionsDisplayHtml = formatQuestionsForDisplay(questionsRaw); if (courseCode !== currentCourseCode) { currentCourseCode = courseCode; rowsHtml += `<tr class="group-header"><td colspan="9">Course: ${escapeHtml(currentCourseCode || 'Uncategorized')}</td></tr>`; } rowsHtml += `<tr data-row-index="${originalIndex}" data-sheet-row="${sheetRowNumber}" data-pin="${escapeHtml(pin)}"><td>${escapeHtml(pin)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(duration)}</td><td>${escapeHtml(startDate)}</td><td>${escapeHtml(startTime)}</td><td>${escapeHtml(mode)}</td><td><div class="formatted-content">${questionsDisplayHtml}</div></td><td class="actions-cell"><button class="btn-sm btn-secondary edit-exam-btn" title="Edit Exam"><i class="fas fa-edit"></i></button> <button class="btn-sm btn-danger delete-exam-btn" title="Delete Exam"><i class="fas fa-trash"></i></button></td></tr>`; }); examsTableBody.innerHTML = rowsHtml; }
-        function formatQuestionsForDisplay(questionsRaw) { /* Same */ let qHtml = 'N/A'; try { const qArray = JSON.parse(questionsRaw); if (Array.isArray(qArray)) { qHtml = qArray.map(q => { let d = `<strong>Type:</strong> ${escapeHtml(q.type||'N/A')}`; if(q.language) d+=`, <strong>Lang:</strong> ${escapeHtml(q.language)}`; if(q.allowed_types) d+=`, <strong>Allowed:</strong> ${escapeHtml(q.allowed_types.join(', '))}`; if(q.max_size_mb) d+=`, <strong>Max MB:</strong> ${escapeHtml(q.max_size_mb)}`; let c = q.content ? `<dd>${escapeHtml(q.content)}</dd>` : ''; return `<div class="question-item"><dl><dt>${escapeHtml(q.prompt||'Q')}</dt><dd><i>${d}</i></dd>${c}</dl></div>`; }).join(''); } else { throw new Error("Not array"); } } catch(e){ qHtml = questionsRaw.split('\n').map(p => `<p>${escapeHtml(p)}</p>`).join(''); } return qHtml || ''; }
+function formatQuestionsForDisplay(questionsRaw) {
+             let qHtml = 'N/A';
+             try {
+                 const qArray = JSON.parse(questionsRaw);
+                 if (Array.isArray(qArray)) {
+                     if (qArray.length === 0) return '<em>No questions defined.</em>';
+                     qHtml = qArray.map((q, index) => {
+                         let details = `<strong>Type:</strong> ${escapeHtml(q.type || 'N/A')}`;
+                         if (q.language) details += `, <strong>Lang:</strong> ${escapeHtml(q.language)}`;
+                         if (q.allowed_types) details += `, <strong>Allowed:</strong> ${escapeHtml(q.allowed_types.join(', '))}`;
+                         if (q.max_size_mb) details += `, <strong>Max MB:</strong> ${escapeHtml(q.max_size_mb)}`;
+
+                         let optionsHtml = '';
+                         if (q.type === 'multiple_select' && Array.isArray(q.options)) {
+                            optionsHtml += '<ul style="margin: 5px 0 5px 20px; padding-left: 0; list-style: disc;">';
+                            const correctAnswers = q.correct_answers || []; // Ensure it's an array
+                            optionsHtml += q.options.map(opt => {
+                                const isCorrect = correctAnswers.includes(opt);
+                                return `<li ${isCorrect ? 'style="font-weight: bold; color: var(--success-color);"' : ''}>${escapeHtml(opt)}${isCorrect ? ' <i class="fas fa-check" title="Correct Answer"></i>' : ''}</li>`;
+                            }).join('');
+                            optionsHtml += '</ul>';
+                         }
+
+                         let contentHtml = q.content ? `<dd>${escapeHtml(q.content)}</dd>` : ''; // For long_answer
+
+                         return `<div class="question-item">
+                                     <dl>
+                                         <dt>${index + 1}. ${escapeHtml(q.prompt || 'Q')}</dt>
+                                         <dd><i>${details}</i></dd>
+                                         ${contentHtml}
+                                         ${optionsHtml}
+                                     </dl>
+                                 </div>`;
+                     }).join('');
+                 } else {
+                     throw new Error("Not an array");
+                 }
+             } catch (e) {
+                 // Fallback for non-JSON or malformed JSON
+                 qHtml = '<span style="color: red;">Error parsing questions</span><br>' + escapeHtml(questionsRaw).replace(/\n/g, '<br>');
+             }
+             return qHtml || '<em>Error or no content.</em>';
+        }
         async function loadAttemptsData() { /* Same, added actions */ if (!isAdminAllowed) return; console.log("Loading attempts data..."); attemptsLoading.style.display = 'block'; refreshAttemptsBtn.disabled = true; attemptsTableBody.innerHTML = ''; const data = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_ATTEMPTS_SHEET_NAME}!A:I`); attemptsLoading.style.display = 'none'; refreshAttemptsBtn.disabled = !isOnline; if (data) { populateAttemptsTable(data); resetSortIcon(attemptsTable); } else { attemptsTableBody.innerHTML = `<tr><td colspan="10">Failed to load attempts data.</td></tr>`; } }
         function populateAttemptsTable(data) { /* Added actions */ if (!data || data.length <= 1) { attemptsTableBody.innerHTML = `<tr><td colspan="10">No attempts found.</td></tr>`; return; } const rowsHtml = data.slice(1).map((row, index) => { const sheetRowNumber = index + 2; const timestamp=row[0]||''; const email=row[2]||''; const pin=row[3]||''; const answersHtml = formatJsonForDisplay(row[7]); const fingerprintHtml = formatJsonForDisplay(row[8]); return `<tr data-sheet-row="${sheetRowNumber}" data-key="${escapeHtml(timestamp)}-${escapeHtml(email)}-${escapeHtml(pin)}"><td>${escapeHtml(timestamp)}</td><td>${escapeHtml(row[1]||'')}</td><td>${escapeHtml(email)}</td><td>${escapeHtml(pin)}</td><td>${escapeHtml(row[4]||'')}</td><td>${escapeHtml(row[5]||'')}</td><td>${escapeHtml(row[6]||'')}</td><td><div class="formatted-content">${answersHtml}</div></td><td><div class="formatted-content">${fingerprintHtml}</div></td><td class="actions-cell"><button class="btn-sm btn-danger delete-attempt-btn" title="Delete Attempt"><i class="fas fa-trash"></i></button></td></tr>`; }).join(''); attemptsTableBody.innerHTML = rowsHtml; }
 
@@ -337,7 +379,7 @@
 
         function closeExamDialog() { examDialogBackdrop.classList.remove('visible'); }
 
-        function addQuestionBlock() {
+function addQuestionBlock() {
             // Remove the "No questions" message if present
             const placeholder = questionsBuilderDiv.querySelector('p');
             if (placeholder) placeholder.remove();
@@ -346,6 +388,8 @@
             const block = document.createElement('div');
             block.className = 'question-block';
             block.dataset.index = questionIndex;
+
+            // Added 'multiple_select' option
             block.innerHTML = `
                 <div class="question-block-header">
                     <span>Question ${questionIndex + 1}</span>
@@ -358,14 +402,17 @@
                         <option value="long_answer">Long Answer / Instructions</option>
                         <option value="code">Code</option>
                         <option value="attachment">Attachment</option>
+                        <option value="multiple_select">Multiple Choice</option> {/* Added Option */}
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="q-prompt-${questionIndex}">Prompt / Instructions:</label>
+                    <label for="q-prompt-${questionIndex}">Prompt / Question Text:</label>
                     <textarea id="q-prompt-${questionIndex}" class="form-control question-prompt" rows="2" required></textarea>
                 </div>
+
+                {/* --- Conditional Fields --- */}
                 <div class="conditional-field" data-type="code">
-                    <div class="form-group">
+                     <div class="form-group">
                         <label for="q-lang-${questionIndex}">Language (optional):</label>
                         <input type="text" id="q-lang-${questionIndex}" class="form-control question-lang" placeholder="e.g., python, javascript">
                     </div>
@@ -374,13 +421,29 @@
                      <div class="form-group">
                         <label for="q-types-${questionIndex}">Allowed Types (comma-separated MIME types, optional):</label>
                         <input type="text" id="q-types-${questionIndex}" class="form-control question-allowed-types" placeholder="e.g., application/pdf,image/jpeg">
-                    </div>
+                     </div>
                      <div class="form-group">
                         <label for="q-size-${questionIndex}">Max Size (MB, optional):</label>
                         <input type="number" id="q-size-${questionIndex}" class="form-control question-max-size" min="1">
-                    </div>
-                </div>`;
+                     </div>
+                </div>
+
+                {/* --- NEW Conditional Field for Multiple Choice --- */}
+                <div class="conditional-field" data-type="multiple_select">
+                     <div class="form-group">
+                        <label for="q-options-${questionIndex}">Options (Enter ONE option per line):</label>
+                        <textarea id="q-options-${questionIndex}" class="form-control question-options" rows="4" placeholder="Option A\nOption B\nOption C"></textarea>
+                     </div>
+                     <div class="form-group">
+                        <label for="q-correct-${questionIndex}">Correct Answer(s) (Enter EXACT text of correct option(s), one per line if multiple are correct):</label>
+                        <textarea id="q-correct-${questionIndex}" class="form-control question-correct" rows="2" placeholder="Option B\nOption C"></textarea>
+                        <small style="font-size: 0.8em; color: #555;">For multiple correct answers, separate them by putting each on a new line.</small>
+                     </div>
+                </div>
+                `;
             questionsBuilderDiv.appendChild(block);
+             // Trigger change event manually in case default 'short_answer' needs to hide fields initially (though default hide works better)
+            // block.querySelector('.question-type-select').dispatchEvent(new Event('change'));
         }
 
         function handleQuestionTypeChange(event) {
@@ -415,63 +478,141 @@
              }
          }
 
-        async function handleSaveExam(event) { // UPDATED to collect questions from builder
+async function handleSaveExam(event) {
              event.preventDefault();
              if (!isAdminAllowed || !isOnline) return;
-             if (!examPinInput.value || !examCodeInput.value || !examNameInput.value || !examDurationInput.value || !examStartDateInput.value || !examStartTimeInput.value || !examModeInput.value) { showImprovedNotification('warning', 'Missing Fields', 'Fill all required exam details.'); return; }
+             // Basic validation for exam details
+             if (!examPinInput.value || !examCodeInput.value || !examNameInput.value || !examDurationInput.value || !examStartDateInput.value || !examStartTimeInput.value || !examModeInput.value) {
+                 showImprovedNotification('warning', 'Missing Fields', 'Fill all required exam details.');
+                 return;
+             }
 
              // --- Collect Questions from Builder ---
              const questionsArray = [];
              const questionBlocks = questionsBuilderDiv.querySelectorAll('.question-block');
              let questionsValid = true;
+
              questionBlocks.forEach(block => {
-                 const type = block.querySelector('.question-type-select').value;
-                 const prompt = block.querySelector('.question-prompt').value.trim();
+                 const typeSelect = block.querySelector('.question-type-select');
+                 const promptInput = block.querySelector('.question-prompt');
+                 const type = typeSelect.value;
+                 const prompt = promptInput.value.trim();
+
+                 // Reset previous errors
+                 promptInput.style.borderColor = '';
+                 block.querySelectorAll('.question-options, .question-correct').forEach(el => el.style.borderColor = '');
 
                  if (!prompt) {
                      questionsValid = false;
-                     block.querySelector('.question-prompt').style.borderColor = 'red'; // Highlight missing prompt
-                 } else {
-                      block.querySelector('.question-prompt').style.borderColor = ''; // Reset border
+                     promptInput.style.borderColor = 'red'; // Highlight missing prompt
                  }
 
                  const question = { type, prompt };
 
+                 // --- Handle type-specific fields ---
                  if (type === 'code') {
                      const lang = block.querySelector('.question-lang').value.trim();
                      if (lang) question.language = lang;
                  } else if (type === 'attachment') {
-                     const typesStr = block.querySelector('.question-allowed-types').value.trim();
-                     const sizeStr = block.querySelector('.question-max-size').value.trim();
-                     if (typesStr) question.allowed_types = typesStr.split(',').map(t => t.trim()).filter(t => t); // Split and trim
-                     if (sizeStr) question.max_size_mb = parseInt(sizeStr, 10);
+                    const typesStr = block.querySelector('.question-allowed-types').value.trim();
+                    const sizeStr = block.querySelector('.question-max-size').value.trim();
+                    if (typesStr) question.allowed_types = typesStr.split(',').map(t => t.trim()).filter(t => t);
+                    if (sizeStr) {
+                        const sizeNum = parseInt(sizeStr, 10);
+                        if (!isNaN(sizeNum) && sizeNum > 0) question.max_size_mb = sizeNum;
+                    }
+                 } else if (type === 'multiple_select') {
+                    const optionsInput = block.querySelector('.question-options');
+                    const correctInput = block.querySelector('.question-correct');
+                    const optionsStr = optionsInput.value.trim();
+                    const correctStr = correctInput.value.trim();
+
+                    if (!optionsStr) {
+                        questionsValid = false;
+                        optionsInput.style.borderColor = 'red';
+                    } else {
+                         // Split options by newline, trim whitespace, filter empty lines
+                        question.options = optionsStr.split('\n').map(opt => opt.trim()).filter(opt => opt);
+                        if (question.options.length < 2) { // Need at least 2 options
+                             questionsValid = false;
+                             optionsInput.style.borderColor = 'red';
+                             showImprovedNotification('warning', 'Invalid Options', `Question "${prompt.substring(0,20)}..." needs at least two distinct options.`);
+                        }
+                    }
+
+                     if (!correctStr) {
+                        questionsValid = false;
+                        correctInput.style.borderColor = 'red';
+                    } else {
+                         // Split correct answers by newline, trim, filter empty
+                        question.correct_answers = correctStr.split('\n').map(ans => ans.trim()).filter(ans => ans);
+                         if (question.correct_answers.length === 0) {
+                            questionsValid = false;
+                            correctInput.style.borderColor = 'red';
+                         }
+                         // Optional: Validate that correct answers exist in the options list
+                         if (question.options && question.correct_answers.length > 0) {
+                             const allCorrectExist = question.correct_answers.every(ans => question.options.includes(ans));
+                             if (!allCorrectExist) {
+                                 questionsValid = false;
+                                 correctInput.style.borderColor = 'red';
+                                 showImprovedNotification('warning', 'Invalid Correct Answer', `One or more correct answers for question "${prompt.substring(0,20)}..." do not match the provided options.`);
+                             }
+                         }
+                    }
                  }
-                 questionsArray.push(question);
+                 // --- End type-specific fields ---
+
+                 if (questionsValid) { // Only add if valid so far for this question
+                    questionsArray.push(question);
+                 }
              });
+             // --- End Collecting Questions ---
+
 
              if (!questionsValid) {
-                 showImprovedNotification('warning', 'Missing Prompt', 'Please ensure all questions have a prompt.');
-                 return;
+                 showImprovedNotification('warning', 'Invalid Question Data', 'Please check the highlighted fields in the questions builder.');
+                 return; // Stop if any question had validation errors
              }
-             const questionsJsonString = JSON.stringify(questionsArray); // Convert array to JSON string
-             // ------------------------------------
 
-             const examData = [ examPinInput.value.trim(), examCodeInput.value.trim(), examNameInput.value.trim(), examDurationInput.value, examStartDateInput.value, examStartTimeInput.value, examModeInput.value, questionsJsonString ]; // Use JSON string here
-             saveExamDialogBtn.disabled = true; saveExamDialogBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-             let success = false; const rowIndex = examRowIndexInput.value;
+             // Proceed if all questions are valid
+             const questionsJsonString = JSON.stringify(questionsArray);
 
-             if (rowIndex) { // EDIT (Placeholder)
-                 console.log("EDITING exam on sheet row:", parseInt(rowIndex, 10) + 2);
-                 showImprovedNotification('info', 'Not Implemented', 'Editing is not yet fully implemented.'); success = false;
-                 // TODO: Implement gapi.client.sheets.spreadsheets.values.update
+             const examData = [
+                 examPinInput.value.trim(), examCodeInput.value.trim(), examNameInput.value.trim(),
+                 examDurationInput.value, examStartDateInput.value, examStartTimeInput.value,
+                 examModeInput.value, questionsJsonString // Use JSON string here
+             ];
+
+             saveExamDialogBtn.disabled = true;
+             saveExamDialogBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+             let success = false;
+             const rowIndex = examRowIndexInput.value; // This is original index, sheet row is index + 2
+
+             if (rowIndex) { // EDIT (Still Placeholder - needs different API call)
+                 const sheetRowToUpdate = parseInt(rowIndex, 10) + 2; // Calculate sheet row number
+                 console.log("EDITING exam on sheet row:", sheetRowToUpdate);
+                  // --- TODO: Implement Sheets API Update ---
+                  // You need gapi.client.sheets.spreadsheets.values.update
+                  // Specify the range like `${EXAM_DETAILS_SHEET_NAME}!A${sheetRowToUpdate}:H${sheetRowToUpdate}`
+                  // And provide the `resource: { values: [examData] }`
+                  showImprovedNotification('info', 'Not Implemented', 'Editing requires an update call to the Sheets API (not implemented yet).');
+                  success = false; // Mark as failed for now
              } else { // ADD
                  console.log("ADDING new exam:", examData);
                  success = await appendSheetData(EXAM_SPREADSHEET_ID, EXAM_DETAILS_SHEET_NAME, [examData]);
              }
 
-             saveExamDialogBtn.disabled = false; saveExamDialogBtn.innerHTML = rowIndex ? 'Save Changes' : 'Add Exam';
-             if (success) { showImprovedNotification('success', 'Exam Saved', `Exam "${examData[2]}" was ${rowIndex ? 'updated' : 'added'}.`); closeExamDialog(); loadExamsData(); }
-             else if (!rowIndex) { showImprovedNotification('error', 'Save Failed', 'Could not save exam.'); }
+             saveExamDialogBtn.disabled = false;
+             saveExamDialogBtn.innerHTML = rowIndex ? 'Save Changes' : 'Add Exam';
+
+             if (success) {
+                 showImprovedNotification('success', 'Exam Saved', `Exam "${escapeHtml(examData[2])}" was ${rowIndex ? 'updated (placeholder)' : 'added'}.`);
+                 closeExamDialog();
+                 loadExamsData(); // Refresh table
+             } else if (!rowIndex) { // Only show add failure if it wasn't an edit placeholder
+                 showImprovedNotification('error', 'Save Failed', 'Could not save new exam.');
+             }
         }
 
 
