@@ -1668,33 +1668,37 @@ async function handleStartExam() {
                 questionDiv.id = questionId;
                 questionDiv.dataset.originalIndex = originalIndex;
 
-                // --- Process Prompt Text ---
+// --- Process Prompt Text ---
                 let promptText = q.prompt || `Question ${displayQNum}`;
                 // 1. Escape basic HTML characters FIRST
                 promptText = escapeHtml(promptText);
 
                 // 2. Convert simple markup (**bold**) to HTML
-                //    Use regex: Replace **non-greedy capture** with <strong>capture</strong>
                 promptText = promptText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                //    Optional: Italic rule: *non-greedy capture* with <em>capture</em>
-                //    promptText = promptText.replace(/\*(.*?)\*/g, '<em>$1</em>');
+                // Optional: Italic rule: *non-greedy capture* with <em>capture</em>
+                // promptText = promptText.replace(/\*(.*?)\*/g, '<em>$1</em>');
 
-                // 3. Emphasize specific terms (can be combined/done after general markup)
-                const termsToEmphasize = ['sep', 'end', 'print()', 'input()', 'range(5)', 'range(2, 8, 2)', 'TypeError', 'IDE'];
+                // 3. Emphasize specific terms
+                const termsToEmphasize = ['sep', 'end', 'print()', 'input()', 'range\\(5\\)', 'range\\(2, 8, 2\\)', 'TypeError', 'IDE']; // Escaped parentheses for regex constructor
                 termsToEmphasize.forEach(term => {
-                    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape regex special chars
+                    // For terms manually escaped above (like range), use them directly.
+                    // For others, escape them. This is slightly inconsistent, might be better to list all terms simply and escape here.
+                    const termForRegex = (term.includes('\\(')) ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                     // Regex looks for term NOT immediately inside HTML tags (basic check)
-                    const regex = new RegExp(`(?<![=\\"'>])(\\b${escapedTerm}\\b)(?![<\\(\\"'])`, 'g');
-                    promptText = promptText.replace(regex, (match) => `<em class="term">${match}</em>`); // Use function to avoid issues with $n in replacement
-                }); // <-- Make sure this closing brace and semicolon are correct
+                    const regex = new RegExp(`(?<![=\\"'>])(\\b${termForRegex}\\b)(?![<\\(\\"'])`, 'g');
+                    promptText = promptText.replace(regex, (match) => `<em class="term">${match}</em>`);
+                });
 
-                // Emphasize specific code examples carefully
-                // Use functions in replace to avoid issues with special characters in replacement string
+                // Emphasize specific code examples with corrected regex escaping
+                // Use functions in replace to avoid issues with $n in replacement string
                 promptText = promptText.replace(/print'Hello World'/g, () => '<em class="term">print\'Hello World\'</em>');
+                // Escape the '+' sign in the regex: \+
                 promptText = promptText.replace(/x = 5 \+ '3'/g, () => '<em class="term">x = 5 + \'3\'</em>');
-                // Ensure quotes inside the search string are handled correctly
+                // Escape parentheses in the regex: \( and \)
                 promptText = promptText.replace(/print\("Value:", value, sep = ':'\)/g, () => '<em class="term">print("Value:", value, sep = \':\')</em>');
+                 // Escape parentheses in the regex: \( and \)
                 promptText = promptText.replace(/print\(My variable is, x\)/g, () => '<em class="term">print(My variable is, x)</em>');
+                // This one is fine as is
                 promptText = promptText.replace(/"My variable is"/g, () => '<em class="term">"My variable is"</em>');
 
 
