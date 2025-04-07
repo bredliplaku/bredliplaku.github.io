@@ -1673,31 +1673,29 @@ async function handleStartExam() {
                 // 1. Escape basic HTML characters FIRST
                 promptText = escapeHtml(promptText);
 
-                // 2. Convert simple markup (**bold**) to HTML (BEFORE replacing \n)
+                // 2. Convert simple markup (**bold**) to HTML
                 //    Use regex: Replace **non-greedy capture** with <strong>capture</strong>
-                //    Handles cases where asterisks might be adjacent: **A** **B**
                 promptText = promptText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                //    Optional: Add italic rule: *non-greedy capture* with <em>capture</em>
+                //    Optional: Italic rule: *non-greedy capture* with <em>capture</em>
                 //    promptText = promptText.replace(/\*(.*?)\*/g, '<em>$1</em>');
 
-                // 3. Emphasize specific terms (can be combined with or done after general markup)
-                //    (Keep the existing term emphasis logic if you still want it)
+                // 3. Emphasize specific terms (can be combined/done after general markup)
                 const termsToEmphasize = ['sep', 'end', 'print()', 'input()', 'range(5)', 'range(2, 8, 2)', 'TypeError', 'IDE'];
                 termsToEmphasize.forEach(term => {
-                    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    // Ensure we don't double-wrap if term was already bolded by **
-                    // This regex looks for the term NOT preceded by ">" (from </strong>)
-                    // and NOT followed by "<" (from <strong>) - basic check
-                    const regex = new RegExp(`(?<!>)(\\b${escapedTerm}\\b)(?!<)`, 'g');
-                     // Wrap in <em class="term"> for specific styling if needed, or use <strong>
-                    promptText = promptText.replace(regex, '<em class="term">$1</em>');
-                });
-                 // Emphasize specific code examples (as before)
-                 promptText = promptText.replace(/print'Hello World'/g, '<em class="term">print\'Hello World\'</em>');
-                 promptText = promptText.replace(/x = 5 \+ '3'/g, '<em class="term">x = 5 + \'3\'</em>');
-                 promptText = promptText.replace(/print\(My variable is, x\)/g, '<em class="term">print(My variable is, x)</em>');
-                 // Emphasize quoted text if needed (adjust regex if needed)
-                 promptText = promptText.replace(/"My variable is"/g, '<em class="term">"My variable is"</em>');
+                    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape regex special chars
+                    // Regex looks for term NOT immediately inside HTML tags (basic check)
+                    const regex = new RegExp(`(?<![=\\"'>])(\\b${escapedTerm}\\b)(?![<\\(\\"'])`, 'g');
+                    promptText = promptText.replace(regex, (match) => `<em class="term">${match}</em>`); // Use function to avoid issues with $n in replacement
+                }); // <-- Make sure this closing brace and semicolon are correct
+
+                // Emphasize specific code examples carefully
+                // Use functions in replace to avoid issues with special characters in replacement string
+                promptText = promptText.replace(/print'Hello World'/g, () => '<em class="term">print\'Hello World\'</em>');
+                promptText = promptText.replace(/x = 5 \+ '3'/g, () => '<em class="term">x = 5 + \'3\'</em>');
+                // Ensure quotes inside the search string are handled correctly
+                promptText = promptText.replace(/print\("Value:", value, sep = ':'\)/g, () => '<em class="term">print("Value:", value, sep = \':\')</em>');
+                promptText = promptText.replace(/print\(My variable is, x\)/g, () => '<em class="term">print(My variable is, x)</em>');
+                promptText = promptText.replace(/"My variable is"/g, () => '<em class="term">"My variable is"</em>');
 
 
                 // 4. Replace newline characters (\n) with HTML line breaks (<br>) LAST
