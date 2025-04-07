@@ -1678,24 +1678,28 @@ function displayQuestions(questionsJsonString) {
             // 1. Escape basic HTML characters first
             promptText = escapeHtml(promptText);
 
-            // 2. Convert simple markup (**bold**) to HTML
+            // 2. Convert simple markup (**bold** or ***bold***) to HTML
+            // First convert ***text*** to bold:
             promptText = promptText.replace(/\*\*\*(.*?)\*\*\*/g, '<strong>$1</strong>');
-			promptText = promptText.replace(/(?<!\*)\*\*(?!\*)(.*?)\*\*(?!\*)/g, '<strong>$1</strong>');
+            // Then convert **text** to bold (ensuring that we don't conflict with ***):
+            promptText = promptText.replace(/(?<!\*)\*\*(?!\*)(.*?)\*\*(?!\*)/g, '<strong>$1</strong>');
             // Optionally, uncomment the next line to italicise text enclosed in single asterisks:
             // promptText = promptText.replace(/\*(.*?)\*/g, '<em>$1</em>');
 
             // 3. Emphasise specific terms
             const termsToEmphasise = ['sep', 'end', 'print()', 'input()', 'range\\(5\\)', 'range\\(2, 8, 2\\)', 'TypeError', 'IDE'];
             termsToEmphasise.forEach(term => {
-                // For terms that are already escaped (like 'range\\(5\\)'), use them directly.
                 const termForRegex = (term.includes('\\(')) ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                // Regex looks for the term not immediately inside HTML tags (a basic check)
                 const regex = new RegExp(`(?<![=\\"'>])(\\b${termForRegex}\\b)(?![<\\(\\"'])`, 'g');
                 promptText = promptText.replace(regex, (match) => `<em class="term">${match}</em>`);
             });
 
             // Emphasise specific code examples with correct regex escaping
             promptText = promptText.replace(/print'Hello World'/g, () => '<em class="term">print\'Hello World\'</em>');
+            promptText = promptText.replace(/x = 5 \+ '3'/g, () => '<em class="term">x = 5 + \'3\'</em>');
+            promptText = promptText.replace(/print\("Value:", value, sep = ':'\)/g, () => '<em class="term">print("Value:", value, sep = \':\')</em>');
+            promptText = promptText.replace(/print\(My variable is, x\)/g, () => '<em class="term">print(My variable is, x)</em>');
+            promptText = promptText.replace(/"My variable is"/g, () => '<em class="term">"My variable is"</em>');
 
             // 4. Replace newline characters (\n) with HTML line breaks (<br>) last
             promptText = promptText.replace(/\n/g, '<br>');
@@ -1718,15 +1722,12 @@ function displayQuestions(questionsJsonString) {
                     questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${escapeHtml(q.content || '')}</textarea>`;
                     break;
                 case 'code':
-                    // Example handling for code type questions; adjust as needed.
                     questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control code-editor" rows="8" placeholder="Enter your code">${escapeHtml(q.content || '')}</textarea>`;
                     break;
                 case 'attachment':
-                    // Example handling for attachment type questions; adjust as needed.
                     questionContentHtml += `<input type="file" id="${answerId}" name="${answerName}" class="form-control">`;
                     break;
                 case 'multiple_select':
-                    // Renders radio buttons.
                     questionContentHtml += `<div class="checkbox-group" id="${answerId}">`;
                     if (Array.isArray(q.options)) {
                         q.options.forEach((option, optIndex) => {
@@ -1740,14 +1741,13 @@ function displayQuestions(questionsJsonString) {
                     questionContentHtml += `</div>`;
                     break;
                 default:
-                    // For any other type, simply display the content.
                     questionContentHtml += `<p>${escapeHtml(q.content || '')}</p>`;
                     break;
             }
             questionContentHtml += '</div>'; // End question-content
 
+            // Added confirm/edit actions
             const actionsHtml = `<div class="question-actions"> <button type="button" class="btn-confirm btn-green" onclick="confirmAnswer('${questionId}')"><i class="fas fa-check"></i> Confirm</button> <button type="button" class="btn-edit btn-grey" onclick="editAnswer('${questionId}')"><i class="fas fa-pencil-alt"></i> Edit</button> </div>`;
-
 
             const labelTargetId = answerId; // Use answerId as the label's target
             questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
@@ -1760,6 +1760,7 @@ function displayQuestions(questionsJsonString) {
     }
     checkAllConfirmed();
 }
+
 
 
     // Utility function to escape HTML (Ensure this exists)
