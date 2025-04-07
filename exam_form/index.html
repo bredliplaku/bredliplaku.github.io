@@ -1630,125 +1630,139 @@ async function handleStartExam() {
         checkAllConfirmed();
     }
 
-        // Parses the JSON string and displays questions in the UI (Keep as is)
-    function displayQuestions(questionsJsonString) {
-        console.log("Parsing and displaying exam questions...");
-        examQuestionsArea.innerHTML = ''; // Clear previous questions
-        totalQuestions = 0;
+function displayQuestions(questionsJsonString) {
+    console.log("Parsing and displaying exam questions...");
+    examQuestionsArea.innerHTML = ''; // Clear previous questions
+    totalQuestions = 0;
+    try {
+        let questionsArray = [];
         try {
-            let questionsArray = [];
-            try {
-                questionsArray = JSON.parse(questionsJsonString);
-                if (!Array.isArray(questionsArray)) { throw new Error("Parsed data not an array."); }
-            } catch (parseError) {
-                 console.warn("Could not parse questions JSON. Displaying as single block.", parseError);
-                 questionsArray = [{ type: "long_answer", prompt: "Exam Instructions / Questions", content: questionsJsonString }];
-             }
+            questionsArray = JSON.parse(questionsJsonString);
+            if (!Array.isArray(questionsArray)) { 
+                throw new Error("Parsed data is not an array.");
+            }
+        } catch (parseError) {
+            console.warn("Could not parse questions JSON. Displaying as a single block.", parseError);
+            questionsArray = [{
+                type: "long_answer",
+                prompt: "Exam Instructions / Questions",
+                content: questionsJsonString
+            }];
+        }
 
-            totalQuestions = questionsArray.length;
-            console.log(`Total questions loaded: ${totalQuestions}`);
+        totalQuestions = questionsArray.length;
+        console.log(`Total questions loaded: ${totalQuestions}`);
 
-            const originalIndices = questionsArray.map((_, index) => index);
-            // ... (keep shuffling logic if you have it) ...
-            console.log("Shuffled display order (indices):", originalIndices);
-            examDetails.OriginalOrderMap = {};
-            questionsArray.forEach((q, index) => { examDetails.OriginalOrderMap[index] = q; });
+        const originalIndices = questionsArray.map((_, index) => index);
+        console.log("Shuffled display order (indices):", originalIndices);
+        examDetails.OriginalOrderMap = {};
+        questionsArray.forEach((q, index) => {
+            examDetails.OriginalOrderMap[index] = q;
+        });
 
+        originalIndices.forEach((originalIndex, displayIndex) => {
+            const q = questionsArray[originalIndex];
+            const displayQNum = displayIndex + 1;
+            const originalQNum = originalIndex + 1;
+            const questionId = `q-${originalQNum}`;
+            const answerId = `ans-${originalQNum}`;
+            const answerName = `ans-${originalQNum}`;
 
-            originalIndices.forEach((originalIndex, displayIndex) => {
-                const q = questionsArray[originalIndex];
-                const displayQNum = displayIndex + 1;
-                const originalQNum = originalIndex + 1;
-                const questionId = `q-${originalQNum}`;
-                const answerId = `ans-${originalQNum}`;
-                const answerName = `ans-${originalQNum}`;
+            const questionDiv = document.createElement('div');
+            questionDiv.className = 'question form-group';
+            questionDiv.id = questionId;
+            questionDiv.dataset.originalIndex = originalIndex;
 
-                const questionDiv = document.createElement('div');
-                questionDiv.className = 'question form-group';
-                questionDiv.id = questionId;
-                questionDiv.dataset.originalIndex = originalIndex;
+            // --- Process Prompt Text ---
+            let promptText = q.prompt || `Question ${displayQNum}`;
+            // 1. Escape basic HTML characters first
+            promptText = escapeHtml(promptText);
 
-// --- Process Prompt Text ---
-                let promptText = q.prompt || `Question ${displayQNum}`;
-                // 1. Escape basic HTML characters FIRST
-                promptText = escapeHtml(promptText);
+            // 2. Convert simple markup (**bold**) to HTML
+            promptText = promptText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            // Optionally, uncomment the next line to italicise text enclosed in single asterisks:
+            // promptText = promptText.replace(/\*(.*?)\*/g, '<em>$1</em>');
 
-                // 2. Convert simple markup (**bold**) to HTML
-                promptText = promptText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                // Optional: Italic rule: *non-greedy capture* with <em>capture</em>
-                // promptText = promptText.replace(/\*(.*?)\*/g, '<em>$1</em>');
-
-                // 3. Emphasize specific terms
-                const termsToEmphasize = ['sep', 'end', 'print()', 'input()', 'range\\(5\\)', 'range\\(2, 8, 2\\)', 'TypeError', 'IDE']; // Escaped parentheses for regex constructor
-                termsToEmphasize.forEach(term => {
-                    // For terms manually escaped above (like range), use them directly.
-                    // For others, escape them. This is slightly inconsistent, might be better to list all terms simply and escape here.
-                    const termForRegex = (term.includes('\\(')) ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    // Regex looks for term NOT immediately inside HTML tags (basic check)
-                    const regex = new RegExp(`(?<![=\\"'>])(\\b${termForRegex}\\b)(?![<\\(\\"'])`, 'g');
-                    promptText = promptText.replace(regex, (match) => `<em class="term">${match}</em>`);
-                });
-
-                // Emphasize specific code examples with corrected regex escaping
-                // Use functions in replace to avoid issues with $n in replacement string
-                promptText = promptText.replace(/print'Hello World'/g, () => '<em class="term">print\'Hello World\'</em>');
-                // Escape the '+' sign in the regex: \+
-                promptText = promptText.replace(/x = 5 \+ '3'/g, () => '<em class="term">x = 5 + \'3\'</em>');
-                // Escape parentheses in the regex: \( and \)
-                promptText = promptText.replace(/print\("Value:", value, sep = ':'\)/g, () => '<em class="term">print("Value:", value, sep = \':\')</em>');
-                 // Escape parentheses in the regex: \( and \)
-                promptText = promptText.replace(/print\(My variable is, x\)/g, () => '<em class="term">print(My variable is, x)</em>');
-                // This one is fine as is
-                promptText = promptText.replace(/"My variable is"/g, () => '<em class="term">"My variable is"</em>');
-
-
-                // 4. Replace newline characters (\n) with HTML line breaks (<br>) LAST
-                promptText = promptText.replace(/\n/g, '<br>');
-                // --- End Process Prompt Text ---
-
-                let questionContentHtml = '<div class="question-content">';
-                let labelClass = '';
-                let labelTag = 'label';
-
-                if (q.type === 'code') {
-                    labelClass = 'code-prompt';
-                }
-
-                // Generate input HTML based on type (ensure options are escaped)
-                switch (q.type) {
-                   // ... cases for short_answer, long_answer, code, attachment, multiple_select (radio) ...
-                   // (Make sure these cases use escapeHtml for content/options where needed)
-                     case 'short_answer': questionContentHtml += `<input type="text" id="${answerId}" name="${answerName}" class="form-control" placeholder="Enter your answer">`; break;
-                     case 'long_answer': questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${escapeHtml(q.content || '')}</textarea>`; break;
-                     case 'code': /* ... as before ... */ break;
-                     case 'attachment': /* ... as before ... */ break;
-                     case 'multiple_select': // Renders RADIO buttons
-                         questionContentHtml += `<div class="checkbox-group" id="${answerId}">`;
-                         if (Array.isArray(q.options)) {
-                             q.options.forEach((option, optIndex) => {
-                                 const optionId = `${answerId}-opt${optIndex}`;
-                                 const escapedOption = escapeHtml(option);
-                                 questionContentHtml += `<div class="checkbox-item"><input type="radio" id="${optionId}" name="${answerName}" value="${escapedOption}" class="form-control-checkbox"><label for="${optionId}">${escapedOption}</label></div>`;
-                             });
-                         } else { questionContentHtml += `<p style="color:red;">Error: Options missing.</p>`; }
-                         questionContentHtml += `</div>`;
-                         break;
-                     default: /* ... as before ... */ break;
-                }
-                questionContentHtml += '</div>'; // End question-content
-
-                const actionsHtml = /* ... confirm/edit buttons ... */;
-
-                const labelTargetId = /* ... target ID ... */;
-                // Insert the fully processed promptText (contains <br>, <strong>, <em> tags)
-                questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
-
-                examQuestionsArea.appendChild(questionDiv);
+            // 3. Emphasise specific terms
+            const termsToEmphasise = ['sep', 'end', 'print()', 'input()', 'range\\(5\\)', 'range\\(2, 8, 2\\)', 'TypeError', 'IDE'];
+            termsToEmphasise.forEach(term => {
+                // For terms that are already escaped (like 'range\\(5\\)'), use them directly.
+                const termForRegex = (term.includes('\\(')) ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Regex looks for the term not immediately inside HTML tags (a basic check)
+                const regex = new RegExp(`(?<![=\\"'>])(\\b${termForRegex}\\b)(?![<\\(\\"'])`, 'g');
+                promptText = promptText.replace(regex, (match) => `<em class="term">${match}</em>`);
             });
 
-        } catch (e) { /* ... error handling ... */ }
-        checkAllConfirmed();
+            // Emphasise specific code examples with correct regex escaping
+            promptText = promptText.replace(/print'Hello World'/g, () => '<em class="term">print\'Hello World\'</em>');
+            promptText = promptText.replace(/x = 5 \+ '3'/g, () => '<em class="term">x = 5 + \'3\'</em>');
+            promptText = promptText.replace(/print\("Value:", value, sep = ':'\)/g, () => '<em class="term">print("Value:", value, sep = \':\')</em>');
+            promptText = promptText.replace(/print\(My variable is, x\)/g, () => '<em class="term">print(My variable is, x)</em>');
+            promptText = promptText.replace(/"My variable is"/g, () => '<em class="term">"My variable is"</em>');
+
+            // 4. Replace newline characters (\n) with HTML line breaks (<br>) last
+            promptText = promptText.replace(/\n/g, '<br>');
+            // --- End Process Prompt Text ---
+
+            let questionContentHtml = '<div class="question-content">';
+            let labelClass = '';
+            let labelTag = 'label';
+
+            if (q.type === 'code') {
+                labelClass = 'code-prompt';
+            }
+
+            // Generate input HTML based on question type (ensure options are escaped)
+            switch (q.type) {
+                case 'short_answer':
+                    questionContentHtml += `<input type="text" id="${answerId}" name="${answerName}" class="form-control" placeholder="Enter your answer">`;
+                    break;
+                case 'long_answer':
+                    questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${escapeHtml(q.content || '')}</textarea>`;
+                    break;
+                case 'code':
+                    // Example handling for code type questions; adjust as needed.
+                    questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control code-editor" rows="8" placeholder="Enter your code">${escapeHtml(q.content || '')}</textarea>`;
+                    break;
+                case 'attachment':
+                    // Example handling for attachment type questions; adjust as needed.
+                    questionContentHtml += `<input type="file" id="${answerId}" name="${answerName}" class="form-control">`;
+                    break;
+                case 'multiple_select':
+                    // Renders radio buttons.
+                    questionContentHtml += `<div class="checkbox-group" id="${answerId}">`;
+                    if (Array.isArray(q.options)) {
+                        q.options.forEach((option, optIndex) => {
+                            const optionId = `${answerId}-opt${optIndex}`;
+                            const escapedOption = escapeHtml(option);
+                            questionContentHtml += `<div class="checkbox-item"><input type="radio" id="${optionId}" name="${answerName}" value="${escapedOption}" class="form-control-checkbox"><label for="${optionId}">${escapedOption}</label></div>`;
+                        });
+                    } else {
+                        questionContentHtml += `<p style="color:red;">Error: Options missing.</p>`;
+                    }
+                    questionContentHtml += `</div>`;
+                    break;
+                default:
+                    // For any other type, simply display the content.
+                    questionContentHtml += `<p>${escapeHtml(q.content || '')}</p>`;
+                    break;
+            }
+            questionContentHtml += '</div>'; // End question-content
+
+            const actionsHtml = ''; // Placeholder for confirm/edit buttons
+
+            const labelTargetId = answerId; // Use answerId as the label's target
+            questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
+
+            examQuestionsArea.appendChild(questionDiv);
+        });
+    } catch (e) {
+        console.error("Error displaying questions:", e);
+        examQuestionsArea.innerHTML = '<p>Error loading questions.</p>';
     }
+    checkAllConfirmed();
+}
+
 
     // Utility function to escape HTML (Ensure this exists)
     function escapeHtml(unsafe) {
