@@ -496,6 +496,18 @@
          }
         /* --- End Checkbox Styling --- */
 
+/* Style for code question prompts */
+    label.code-prompt {
+        white-space: pre-wrap; /* Respects whitespace and line breaks */
+        font-family: monospace; /* Use a monospace font */
+        display: block; /* Ensure label takes full width */
+        background-color: #f8f9fa; /* Light background like code blocks */
+        padding: 10px; /* Add some padding */
+        border: 1px solid #eee; /* Subtle border */
+        border-radius: 4px;
+        line-height: 1.4; /* Adjust line spacing */
+        margin-bottom: 10px; /* Add margin below prompt */
+    }
 
         #submit-exam-btn {
             margin-top: 30px;
@@ -1613,119 +1625,133 @@ async function handleStartExam() {
     }
 
         // Parses the JSON string and displays questions in the UI (Keep as is)
-        function displayQuestions(questionsJsonString) {
-            console.log("Parsing and displaying exam questions...");
-            examQuestionsArea.innerHTML = ''; // Clear previous questions
-            totalQuestions = 0; // Reset count for this display run
+// --- MODIFIED: displayQuestions (Handles newlines and code prompt styling) ---
+    function displayQuestions(questionsJsonString) {
+        console.log("Parsing and displaying exam questions...");
+        examQuestionsArea.innerHTML = ''; // Clear previous questions
+        totalQuestions = 0;
+        try {
+            let questionsArray = [];
             try {
-                let questionsArray = [];
+                questionsArray = JSON.parse(questionsJsonString);
+                if (!Array.isArray(questionsArray)) { throw new Error("Parsed data not an array."); }
+            } catch (parseError) {
+                 console.warn("Could not parse questions JSON. Displaying as single block.", parseError);
+                 questionsArray = [{ type: "long_answer", prompt: "Exam Instructions / Questions", content: questionsJsonString }];
+             }
 
-                // Robust JSON parsing
-                try {
-                    questionsArray = JSON.parse(questionsJsonString);
-                    if (!Array.isArray(questionsArray)) {
-                        throw new Error("Parsed questions data is not an array.");
-                    }
-                } catch (parseError) {
-                     // Fallback if JSON is invalid
-                     console.warn("Could not parse questions JSON. Displaying as single block.", parseError);
-                     questionsArray = [{ type: "long_answer", prompt: "Exam Instructions / Questions", content: questionsJsonString }];
-                 }
+            totalQuestions = questionsArray.length;
+            console.log(`Total questions loaded: ${totalQuestions}`);
 
-                totalQuestions = questionsArray.length; // Store the total number of questions
-                console.log(`Total questions loaded: ${totalQuestions}`);
+            const originalIndices = questionsArray.map((_, index) => index);
+            // ... (keep shuffling logic if you have it) ...
+            // for (let i = originalIndices.length - 1; i > 0; i--) { ... }
+            console.log("Shuffled display order (indices):", originalIndices);
+            examDetails.OriginalOrderMap = {};
+            questionsArray.forEach((q, index) => { examDetails.OriginalOrderMap[index] = q; });
 
-                // **Randomize Question Order**
-                 const originalIndices = questionsArray.map((_, index) => index);
-                 for (let i = originalIndices.length - 1; i > 0; i--) {
-                     const j = Math.floor(Math.random() * (i + 1));
-                     [originalIndices[i], originalIndices[j]] = [originalIndices[j], originalIndices[i]];
-                 }
-                 console.log("Shuffled display order (indices):", originalIndices);
 
-                // Store Original Order Map for submission
-                 examDetails.OriginalOrderMap = {};
-                 questionsArray.forEach((q, index) => { examDetails.OriginalOrderMap[index] = q; });
+            originalIndices.forEach((originalIndex, displayIndex) => {
+                const q = questionsArray[originalIndex];
+                const displayQNum = displayIndex + 1;
+                const originalQNum = originalIndex + 1;
+                const questionId = `q-${originalQNum}`;
+                const answerId = `ans-${originalQNum}`;
+                const answerName = `ans-${originalQNum}`;
 
-                // **Display questions in the shuffled order**
-                originalIndices.forEach((originalIndex, displayIndex) => {
-                    const q = questionsArray[originalIndex];
-                    const displayQNum = displayIndex + 1;
-                    const originalQNum = originalIndex + 1;
-                    const questionId = `q-${originalQNum}`; // Unique ID for the question container div
-                    const answerId = `ans-${originalQNum}`;
-                    const answerName = `ans-${originalQNum}`;
+                const questionDiv = document.createElement('div');
+                questionDiv.className = 'question form-group';
+                questionDiv.id = questionId;
+                questionDiv.dataset.originalIndex = originalIndex;
 
-                    const questionDiv = document.createElement('div');
-                    questionDiv.className = 'question form-group'; // Add 'form-group' if needed for styling
-                    questionDiv.id = questionId;
-                    questionDiv.dataset.originalIndex = originalIndex;
+                // --- Process Prompt Text ---
+                // 1. Get the raw prompt text
+                let promptText = q.prompt || `Question ${displayQNum}`;
+                // 2. Escape HTML characters to prevent XSS if prompt contains HTML
+                promptText = escapeHtml(promptText);
+                // 3. Replace newline characters (\n) with HTML line breaks (<br>)
+                promptText = promptText.replace(/\n/g, '<br>');
+                // --- End Process Prompt Text ---
 
-                    let inputHtml = '';
-                    const promptText = q.prompt || `Question ${displayQNum}`;
-                    let questionContentHtml = '<div class="question-content">';
+                let questionContentHtml = '<div class="question-content">';
+                let labelClass = ''; // Class for the label element
+                let labelTag = 'label'; // Use label by default
 
-                    switch (q.type) {
-                        case 'short_answer':
-                            questionContentHtml += `<input type="text" id="${answerId}" name="${answerName}" class="form-control" placeholder="Enter your answer">`;
-                            break;
-                        case 'long_answer':
-                            questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${q.content || ''}</textarea>`;
-                            break;
-                        case 'code':
-                            const langHint = q.language ? `(${q.language})` : '';
-                            questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="8" placeholder="Enter your code here ${langHint}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`;
-                            // Generic note about length limits
-                            questionContentHtml += `<small class="length-limit-note">Note: Very long code submissions might have length limitations.</small>`;
-                            break;
-                        case 'attachment':
-                             const allowedTypes = q.allowed_types || []; const acceptAttr = allowedTypes.join(',');
-                             const maxSizeMB = q.max_size_mb; const maxBytes = maxSizeMB ? maxSizeMB * 1024 * 1024 : null;
-                             questionContentHtml += `<input type="file" id="${answerId}" name="${answerName}" class="form-control" accept="${acceptAttr}" ${maxBytes ? `data-max-size="${maxBytes}"` : ''} data-allowed-types='${JSON.stringify(allowedTypes)}'> <small class="file-helper-text">Allowed: ${acceptAttr || 'any'}${maxSizeMB ? `, Max: ${maxSizeMB}MB` : ''}</small>`;
-                             setTimeout(() => addAttachmentValidation(answerId), 0); // Add validation after element is in DOM
-                             break;
-case 'multiple_select':
-    questionContentHtml += `<div class="checkbox-group" id="${answerId}">`;
-    if (Array.isArray(q.options)) {
-        q.options.forEach((option, optIndex) => {
-            const optionId = `${answerId}-opt${optIndex}`;
-            questionContentHtml += `
-                <div class="checkbox-item">
-                    <input type="radio" id="${optionId}" name="${answerName}" value="${option}" class="form-control-checkbox">
-                    <label for="${optionId}">${option}</label>
-                </div>`;
-        });
-    }
-    questionContentHtml += `</div>`;
-    break;
-                        default:
-                             questionContentHtml += `<p style="color:red;">Unsupported type: ${q.type}</p><p>${q.content || ''}</p>`;
-                    }
-                    questionContentHtml += '</div>'; // End question-content
+                // Check if it's a code question for special formatting
+                if (q.type === 'code') {
+                    labelClass = 'code-prompt'; // Add class for styling
+                    // For code prompts, using a <div> might be better than <label>
+                    // as the content isn't directly labeling a single input.
+                    // labelTag = 'div'; // Optional: Use a div instead of label
+                }
 
-                    // Add Confirm/Edit Buttons
-                    const actionsHtml = `<div class="question-actions">
-                                          <button type="button" class="btn-confirm btn-orange btn-sm" onclick="confirmAnswer('${questionId}')"><i class="fas fa-check"></i> Confirm</button>
-                                          <button type="button" class="btn-edit btn-grey btn-sm" onclick="editAnswer('${questionId}')"><i class="fas fa-pencil-alt"></i> Edit</button>
-                                       </div>`;
+                // Generate input HTML based on type
+                switch (q.type) {
+                    case 'short_answer':
+                        questionContentHtml += `<input type="text" id="${answerId}" name="${answerName}" class="form-control" placeholder="Enter your answer">`;
+                        break;
+                    case 'long_answer':
+                        questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${q.content || ''}</textarea>`;
+                        break;
+                    case 'code':
+                        const langHint = q.language ? `(${q.language})` : '';
+                        // Apply monospace font styling directly to textarea as well
+                        questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="8" placeholder="Enter your code here ${langHint}" style="font-family: monospace; white-space: pre; overflow-wrap: normal; overflow-x: scroll;"></textarea>`;
+                        questionContentHtml += `<small class="length-limit-note">Note: Very long code submissions might have length limitations.</small>`;
+                        break;
+                    case 'attachment':
+                         const allowedTypes = q.allowed_types || []; const acceptAttr = allowedTypes.join(',');
+                         const maxSizeMB = q.max_size_mb; const maxBytes = maxSizeMB ? maxSizeMB * 1024 * 1024 : null;
+                         questionContentHtml += `<input type="file" id="${answerId}" name="${answerName}" class="form-control" accept="${acceptAttr}" ${maxBytes ? `data-max-size="${maxBytes}"` : ''} data-allowed-types='${JSON.stringify(allowedTypes)}'> <small class="file-helper-text">Allowed: ${acceptAttr || 'any'}${maxSizeMB ? `, Max: ${maxSizeMB}MB` : ''}</small>`;
+                         setTimeout(() => addAttachmentValidation(answerId), 0);
+                         break;
+                    case 'multiple_select': // Renders RADIO buttons now
+                         questionContentHtml += `<div class="checkbox-group" id="${answerId}">`;
+                         if (Array.isArray(q.options)) {
+                             q.options.forEach((option, optIndex) => {
+                                 const optionId = `${answerId}-opt${optIndex}`;
+                                 questionContentHtml += `<div class="checkbox-item"><input type="radio" id="${optionId}" name="${answerName}" value="${escapeHtml(option)}" class="form-control-checkbox"><label for="${optionId}">${escapeHtml(option)}</label></div>`; // Use escapeHtml on option text
+                             });
+                         } else { questionContentHtml += `<p style="color:red;">Error: Options missing.</p>`; }
+                         questionContentHtml += `</div>`;
+                         break;
+                    default:
+                         questionContentHtml += `<p style="color:red;">Unsupported type: ${q.type}</p><p>${escapeHtml(q.content || '')}</p>`;
+                }
+                questionContentHtml += '</div>'; // End question-content
 
-                    // Assemble the full question block
-                    // Ensure the prompt label targets the primary input ID where appropriate
-                    const labelTargetId = (q.type === 'multiple_select' || q.type === 'attachment') ? questionId : answerId; // Target group or main input
-                    questionDiv.innerHTML = `<label for="${labelTargetId}">${promptText}</label>${questionContentHtml}${actionsHtml}`;
+                // Add Confirm/Edit Buttons
+                const actionsHtml = `<div class="question-actions"> <button type="button" class="btn-confirm btn-orange btn-sm" onclick="confirmAnswer('${questionId}')"><i class="fas fa-check"></i> Confirm</button> <button type="button" class="btn-edit btn-grey btn-sm" onclick="editAnswer('${questionId}')"><i class="fas fa-pencil-alt"></i> Edit</button> </div>`;
 
-                    examQuestionsArea.appendChild(questionDiv);
-                });
+                // Assemble the full question block, using processed promptText and adding class if needed
+                const labelTargetId = (q.type === 'multiple_select' || q.type === 'attachment') ? answerId : answerId; // Target main input/group
+                // Use the labelTag variable decided earlier
+                questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
 
-            } catch (e) {
-                console.error("Error processing or displaying questions:", e);
-                examQuestionsArea.innerHTML = `<p style="color:red;">Error loading questions: ${e.message}.</p>`;
-                showImprovedNotification('error', 'Question Display Error', `Could not display questions: ${e.message}`);
-                if (submitExamBtn) submitExamBtn.disabled = true;
-                totalQuestions = 0; // Ensure count is 0 on error
-            }
-            checkAllConfirmed(); // Initial check after displaying questions or on error
+                examQuestionsArea.appendChild(questionDiv);
+            });
+
+        } catch (e) {
+            console.error("Error processing or displaying questions:", e);
+            examQuestionsArea.innerHTML = `<p style="color:red;">Error loading questions: ${e.message}.</p>`;
+            showImprovedNotification('error', 'Question Display Error', `Could not display questions: ${e.message}`);
+            if (submitExamBtn) submitExamBtn.disabled = true;
+            totalQuestions = 0;
         }
+        checkAllConfirmed();
+    }
+
+    // Utility function to escape HTML (Important if prompts/options could contain < > &)
+    // Make sure you have this function defined in your script, or add it:
+    function escapeHtml(unsafe) {
+        if (typeof unsafe !== 'string') return unsafe;
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+     }
 
 
          // Confirms an answer (Keep as is)
