@@ -115,7 +115,57 @@
         @media (max-width: 768px) { /* Keep previous responsive */
              .container { padding: 15px; } .app-header { flex-direction: column; align-items: flex-start; gap: 15px; padding: 20px; } h1 { font-size: 1.6em; } .sync-auth-container { justify-content: center; } .module-content { padding: 20px; } table.data-table { font-size: 0.85em; } table.data-table th, table.data-table td { padding: 8px 10px; } .formatted-content { max-height: 200px; font-size: 0.9em; } .in-page-notifications { width: 95%; bottom: 10px; right: 50%; transform: translateX(50%); } button { padding: 8px 18px; font-size: 0.85em; } .dialog { max-width: 95%; padding: 20px; }
              #questions-builder { max-height: 250px; }
-        }
+		}
+		    .question-grading-card {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+        background-color: #f9f9f9;
+    }
+    .question-grading-card.correct {
+        border-left: 4px solid var(--success-color);
+    }
+    .question-grading-card.incorrect {
+        border-left: 4px solid var(--danger-color);
+    }
+    .question-grading-card.partial {
+        border-left: 4px solid var(--warning-color);
+    }
+    .question-grading-card.ungraded {
+        border-left: 4px solid #999;
+    }
+    .question-prompt {
+        font-weight: 500;
+        margin-bottom: 10px;
+    }
+    .student-answer, .correct-answer {
+        padding: 10px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+    }
+    .student-answer {
+        background-color: #f0f0f0;
+        border: 1px solid #ddd;
+    }
+    .correct-answer {
+        background-color: rgba(67, 160, 71, 0.1);
+        border: 1px solid rgba(67, 160, 71, 0.2);
+    }
+    .question-points {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 10px;
+    }
+    .auto-graded-label {
+        background-color: var(--info-color);
+        color: white;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.8em;
+        margin-left: 10px;
+    }
     </style>
 </head>
 <body class="content-hidden">
@@ -184,6 +234,44 @@
                     </div>
                 </form>
             </div>
+			<div id="grading-dialog-backdrop" class="dialog-backdrop">
+    <div id="grading-dialog" class="dialog">
+        <h3 id="grading-dialog-title" class="dialog-title">Grade Submission</h3>
+        <div id="grading-student-info" class="form-group">
+            <p><strong>Student:</strong> <span id="grading-student-name"></span></p>
+            <p><strong>Email:</strong> <span id="grading-student-email"></span></p>
+            <p><strong>Exam:</strong> <span id="grading-exam-name"></span> (<span id="grading-exam-pin"></span>)</p>
+            <p><strong>Submitted:</strong> <span id="grading-timestamp"></span></p>
+        </div>
+        
+        <div class="form-group">
+            <label><strong>Total Score:</strong></label>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <input type="number" id="grading-total-score" class="form-control" style="width: 80px;" min="0"> / 
+                <span id="grading-max-score">0</span> points
+                (<span id="grading-percentage">0%</span>)
+            </div>
+        </div>
+        
+        <div id="grading-questions-container" style="max-height: 400px; overflow-y: auto; margin: 20px 0; border: 1px solid #eee; border-radius: 8px; padding: 15px;">
+            <!-- Questions will be inserted here dynamically -->
+            <p style="text-align: center; color: #777;">Loading questions and answers...</p>
+        </div>
+        
+        <div class="form-group">
+            <label for="grading-feedback">Feedback to Student:</label>
+            <textarea id="grading-feedback" class="form-control" rows="3" placeholder="Add feedback for the student..."></textarea>
+        </div>
+        
+        <div class="dialog-actions">
+            <button type="button" id="cancel-grading-dialog-btn" class="btn-secondary">Cancel</button>
+            <button type="button" id="run-autograder-btn" class="btn-info">
+                <i class="fas fa-magic"></i> Run Autograder
+            </button>
+            <button type="button" id="save-grading-dialog-btn" class="btn-success">Save Grades</button>
+        </div>
+    </div>
+</div>
         </div>
 
         <div id="in-page-notification-area" class="in-page-notifications"></div>
@@ -245,6 +333,12 @@
         const examModeInput = document.getElementById('exam-mode');
         const questionsBuilderDiv = document.getElementById('questions-builder'); // Container for dynamic questions
         const addQuestionBtn = document.getElementById('add-question-btn'); // Button to add a question block
+		
+		// Global variables for grading
+		let currentGradingData = null;
+		let currentExamQuestions = null;
+		let currentSubmissionAnswers = null;
+		let currentGradeSheetRow = null;
 
 
         // === Initialisation ===
@@ -280,6 +374,22 @@
         async function fetchUserInfo() { if (!gapi.client?.getToken()?.access_token) { currentUser = null; return; } console.log('Fetching user info...'); try { const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}` } }); if (!response.ok) { if (response.status === 401) { handleAdminSignoutLogic(); return; } throw new Error(`(${response.status}) ${await response.text()}`); } const ui = await response.json(); currentUser = { id: ui.sub, name: ui.name || 'N/A', email: ui.email || 'N/A', picture: ui.picture || '' }; console.log('User fetched:', currentUser.email); } catch (e) { console.error('Fetch user info error:', e); showImprovedNotification('error', 'User Info Error', `Could not get user details: ${e.message}.`); currentUser = null; } }
         function handleAdminSignoutClick() { handleAdminSignoutLogic(); showImprovedNotification('info', 'Signed Out', 'You have been signed out.'); }
         function handleAdminSignoutLogic() { const token = gapi.client.getToken(); if (token?.access_token) { try { google.accounts.oauth2.revoke(token.access_token, () => console.log('Admin token revoked.')); } catch (e) { console.warn("Token revoke error:", e); } gapi.client.setToken(''); } localStorage.removeItem('gapi_admin_token'); isSignedIn = false; isAdminAllowed = false; currentUser = null; updateAdminAuthUI(); clearTableData(); }
+
+// Add event listeners for grading buttons
+function setupGradingEventListeners() {
+    attemptsTableBody?.addEventListener('click', handleAttemptsTableActions);
+    document.getElementById('cancel-grading-dialog-btn')?.addEventListener('click', closeGradingDialog);
+    document.getElementById('run-autograder-btn')?.addEventListener('click', runAutograder);
+    document.getElementById('save-grading-dialog-btn')?.addEventListener('click', saveGrades);
+    document.getElementById('grading-total-score')?.addEventListener('input', updateGradePercentage);
+
+    // Add this to setupEventListeners()
+    document.getElementById('grading-dialog-backdrop')?.addEventListener('click', (e) => {
+        if (e.target === document.getElementById('grading-dialog-backdrop')) closeGradingDialog();
+    });
+}
+
+
 
         // === UI State === (No changes)
         function updateAdminAuthUI() { console.log('Updating Admin Auth UI - SignedIn:', isSignedIn, 'IsAdmin:', isAdminAllowed); if (isSignedIn) { userContainer.style.display = 'flex'; loginContainer.style.display = 'none'; if (userName) userName.textContent = currentUser?.name || 'User'; if (userAvatar) userAvatar.src = currentUser?.picture || ''; if (isAdminAllowed) { signinPromptModule.style.display = 'none'; accessDeniedModule.style.display = 'none'; adminDashboardModule.style.display = 'block'; adminHeader.style.display = 'flex'; refreshExamsBtn.disabled = !isOnline; refreshAttemptsBtn.disabled = !isOnline; addExamBtn.disabled = !isOnline; } else { signinPromptModule.style.display = 'none'; adminDashboardModule.style.display = 'none'; adminHeader.style.display = 'none'; accessDeniedModule.style.display = 'block'; if (deniedUserEmail) deniedUserEmail.textContent = currentUser?.email || 'Unknown User'; } } else { userContainer.style.display = 'none'; loginContainer.style.display = 'block'; signinPromptModule.style.display = 'block'; accessDeniedModule.style.display = 'none'; adminDashboardModule.style.display = 'none'; adminHeader.style.display = 'none'; } }
@@ -336,7 +446,73 @@ function formatQuestionsForDisplay(questionsRaw) {
              return qHtml || '<em>Error or no content.</em>';
         }
         async function loadAttemptsData() { /* Same, added actions */ if (!isAdminAllowed) return; console.log("Loading attempts data..."); attemptsLoading.style.display = 'block'; refreshAttemptsBtn.disabled = true; attemptsTableBody.innerHTML = ''; const data = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_ATTEMPTS_SHEET_NAME}!A:I`); attemptsLoading.style.display = 'none'; refreshAttemptsBtn.disabled = !isOnline; if (data) { populateAttemptsTable(data); resetSortIcon(attemptsTable); } else { attemptsTableBody.innerHTML = `<tr><td colspan="10">Failed to load attempts data.</td></tr>`; } }
-        function populateAttemptsTable(data) { /* Added actions */ if (!data || data.length <= 1) { attemptsTableBody.innerHTML = `<tr><td colspan="10">No attempts found.</td></tr>`; return; } const rowsHtml = data.slice(1).map((row, index) => { const sheetRowNumber = index + 2; const timestamp=row[0]||''; const email=row[2]||''; const pin=row[3]||''; const answersHtml = formatJsonForDisplay(row[7]); const fingerprintHtml = formatJsonForDisplay(row[8]); return `<tr data-sheet-row="${sheetRowNumber}" data-key="${escapeHtml(timestamp)}-${escapeHtml(email)}-${escapeHtml(pin)}"><td>${escapeHtml(timestamp)}</td><td>${escapeHtml(row[1]||'')}</td><td>${escapeHtml(email)}</td><td>${escapeHtml(pin)}</td><td>${escapeHtml(row[4]||'')}</td><td>${escapeHtml(row[5]||'')}</td><td>${escapeHtml(row[6]||'')}</td><td><div class="formatted-content">${answersHtml}</div></td><td><div class="formatted-content">${fingerprintHtml}</div></td><td class="actions-cell"><button class="btn-sm btn-danger delete-attempt-btn" title="Delete Attempt"><i class="fas fa-trash"></i></button></td></tr>`; }).join(''); attemptsTableBody.innerHTML = rowsHtml; }
+function populateAttemptsTable(data) {
+    if (!data || data.length <= 1) {
+        attemptsTableBody.innerHTML = `<tr><td colspan="11">No attempts found.</td></tr>`;
+        return;
+    }
+    
+    const rowsHtml = data.slice(1).map((row, index) => {
+        const sheetRowNumber = index + 2;
+        const timestamp = row[0] || '';
+        const email = row[2] || '';
+        const pin = row[3] || '';
+        const status = row[6] || '';
+        const answersHtml = formatJsonForDisplay(row[7]);
+        const fingerprintHtml = formatJsonForDisplay(row[8]);
+        
+        // Check if grades are available (assuming column J, index 9)
+        const gradesJson = row[9] || '';
+        let gradesInfo = '';
+        
+        if (gradesJson) {
+            try {
+                const grades = JSON.parse(gradesJson);
+                gradesInfo = `
+                    <div style="background-color: #f8f9fa; padding: 8px; border-radius: 4px; margin-top: 5px;">
+                        <strong>Score:</strong> ${grades.totalScore}/${grades.maxScore} (${grades.percentage})<br>
+                        <strong>Graded by:</strong> ${grades.gradedBy}<br>
+                        <strong>Date:</strong> ${new Date(grades.gradedAt).toLocaleString()}
+                    </div>
+                `;
+            } catch (e) {
+                console.warn("Error parsing grades JSON:", e);
+                gradesInfo = `<div style="color:red;">Error parsing grade data</div>`;
+            }
+        }
+        
+        // Add visual indicator for status
+        let statusBadge = '';
+        if (status.toLowerCase() === 'submit') {
+            statusBadge = `<span style="background-color: var(--info-color); color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">Submitted</span>`;
+        } else if (status.toLowerCase() === 'graded') {
+            statusBadge = `<span style="background-color: var(--success-color); color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">Graded</span>`;
+        }
+        
+        return `<tr data-sheet-row="${sheetRowNumber}" data-key="${escapeHtml(timestamp)}-${escapeHtml(email)}-${escapeHtml(pin)}">
+            <td>${escapeHtml(timestamp)}</td>
+            <td>${escapeHtml(row[1]||'')}</td>
+            <td>${escapeHtml(email)}</td>
+            <td>${escapeHtml(pin)}</td>
+            <td>${escapeHtml(row[4]||'')}</td>
+            <td>${escapeHtml(row[5]||'')}</td>
+            <td>${statusBadge || escapeHtml(status)}</td>
+            <td><div class="formatted-content">${answersHtml}</div></td>
+            <td><div class="formatted-content">${fingerprintHtml}</div></td>
+            <td><div class="formatted-content">${gradesInfo}</div></td>
+            <td class="actions-cell">
+                <button class="btn-sm btn-secondary grade-attempt-btn" title="Grade Submission">
+                    <i class="${status.toLowerCase() === 'graded' ? 'fas fa-edit' : 'fas fa-check-square'}"></i>
+                </button>
+                <button class="btn-sm btn-danger delete-attempt-btn" title="Delete Attempt">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+    
+    attemptsTableBody.innerHTML = rowsHtml;
+}
 
         // === UI Updates === (No changes)
         function updateOnlineStatus() { isOnline = navigator.onLine; console.log('Admin Connection:', isOnline ? 'Online' : 'Offline'); if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Functionality disabled.', 5000); } const buttonsDisabled = !isOnline || !isAdminAllowed; refreshExamsBtn.disabled = buttonsDisabled; refreshAttemptsBtn.disabled = buttonsDisabled; addExamBtn.disabled = buttonsDisabled; }
@@ -618,10 +794,496 @@ async function handleSaveExam(event) {
 
         // === Action Button Handlers & Placeholders ===
         function handleExamsTableActions(event) { /* Same */ const target = event.target.closest('button'); if (!target) return; const row = target.closest('tr'); if (!row) return; const sheetRow = row.dataset.sheetRow; const pin = row.dataset.pin; if (target.classList.contains('edit-exam-btn')) { editExamPlaceholder(pin, sheetRow); } else if (target.classList.contains('delete-exam-btn')) { deleteExamPlaceholder(pin, sheetRow); } }
-        function handleAttemptsTableActions(event) { /* Same */ const target = event.target.closest('button'); if (!target) return; const row = target.closest('tr'); if (!row) return; const sheetRow = row.dataset.sheetRow; const key = row.dataset.key; if (target.classList.contains('delete-attempt-btn')) { deleteAttemptPlaceholder(key, sheetRow); } }
+        function handleAttemptsTableActions(event) {
+    const target = event.target.closest('button');
+    if (!target) return;
+    
+    const row = target.closest('tr');
+    if (!row) return;
+    
+    const sheetRow = row.dataset.sheetRow;
+    const key = row.dataset.key;
+    
+    if (target.classList.contains('delete-attempt-btn')) {
+        deleteAttemptPlaceholder(key, sheetRow);
+    } else if (target.classList.contains('grade-attempt-btn')) {
+        openGradingDialog(row, sheetRow);
+    }
+}
+
+// Function to open the grading dialog
+async function openGradingDialog(row, sheetRow) {
+    if (!isAdminAllowed) return;
+    console.log(`Opening grading dialog for row ${sheetRow}`);
+    
+    currentGradeSheetRow = sheetRow;
+    
+    // Get the cells from the row
+    const timestamp = row.cells[0].textContent;
+    const studentName = row.cells[1].textContent;
+    const studentEmail = row.cells[2].textContent;
+    const examPin = row.cells[3].textContent;
+    const courseCode = row.cells[4].textContent;
+    
+    // Populate student info in the dialog
+    document.getElementById('grading-student-name').textContent = studentName;
+    document.getElementById('grading-student-email').textContent = studentEmail;
+    document.getElementById('grading-exam-pin').textContent = examPin;
+    document.getElementById('grading-timestamp').textContent = timestamp;
+    
+    // Fetch the exam details to get questions and correct answers
+    await fetchExamDetailsForGrading(examPin);
+    
+    // Parse the student's answers from the answers column
+    const answersCell = row.cells[7].querySelector('.formatted-content');
+    const answersText = answersCell.textContent;
+    parseStudentAnswers(answersText);
+    
+    // Populate the questions container
+    populateGradingQuestions();
+    
+    // Show the dialog
+    document.getElementById('grading-dialog-backdrop').classList.add('visible');
+}
+
+// Function to close the grading dialog
+function closeGradingDialog() {
+    document.getElementById('grading-dialog-backdrop').classList.remove('visible');
+    
+    // Clear the state
+    currentGradingData = null;
+    currentExamQuestions = null;
+    currentSubmissionAnswers = null;
+    currentGradeSheetRow = null;
+    
+    // Clear the form
+    document.getElementById('grading-questions-container').innerHTML = 
+        '<p style="text-align: center; color: #777;">Loading questions and answers...</p>';
+    document.getElementById('grading-feedback').value = '';
+    document.getElementById('grading-total-score').value = '';
+}
+
+// Function to fetch exam details for grading
+async function fetchExamDetailsForGrading(pin) {
+    console.log(`Fetching exam details for PIN: ${pin}`);
+    
+    // Start loading indicator
+    document.getElementById('grading-questions-container').innerHTML = 
+        '<p style="text-align: center;"><i class="fas fa-spinner fa-spin"></i> Loading exam details...</p>';
+    
+    // Fetch exam data from the Exams sheet
+    const examData = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_DETAILS_SHEET_NAME}!A:H`);
+    
+    if (!examData || examData.length <= 1) {
+        document.getElementById('grading-questions-container').innerHTML = 
+            '<p style="text-align: center; color: red;">Error: Could not load exam details.</p>';
+        return;
+    }
+    
+    // Find the exam with the matching PIN
+    let examDetails = null;
+    for (let i = 1; i < examData.length; i++) {
+        const row = examData[i];
+        if (row[0] === pin) {
+            examDetails = {
+                PIN: row[0],
+                Code: row[1],
+                Name: row[2],
+                Duration: row[3],
+                StartDate: row[4],
+                StartTime: row[5],
+                Mode: row[6],
+                Questions: row[7]
+            };
+            break;
+        }
+    }
+    
+    if (!examDetails) {
+        document.getElementById('grading-questions-container').innerHTML = 
+            `<p style="text-align: center; color: red;">Error: Could not find exam with PIN: ${pin}</p>`;
+        return;
+    }
+    
+    // Set the exam name in the dialog
+    document.getElementById('grading-exam-name').textContent = examDetails.Name;
+    
+    // Parse the questions JSON
+    try {
+        currentExamQuestions = JSON.parse(examDetails.Questions);
+        const totalPoints = calculateTotalPoints(currentExamQuestions);
+        document.getElementById('grading-max-score').textContent = totalPoints;
+    } catch (e) {
+        console.error("Error parsing exam questions:", e);
+        document.getElementById('grading-questions-container').innerHTML = 
+            `<p style="text-align: center; color: red;">Error parsing questions: ${e.message}</p>`;
+        currentExamQuestions = [];
+    }
+    
+    // Store the complete data for reference
+    currentGradingData = examDetails;
+}
+
+// Function to parse student answers from a JSON string
+function parseStudentAnswers(answersText) {
+    try {
+        // Try to parse JSON directly from the content
+        const jsonStart = answersText.indexOf('{');
+        const jsonEnd = answersText.lastIndexOf('}') + 1;
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+            const jsonStr = answersText.substring(jsonStart, jsonEnd);
+            currentSubmissionAnswers = JSON.parse(jsonStr);
+        } else {
+            // If not valid JSON format, try to extract key-value pairs
+            currentSubmissionAnswers = {};
+            const lines = answersText.split('\n');
+            for (const line of lines) {
+                const match = line.match(/([^:]+):\s*(.+)/);
+                if (match && match.length >= 3) {
+                    const key = match[1].trim();
+                    const value = match[2].trim();
+                    currentSubmissionAnswers[key] = value;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Error parsing student answers:", e);
+        currentSubmissionAnswers = {};
+        document.getElementById('grading-questions-container').innerHTML = 
+            `<p style="text-align: center; color: red;">Error parsing student answers: ${e.message}</p>`;
+    }
+}
+
+// Function to calculate total possible points for an exam
+function calculateTotalPoints(questions) {
+    // Default each question to 1 point if not specified
+    return questions.length;
+}
+
+// Function to populate the grading questions container
+function populateGradingQuestions() {
+    const container = document.getElementById('grading-questions-container');
+    
+    if (!currentExamQuestions || !currentSubmissionAnswers) {
+        container.innerHTML = '<p style="text-align: center; color: red;">Error: Missing questions or answers.</p>';
+        return;
+    }
+    
+    let html = '';
+    
+    // Process each question and its corresponding answer
+    currentExamQuestions.forEach((question, index) => {
+        const questionNumber = index + 1;
+        const answerId = `ans-${questionNumber}`;
+        const studentAnswer = currentSubmissionAnswers[answerId] || '';
+        
+        // Determine if this question can be auto-graded
+        const canAutoGrade = question.type === 'multiple_select' && question.correct_answers;
+        
+        // Create the question card
+        html += `
+            <div class="question-grading-card ungraded" id="grading-q-${questionNumber}" data-question-index="${index}">
+                <div class="question-prompt">Question ${questionNumber}: ${escapeHtml(question.prompt)}</div>
+                
+                <div class="student-answer">
+                    <strong>Student Answer:</strong>
+                    <div>${formatStudentAnswer(studentAnswer, question.type)}</div>
+                </div>
+                
+                ${canAutoGrade ? `
+                <div class="correct-answer">
+                    <strong>Correct Answer:</strong>
+                    <div>${formatCorrectAnswer(question)}</div>
+                </div>
+                ` : ''}
+                
+                <div class="question-points">
+                    <div>
+                        <label>Points: <input type="number" class="form-control" style="width: 60px; display: inline-block;" 
+                            id="points-q-${questionNumber}" min="0" max="1" value="0" step="0.5"></label>
+                        <span>/ 1</span>
+                        ${canAutoGrade ? '<span class="auto-graded-label">Auto-gradable</span>' : ''}
+                    </div>
+                    <div>
+                        <button type="button" class="btn-sm btn-success" onclick="markCorrect(${questionNumber})">
+                            <i class="fas fa-check"></i> Correct
+                        </button>
+                        <button type="button" class="btn-sm btn-danger" onclick="markIncorrect(${questionNumber})">
+                            <i class="fas fa-times"></i> Incorrect
+                        </button>
+                        ${canAutoGrade ? `
+                        <button type="button" class="btn-sm btn-info" onclick="autoGradeQuestion(${questionNumber})">
+                            <i class="fas fa-magic"></i> Auto
+                        </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+    
+    // Check if the grade already exists in the submission row
+    // This would require adding a grade column to your attempts data
+    // Implement this if you add grades to your backend
+}
+
+// Function to format student answers based on question type
+function formatStudentAnswer(answer, questionType) {
+    if (!answer || answer === '') return '<em>No answer provided</em>';
+    
+    switch (questionType) {
+        case 'multiple_select':
+            return escapeHtml(answer);
+        case 'code':
+            return `<pre style="background-color: #f5f5f5; padding: 10px; border-radius: 4px;">${escapeHtml(answer)}</pre>`;
+        case 'attachment':
+            if (answer.startsWith('FILE_UPLOADED:')) {
+                const filename = answer.replace('FILE_UPLOADED:', '');
+                return `<em>File uploaded:</em> ${escapeHtml(filename)}`;
+            }
+            return escapeHtml(answer);
+        case 'short_answer':
+        case 'long_answer':
+        default:
+            return escapeHtml(answer).replace(/\n/g, '<br>');
+    }
+}
+
+// Function to format correct answers
+function formatCorrectAnswer(question) {
+    if (question.type === 'multiple_select' && question.correct_answers) {
+        if (Array.isArray(question.correct_answers)) {
+            // If multiple correct answers
+            if (question.correct_answers.length > 1) {
+                return question.correct_answers.map(ans => escapeHtml(ans)).join('<br>');
+            }
+            // Single correct answer
+            return escapeHtml(question.correct_answers[0]);
+        }
+        return 'Error: Invalid correct_answers format';
+    }
+    return '<em>Manual grading required</em>';
+}
+
+// Function to mark a question as correct
+function markCorrect(questionNumber) {
+    const questionCard = document.getElementById(`grading-q-${questionNumber}`);
+    const pointsInput = document.getElementById(`points-q-${questionNumber}`);
+    
+    questionCard.className = 'question-grading-card correct';
+    pointsInput.value = 1;
+    
+    updateTotalScore();
+}
+
+// Function to mark a question as incorrect
+function markIncorrect(questionNumber) {
+    const questionCard = document.getElementById(`grading-q-${questionNumber}`);
+    const pointsInput = document.getElementById(`points-q-${questionNumber}`);
+    
+    questionCard.className = 'question-grading-card incorrect';
+    pointsInput.value = 0;
+    
+    updateTotalScore();
+}
+
+// Function to automatically grade a specific question
+function autoGradeQuestion(questionNumber) {
+    const questionIndex = questionNumber - 1;
+    const question = currentExamQuestions[questionIndex];
+    const answerId = `ans-${questionNumber}`;
+    const studentAnswer = currentSubmissionAnswers[answerId] || '';
+    
+    if (question.type !== 'multiple_select' || !question.correct_answers) {
+        showImprovedNotification('warning', 'Auto-grade Error', 'This question cannot be auto-graded.');
+        return;
+    }
+    
+    const isCorrect = isMultipleChoiceCorrect(studentAnswer, question.correct_answers);
+    
+    if (isCorrect) {
+        markCorrect(questionNumber);
+    } else {
+        markIncorrect(questionNumber);
+    }
+}
+
+// Function to check if a multiple choice answer is correct
+function isMultipleChoiceCorrect(studentAnswer, correctAnswers) {
+    // Handle multiple possible correct answers
+    if (Array.isArray(correctAnswers)) {
+        return correctAnswers.includes(studentAnswer);
+    }
+    // Single correct answer
+    return studentAnswer === correctAnswers;
+}
+
+// Function to run the autograder on all applicable questions
+function runAutograder() {
+    let autoGradedCount = 0;
+    
+    currentExamQuestions.forEach((question, index) => {
+        const questionNumber = index + 1;
+        
+        // Only auto-grade multiple choice questions with correct_answers defined
+        if (question.type === 'multiple_select' && question.correct_answers) {
+            autoGradeQuestion(questionNumber);
+            autoGradedCount++;
+        }
+    });
+    
+    updateTotalScore();
+    
+    showImprovedNotification(
+        'info', 
+        'Auto-grading Complete', 
+        `Auto-graded ${autoGradedCount} multiple-choice questions. Please manually grade the remaining questions.`
+    );
+}
+
+// Function to update the total score
+function updateTotalScore() {
+    const maxScore = parseInt(document.getElementById('grading-max-score').textContent);
+    let totalScore = 0;
+    
+    // Sum all the individual question scores
+    currentExamQuestions.forEach((_, index) => {
+        const questionNumber = index + 1;
+        const pointsInput = document.getElementById(`points-q-${questionNumber}`);
+        if (pointsInput) {
+            totalScore += parseFloat(pointsInput.value) || 0;
+        }
+    });
+    
+    // Update the total score input
+    const totalScoreInput = document.getElementById('grading-total-score');
+    totalScoreInput.value = totalScore.toFixed(1);
+    
+    // Update the percentage
+    updateGradePercentage();
+}
+
+// Function to update the grade percentage display
+function updateGradePercentage() {
+    const totalScore = parseFloat(document.getElementById('grading-total-score').value) || 0;
+    const maxScore = parseInt(document.getElementById('grading-max-score').textContent);
+    
+    if (maxScore > 0) {
+        const percentage = (totalScore / maxScore) * 100;
+        document.getElementById('grading-percentage').textContent = `${percentage.toFixed(1)}%`;
+    } else {
+        document.getElementById('grading-percentage').textContent = '0%';
+    }
+}
+
+// Function to save the grades
+async function saveGrades() {
+    if (!currentGradeSheetRow || !currentGradingData || !currentExamQuestions || !currentSubmissionAnswers) {
+        showImprovedNotification('error', 'Save Error', 'Missing data required for saving grades.');
+        return;
+    }
+    
+    // Disable the save button during the save operation
+    const saveButton = document.getElementById('save-grading-dialog-btn');
+    saveButton.disabled = true;
+    saveButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+    
+    // Collect the grade data
+    const totalScore = parseFloat(document.getElementById('grading-total-score').value) || 0;
+    const maxScore = parseInt(document.getElementById('grading-max-score').textContent);
+    const percentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
+    const feedback = document.getElementById('grading-feedback').value;
+    
+    // Collect individual question grades
+    const questionGrades = {};
+    currentExamQuestions.forEach((_, index) => {
+        const questionNumber = index + 1;
+        const pointsInput = document.getElementById(`points-q-${questionNumber}`);
+        const questionCard = document.getElementById(`grading-q-${questionNumber}`);
+        
+        if (pointsInput && questionCard) {
+            const points = parseFloat(pointsInput.value) || 0;
+            const status = questionCard.classList.contains('correct') ? 'correct' : 
+                          questionCard.classList.contains('incorrect') ? 'incorrect' : 
+                          questionCard.classList.contains('partial') ? 'partial' : 'ungraded';
+            
+            questionGrades[`q-${questionNumber}`] = {
+                points,
+                status
+            };
+        }
+    });
+    
+    // Create the grade object
+    const gradeData = {
+        totalScore,
+        maxScore,
+        percentage: percentage.toFixed(1) + '%',
+        feedback,
+        gradedAt: new Date().toISOString(),
+        gradedBy: currentUser?.email || 'Unknown',
+        questionGrades
+    };
+    
+    // Convert to JSON string for storage
+    const gradeJson = JSON.stringify(gradeData);
+    
+    console.log(`Saving grades for row ${currentGradeSheetRow}:`, gradeData);
+    
+    // Add a "Grades" column to the Attempts sheet if needed
+    // This requires extending your sheet with an extra column
+    
+    // For illustration, we'll use column J (index 9) as the Grades column
+    const range = `${EXAM_ATTEMPTS_SHEET_NAME}!J${currentGradeSheetRow}`;
+    
+    try {
+        // Use gapi.client.sheets.spreadsheets.values.update to save the grade
+        await gapi.client.sheets.spreadsheets.values.update({
+            spreadsheetId: EXAM_SPREADSHEET_ID,
+            range: range,
+            valueInputOption: 'RAW',
+            resource: {
+                values: [[gradeJson]]
+            }
+        });
+        
+        showImprovedNotification('success', 'Grades Saved', 'The grades have been successfully saved.');
+        
+        // Update the status column (assuming column G, index 6, is the Status column)
+        const statusRange = `${EXAM_ATTEMPTS_SHEET_NAME}!G${currentGradeSheetRow}`;
+        await gapi.client.sheets.spreadsheets.values.update({
+            spreadsheetId: EXAM_SPREADSHEET_ID,
+            range: statusRange,
+            valueInputOption: 'RAW',
+            resource: {
+                values: [['graded']]
+            }
+        });
+        
+        // Close the dialog and refresh the attempts data
+        closeGradingDialog();
+        loadAttemptsData();
+        
+    } catch (error) {
+        console.error('Error saving grades:', error);
+        showImprovedNotification('error', 'Save Failed', `Could not save grades: ${error.message}`);
+    } finally {
+        // Re-enable the save button
+        saveButton.disabled = false;
+        saveButton.innerHTML = 'Save Grades';
+    }
+}
+
         function editExamPlaceholder(pin, sheetRow) { /* Same */ if (!isAdminAllowed) return; console.log(`EDIT action triggered for PIN: ${pin}, Sheet Row: ${sheetRow}`); alert(`Editing for PIN ${pin} (Row ${sheetRow}) is not implemented yet.\n\nYou would fetch row ${sheetRow} data, parse questions JSON, populate the modal (incl. builder), and use Sheets API 'update'.`); }
         function deleteExamPlaceholder(pin, sheetRow) { /* Same */ if (!isAdminAllowed) return; console.log(`DELETE action triggered for PIN: ${pin}, Sheet Row: ${sheetRow}`); if (confirm(`Are you sure you want to delete Exam with PIN: ${pin} (Row ${sheetRow})?\n\nThis requires complex API calls not yet implemented.`)) { alert(`Deletion for PIN ${pin} (Row ${sheetRow}) is not implemented.\n\nYou would use Sheets API 'batchUpdate' or 'clear'.`); } }
         function deleteAttemptPlaceholder(key, sheetRow) { /* Same */ if (!isAdminAllowed) return; console.log(`DELETE action triggered for Attempt: ${key}, Sheet Row: ${sheetRow}`); if (confirm(`Are you sure you want to delete this attempt (Row ${sheetRow})?\n\nThis requires complex API calls not yet implemented.`)) { alert(`Deletion for attempt ${key} (Row ${sheetRow}) is not implemented.\n\nYou would use Sheets API 'batchUpdate' or 'clear'.`); } }
+		
+		// Initialize grading event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    setupGradingEventListeners();
+});
 
     </script>
 
