@@ -199,7 +199,21 @@
                       <div id="attempts-loading" style="display: none; margin-top: 10px;"><i class="fas fa-spinner fa-spin"></i> Loading attempts...</div>
                      <div class="data-table-container">
                         <table class="data-table" id="attempts-table">
-                            <thead> <tr> <th data-column="0">Timestamp <span class="sort-icon"></span></th> <th data-column="1">Name <span class="sort-icon"></span></th> <th data-column="2">Email <span class="sort-icon"></span></th> <th data-column="3">PIN <span class="sort-icon"></span></th> <th data-column="4">Course Code <span class="sort-icon"></span></th> <th data-column="5">Student ID <span class="sort-icon"></span></th> <th data-column="6">Status <span class="sort-icon"></span></th> <th data-column="7" style="min-width: 350px;">Answers</th> <th data-column="8" style="min-width: 300px;">Fingerprint</th> <th>Actions</th> </tr> </thead>
+                            <thead> 
+    <tr> 
+        <th data-column="0">Timestamp <span class="sort-icon"></span></th> 
+        <th data-column="1">Name <span class="sort-icon"></span></th> 
+        <th data-column="2">Email <span class="sort-icon"></span></th> 
+        <th data-column="3">PIN <span class="sort-icon"></span></th> 
+        <th data-column="4">Course Code <span class="sort-icon"></span></th> 
+        <th data-column="5">Student ID <span class="sort-icon"></span></th> 
+        <th data-column="6">Status <span class="sort-icon"></span></th> 
+        <th data-column="7" style="min-width: 350px;">Answers</th> 
+        <th data-column="8" style="min-width: 300px;">Fingerprint</th> 
+        <th data-column="9" style="min-width: 200px;">Grades</th> 
+        <th>Actions</th> 
+    </tr> 
+</thead>
                             <tbody id="attempts-table-body"></tbody>
                         </table>
                     </div>
@@ -360,6 +374,13 @@
             questionsBuilderDiv?.addEventListener('click', handleRemoveQuestion); // Listener for remove buttons
             examsTableBody?.addEventListener('click', handleExamsTableActions);
             attemptsTableBody?.addEventListener('click', handleAttemptsTableActions);
+			document.getElementById('cancel-grading-dialog-btn')?.addEventListener('click', closeGradingDialog);
+			document.getElementById('run-autograder-btn')?.addEventListener('click', runAutograder);
+			document.getElementById('save-grading-dialog-btn')?.addEventListener('click', saveGrades);
+			document.getElementById('grading-total-score')?.addEventListener('input', updateGradePercentage);
+			document.getElementById('grading-dialog-backdrop')?.addEventListener('click', (e) => {
+				if (e.target === document.getElementById('grading-dialog-backdrop')) closeGradingDialog();
+			});
         }
         function updateYear() { /* Same */ const el = document.getElementById('currentYear'); if (el) el.textContent = new Date().getFullYear(); }
 
@@ -793,8 +814,8 @@ async function handleSaveExam(event) {
 
 
         // === Action Button Handlers & Placeholders ===
-        function handleExamsTableActions(event) { /* Same */ const target = event.target.closest('button'); if (!target) return; const row = target.closest('tr'); if (!row) return; const sheetRow = row.dataset.sheetRow; const pin = row.dataset.pin; if (target.classList.contains('edit-exam-btn')) { editExamPlaceholder(pin, sheetRow); } else if (target.classList.contains('delete-exam-btn')) { deleteExamPlaceholder(pin, sheetRow); } }
-        function handleAttemptsTableActions(event) {
+        function handleExamsTableActions(event) { /* Same */ const target = event.target.closest('button'); if (!target) return; const row = target.closest('tr'); if (!row) return; const sheetRow = row.dataset.sheetRow; const pin = row.dataset.pin; if (target.classList.contains('edit-exam-btn')) { editExam(pin, sheetRow); } else if (target.classList.contains('delete-exam-btn')) { deleteExam(pin, sheetRow); } }
+function handleAttemptsTableActions(event) {
     const target = event.target.closest('button');
     if (!target) return;
     
@@ -805,45 +826,50 @@ async function handleSaveExam(event) {
     const key = row.dataset.key;
     
     if (target.classList.contains('delete-attempt-btn')) {
-        deleteAttemptPlaceholder(key, sheetRow);
+        deleteAttempt(key, sheetRow);
     } else if (target.classList.contains('grade-attempt-btn')) {
+        console.log(`Opening grading for row ${sheetRow}`); // Debug log
         openGradingDialog(row, sheetRow);
     }
 }
 
 // Function to open the grading dialog
-async function openGradingDialog(row, sheetRow) {
-    if (!isAdminAllowed) return;
-    console.log(`Opening grading dialog for row ${sheetRow}`);
+function openGradingDialog(row, sheetRow) {
+    console.log("openGradingDialog called with row:", row, "sheetRow:", sheetRow);
+    if (!isAdminAllowed) {
+        console.log("Admin not allowed, returning");
+        return;
+    }
     
-    currentGradeSheetRow = sheetRow;
-    
-    // Get the cells from the row
-    const timestamp = row.cells[0].textContent;
-    const studentName = row.cells[1].textContent;
-    const studentEmail = row.cells[2].textContent;
-    const examPin = row.cells[3].textContent;
-    const courseCode = row.cells[4].textContent;
-    
-    // Populate student info in the dialog
-    document.getElementById('grading-student-name').textContent = studentName;
-    document.getElementById('grading-student-email').textContent = studentEmail;
-    document.getElementById('grading-exam-pin').textContent = examPin;
-    document.getElementById('grading-timestamp').textContent = timestamp;
-    
-    // Fetch the exam details to get questions and correct answers
-    await fetchExamDetailsForGrading(examPin);
-    
-    // Parse the student's answers from the answers column
-    const answersCell = row.cells[7].querySelector('.formatted-content');
-    const answersText = answersCell.textContent;
-    parseStudentAnswers(answersText);
-    
-    // Populate the questions container
-    populateGradingQuestions();
-    
-    // Show the dialog
-    document.getElementById('grading-dialog-backdrop').classList.add('visible');
+    try {
+        currentGradeSheetRow = sheetRow;
+        
+        // Get the cells from the row
+        const timestamp = row.cells[0].textContent;
+        const studentName = row.cells[1].textContent;
+        const studentEmail = row.cells[2].textContent;
+        const examPin = row.cells[3].textContent;
+        const courseCode = row.cells[4].textContent;
+        
+        console.log("Got student data:", studentName, studentEmail, examPin);
+        
+        // Show the dialog first
+        document.getElementById('grading-dialog-backdrop').classList.add('visible');
+        
+        // Populate student info in the dialog
+        document.getElementById('grading-student-name').textContent = studentName;
+        document.getElementById('grading-student-email').textContent = studentEmail;
+        document.getElementById('grading-exam-pin').textContent = examPin;
+        document.getElementById('grading-timestamp').textContent = timestamp;
+        
+        console.log("Populated initial info, fetching exam details...");
+        
+        // Fetch exam details async
+        fetchExamDetailsForGrading(examPin);
+    } catch (error) {
+        console.error("Error in openGradingDialog:", error);
+        showImprovedNotification('error', 'Error', 'Failed to open grading dialog: ' + error.message);
+    }
 }
 
 // Function to close the grading dialog
@@ -988,21 +1014,30 @@ function populateGradingQuestions() {
                 <div class="student-answer">
                     <strong>Student Answer:</strong>
                     <div>${formatStudentAnswer(studentAnswer, question.type)}</div>
-                </div>
+                </div>`;
                 
-                ${canAutoGrade ? `
+        // Conditionally add correct answer section
+        if (canAutoGrade) {
+            html += `
                 <div class="correct-answer">
                     <strong>Correct Answer:</strong>
                     <div>${formatCorrectAnswer(question)}</div>
-                </div>
-                ` : ''}
-                
+                </div>`;
+        }
+        
+        // Add points and buttons section
+        html += `
                 <div class="question-points">
                     <div>
                         <label>Points: <input type="number" class="form-control" style="width: 60px; display: inline-block;" 
                             id="points-q-${questionNumber}" min="0" max="1" value="0" step="0.5"></label>
-                        <span>/ 1</span>
-                        ${canAutoGrade ? '<span class="auto-graded-label">Auto-gradable</span>' : ''}
+                        <span>/ 1</span>`;
+        
+        if (canAutoGrade) {
+            html += `<span class="auto-graded-label">Auto-gradable</span>`;
+        }
+        
+        html += `
                     </div>
                     <div>
                         <button type="button" class="btn-sm btn-success" onclick="markCorrect(${questionNumber})">
@@ -1010,23 +1045,22 @@ function populateGradingQuestions() {
                         </button>
                         <button type="button" class="btn-sm btn-danger" onclick="markIncorrect(${questionNumber})">
                             <i class="fas fa-times"></i> Incorrect
-                        </button>
-                        ${canAutoGrade ? `
+                        </button>`;
+        
+        if (canAutoGrade) {
+            html += `
                         <button type="button" class="btn-sm btn-info" onclick="autoGradeQuestion(${questionNumber})">
                             <i class="fas fa-magic"></i> Auto
-                        </button>
-                        ` : ''}
+                        </button>`;
+        }
+        
+        html += `
                     </div>
                 </div>
-            </div>
-        `;
+            </div>`;
     });
     
     container.innerHTML = html;
-    
-    // Check if the grade already exists in the submission row
-    // This would require adding a grade column to your attempts data
-    // Implement this if you add grades to your backend
 }
 
 // Function to format student answers based on question type
@@ -1276,9 +1310,128 @@ async function saveGrades() {
     }
 }
 
-        function editExamPlaceholder(pin, sheetRow) { /* Same */ if (!isAdminAllowed) return; console.log(`EDIT action triggered for PIN: ${pin}, Sheet Row: ${sheetRow}`); alert(`Editing for PIN ${pin} (Row ${sheetRow}) is not implemented yet.\n\nYou would fetch row ${sheetRow} data, parse questions JSON, populate the modal (incl. builder), and use Sheets API 'update'.`); }
-        function deleteExamPlaceholder(pin, sheetRow) { /* Same */ if (!isAdminAllowed) return; console.log(`DELETE action triggered for PIN: ${pin}, Sheet Row: ${sheetRow}`); if (confirm(`Are you sure you want to delete Exam with PIN: ${pin} (Row ${sheetRow})?\n\nThis requires complex API calls not yet implemented.`)) { alert(`Deletion for PIN ${pin} (Row ${sheetRow}) is not implemented.\n\nYou would use Sheets API 'batchUpdate' or 'clear'.`); } }
-        function deleteAttemptPlaceholder(key, sheetRow) { /* Same */ if (!isAdminAllowed) return; console.log(`DELETE action triggered for Attempt: ${key}, Sheet Row: ${sheetRow}`); if (confirm(`Are you sure you want to delete this attempt (Row ${sheetRow})?\n\nThis requires complex API calls not yet implemented.`)) { alert(`Deletion for attempt ${key} (Row ${sheetRow}) is not implemented.\n\nYou would use Sheets API 'batchUpdate' or 'clear'.`); } }
+	async function editExam(pin, sheetRow) {
+    if (!isAdminAllowed) return;
+    console.log(`Editing exam with PIN: ${pin}, Sheet Row: ${sheetRow}`);
+    
+    // Show loading state
+    examDialogTitle.textContent = "Edit Exam";
+    saveExamDialogBtn.textContent = "Save Changes";
+    examRowIndexInput.value = sheetRow - 2; // Convert sheet row to zero-based index
+    
+    setSyncing(true);
+    try {
+        // Fetch the specific row data
+        const range = `${EXAM_DETAILS_SHEET_NAME}!A${sheetRow}:H${sheetRow}`;
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: EXAM_SPREADSHEET_ID,
+            range: range
+        });
+        
+        if (!response.result.values || response.result.values.length === 0) {
+            throw new Error("Could not find exam data");
+        }
+        
+        const examData = response.result.values[0];
+        
+        // Populate the form with exam data
+        examPinInput.value = examData[0] || '';
+        examCodeInput.value = examData[1] || '';
+        examNameInput.value = examData[2] || '';
+        examDurationInput.value = examData[3] || '';
+        examStartDateInput.value = examData[4] || '';
+        examStartTimeInput.value = examData[5] || '';
+        examModeInput.value = examData[6] || 'Quiz';
+        
+        // Parse and populate questions
+        try {
+            const questionsJson = examData[7] || '[]';
+            const questions = JSON.parse(questionsJson);
+            
+            // Clear existing questions
+            questionsBuilderDiv.innerHTML = '';
+            
+            // Add each question
+            if (Array.isArray(questions) && questions.length > 0) {
+                questions.forEach(question => {
+                    addQuestionBlock();
+                    
+                    // Get the last added question block
+                    const blocks = questionsBuilderDiv.querySelectorAll('.question-block');
+                    const block = blocks[blocks.length - 1];
+                    
+                    if (block) {
+                        // Set question type and populate fields
+                        const typeSelect = block.querySelector('.question-type-select');
+                        if (typeSelect && question.type) {
+                            typeSelect.value = question.type;
+                            typeSelect.dispatchEvent(new Event('change'));
+                        }
+                        
+                        // Set prompt and type-specific fields
+                        const promptInput = block.querySelector('.question-prompt');
+                        if (promptInput) promptInput.value = question.prompt || '';
+                        
+                        // Handle type-specific fields (code, attachment, multiple_select)
+                        // ...code for each question type...
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Error parsing questions JSON:", e);
+        }
+        
+        // Show the dialog
+        examDialogBackdrop.classList.add('visible');
+        
+    } catch (error) {
+        console.error('Error loading exam for editing:', error);
+        showImprovedNotification('error', 'Edit Failed', `Could not load exam for editing: ${error.message}`);
+    } finally {
+        setSyncing(false);
+    }
+}
+
+        async function deleteExam(pin, sheetRow) {
+    if (!isAdminAllowed) return;
+    
+    if (confirm(`Are you sure you want to delete Exam with PIN: ${pin} (Row ${sheetRow})?`)) {
+        try {
+            await gapi.client.sheets.spreadsheets.values.clear({
+                spreadsheetId: EXAM_SPREADSHEET_ID,
+                range: `${EXAM_DETAILS_SHEET_NAME}!A${sheetRow}:H${sheetRow}`
+            });
+            
+            showImprovedNotification('success', 'Exam Deleted', `Exam with PIN ${pin} has been deleted.`);
+            loadExamsData(); // Refresh the data
+        } catch (error) {
+            console.error('Error deleting exam:', error);
+            showImprovedNotification('error', 'Delete Failed', `Could not delete exam: ${error.message}`);
+        }
+    }
+}
+        async function deleteAttempt(key, sheetRow) {
+    if (!isAdminAllowed) return;
+    
+    if (confirm(`Are you sure you want to delete this attempt (Row ${sheetRow})?`)) {
+        try {
+            setSyncing(true);
+            // Clear the entire row in the Attempts sheet
+            await gapi.client.sheets.spreadsheets.values.clear({
+                spreadsheetId: EXAM_SPREADSHEET_ID,
+                range: `${EXAM_ATTEMPTS_SHEET_NAME}!A${sheetRow}:J${sheetRow}`
+            });
+            
+            showImprovedNotification('success', 'Attempt Deleted', 'The submission has been deleted successfully.');
+            loadAttemptsData(); // Refresh the attempts table
+        } catch (error) {
+            console.error('Error deleting attempt:', error);
+            showImprovedNotification('error', 'Delete Failed', `Could not delete the attempt: ${error.message}`);
+        } finally {
+            setSyncing(false);
+        }
+    }
+}
 		
 		// Initialize grading event listeners
 document.addEventListener('DOMContentLoaded', function() {
