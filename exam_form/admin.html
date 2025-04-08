@@ -199,18 +199,18 @@
                       <div id="attempts-loading" style="display: none; margin-top: 10px;"><i class="fas fa-spinner fa-spin"></i> Loading attempts...</div>
                      <div class="data-table-container">
                         <table class="data-table" id="attempts-table">
-                            <thead> 
+<thead> 
     <tr> 
-        <th data-column="0">Timestamp <span class="sort-icon"></span></th> 
-        <th data-column="1">Name <span class="sort-icon"></span></th> 
-        <th data-column="2">Email <span class="sort-icon"></span></th> 
-        <th data-column="3">PIN <span class="sort-icon"></span></th> 
-        <th data-column="4">Course Code <span class="sort-icon"></span></th> 
-        <th data-column="5">Student ID <span class="sort-icon"></span></th> 
-        <th data-column="6">Status <span class="sort-icon"></span></th> 
-        <th data-column="7" style="min-width: 350px;">Answers</th> 
-        <th data-column="8" style="min-width: 300px;">Fingerprint</th> 
-        <th data-column="9" style="min-width: 200px;">Grades</th> 
+        <th data-column="0">Timestamp</th> 
+        <th data-column="1">Name</th> 
+        <th data-column="2">Email</th> 
+        <th data-column="3">PIN</th> 
+        <th data-column="4">Course</th> 
+        <th data-column="5">Student ID</th> 
+        <th data-column="6">Status</th> 
+        <th>Answers</th> 
+        <th>Fingerprint</th> 
+        <th>Grade</th> 
         <th>Actions</th> 
     </tr> 
 </thead>
@@ -284,6 +284,15 @@
             </button>
             <button type="button" id="save-grading-dialog-btn" class="btn-success">Save Grades</button>
         </div>
+<div id="content-popup-backdrop" class="dialog-backdrop">
+  <div id="content-popup" class="dialog" style="max-width: 800px;">
+    <h3 id="content-popup-title" class="dialog-title">Content Details</h3>
+    <div id="content-popup-content" style="max-height: 70vh; overflow-y: auto;"></div>
+    <div class="dialog-actions">
+      <button type="button" id="close-content-popup-btn" class="btn-secondary">Close</button>
+    </div>
+  </div>
+</div>
     </div>
 </div>
         </div>
@@ -422,7 +431,8 @@ function setupGradingEventListeners() {
 
         // === Admin Data Loading & Display === (Grouping logic included)
         async function loadExamsData() { /* Same grouping logic */ if (!isAdminAllowed) return; console.log("Loading exams data..."); examsLoading.style.display = 'block'; refreshExamsBtn.disabled = true; examsTableBody.innerHTML = ''; allExamsData = []; const data = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_DETAILS_SHEET_NAME}!A:H`); examsLoading.style.display = 'none'; refreshExamsBtn.disabled = !isOnline; if (data && data.length > 1) { allExamsData = data.slice(1).map((row, index) => ({ data: row, originalIndex: index })); allExamsData.sort((a, b) => { const codeA = a.data[1] || ''; const codeB = b.data[1] || ''; const pinA = a.data[0] || ''; const pinB = b.data[0] || ''; const codeCompare = codeA.localeCompare(codeB); if (codeCompare !== 0) { return codeCompare; } return pinA.localeCompare(pinB); }); populateExamsTable(allExamsData); resetSortIcon(examsTable); } else if (data) { examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`; } else { examsTableBody.innerHTML = `<tr><td colspan="9">Failed to load exam data.</td></tr>`; } }
-        function populateExamsTable(groupedData) { /* Added action buttons */ if (!groupedData || groupedData.length === 0) { examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`; return; } let currentCourseCode = null; let rowsHtml = ''; groupedData.forEach(item => { const row = item.data; const originalIndex = item.originalIndex; const sheetRowNumber = originalIndex + 2; const pin = row[0] || ''; const courseCode = row[1] || ''; const name = row[2] || ''; const duration = row[3] || ''; const startDate = row[4] || ''; const startTime = row[5] || ''; const mode = row[6] || ''; const questionsRaw = row[7] || ''; let questionsDisplayHtml = formatQuestionsForDisplay(questionsRaw); if (courseCode !== currentCourseCode) { currentCourseCode = courseCode; rowsHtml += `<tr class="group-header"><td colspan="9">Course: ${escapeHtml(currentCourseCode || 'Uncategorized')}</td></tr>`; } rowsHtml += `<tr data-row-index="${originalIndex}" data-sheet-row="${sheetRowNumber}" data-pin="${escapeHtml(pin)}"><td>${escapeHtml(pin)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(duration)}</td><td>${escapeHtml(startDate)}</td><td>${escapeHtml(startTime)}</td><td>${escapeHtml(mode)}</td><td><div class="formatted-content">${questionsDisplayHtml}</div></td><td class="actions-cell"><button class="btn-sm btn-secondary edit-exam-btn" title="Edit Exam"><i class="fas fa-edit"></i></button> <button class="btn-sm btn-danger delete-exam-btn" title="Delete Exam"><i class="fas fa-trash"></i></button></td></tr>`; }); examsTableBody.innerHTML = rowsHtml; }
+        
+
 function formatQuestionsForDisplay(questionsRaw) {
              let qHtml = 'N/A';
              try {
@@ -467,6 +477,7 @@ function formatQuestionsForDisplay(questionsRaw) {
              return qHtml || '<em>Error or no content.</em>';
         }
         async function loadAttemptsData() { /* Same, added actions */ if (!isAdminAllowed) return; console.log("Loading attempts data..."); attemptsLoading.style.display = 'block'; refreshAttemptsBtn.disabled = true; attemptsTableBody.innerHTML = ''; const data = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_ATTEMPTS_SHEET_NAME}!A:I`); attemptsLoading.style.display = 'none'; refreshAttemptsBtn.disabled = !isOnline; if (data) { populateAttemptsTable(data); resetSortIcon(attemptsTable); } else { attemptsTableBody.innerHTML = `<tr><td colspan="10">Failed to load attempts data.</td></tr>`; } }
+
 function populateAttemptsTable(data) {
     if (!data || data.length <= 1) {
         attemptsTableBody.innerHTML = `<tr><td colspan="11">No attempts found.</td></tr>`;
@@ -476,29 +487,27 @@ function populateAttemptsTable(data) {
     const rowsHtml = data.slice(1).map((row, index) => {
         const sheetRowNumber = index + 2;
         const timestamp = row[0] || '';
+        const studentName = row[1] || '';
         const email = row[2] || '';
         const pin = row[3] || '';
+        const courseCode = row[4] || '';
+        const studentId = row[5] || '';
         const status = row[6] || '';
+        
+        // Store formatted content for popups but don't display directly
         const answersHtml = formatJsonForDisplay(row[7]);
         const fingerprintHtml = formatJsonForDisplay(row[8]);
         
-        // Check if grades are available (assuming column J, index 9)
+        // Check if grades are available
         const gradesJson = row[9] || '';
-        let gradesInfo = '';
+        let gradeSummary = '';
         
         if (gradesJson) {
             try {
                 const grades = JSON.parse(gradesJson);
-                gradesInfo = `
-                    <div style="background-color: #f8f9fa; padding: 8px; border-radius: 4px; margin-top: 5px;">
-                        <strong>Score:</strong> ${grades.totalScore}/${grades.maxScore} (${grades.percentage})<br>
-                        <strong>Graded by:</strong> ${grades.gradedBy}<br>
-                        <strong>Date:</strong> ${new Date(grades.gradedAt).toLocaleString()}
-                    </div>
-                `;
+                gradeSummary = `<strong>${grades.totalScore}/${grades.maxScore}</strong> (${grades.percentage})`;
             } catch (e) {
-                console.warn("Error parsing grades JSON:", e);
-                gradesInfo = `<div style="color:red;">Error parsing grade data</div>`;
+                gradeSummary = '<span style="color:red;">Error</span>';
             }
         }
         
@@ -510,17 +519,20 @@ function populateAttemptsTable(data) {
             statusBadge = `<span style="background-color: var(--success-color); color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.8em;">Graded</span>`;
         }
         
-        return `<tr data-sheet-row="${sheetRowNumber}" data-key="${escapeHtml(timestamp)}-${escapeHtml(email)}-${escapeHtml(pin)}">
+        // Create a data attribute to store content for popups
+        return `<tr data-sheet-row="${sheetRowNumber}" data-key="${escapeHtml(timestamp)}-${escapeHtml(email)}-${escapeHtml(pin)}"
+                data-answers='${JSON.stringify(escapeHtml(row[7] || '{}'))}' 
+                data-fingerprint='${JSON.stringify(escapeHtml(row[8] || '{}'))}'>
             <td>${escapeHtml(timestamp)}</td>
-            <td>${escapeHtml(row[1]||'')}</td>
+            <td>${escapeHtml(studentName)}</td>
             <td>${escapeHtml(email)}</td>
             <td>${escapeHtml(pin)}</td>
-            <td>${escapeHtml(row[4]||'')}</td>
-            <td>${escapeHtml(row[5]||'')}</td>
+            <td>${escapeHtml(courseCode)}</td>
+            <td>${escapeHtml(studentId)}</td>
             <td>${statusBadge || escapeHtml(status)}</td>
-            <td><div class="formatted-content">${answersHtml}</div></td>
-            <td><div class="formatted-content">${fingerprintHtml}</div></td>
-            <td><div class="formatted-content">${gradesInfo}</div></td>
+            <td><button class="btn-sm" onclick="showAnswersPopup(this.closest('tr'))"><i class="fas fa-list-alt"></i> View</button></td>
+            <td><button class="btn-sm" onclick="showFingerprintPopup(this.closest('tr'))"><i class="fas fa-fingerprint"></i> View</button></td>
+            <td>${gradeSummary || 'Not graded'}</td>
             <td class="actions-cell">
                 <button class="btn-sm btn-secondary grade-attempt-btn" title="Grade Submission">
                     <i class="${status.toLowerCase() === 'graded' ? 'fas fa-edit' : 'fas fa-check-square'}"></i>
@@ -533,6 +545,19 @@ function populateAttemptsTable(data) {
     }).join('');
     
     attemptsTableBody.innerHTML = rowsHtml;
+}
+
+// Functions to show content popups
+function showAnswersPopup(row) {
+    const answersRaw = row.dataset.answers ? JSON.parse(row.dataset.answers) : '{}';
+    const formattedContent = formatJsonForDisplay(answersRaw);
+    showContentPopup('Student Answers', `<div class="formatted-content">${formattedContent}</div>`);
+}
+
+function showFingerprintPopup(row) {
+    const fingerprintRaw = row.dataset.fingerprint ? JSON.parse(row.dataset.fingerprint) : '{}';
+    const formattedContent = formatJsonForDisplay(fingerprintRaw);
+    showContentPopup('Submission Fingerprint', `<div class="formatted-content">${formattedContent}</div>`);
 }
 
         // === UI Updates === (No changes)
@@ -833,43 +858,103 @@ function handleAttemptsTableActions(event) {
     }
 }
 
-// Function to open the grading dialog
-function openGradingDialog(row, sheetRow) {
-    console.log("openGradingDialog called with row:", row, "sheetRow:", sheetRow);
-    if (!isAdminAllowed) {
-        console.log("Admin not allowed, returning");
-        return;
+function populateExamsTable(groupedData) {
+  if (!groupedData || groupedData.length === 0) {
+    examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`;
+    return;
+  }
+  
+  let currentCourseCode = null;
+  let rowsHtml = '';
+  
+  groupedData.forEach(item => {
+    const row = item.data;
+    const originalIndex = item.originalIndex;
+    const sheetRowNumber = originalIndex + 2;
+    const pin = row[0] || '';
+    const courseCode = row[1] || '';
+    const name = row[2] || '';
+    const duration = row[3] || '';
+    const startDate = row[4] || '';
+    const startTime = row[5] || '';
+    const mode = row[6] || '';
+    const questionsRaw = row[7] || '';
+    
+    // Calculate questions count
+    let questionsCount = 0;
+    try {
+      const questions = JSON.parse(questionsRaw);
+      questionsCount = Array.isArray(questions) ? questions.length : 0;
+    } catch (e) {
+      questionsCount = 0;
     }
     
-    try {
-        currentGradeSheetRow = sheetRow;
-        
-        // Get the cells from the row
-        const timestamp = row.cells[0].textContent;
-        const studentName = row.cells[1].textContent;
-        const studentEmail = row.cells[2].textContent;
-        const examPin = row.cells[3].textContent;
-        const courseCode = row.cells[4].textContent;
-        
-        console.log("Got student data:", studentName, studentEmail, examPin);
-        
-        // Show the dialog first
-        document.getElementById('grading-dialog-backdrop').classList.add('visible');
-        
-        // Populate student info in the dialog
-        document.getElementById('grading-student-name').textContent = studentName;
-        document.getElementById('grading-student-email').textContent = studentEmail;
-        document.getElementById('grading-exam-pin').textContent = examPin;
-        document.getElementById('grading-timestamp').textContent = timestamp;
-        
-        console.log("Populated initial info, fetching exam details...");
-        
-        // Fetch exam details async
-        fetchExamDetailsForGrading(examPin);
-    } catch (error) {
-        console.error("Error in openGradingDialog:", error);
-        showImprovedNotification('error', 'Error', 'Failed to open grading dialog: ' + error.message);
+    if (courseCode !== currentCourseCode) {
+      currentCourseCode = courseCode;
+      rowsHtml += `<tr class="group-header"><td colspan="9">Course: ${escapeHtml(currentCourseCode || 'Uncategorized')}</td></tr>`;
     }
+    
+    rowsHtml += `<tr data-row-index="${originalIndex}" data-sheet-row="${sheetRowNumber}" data-pin="${escapeHtml(pin)}" data-questions='${JSON.stringify(questionsRaw)}'>
+      <td>${escapeHtml(pin)}</td>
+      <td>${escapeHtml(name)}</td>
+      <td>${escapeHtml(duration)}</td>
+      <td>${escapeHtml(startDate)}</td>
+      <td>${escapeHtml(startTime)}</td>
+      <td>${escapeHtml(mode)}</td>
+      <td><button class="btn-sm" onclick="showQuestionsPopup(this.closest('tr'))"><i class="fas fa-question-circle"></i> View (${questionsCount})</button></td>
+      <td class="actions-cell">
+        <button class="btn-sm btn-secondary edit-exam-btn" title="Edit Exam"><i class="fas fa-edit"></i></button>
+        <button class="btn-sm btn-danger delete-exam-btn" title="Delete Exam"><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>`;
+  });
+  
+  examsTableBody.innerHTML = rowsHtml;
+}
+
+// Move outside the loop - global function
+function showQuestionsPopup(row) {
+  const questionsRaw = row.dataset.questions;
+  const formattedContent = formatQuestionsForDisplay(questionsRaw);
+  showContentPopup('Exam Questions', `<div class="formatted-content">${formattedContent}</div>`);
+}
+
+// Function to open the grading dialog
+function openGradingDialog(row, sheetRow) {
+  if (!isAdminAllowed) return;
+  
+  try {
+    currentGradeSheetRow = sheetRow;
+    
+    // Get student data
+    const timestamp = row.cells[0].textContent;
+    const studentName = row.cells[1].textContent;
+    const studentEmail = row.cells[2].textContent;
+    const examPin = row.cells[3].textContent;
+    
+    // Show dialog and populate basic info
+    document.getElementById('grading-dialog-backdrop').classList.add('visible');
+    document.getElementById('grading-student-name').textContent = studentName;
+    document.getElementById('grading-student-email').textContent = studentEmail;
+    document.getElementById('grading-exam-pin').textContent = examPin;
+    document.getElementById('grading-timestamp').textContent = timestamp;
+    
+    // Parse answers from the answers cell - THIS WAS MISSING
+    const answersCell = row.cells[7].querySelector('.formatted-content');
+    if (answersCell) {
+      const answersText = answersCell.textContent || '';
+      parseStudentAnswers(answersText);
+    }
+    
+    // Fetch exam details and then populate questions
+    fetchExamDetailsForGrading(examPin).then(() => {
+      populateGradingQuestions();
+    });
+    
+  } catch (error) {
+    console.error("Error in openGradingDialog:", error);
+    showImprovedNotification('error', 'Error', 'Failed to open grading dialog: ' + error.message);
+  }
 }
 
 // Function to close the grading dialog
@@ -1431,6 +1516,23 @@ async function saveGrades() {
             setSyncing(false);
         }
     }
+}
+
+// Add popup event listener
+document.getElementById('close-content-popup-btn')?.addEventListener('click', closeContentPopup);
+document.getElementById('content-popup-backdrop')?.addEventListener('click', (e) => {
+  if (e.target === document.getElementById('content-popup-backdrop')) closeContentPopup();
+});
+
+// Functions for content popup
+function showContentPopup(title, content) {
+  document.getElementById('content-popup-title').textContent = title;
+  document.getElementById('content-popup-content').innerHTML = content;
+  document.getElementById('content-popup-backdrop').classList.add('visible');
+}
+
+function closeContentPopup() {
+  document.getElementById('content-popup-backdrop').classList.remove('visible');
 }
 		
 		// Initialize grading event listeners
