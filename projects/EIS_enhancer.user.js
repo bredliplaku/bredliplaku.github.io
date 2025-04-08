@@ -133,7 +133,7 @@
                 // Optionally, click one more time after a slight delay to ensure submission.
                 setTimeout(() => {
                     greenButton.click();
-                }, 300);
+                }, 1200);
                 clearInterval(loginInterval);
             }
         }, 100);
