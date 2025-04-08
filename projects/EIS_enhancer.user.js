@@ -4,7 +4,7 @@
 // @version      1.0
 // @description  Automatically enhance EIS and auto-select the "@epoka.edu.al" Google account when coming from EIS.
 // @author       Bredli Plaku
-// @updateURL    https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/EIS_enhancer.user.js
+// @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
 // @downloadURL  https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/EIS_enhancer.user.js
 // @match        https://eis.epoka.edu.al/*
 // @match        https://accounts.google.com/*
