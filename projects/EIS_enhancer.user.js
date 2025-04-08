@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      1.0
-// @description  Automatically enhance EIS and auto-select the "@epoka.edu.al" Google account when coming from EIS.
+// @version      1.1
+// @description  Automatically enhance EIS, expand the login form, and auto-click the green login button on /login (after expansion). Also, auto-select the Google account when coming from EIS.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
 // @downloadURL  https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
@@ -101,7 +101,6 @@
     }
     scanAndReplace();
 
-    // Monitor for dynamically added nodes
     const observer = new MutationObserver((mutations) => {
         mutations.forEach(mutation => {
             mutation.addedNodes.forEach(node => {
@@ -112,15 +111,29 @@
     observer.observe(document.body, { childList: true, subtree: true });
 
     // ************************************************************************
-    // Automatic Clicks on Login Buttons
+    // Automatic Clicks on Login Buttons for EIS
     // ************************************************************************
 
-    // Auto-click "Login with Epoka Mail" on /login page
     if (window.location.pathname === '/login') {
+        // First, click the expand link to reveal the hidden login form.
+        const expandInterval = setInterval(() => {
+            // The expand link is inside ".tools a.expand"
+            const expandLink = document.querySelector('.tools a.expand');
+            if (expandLink) {
+                expandLink.click();
+                clearInterval(expandInterval);
+            }
+        }, 100);
+
+        // Then wait for the green login button to be visible and click it.
         const loginInterval = setInterval(() => {
-            const loginLink = document.querySelector('a.btn.blue.btn-block[href="/connect/google"]');
-            if (loginLink) {
-                loginLink.click();
+            const greenButton = document.querySelector('button.btn.green.pull-right');
+            if (greenButton && greenButton.offsetParent !== null) { // ensures element is visible
+                greenButton.click();
+                // Optionally, click one more time after a slight delay to ensure submission.
+                setTimeout(() => {
+                    greenButton.click();
+                }, 300);
                 clearInterval(loginInterval);
             }
         }, 100);
@@ -136,28 +149,4 @@
             }
         }, 100);
     }
-
-  // ************************************************************************
-    // Auto-Select First Google Account When on accounts.google.com Coming from EIS
-    // ************************************************************************
-if (
-  window.location.hostname.includes("accounts.google.com") &&
-  document.referrer.includes("eis.epoka.edu.al")
-) {
-  const accountInterval = setInterval(() => {
-    /*
-     * Look for the first div that has both:
-     *   - data-identifier (often used to store the account's email)
-     *   - role="link" or role="option" (typical for clickable account items)
-     *
-     * Adjust this selector if Google changes the page markup.
-     */
-    const firstAccount = document.querySelector('div[data-identifier][role="link"], div[data-identifier][role="option"]');
-    if (firstAccount) {
-      firstAccount.click();
-      clearInterval(accountInterval);
-    }
-  }, 100);
-}
-
 })();
