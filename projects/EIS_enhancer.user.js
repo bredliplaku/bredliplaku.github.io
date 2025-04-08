@@ -5,10 +5,10 @@
 // @description  Automatically enhance EIS and auto-select the "@epoka.edu.al" Google account when coming from EIS.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
-// @downloadURL  https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/EIS_enhancer.user.js
+// @downloadURL  https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
 // @match        https://eis.epoka.edu.al/*
 // @match        https://accounts.google.com/*
-// @grant        none
+// @grant        unsafeWindow
 // @run-at       document-end
 // ==/UserScript==
 
@@ -52,12 +52,12 @@
             --box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
             --font-family: 'Roboto', sans-serif;
         }
-        
+
         /* Apply font family to body */
         body {
             font-family: var(--font-family) !important;
         }
-        
+
         .table-scrollable, .table {
             border-radius: 15px !important;
         }
@@ -100,7 +100,7 @@
         replaceEpokaText(document.body);
     }
     scanAndReplace();
-    
+
     // Monitor for dynamically added nodes
     const observer = new MutationObserver((mutations) => {
         mutations.forEach(mutation => {
@@ -118,4 +118,46 @@
     // Auto-click "Login with Epoka Mail" on /login page
     if (window.location.pathname === '/login') {
         const loginInterval = setInterval(() => {
-            const loginLink = document.querySelector
+            const loginLink = document.querySelector('a.btn.blue.btn-block[href="/connect/google"]');
+            if (loginLink) {
+                loginLink.click();
+                clearInterval(loginInterval);
+            }
+        }, 100);
+    }
+
+    // Auto-click login button on /switchrole page
+    if (window.location.pathname === '/switchrole') {
+        const roleInterval = setInterval(() => {
+            const loginButton = document.querySelector('button.btn.green.pull-right');
+            if (loginButton) {
+                loginButton.click();
+                clearInterval(roleInterval);
+            }
+        }, 100);
+    }
+
+  // ************************************************************************
+    // Auto-Select First Google Account When on accounts.google.com Coming from EIS
+    // ************************************************************************
+if (
+  window.location.hostname.includes("accounts.google.com") &&
+  document.referrer.includes("eis.epoka.edu.al")
+) {
+  const accountInterval = setInterval(() => {
+    /*
+     * Look for the first div that has both:
+     *   - data-identifier (often used to store the account's email)
+     *   - role="link" or role="option" (typical for clickable account items)
+     *
+     * Adjust this selector if Google changes the page markup.
+     */
+    const firstAccount = document.querySelector('div[data-identifier][role="link"], div[data-identifier][role="option"]');
+    if (firstAccount) {
+      firstAccount.click();
+      clearInterval(accountInterval);
+    }
+  }, 100);
+}
+
+})();
