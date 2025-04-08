@@ -2,13 +2,12 @@
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
 // @version      1.1
-// @description  Automatically enhance EIS, expand the login form, and auto-click the green login button on /login (after expansion). Also, auto-select the Google account when coming from EIS.
+// @description  Automatically enhance EIS and log in with username.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
 // @downloadURL  https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
 // @match        https://eis.epoka.edu.al/*
-// @match        https://accounts.google.com/*
-// @grant        unsafeWindow
+// @grant        none
 // @run-at       document-end
 // ==/UserScript==
 
