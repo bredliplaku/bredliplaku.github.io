@@ -1377,40 +1377,217 @@ function addQuestionBlock(questionData = null) {
         function handleRemoveQuestion(event) { if (!event.target.classList.contains('remove-question-btn')) return; const block = event.target.closest('.question-block'); if (block) { block.remove(); questionsBuilderDiv.querySelectorAll('.question-block').forEach((qBlock, index) => { const headerSpan = qBlock.querySelector('.question-block-header span'); if (headerSpan) headerSpan.textContent = `Question ${index + 1}`; }); if (questionsBuilderDiv.children.length === 0) questionsBuilderDiv.innerHTML = '<p style="text-align: center; color: #777;">No questions added yet.</p>'; } }
         // handleSaveExam - Modified to include points (see previous thought/code)
         async function handleSaveExam() {
-            if (!isAdminAllowed || !isOnline) return;
-            if (!examPinInput.value || !examCodeInput.value || !examNameInput.value || !examDurationInput.value || !examStartDateInput.value || !examStartTimeInput.value || !examModeInput.value) { showImprovedNotification('warning', 'Missing Fields', 'Please fill all required exam details.'); return; }
+    if (!isAdminAllowed || !isOnline) return;
 
-            const questionsArray = []; const questionBlocks = questionsBuilderDiv.querySelectorAll('.question-block'); let questionsValid = true;
-            questionBlocks.forEach((block, index) => {
-                const qNum = index + 1; const typeSelect = block.querySelector('.question-type-select'); const promptInput = block.querySelector('.question-prompt'); const pointsInput = block.querySelector('.question-points'); const type = typeSelect.value; const prompt = promptInput.value.trim(); const points = parseFloat(pointsInput?.value) || null; // Get points, null if empty/invalid
+    // Check required exam fields
+    if (
+        !examPinInput.value ||
+        !examCodeInput.value ||
+        !examNameInput.value ||
+        !examDurationInput.value ||
+        !examStartDateInput.value ||
+        !examStartTimeInput.value ||
+        !examModeInput.value
+    ) {
+        showImprovedNotification('warning', 'Missing Fields', 'Please fill in all required exam details.');
+        return;
+    }
 
-                promptInput.style.borderColor = ''; block.querySelectorAll('.question-options, .question-correct').forEach(el => el.style.borderColor = '');
-                if (!prompt) { questionsValid = false; promptInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Prompt cannot be empty.'); }
-                if (points !== null && points < 0) { questionsValid = false; pointsInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Points cannot be negative.'); }
+    const questionsArray = [];
+    const questionBlocks = questionsBuilderDiv.querySelectorAll('.question-block');
+    let questionsValid = true;
 
-                const question = { type, prompt };
-                if (points !== null) question.points = points; // Add points only if valid number provided
+    questionBlocks.forEach((block, index) => {
+        const qNum        = index + 1;
+        const typeSelect  = block.querySelector('.question-type-select');
+        const promptInput = block.querySelector('.question-prompt');
+        const pointsInput = block.querySelector('.question-points');
+        const type        = typeSelect.value;
+        const prompt      = promptInput.value.trim();
 
-                if (type === 'code') { const lang = block.querySelector('.question-lang').value.trim(); if (lang) question.language = lang; }
-                else if (type === 'attachment') { /* ... attachment logic ... */ const typesStr = block.querySelector('.question-allowed-types').value.trim(); const sizeStr = block.querySelector('.question-max-size').value.trim(); if (typesStr) question.allowed_types = typesStr.split(',').map(t => t.trim()).filter(t => t); if (sizeStr) { const sizeNum = parseInt(sizeStr, 10); if (!isNaN(sizeNum) && sizeNum > 0) question.max_size_mb = sizeNum; else if (sizeStr) { questionsValid = false; block.querySelector('.question-max-size').style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Max size must be a positive number.'); } } }
-                else if (type === 'multiple_select') { /* ... mc logic ... */ const optionsInput = block.querySelector('.question-options'); const correctInput = block.querySelector('.question-correct'); const optionsStr = optionsInput.value.trim(); const correctStr = correctInput.value.trim(); if (!optionsStr) { questionsValid = false; optionsInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Options cannot be empty.'); } else { question.options = optionsStr.split('\n').map(opt => opt.trim()).filter(opt => opt); if (question.options.length < 1) { questionsValid = false; optionsInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Needs at least one option.'); } } if (!correctStr) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Correct answer(s) cannot be empty.'); } else { question.correct_answers = correctStr.split('\n').map(ans => ans.trim()).filter(ans => ans); if (question.correct_answers.length === 0) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'At least one correct answer required.'); } if (question.options && question.correct_answers.length > 0) { const allCorrectExist = question.correct_answers.every(ans => question.options.includes(ans)); if (!allCorrectExist) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Correct answer not found in options.'); } } } 
-				
-                if (questionsValid) questionsArray.push(question);
-            });
-
-            if (!questionsValid) { showImprovedNotification('error', 'Validation Failed', 'Please check highlighted fields.'); return; }
-
-            const questionsJsonString = JSON.stringify(questionsArray);
-            const examData = [ examPinInput.value.trim(), examCodeInput.value.trim(), examNameInput.value.trim(), examDurationInput.value, examStartDateInput.value, examStartTimeInput.value, examModeInput.value, questionsJsonString ];
-
-            saveExamDialogBtn.disabled = true; saveExamDialogBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-            let success = false; const originalIndexStr = examRowIndexInput.value;
-            if (originalIndexStr !== '') { const sheetRowToUpdate = parseInt(originalIndexStr, 10) + 2; const rangeToUpdate = `${EXAM_DETAILS_SHEET_NAME}!A${sheetRowToUpdate}:H${sheetRowToUpdate}`; console.log("UPDATING exam on sheet row:", sheetRowToUpdate); success = await updateSheetData(EXAM_SPREADSHEET_ID, rangeToUpdate, [examData]); }
-            else { console.log("ADDING new exam"); success = await appendSheetData(EXAM_SPREADSHEET_ID, EXAM_DETAILS_SHEET_NAME, [examData]); }
-
-            saveExamDialogBtn.disabled = !isOnline || !isAdminAllowed; saveExamDialogBtn.innerHTML = originalIndexStr ? 'Save Changes' : 'Add Exam';
-            if (success) { showImprovedNotification('success', 'Exam Saved', `Exam "${escapeHtml(examData[2])}" was ${originalIndexStr ? 'updated' : 'added'}.`); closeExamDialog(); loadExamsData(); }
+        // Robust parsing of points: allow zero
+        let points = null;
+        const rawPts = pointsInput.value.trim();
+        if (rawPts !== '') {
+            const parsed = parseFloat(rawPts);
+            if (!Number.isNaN(parsed)) {
+                points = parsed;
+            }
         }
+
+        // Reset any previous error styling
+        promptInput.style.borderColor = '';
+        block.querySelectorAll('.question-options, .question-correct')
+             .forEach(el => el.style.borderColor = '');
+
+        // Validate prompt
+        if (!prompt) {
+            questionsValid = false;
+            promptInput.style.borderColor = 'red';
+            showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Prompt cannot be empty.');
+        }
+
+        // Validate points
+        if (points !== null && points < 0) {
+            questionsValid = false;
+            pointsInput.style.borderColor = 'red';
+            showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Points cannot be negative.');
+        }
+
+        // Build question object
+        const question = { type, prompt };
+        if (points !== null) question.points = points;
+
+        // Type‑specific fields
+        if (type === 'code') {
+            const lang = block.querySelector('.question-lang').value.trim();
+            if (lang) question.language = lang;
+        }
+        else if (type === 'attachment') {
+            const typesStr = block.querySelector('.question-allowed-types').value.trim();
+            const sizeStr  = block.querySelector('.question-max-size').value.trim();
+
+            if (typesStr) {
+                question.allowed_types = typesStr
+                    .split(',')
+                    .map(t => t.trim())
+                    .filter(t => t);
+            }
+
+            if (sizeStr) {
+                const sizeNum = parseInt(sizeStr, 10);
+                if (!isNaN(sizeNum) && sizeNum > 0) {
+                    question.max_size_mb = sizeNum;
+                } else {
+                    questionsValid = false;
+                    block.querySelector('.question-max-size').style.borderColor = 'red';
+                    showImprovedNotification(
+                        'warning',
+                        `Validation Error (Q${qNum})`,
+                        'Max size must be a positive number.'
+                    );
+                }
+            }
+        }
+        else if (type === 'multiple_select') {
+            const optionsInput = block.querySelector('.question-options');
+            const correctInput = block.querySelector('.question-correct');
+            const optionsStr   = optionsInput.value.trim();
+            const correctStr   = correctInput.value.trim();
+
+            // Validate options
+            if (!optionsStr) {
+                questionsValid = false;
+                optionsInput.style.borderColor = 'red';
+                showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Options cannot be empty.');
+            } else {
+                question.options = optionsStr
+                    .split('\n')
+                    .map(opt => opt.trim())
+                    .filter(opt => opt);
+
+                if (question.options.length < 1) {
+                    questionsValid = false;
+                    optionsInput.style.borderColor = 'red';
+                    showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Needs at least one option.');
+                }
+            }
+
+            // Validate correct answers
+            if (!correctStr) {
+                questionsValid = false;
+                correctInput.style.borderColor = 'red';
+                showImprovedNotification(
+                    'warning',
+                    `Validation Error (Q${qNum})`,
+                    'Correct answer(s) cannot be empty.'
+                );
+            } else {
+                question.correct_answers = correctStr
+                    .split('\n')
+                    .map(ans => ans.trim())
+                    .filter(ans => ans);
+
+                if (question.correct_answers.length === 0) {
+                    questionsValid = false;
+                    correctInput.style.borderColor = 'red';
+                    showImprovedNotification(
+                        'warning',
+                        `Validation Error (Q${qNum})`,
+                        'At least one correct answer required.'
+                    );
+                }
+
+                if (
+                    question.options &&
+                    question.correct_answers.length > 0 &&
+                    !question.correct_answers.every(ans => question.options.includes(ans))
+                ) {
+                    questionsValid = false;
+                    correctInput.style.borderColor = 'red';
+                    showImprovedNotification(
+                        'warning',
+                        `Validation Error (Q${qNum})`,
+                        'Correct answer not found in options.'
+                    );
+                }
+            }
+        }
+
+        // If this question passed validation, add it
+        if (questionsValid) {
+            questionsArray.push(question);
+        }
+    });
+
+    // If any question failed, abort
+    if (!questionsValid) {
+        showImprovedNotification('error', 'Validation Failed', 'Please check highlighted fields.');
+        return;
+    }
+
+    // Prepare and send data
+    const questionsJsonString = JSON.stringify(questionsArray);
+    const examData = [
+        examPinInput.value.trim(),
+        examCodeInput.value.trim(),
+        examNameInput.value.trim(),
+        examDurationInput.value,
+        examStartDateInput.value,
+        examStartTimeInput.value,
+        examModeInput.value,
+        questionsJsonString
+    ];
+
+    saveExamDialogBtn.disabled = true;
+    saveExamDialogBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
+    let success = false;
+    const originalIndexStr = examRowIndexInput.value;
+
+    if (originalIndexStr !== '') {
+        const sheetRowToUpdate = parseInt(originalIndexStr, 10) + 2;
+        const rangeToUpdate = `${EXAM_DETAILS_SHEET_NAME}!A${sheetRowToUpdate}:H${sheetRowToUpdate}`;
+        console.log("UPDATING exam on sheet row:", sheetRowToUpdate);
+        success = await updateSheetData(EXAM_SPREADSHEET_ID, rangeToUpdate, [examData]);
+    } else {
+        console.log("ADDING new exam");
+        success = await appendSheetData(EXAM_SPREADSHEET_ID, EXAM_DETAILS_SHEET_NAME, [examData]);
+    }
+
+    saveExamDialogBtn.disabled = !isOnline || !isAdminAllowed;
+    saveExamDialogBtn.innerHTML = originalIndexStr ? 'Save Changes' : 'Add Exam';
+
+    if (success) {
+        showImprovedNotification(
+            'success',
+            'Exam Saved',
+            `Exam "${escapeHtml(examData[2])}" was ${originalIndexStr ? 'updated' : 'added'}.`
+        );
+        closeExamDialog();
+        loadExamsData();
+    }
+}
 
         // === Action Button Handlers ===
         function handleExamsTableActions(event) {
