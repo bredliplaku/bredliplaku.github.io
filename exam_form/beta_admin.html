@@ -67,6 +67,93 @@
         .user-info { display: flex; align-items: center; gap: 10px; }
         .user-avatar { width: 36px; height: 36px; border-radius: 50%; border: 2px solid rgba(0,0,0,0.1); }
 
+.question-summary-header {
+    font-weight: 500;
+    color: var(--primary-dark);
+    margin-bottom: 8px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+}
+
+.question-list-item {
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px dotted #eee;
+    position: relative;
+}
+
+.question-type-badge {
+    display: inline-block;
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.8em;
+    color: #555;
+    margin-right: 5px;
+}
+
+.question-points-badge {
+    display: inline-block;
+    background-color: var(--info-color);
+    color: white;
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 0.75em;
+    margin-left: 5px;
+}
+
+.question-snippet {
+    margin-top: 4px;
+    font-size: 0.9em;
+    color: #666;
+}
+
+.question-list-more {
+    font-style: italic;
+    color: #888;
+    font-size: 0.85em;
+    text-align: center;
+    margin: 5px 0;
+}
+
+.view-all-questions-btn {
+    margin-top: 5px;
+}
+
+.full-questions-preview {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.question-detail-item {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #ddd;
+}
+
+.question-detail-item:last-child {
+    border-bottom: none;
+}
+
+.question-detail-item h4 {
+    color: var(--primary-dark);
+    margin-bottom: 10px;
+}
+
+.question-prompt {
+    font-weight: 500;
+    margin-bottom: 8px;
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-left: 3px solid var(--primary-color);
+}
+
+.question-meta {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 8px;
+}
+
         /* Table Styles */
         .data-table-container { overflow-x: auto; margin-top: 20px; border: 1px solid var(--border-color); border-radius: 8px; }
         table.data-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
@@ -755,10 +842,10 @@ function formatQuestionsForPreview(questionsRaw) {
 
 function showQuestionsPopup(row) {
     if (!row || !row.dataset.questions) return;
-    
+
     const questionsRaw = row.dataset.questions;
     let contentHtml = '<div class="full-questions-preview">';
-    
+
     try {
         const questions = JSON.parse(questionsRaw);
         if (Array.isArray(questions) && questions.length > 0) {
@@ -780,15 +867,18 @@ function showQuestionsPopup(row) {
                     optionsHtml += '</ul>';
                 }
 
-                let contentHtml = q.content ? `<div class="question-content"><strong>Content:</strong> ${escapeHtml(q.content)}</div>` : '';
-
-                return `<div class="question-detail-item">
-                    <h4>Question ${index + 1}</h4>
-                    <div class="question-prompt">${escapeHtml(q.prompt || 'No prompt')}</div>
-                    <div class="question-meta">${details}</div>
-                    ${contentHtml}
-                    ${optionsHtml ? `<div class="question-options"><strong>Options/Answers:</strong>${optionsHtml}</div>` : ''}
-                </div>`;
+                let questionContentHtml = q.content ? `<div class="question-content"><strong>Content:</strong> ${escapeHtml(q.content)}</div>` : '';
+				return `<div class="question-detail-item">
+					<h4>Question ${index + 1}</h4>
+					<div class="question-prompt">${escapeHtml(q.prompt || 'No prompt')}</div>
+					<div class="question-meta">${details}</div>
+					${questionContentHtml}
+					${optionsHtml
+					  ? '<div class="question-options"><strong>Options/Answers:</strong>' 
+						+ optionsHtml 
+						+ '</div>'
+					  : ''}
+				</div>`;
             }).join('');
         } else {
             contentHtml += '<p>No questions found or invalid format.</p>';
@@ -796,10 +886,11 @@ function showQuestionsPopup(row) {
     } catch (e) {
         contentHtml += `<p>Error parsing questions: ${e.message}</p>`;
     }
-    
+
     contentHtml += '</div>';
     showContentPopup('Exam Questions', contentHtml);
 }
+
 
         async function loadAttemptsData() {
             if (!isAdminAllowed) return;
@@ -985,50 +1076,70 @@ function showQuestionsPopup(row) {
              }
          }
          // NEW: formatQuestionsForDisplay function (ensure it exists)
-        function formatQuestionsForDisplay(questionsRaw) {
-             let qHtml = 'N/A';
-             try {
-                 const qArray = JSON.parse(questionsRaw);
-                 if (Array.isArray(qArray)) {
-                     if (qArray.length === 0) return '<em>No questions defined.</em>';
-                     qHtml = qArray.map((q, index) => {
-                         let details = `<strong>Type:</strong> ${escapeHtml(q.type || 'N/A')}`;
-                         if (q.language) details += `, <strong>Lang:</strong> ${escapeHtml(q.language)}`;
-                         if (q.allowed_types) details += `, <strong>Allowed:</strong> ${escapeHtml(q.allowed_types.join(', '))}`;
-                         if (q.max_size_mb) details += `, <strong>Max MB:</strong> ${escapeHtml(q.max_size_mb)}`;
-                         if (q.points) details += `, <strong>Points:</strong> ${escapeHtml(q.points)}`; // Display points if defined
+function formatQuestionsForDisplay(questionsRaw) {
+    let qHtml = 'N/A';
+    try {
+        const qArray = JSON.parse(questionsRaw);
+        if (Array.isArray(qArray)) {
+            if (qArray.length === 0) {
+                return '<em>No questions defined.</em>';
+            }
+            qHtml = qArray.map((q, index) => {
+                let details = `<strong>Type:</strong> ${escapeHtml(q.type || 'N/A')}`;
+                if (q.language) {
+                    details += `, <strong>Lang:</strong> ${escapeHtml(q.language)}`;
+                }
+                if (q.allowed_types) {
+                    details += `, <strong>Allowed:</strong> ${escapeHtml(q.allowed_types.join(', '))}`;
+                }
+                if (q.max_size_mb) {
+                    details += `, <strong>Max MB:</strong> ${escapeHtml(q.max_size_mb)}`;
+                }
+                if (q.points) {
+                    details += `, <strong>Points:</strong> ${escapeHtml(q.points)}`;
+                }
 
-                         let optionsHtml = '';
-                         if (q.type === 'multiple_select' && Array.isArray(q.options)) {
-                            optionsHtml += '<ul>';
-                            const correctAnswers = Array.isArray(q.correct_answers) ? q.correct_answers : [];
-                            optionsHtml += q.options.map(opt => {
-                                const isCorrect = correctAnswers.includes(opt);
-                                return `<li ${isCorrect ? 'style="font-weight: bold; color: var(--success-color);"' : ''}>${escapeHtml(opt)}${isCorrect ? ' <i class="fas fa-check" title="Correct Answer"></i>' : ''}</li>`;
-                            }).join('');
-                            optionsHtml += '</ul>';
-                         }
+                let optionsHtml = '';
+                if (q.type === 'multiple_select' && Array.isArray(q.options)) {
+                    optionsHtml += '<ul>';
+                    const correctAnswers = Array.isArray(q.correct_answers) ? q.correct_answers : [];
+                    optionsHtml += q.options.map(opt => {
+                        const isCorrect = correctAnswers.includes(opt);
+                        return `<li${isCorrect ? ' style="font-weight: bold; color: var(--success-color);"' : ''}>` +
+                               `${escapeHtml(opt)}` +
+                               `${isCorrect ? ' <i class="fas fa-check" title="Correct Answer"></i>' : ''}` +
+                               `</li>`;
+                    }).join('');
+                    optionsHtml += '</ul>';
+                }
 
-                         let contentHtml = q.content ? `<dd><strong>Content:</strong> ${escapeHtml(q.content)}</dd>` : '';
+                let contentHtml = q.content
+                    ? `<dd><strong>Content:</strong> ${escapeHtml(q.content)}</dd>`
+                    : '';
 
-                         return `<div class="question-item">
-                                     <dl>
-                                         <dt>${index + 1}. ${escapeHtml(q.prompt || 'Q')}</dt>
-                                         <dd><i>${details}</i></dd>
-                                         ${contentHtml}
-                                         ${optionsHtml ? `<dd><strong>Options/Answers:</strong>${optionsHtml}</dd>` : ''}
-                                     </dl>
-                                 </div>`;
-                     }).join('');
-                 } else {
-                     throw new Error("Not an array");
-                 }
-             } catch (e) {
-                 console.warn("Error parsing questions JSON for display:", questionsRaw, e);
-                 qHtml = `<div style="color: red; font-weight: bold;">Error parsing questions: ${escapeHtml(e.message)}</div><pre>${escapeHtml(questionsRaw)}</pre>`;
-             }
-             return qHtml || '<em>Error or no content.</em>';
+                return `<div class="question-item">
+    <dl>
+        <dt>${index + 1}. ${escapeHtml(q.prompt || 'Q')}</dt>
+        <dd><i>${details}</i></dd>
+        ${contentHtml}
+        ${optionsHtml
+            ? '<dd><strong>Options/Answers:</strong>' + optionsHtml + '</dd>'
+            : ''}
+    </dl>
+</div>`;
+            }).join('');
+        } else {
+            throw new Error('Not an array');
         }
+    } catch (e) {
+        console.warn('Error parsing questions JSON for display:', questionsRaw, e);
+        qHtml = '<div style="color: red; font-weight: bold;">' +
+                'Error parsing questions: ' + escapeHtml(e.message) +
+                '</div><pre>' + escapeHtml(questionsRaw) + '</pre>';
+    }
+    return qHtml || '<em>Error or no content.</em>';
+}
+
 
 
         // === Table Sorting === (Unchanged compareCells, updateSortIcons, resetSortIcon)
@@ -1078,44 +1189,188 @@ function showQuestionsPopup(row) {
         }
         function closeExamDialog() { examDialogBackdrop.classList.remove('visible'); }
         // addQuestionBlock - Modified to accept data for editing (see previous thought/code)
-        function addQuestionBlock(questionData = null) {
-            const placeholder = questionsBuilderDiv.querySelector('p'); if (placeholder) placeholder.remove();
-            const questionIndex = questionsBuilderDiv.querySelectorAll('.question-block').length;
-            const block = document.createElement('div'); block.className = 'question-block'; block.dataset.index = questionIndex;
-            const type = questionData?.type || 'short_answer'; const prompt = questionData?.prompt || ''; const lang = questionData?.language || ''; const allowedTypes = (questionData?.allowed_types || []).join(','); const maxSize = questionData?.max_size_mb || ''; const options = (questionData?.options || []).join('\n'); const correct = (questionData?.correct_answers || []).join('\n'); const points = questionData?.points ?? ''; // Get points
+function addQuestionBlock(questionData = null) {
+    const placeholder = questionsBuilderDiv.querySelector('p');
+    if (placeholder) placeholder.remove();
 
-            block.innerHTML = `
-                <div class="question-block-header">
-                    <span>Question ${questionIndex + 1}</span>
-                    <button type="button" class="btn-danger btn-sm remove-question-btn" title="Remove Question">&times;</button>
+    const questionIndex = questionsBuilderDiv.querySelectorAll('.question-block').length;
+    const block = document.createElement('div');
+    block.className = 'question-block';
+    block.dataset.index = questionIndex;
+
+    // Use provided data or defaults
+    const type          = questionData?.type           || 'short_answer';
+    const prompt        = questionData?.prompt         || '';
+    const lang          = questionData?.language       || '';
+    const allowedTypes  = (questionData?.allowed_types || []).join(',');
+    const maxSize       = questionData?.max_size_mb    || '';
+    const options       = (questionData?.options       || []).join('\n');
+    const correct       = (questionData?.correct_answers || []).join('\n');
+    const points        = questionData?.points ?? '';
+    const content       = questionData?.content        || '';
+
+    block.innerHTML = `
+        <div class="question-block-header">
+            <span>Question ${questionIndex + 1}</span>
+            <div class="question-actions">
+                <button type="button" class="btn-sm btn-secondary move-up-btn" title="Move Up">
+                    <i class="fas fa-arrow-up"></i>
+                </button>
+                <button type="button" class="btn-sm btn-secondary move-down-btn" title="Move Down">
+                    <i class="fas fa-arrow-down"></i>
+                </button>
+                <button type="button" class="btn-sm btn-danger remove-question-btn" title="Remove Question">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="question-config-grid">
+            <div class="form-group question-type-group">
+                <label for="q-type-${questionIndex}">
+                    <i class="fas fa-list-alt"></i> Question Type:
+                    <span class="help-tooltip" title="Select the type of question to present to students">
+                        <i class="fas fa-question-circle"></i>
+                    </span>
+                </label>
+                <select id="q-type-${questionIndex}" class="form-control question-type-select">
+                    <option value="short_answer"   ${type === 'short_answer'   ? 'selected' : ''}>Short Answer</option>
+                    <option value="long_answer"    ${type === 'long_answer'    ? 'selected' : ''}>Long Answer / Instructions</option>
+                    <option value="code"           ${type === 'code'           ? 'selected' : ''}>Code</option>
+                    <option value="attachment"     ${type === 'attachment'     ? 'selected' : ''}>File Upload</option>
+                    <option value="multiple_select"${type === 'multiple_select'? 'selected' : ''}>Multiple Choice</option>
+                </select>
+            </div>
+
+            <div class="form-group question-points-group">
+                <label for="q-points-${questionIndex}">
+                    <i class="fas fa-star"></i> Points:
+                    <span class="help-tooltip" title="Assign point value for this question">
+                        <i class="fas fa-question-circle"></i>
+                    </span>
+                </label>
+                <input type="number"
+                       id="q-points-${questionIndex}"
+                       class="form-control question-points"
+                       min="0" step="0.1"
+                       value="${points}"
+                       placeholder="1">
+            </div>
+        </div>
+
+        <div class="form-group question-prompt-group">
+            <label for="q-prompt-${questionIndex}">
+                <i class="fas fa-question"></i> Question Text:
+                <span class="help-tooltip" title="The main question or prompt shown to students">
+                    <i class="fas fa-question-circle"></i>
+                </span>
+                <span class="markdown-hint">Supports **bold** with double asterisks</span>
+            </label>
+            <textarea id="q-prompt-${questionIndex}"
+                      class="form-control question-prompt"
+                      rows="3"
+                      required>${escapeHtml(prompt)}</textarea>
+        </div>
+
+        <div class="form-group question-content-group"
+             ${type !== 'long_answer' && type !== 'code' ? 'style="display:none;"' : ''}>
+            <label for="q-content-${questionIndex}">
+                <i class="fas fa-file-alt"></i> Default Content:
+                <span class="help-tooltip" title="Initial content to show in the answer box">
+                    <i class="fas fa-question-circle"></i>
+                </span>
+            </label>
+            <textarea id="q-content-${questionIndex}"
+                      class="form-control question-content"
+                      rows="3">${escapeHtml(content)}</textarea>
+        </div>
+
+        <div class="conditional-fields-container">
+            <div class="conditional-field"
+                 data-type="code"
+                 ${type === 'code' ? 'style="display:block;"' : ''}>
+                <div class="form-group">
+                    <label for="q-lang-${questionIndex}">
+                        <i class="fas fa-code"></i> Programming Language:
+                        <span class="help-tooltip" title="Specify language for syntax highlighting">
+                            <i class="fas fa-question-circle"></i>
+                        </span>
+                    </label>
+                    <input type="text"
+                           id="q-lang-${questionIndex}"
+                           class="form-control question-lang"
+                           placeholder="e.g., python"
+                           value="${escapeHtml(lang)}">
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end;"> {/* Grid for type and points */}
-                     <div class="form-group" style="margin-bottom: 0;"> {/* Type */}
-                          <label for="q-type-${questionIndex}">Type:</label>
-                          <select id="q-type-${questionIndex}" class="form-control question-type-select">
-                              <option value="short_answer" ${type === 'short_answer' ? 'selected' : ''}>Short Answer</option>
-                              <option value="long_answer" ${type === 'long_answer' ? 'selected' : ''}>Long Answer / Instructions</option>
-                              <option value="code" ${type === 'code' ? 'selected' : ''}>Code</option>
-                              <option value="attachment" ${type === 'attachment' ? 'selected' : ''}>Attachment</option>
-                              <option value="multiple_select" ${type === 'multiple_select' ? 'selected' : ''}>Multiple Choice</option>
-                          </select>
-                     </div>
-                     <div class="form-group" style="margin-bottom: 0;"> {/* Points */}
-                          <label for="q-points-${questionIndex}">Points:</label>
-                          <input type="number" id="q-points-${questionIndex}" class="form-control question-points" min="0" step="0.1" value="${points}" placeholder="1" style="width: 70px;">
-                     </div>
+            </div>
+
+            <div class="conditional-field"
+                 data-type="attachment"
+                 ${type === 'attachment' ? 'style="display:block;"' : ''}>
+                <div class="form-group">
+                    <label for="q-types-${questionIndex}">
+                        <i class="fas fa-file-upload"></i> Allowed File Types:
+                        <span class="help-tooltip" title="Comma-separated list of allowed extensions (.pdf,.zip)">
+                            <i class="fas fa-question-circle"></i>
+                        </span>
+                    </label>
+                    <input type="text"
+                           id="q-types-${questionIndex}"
+                           class="form-control question-allowed-types"
+                           placeholder="e.g., .pdf,.zip,.jpg"
+                           value="${escapeHtml(allowedTypes)}">
                 </div>
                 <div class="form-group">
-                    <label for="q-prompt-${questionIndex}">Prompt / Question Text:</label>
-                    <textarea id="q-prompt-${questionIndex}" class="form-control question-prompt" rows="2" required>${escapeHtml(prompt)}</textarea>
+                    <label for="q-size-${questionIndex}">
+                        <i class="fas fa-weight"></i> Max File Size (MB):
+                        <span class="help-tooltip" title="Maximum allowed file size in megabytes">
+                            <i class="fas fa-question-circle"></i>
+                        </span>
+                    </label>
+                    <input type="number"
+                           id="q-size-${questionIndex}"
+                           class="form-control question-max-size"
+                           min="1"
+                           value="${escapeHtml(maxSize)}">
                 </div>
-                {/* Conditional Fields */}
-                <div class="conditional-field" data-type="code" style="${type === 'code' ? 'display: block;' : ''}"> <div class="form-group"> <label for="q-lang-${questionIndex}">Language:</label> <input type="text" id="q-lang-${questionIndex}" class="form-control question-lang" placeholder="e.g., python" value="${escapeHtml(lang)}"> </div> </div>
-                <div class="conditional-field" data-type="attachment" style="${type === 'attachment' ? 'display: block;' : ''}"> <div class="form-group"> <label for="q-types-${questionIndex}">Allowed Types:</label> <input type="text" id="q-types-${questionIndex}" class="form-control question-allowed-types" placeholder="e.g., .pdf,.zip" value="${escapeHtml(allowedTypes)}"> </div> <div class="form-group"> <label for="q-size-${questionIndex}">Max Size (MB):</label> <input type="number" id="q-size-${questionIndex}" class="form-control question-max-size" min="1" value="${escapeHtml(maxSize)}"> </div> </div>
-                <div class="conditional-field" data-type="multiple_select" style="${type === 'multiple_select' ? 'display: block;' : ''}"> <div class="form-group"> <label for="q-options-${questionIndex}">Options (ONE per line):</label> <textarea id="q-options-${questionIndex}" class="form-control question-options" rows="4" placeholder="Option A\nOption B">${escapeHtml(options)}</textarea> </div> <div class="form-group"> <label for="q-correct-${questionIndex}">Correct Answer(s) (ONE per line):</label> <textarea id="q-correct-${questionIndex}" class="form-control question-correct" rows="2" placeholder="Option B">${escapeHtml(correct)}</textarea> <small style="font-size: 0.8em; color: #555;">Enter exact text of correct option(s).</small> </div> </div>
-                `;
-            questionsBuilderDiv.appendChild(block);
-        }
+            </div>
+
+            <div class="conditional-field"
+                 data-type="multiple_select"
+                 ${type === 'multiple_select' ? 'style="display:block;"' : ''}>
+                <div class="form-group">
+                    <label for="q-options-${questionIndex}">
+                        <i class="fas fa-list"></i> Answer Options:
+                        <span class="help-tooltip" title="Enter one option per line">
+                            <i class="fas fa-question-circle"></i>
+                        </span>
+                    </label>
+                    <textarea id="q-options-${questionIndex}"
+                              class="form-control question-options"
+                              rows="4"
+                              placeholder="Option A&#10;Option B&#10;Option C">${escapeHtml(options)}</textarea>
+                </div>
+                <div class="form-group">
+                    <label for="q-correct-${questionIndex}">
+                        <i class="fas fa-check"></i> Correct Answer(s):
+                        <span class="help-tooltip" title="Enter the exact text of the correct option(s), one per line">
+                            <i class="fas fa-question-circle"></i>
+                        </span>
+                    </label>
+                    <textarea id="q-correct-${questionIndex}"
+                              class="form-control question-correct"
+                              rows="2"
+                              placeholder="Option B">${escapeHtml(correct)}</textarea>
+                    <div class="help-text">Enter the exact text of correct option(s), one per line</div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    questionsBuilderDiv.appendChild(block);
+    initTooltips();
+}
+
         // handleQuestionTypeChange - Unchanged
         function handleQuestionTypeChange(event) { if (!event.target.classList.contains('question-type-select')) return; const block = event.target.closest('.question-block'); if (!block) return; const selectedType = event.target.value; block.querySelectorAll('.conditional-field').forEach(field => field.style.display = 'none'); const conditionalField = block.querySelector(`.conditional-field[data-type="${selectedType}"]`); if (conditionalField) conditionalField.style.display = 'block'; }
         // handleRemoveQuestion - Unchanged
@@ -1138,7 +1393,8 @@ function showQuestionsPopup(row) {
 
                 if (type === 'code') { const lang = block.querySelector('.question-lang').value.trim(); if (lang) question.language = lang; }
                 else if (type === 'attachment') { /* ... attachment logic ... */ const typesStr = block.querySelector('.question-allowed-types').value.trim(); const sizeStr = block.querySelector('.question-max-size').value.trim(); if (typesStr) question.allowed_types = typesStr.split(',').map(t => t.trim()).filter(t => t); if (sizeStr) { const sizeNum = parseInt(sizeStr, 10); if (!isNaN(sizeNum) && sizeNum > 0) question.max_size_mb = sizeNum; else if (sizeStr) { questionsValid = false; block.querySelector('.question-max-size').style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Max size must be a positive number.'); } } }
-                else if (type === 'multiple_select') { /* ... mc logic ... */ const optionsInput = block.querySelector('.question-options'); const correctInput = block.querySelector('.question-correct'); const optionsStr = optionsInput.value.trim(); const correctStr = correctInput.value.trim(); if (!optionsStr) { questionsValid = false; optionsInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Options cannot be empty.'); } else { question.options = optionsStr.split('\n').map(opt => opt.trim()).filter(opt => opt); if (question.options.length < 1) { questionsValid = false; optionsInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Needs at least one option.'); } } if (!correctStr) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Correct answer(s) cannot be empty.'); } else { question.correct_answers = correctStr.split('\n').map(ans => ans.trim()).filter(ans => ans); if (question.correct_answers.length === 0) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'At least one correct answer required.'); } if (question.options && question.correct_answers.length > 0) { const allCorrectExist = question.correct_answers.every(ans => question.options.includes(ans)); if (!allCorrectExist) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Correct answer not found in options.'); } } } }
+                else if (type === 'multiple_select') { /* ... mc logic ... */ const optionsInput = block.querySelector('.question-options'); const correctInput = block.querySelector('.question-correct'); const optionsStr = optionsInput.value.trim(); const correctStr = correctInput.value.trim(); if (!optionsStr) { questionsValid = false; optionsInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Options cannot be empty.'); } else { question.options = optionsStr.split('\n').map(opt => opt.trim()).filter(opt => opt); if (question.options.length < 1) { questionsValid = false; optionsInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Needs at least one option.'); } } if (!correctStr) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Correct answer(s) cannot be empty.'); } else { question.correct_answers = correctStr.split('\n').map(ans => ans.trim()).filter(ans => ans); if (question.correct_answers.length === 0) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'At least one correct answer required.'); } if (question.options && question.correct_answers.length > 0) { const allCorrectExist = question.correct_answers.every(ans => question.options.includes(ans)); if (!allCorrectExist) { questionsValid = false; correctInput.style.borderColor = 'red'; showImprovedNotification('warning', `Validation Error (Q${qNum})`, 'Correct answer not found in options.'); } } } 
+				
                 if (questionsValid) questionsArray.push(question);
             });
 
