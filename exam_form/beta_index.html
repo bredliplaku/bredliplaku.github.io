@@ -726,14 +726,10 @@
         const ADMIN_EMAILS = ['bplaku@epoka.edu.al'];
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com'; // Keep for sign-in
         const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE'; // Keep for GAPI client init (e.g., reading sheets)
-
-
-                const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
-
+        const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
         // --- !!! ADD YOUR DEPLOYED APPS SCRIPT URL HERE !!! ---
         const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxoC490P6zOD4_FcXCmu890EeGGg8BAbElwSEFkZzlg8AT8g2uWSQBsI4fGw74Dylmh/exec';
-
 
         // === App State ===
         let isAdmin = false;
@@ -751,6 +747,10 @@
         const appStateKey = 'examAppState'; // Key for localStorage
 		let totalQuestions = 0; // To track total number of questions displayed
 		let confirmedQuestionsCount = 0; // To track confirmed questions
+		let tokenRefreshTimer = null;        // Timer for periodic token refresh
+		let inactivityTimer = null;          // Timer to detect inactivity
+		let lastActivityTime = Date.now();   // Timestamp of last user activity
+		let autoSaveTimer = null;            // Timer for auto-saving answers
 
 
         // === DOM Elements === (Keep all these as they are used for UI)
@@ -792,6 +792,9 @@
         const submitExamBtn         = document.getElementById('submit-exam-btn');
         const timerDisplay          = document.getElementById('timer-display');
         const submissionConfirmationModule = document.getElementById('submission-confirmation-module');
+		const TOKEN_REFRESH_INTERVAL = 20 * 60 * 1000; // 20 minutes in milliseconds
+		const INACTIVITY_WARNING_TIME = 15 * 60 * 1000; // 15 minutes in milliseconds
+		const AUTO_SAVE_INTERVAL = 3 * 60 * 1000; // 3 minutes in milliseconds
 
 
         // === Initialisation ===
@@ -842,6 +845,8 @@
             if (startExamBtnAlt) startExamBtnAlt.classList.add('hidden'); // Hide Exam mode button initially
             if (submitExamBtn) submitExamBtn.disabled = true;
         }
+		
+		setupSessionManagement();
 
         function showAppContent() {
             loadingIndicator?.classList.add('hidden');
@@ -855,6 +860,214 @@
                 el.textContent = new Date().getFullYear();
             }
         }
+		
+function setupSessionManagement() {
+    // Setup activity tracking
+    document.addEventListener('mousemove', recordUserActivity);
+    document.addEventListener('keydown', recordUserActivity);
+    document.addEventListener('click', recordUserActivity);
+    
+    // Initial activity timestamp
+    lastActivityTime = Date.now();
+    
+    // Set up auto-save for answers
+    startAutoSave();
+}
+
+function recordUserActivity() {
+    const now = Date.now();
+    const timeSinceLastActivity = now - lastActivityTime;
+    lastActivityTime = now;
+    
+    // If there was a significant gap in activity, consider refreshing the token
+    if (timeSinceLastActivity > 10 * 60 * 1000) { // 10 minutes
+        console.log(`Detected activity after ${timeSinceLastActivity/1000}s inactivity, refreshing token...`);
+        refreshTokenIfNeeded(true); // Force refresh
+    }
+    
+    // Reset inactivity timer if it exists
+    if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+    }
+    
+    // Start inactivity detection
+    startInactivityDetection();
+}
+
+// Starts the inactivity detection timer
+function startInactivityDetection() {
+    // Clear any existing timer
+    if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+    }
+    
+    // Set new timer to detect inactivity
+    inactivityTimer = setTimeout(() => {
+        const inactiveTime = Date.now() - lastActivityTime;
+        if (inactiveTime >= INACTIVITY_WARNING_TIME) {
+            showInactivityWarning();
+        }
+    }, INACTIVITY_WARNING_TIME);
+}
+
+// Shows a warning when user has been inactive
+function showInactivityWarning() {
+    showImprovedNotification(
+        'warning', 
+        'Session Expiring Soon', 
+        'You appear to be inactive. Please click, type, or move your mouse to keep your session active.', 
+        0 // Don't auto-dismiss
+    );
+    
+    // Play a sound to alert the user (optional)
+    try {
+        const audio = new Audio('data:audio/wav;base64,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');
+        audio.play().catch(e => console.warn("Could not play alert sound:", e));
+    } catch(e) {
+        console.warn("Could not create alert sound:", e);
+    }
+}
+
+// Periodic token refresh
+function startTokenRefresh() {
+    // Clear any existing timer
+    stopTokenRefresh();
+    
+    console.log("Starting token refresh timer");
+    tokenRefreshTimer = setInterval(() => {
+        refreshTokenIfNeeded(false);
+    }, TOKEN_REFRESH_INTERVAL);
+}
+
+// Stop token refresh timer
+function stopTokenRefresh() {
+    if (tokenRefreshTimer) {
+        clearInterval(tokenRefreshTimer);
+        tokenRefreshTimer = null;
+    }
+}
+
+// Refresh token if needed or if forced
+async function refreshTokenIfNeeded(force = false) {
+    // Only try to refresh if signed in
+    if (!isSignedIn || !tokenClient) {
+        console.log("Not refreshing token: not signed in or no tokenClient");
+        return false;
+    }
+    
+    // Check for stored token
+    const savedTokenStr = localStorage.getItem('gapi_token');
+    if (!savedTokenStr) {
+        console.log("No token to refresh");
+        return false;
+    }
+    
+    try {
+        const savedToken = JSON.parse(savedTokenStr);
+        
+        // If forced or token is older than 40 minutes, refresh it
+        // Note: Google tokens typically last 1 hour
+        const tokenAgeMs = Date.now() - (savedToken.issued_at || 0);
+        const needsRefresh = force || tokenAgeMs > 40 * 60 * 1000;
+        
+        if (needsRefresh) {
+            console.log(`Token age: ${tokenAgeMs / 1000}s - Refreshing token...`);
+            
+            // Request a new token with the same account
+            tokenClient.requestAccessToken({ prompt: '' });
+            return true;
+        } else {
+            console.log(`Token age: ${tokenAgeMs / 1000}s - No refresh needed`);
+            return false;
+        }
+    } catch (e) {
+        console.error("Error refreshing token:", e);
+        return false;
+    }
+}
+
+// Auto-save answers periodically
+function startAutoSave() {
+    // Clear any existing timer
+    stopAutoSave();
+    
+    console.log("Starting auto-save timer");
+    autoSaveTimer = setInterval(() => {
+        if (examQuestionsModule && !examQuestionsModule.classList.contains('hidden')) {
+            autoSaveAnswers();
+        }
+    }, AUTO_SAVE_INTERVAL);
+}
+
+// Stop auto-save timer
+function stopAutoSave() {
+    if (autoSaveTimer) {
+        clearInterval(autoSaveTimer);
+        autoSaveTimer = null;
+    }
+}
+
+// Automatically save current answers to localStorage
+function autoSaveAnswers() {
+    // Only auto-save if exam is in progress
+    if (!examQuestionsModule || examQuestionsModule.classList.contains('hidden') || !examDetails) {
+        return;
+    }
+    
+    console.log("Auto-saving current answers...");
+    try {
+        // Collect current answers
+        const currentAnswers = {};
+        const confirmationStatus = {};
+        
+        // Use the original indices to collect answers
+        const originalIndices = Object.keys(examDetails.OriginalOrderMap).map(Number).sort((a, b) => a - b);
+        originalIndices.forEach(originalIndex => {
+            const originalQNum = originalIndex + 1;
+            const answerName = `ans-${originalQNum}`;
+            const questionDivId = `q-${originalQNum}`;
+            const questionDiv = document.getElementById(questionDivId);
+            
+            // Get confirmation status
+            if (questionDiv) {
+                confirmationStatus[questionDivId] = questionDiv.classList.contains('confirmed');
+            }
+            
+            // Get answer value based on question type
+            const questionData = examDetails.OriginalOrderMap[originalIndex];
+            if (!questionData) return;
+            
+            const formElement = examForm.elements[answerName];
+            if (formElement) {
+                switch (questionData.type) {
+                    case 'multiple_select':
+                        currentAnswers[answerName] = formElement.value || '';
+                        break;
+                    case 'attachment':
+                        // Skip file inputs - just save "has file" status
+                        currentAnswers[answerName] = (formElement.files && formElement.files.length > 0) 
+                            ? 'FILE_SELECTED' : '';
+                        break;
+                    default:
+                        currentAnswers[answerName] = formElement.value || '';
+                }
+            }
+        });
+        
+        // Update the saved state with current answers and confirmation status
+        const currentState = JSON.parse(localStorage.getItem(appStateKey) || '{}');
+        currentState.currentAnswers = currentAnswers;
+        currentState.confirmationStatus = confirmationStatus;
+        localStorage.setItem(appStateKey, JSON.stringify(currentState));
+        
+        console.log("Answers auto-saved successfully");
+    } catch (e) {
+        console.error("Error auto-saving answers:", e);
+    }
+}
+
+
 
 // === Google API & Auth === (Simplified)
 function initGoogleApi() {
@@ -983,6 +1196,7 @@ function initGoogleApi() {
                 localStorage.removeItem(appStateKey); // Clear invalid/old state
                 saveAppState(); // Save a clean initial state if needed
             }
+			startTokenRefresh();
         }
 
 // Modified to accept token object and use its access_token
@@ -1091,6 +1305,13 @@ function initGoogleApi() {
             resetExamState(); // Reset UI to initial state
             updateAuthUI(); // Update UI to logged-out state
             showImprovedNotification('info', 'Signed Out', 'You have been signed out.');
+			
+			stopTokenRefresh();
+			stopAutoSave();
+			if (inactivityTimer) {
+				clearTimeout(inactivityTimer);
+				inactivityTimer = null;
+			}
         }
 
 
@@ -1628,7 +1849,19 @@ async function handleStartExam() {
         startTimer();
         saveAppState();
         checkAllConfirmed();
+		stopAutoSave();
+		startAutoSave();
     }
+
+function shuffleArray(array) {
+    // Create a copy of the array to avoid modifying the original
+    const shuffled = array.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
 
 function displayQuestions(questionsJsonString) {
     console.log("Parsing and displaying exam questions...");
@@ -1653,14 +1886,23 @@ function displayQuestions(questionsJsonString) {
         totalQuestions = questionsArray.length;
         console.log(`Total questions loaded: ${totalQuestions}`);
 
+        // Create an array of original indices
         const originalIndices = questionsArray.map((_, index) => index);
-        console.log("Shuffled display order (indices):", originalIndices);
+        
+        // Only shuffle for students, not for admin users
+        const shuffledIndices = isAdmin ? originalIndices : shuffleArray(originalIndices);
+        console.log("Display order (indices):", shuffledIndices);
+        
+        // Create a mapping of original indices to questions
         examDetails.OriginalOrderMap = {};
         questionsArray.forEach((q, index) => {
             examDetails.OriginalOrderMap[index] = q;
         });
 
-        originalIndices.forEach((originalIndex, displayIndex) => {
+        // For tracking which questions need to be shuffled again if editing
+        const shuffledQuestionIds = new Set();
+
+        shuffledIndices.forEach((originalIndex, displayIndex) => {
             const q = questionsArray[originalIndex];
             const displayQNum = displayIndex + 1;
             const originalQNum = originalIndex + 1;
@@ -1683,8 +1925,6 @@ function displayQuestions(questionsJsonString) {
             promptText = promptText.replace(/\*\*\*(.*?)\*\*\*/g, '<strong>$1</strong>');
             // Then convert **text** to bold (ensuring that we don't conflict with ***):
             promptText = promptText.replace(/(?<!\*)\*\*(?!\*)(.*?)\*\*(?!\*)/g, '<strong>$1</strong>');
-            // Optionally, uncomment the next line to italicise text enclosed in single asterisks:
-            // promptText = promptText.replace(/\*(.*?)\*/g, '<em>$1</em>');
 
             // 3. Emphasise specific terms
             const termsToEmphasise = ['sep', 'end', 'print()', 'input()', 'range\\(5\\)', 'range\\(2, 8, 2\\)', 'TypeError', 'IDE'];
@@ -1729,11 +1969,34 @@ function displayQuestions(questionsJsonString) {
                     break;
                 case 'multiple_select':
                     questionContentHtml += `<div class="checkbox-group" id="${answerId}">`;
+                    
                     if (Array.isArray(q.options)) {
-                        q.options.forEach((option, optIndex) => {
-                            const optionId = `${answerId}-opt${optIndex}`;
+                        // Create a mapping of original option indices to options for answers
+                        q.optionOrderMap = {};
+                        q.options.forEach((opt, idx) => {
+                            q.optionOrderMap[idx] = opt;
+                        });
+                        
+                        // Get option indices and shuffle them for students (not admin)
+                        let optionIndices = q.options.map((_, i) => i);
+                        if (!isAdmin) {
+                            optionIndices = shuffleArray(optionIndices);
+                        }
+                        
+                        // Store the shuffled order in the question object
+                        q.shuffledOptionIndices = optionIndices;
+                        
+                        // Render options in the shuffled order
+                        optionIndices.forEach((originalOptIndex, displayOptIndex) => {
+                            const option = q.options[originalOptIndex];
+                            const optionId = `${answerId}-opt${originalOptIndex}`;
                             const escapedOption = escapeHtml(option);
-                            questionContentHtml += `<div class="checkbox-item"><input type="radio" id="${optionId}" name="${answerName}" value="${escapedOption}" class="form-control-checkbox"><label for="${optionId}">${escapedOption}</label></div>`;
+                            questionContentHtml += `<div class="checkbox-item">
+                                <input type="radio" id="${optionId}" name="${answerName}" 
+                                    value="${escapedOption}" class="form-control-checkbox" 
+                                    data-original-index="${originalOptIndex}">
+                                <label for="${optionId}">${escapedOption}</label>
+                            </div>`;
                         });
                     } else {
                         questionContentHtml += `<p style="color:red;">Error: Options missing.</p>`;
@@ -1747,7 +2010,14 @@ function displayQuestions(questionsJsonString) {
             questionContentHtml += '</div>'; // End question-content
 
             // Added confirm/edit actions
-            const actionsHtml = `<div class="question-actions"> <button type="button" class="btn-confirm btn-green" onclick="confirmAnswer('${questionId}')"><i class="fas fa-check"></i> Confirm</button> <button type="button" class="btn-edit btn-grey" onclick="editAnswer('${questionId}')"><i class="fas fa-pencil-alt"></i> Edit</button> </div>`;
+            const actionsHtml = `<div class="question-actions"> 
+                <button type="button" class="btn-confirm btn-green" onclick="confirmAnswer('${questionId}')">
+                    <i class="fas fa-check"></i> Confirm
+                </button> 
+                <button type="button" class="btn-edit btn-grey" onclick="editAnswer('${questionId}')">
+                    <i class="fas fa-pencil-alt"></i> Edit
+                </button> 
+            </div>`;
 
             const labelTargetId = answerId; // Use answerId as the label's target
             questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
@@ -2059,40 +2329,33 @@ function displayQuestions(questionsJsonString) {
                         console.log(`Collected answer for ${answerName} (attachment):`, answers[answerName]);
                         break; // Ends attachment case
 
-                    case 'multiple_select': // Handles RADIO BUTTONS
-                        const radioGroup = formElementsWithName;
-                        let selectedValue = null; // Default to null
+					case 'multiple_select': // Handles RADIO BUTTONS
+						const radioGroup = formElementsWithName;
+						let selectedValue = null; // Default to null
 
-                        if (radioGroup && typeof radioGroup.value !== 'undefined') {
-                            if (radioGroup.value !== "") {
-                                selectedValue = radioGroup.value;
-                            }
-                        } else {
-                             console.warn(`Could not find radio button group or its value property for name: "${answerName}"`);
-                        }
-                        answers[answerName] = selectedValue;
-                        console.log(`Collected answer for ${answerName} (radio):`, selectedValue);
-                        break; // Ends multiple_select case
-
-                    // Add cases for other types if you have them (e.g., checkbox if you re-add it)
-
-                    default: // Handles short_answer, long_answer, code, etc.
-                        if (typeof formElementsWithName.value !== 'undefined') {
-                            answers[answerName] = formElementsWithName.value;
-                             console.log(`Collected answer for ${answerName} (default): "${answers[answerName].substring(0,50)}..."`);
-                        } else {
-                            console.warn(`Element "${answerName}" found but has no 'value' property.`);
-                            answers[answerName] = 'ERROR_NO_VALUE_PROP';
-                        }
-                        break; // Ends default case
-                }
-                // --- End of switch statement ---
-
-            } else {
-                // This block executes if element not found (Keep this)
-                console.warn(`Could not find form element for answer name: "${answerName}"`);
-                answers[answerName] = 'ERROR_ELEMENT_NOT_FOUND';
-            }
+						if (radioGroup && typeof radioGroup.value !== 'undefined') {
+							if (radioGroup.value !== "") {
+								selectedValue = radioGroup.value;
+								
+								// If we're working with shuffled options, store additional metadata
+								// This helps with grading on the admin side
+								if (!isAdmin && questionData.shuffledOptionIndices) {
+									// Find which original option index this value corresponds to
+									const selectedOptionEl = document.querySelector(`input[name="${answerName}"]:checked`);
+									if (selectedOptionEl && selectedOptionEl.dataset.originalIndex) {
+										// Add metadata to track original option index
+										answers[`${answerName}_metadata`] = {
+											originalIndex: selectedOptionEl.dataset.originalIndex
+										};
+									}
+								}
+							}
+						} else {
+							console.warn(`Could not find radio button group or its value property for name: "${answerName}"`);
+						}
+						answers[answerName] = selectedValue;
+						console.log(`Collected answer for ${answerName} (radio):`, selectedValue);
+						break; // Ends multiple_select case
                 }
             });
 
@@ -2428,6 +2691,48 @@ function displayQuestions(questionsJsonString) {
              checkAllConfirmed(); // Let this function handle button state based on confirms/online
 
              console.log("Application state restored successfully.");
+			 
+			 / Restore saved answers if available
+if (state.currentAnswers) {
+    console.log("Restoring saved answers...");
+    
+    // Wait a brief moment for the UI to initialize
+    setTimeout(() => {
+        try {
+            // Restore answers
+            for (const answerName in state.currentAnswers) {
+                const formElement = examForm.elements[answerName];
+                if (formElement && state.currentAnswers[answerName] !== 'FILE_SELECTED') {
+                    formElement.value = state.currentAnswers[answerName];
+                }
+            }
+            
+            // Restore confirmation status
+            if (state.confirmationStatus) {
+                for (const questionId in state.confirmationStatus) {
+                    const questionDiv = document.getElementById(questionId);
+                    if (questionDiv && state.confirmationStatus[questionId]) {
+                        // Re-apply confirmed class and disable inputs
+                        questionDiv.classList.add('confirmed');
+                        
+                        // Disable all relevant input elements within this question
+                        const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
+                        inputs.forEach(input => { input.disabled = true; });
+                        
+                        // Count this as confirmed
+                        confirmedQuestionsCount++;
+                    }
+                }
+            }
+            
+            // Update submit button state
+            checkAllConfirmed();
+            console.log(`Restored ${confirmedQuestionsCount}/${totalQuestions} confirmed answers`);
+        } catch (e) {
+            console.error("Error restoring saved answers:", e);
+        }
+    }, 500);
+}
          }
 
     </script>
