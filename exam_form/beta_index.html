@@ -8,6 +8,12 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
     <script src="https://apis.google.com/js/api.js" async defer></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/monokai.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/closebrackets.min.js"></script>
  <style>
         /* --- CSS --- */
         :root {
@@ -366,6 +372,131 @@
         #exam-details-display p {
             margin: 8px 0;
         }
+		/* CodeMirror Editor Styles */
+.code-editor-container {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    background-color: #272822; /* Monokai background */
+}
+
+.code-editor-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: #333;
+    color: #eee;
+    border-bottom: 1px solid #444;
+}
+
+.code-editor-title {
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.editor-lang-badge {
+    background-color: #4a5568;
+    color: #fff;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.8em;
+    margin-left: 8px;
+}
+
+.code-editor-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.code-editor-actions button {
+    font-size: 0.8em;
+    padding: 3px 8px;
+}
+
+.run-code-btn {
+    background-color: #38a169 !important;
+    color: white !important;
+}
+
+.format-code-btn {
+    background-color: #3182ce !important;
+    color: white !important;
+}
+
+.CodeMirror {
+    height: auto !important;
+    min-height: 150px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.code-output-area {
+    background-color: #f8f9fa;
+    border-top: 1px solid #ddd;
+    max-height: 150px;
+    overflow: auto;
+}
+
+.output-header {
+    padding: 6px 12px;
+    background-color: #e9ecef;
+    font-size: 0.9em;
+    font-weight: 500;
+    color: #444;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.clear-output-btn {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    padding: 2px 5px;
+    font-size: 0.8em;
+}
+
+.clear-output-btn:hover {
+    color: #333;
+}
+
+.output-content {
+    padding: 8px 12px;
+    margin: 0;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: #333;
+}
+
+/* Confirmed state styling */
+.editor-confirmed .CodeMirror {
+    opacity: 0.7;
+    background-color: #303030;
+}
+
+.editor-confirmed .code-editor-toolbar::after {
+    content: "✓ CONFIRMED";
+    background-color: rgba(56, 161, 105, 0.8);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    margin-left: 10px;
+}
+
+/* Custom buttons in confirmed state */
+.editor-confirmed .code-editor-actions button {
+    pointer-events: none;
+    opacity: 0.5;
+}
         #exam-details-display strong {
             color: var(--primary-dark);
             margin-right: 5px;
@@ -751,6 +882,8 @@
 		let inactivityTimer = null;          // Timer to detect inactivity
 		let lastActivityTime = Date.now();   // Timestamp of last user activity
 		let autoSaveTimer = null;            // Timer for auto-saving answers
+		let codeEditors = {}; // Object to store CodeMirror instances by answerId
+
 
 
         // === DOM Elements === (Keep all these as they are used for UI)
@@ -893,6 +1026,239 @@ function recordUserActivity() {
     
     // Start inactivity detection
     startInactivityDetection();
+}
+
+// === Add this function to initialize CodeMirror editors ===
+function initializeCodeEditor(textareaId, language = 'python') {
+    // Find the textarea element
+    const textarea = document.getElementById(textareaId);
+    if (!textarea) {
+        console.warn(`Cannot initialize code editor: textarea #${textareaId} not found`);
+        return null;
+    }
+    
+    // Check if CodeMirror is available
+    if (typeof CodeMirror === 'undefined') {
+        console.warn('CodeMirror library not loaded. Using regular textarea instead.');
+        return null;
+    }
+    
+    // Create a wrapper div for the editor
+    const wrapperDiv = document.createElement('div');
+    wrapperDiv.className = 'code-editor-container';
+    wrapperDiv.id = `${textareaId}-wrapper`;
+    
+    // Insert the wrapper before the textarea
+    textarea.parentNode.insertBefore(wrapperDiv, textarea);
+    
+    // Hide the original textarea
+    textarea.style.display = 'none';
+    
+    // Create toolbar for the editor
+    const toolbar = document.createElement('div');
+    toolbar.className = 'code-editor-toolbar';
+    toolbar.innerHTML = `
+        <div class="code-editor-title">
+            <i class="fas fa-code"></i> Python Editor
+            <span class="editor-lang-badge">python</span>
+        </div>
+        <div class="code-editor-actions">
+            <button type="button" class="btn-sm btn-secondary run-code-btn" title="Run Code (Ctrl+Enter)">
+                <i class="fas fa-play"></i> Run
+            </button>
+            <button type="button" class="btn-sm format-code-btn" title="Format Code">
+                <i class="fas fa-align-left"></i> Format
+            </button>
+        </div>
+    `;
+    wrapperDiv.appendChild(toolbar);
+    
+    // Create output area for code execution
+    const outputArea = document.createElement('div');
+    outputArea.className = 'code-output-area';
+    outputArea.id = `${textareaId}-output`;
+    outputArea.innerHTML = '<div class="output-header">Output <button class="clear-output-btn"><i class="fas fa-trash"></i></button></div><pre class="output-content"></pre>';
+    
+    // Initialize CodeMirror
+    const editor = CodeMirror(wrapperDiv, {
+        value: textarea.value,
+        mode: language,
+        theme: 'monokai',
+        lineNumbers: true,
+        indentUnit: 4,
+        tabSize: 4,
+        indentWithTabs: false,
+        smartIndent: true,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        lineWrapping: true,
+        extraKeys: {
+            "Tab": function(cm) {
+                if (cm.somethingSelected()) {
+                    cm.indentSelection("add");
+                } else {
+                    cm.replaceSelection("    ", "end");
+                }
+            },
+            "Ctrl-Enter": function(cm) {
+                runPythonCode(textareaId);
+            }
+        }
+    });
+    
+    // Sync changes back to the hidden textarea for form submission
+    editor.on("change", function(cm) {
+        textarea.value = cm.getValue();
+    });
+    
+    // Add the output area after the editor
+    wrapperDiv.appendChild(outputArea);
+    
+    // Setup event listeners for the toolbar buttons
+    const runBtn = wrapperDiv.querySelector('.run-code-btn');
+    if (runBtn) {
+        runBtn.addEventListener('click', () => runPythonCode(textareaId));
+    }
+    
+    const formatBtn = wrapperDiv.querySelector('.format-code-btn');
+    if (formatBtn) {
+        formatBtn.addEventListener('click', () => formatPythonCode(textareaId));
+    }
+    
+    const clearOutputBtn = wrapperDiv.querySelector('.clear-output-btn');
+    if (clearOutputBtn) {
+        clearOutputBtn.addEventListener('click', () => {
+            const outputContent = wrapperDiv.querySelector('.output-content');
+            if (outputContent) outputContent.innerHTML = '';
+        });
+    }
+    
+    // Store the editor instance
+    codeEditors[textareaId] = editor;
+    
+    // Return the editor instance
+    return editor;
+}
+
+// === Run Python code client-side using Pyodide (optional if you want execution) ===
+async function runPythonCode(textareaId) {
+    const editor = codeEditors[textareaId];
+    if (!editor) return;
+    
+    const outputElem = document.getElementById(`${textareaId}-output`).querySelector('.output-content');
+    if (!outputElem) return;
+    
+    // Get the code from the editor
+    const code = editor.getValue();
+    
+    // Display "running" message
+    outputElem.innerHTML = '<span style="color: #aaa;">Running code...</span>';
+    
+    try {
+        // This is just a mock execution - in a real implementation you might:
+        // 1. Use pyodide for in-browser Python (load dynamically when needed)
+        // 2. Display a simulated output for common Python snippets
+        // 3. Use a basic parser to predict output for simple code
+        // 4. Use a backend service to execute and return results
+        
+        // Mock execution example
+        await mockPythonExecution(code, outputElem);
+        
+    } catch (error) {
+        outputElem.innerHTML = `<span style="color: red;">Error: ${error.message}</span>`;
+    }
+}
+
+// Mock Python execution with simple parsing
+async function mockPythonExecution(code, outputElem) {
+    // Simulate execution delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    let output = '';
+    
+    // Very simple parser for print statements
+    const lines = code.split('\n');
+    for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        // Handle basic print statements
+        if (trimmedLine.startsWith('print(') && trimmedLine.endsWith(')')) {
+            try {
+                // Extract content inside print()
+                const content = trimmedLine.substring(6, trimmedLine.length - 1);
+                
+                // Handle string literals
+                if ((content.startsWith('"') && content.endsWith('"')) || 
+                    (content.startsWith("'") && content.endsWith("'"))) {
+                    output += content.substring(1, content.length - 1) + '\n';
+                }
+                // Handle numbers
+                else if (!isNaN(content)) {
+                    output += content + '\n';
+                }
+                // Handle simple variables - won't work for real
+                else {
+                    output += "[variable content would appear here]\n";
+                }
+            } catch (e) {
+                output += "Error evaluating print statement\n";
+            }
+        }
+        // Handle comments
+        else if (trimmedLine.startsWith('#')) {
+            // Skip comments
+        }
+        // Unknown line type - would actually execute in real Python
+        else if (trimmedLine && !trimmedLine.startsWith('import ') && !trimmedLine.startsWith('from ')) {
+            output += "[Line executed without output]\n";
+        }
+    }
+    
+    if (output) {
+        outputElem.innerHTML = escapeHtml(output);
+    } else {
+        outputElem.innerHTML = '<span style="color: #8a8;">Code executed successfully with no output.</span>';
+    }
+}
+
+// Format Python code (simple indentation fix)
+function formatPythonCode(textareaId) {
+    const editor = codeEditors[textareaId];
+    if (!editor) return;
+    
+    const code = editor.getValue();
+    
+    // Simple formatter that standardizes indentation and line breaks
+    try {
+        // 1. Split into lines
+        const lines = code.split('\n');
+        let formattedLines = [];
+        
+        for (let line of lines) {
+            // 2. Handle indentation (keep leading spaces but standardize)
+            const leadingSpaces = line.match(/^\s*/)[0].length;
+            const standardIndent = Math.floor(leadingSpaces / 4) * 4;
+            const trimmedLine = line.trim();
+            
+            if (trimmedLine) {
+                formattedLines.push(' '.repeat(standardIndent) + trimmedLine);
+            } else {
+                formattedLines.push(''); // Keep empty lines
+            }
+        }
+        
+        // Set the formatted code back to the editor
+        editor.setValue(formattedLines.join('\n'));
+        
+        // Show success message
+        const outputElem = document.getElementById(`${textareaId}-output`).querySelector('.output-content');
+        if (outputElem) {
+            outputElem.innerHTML = '<span style="color: #8a8;">Code formatted successfully.</span>';
+        }
+        
+    } catch (e) {
+        console.error("Error formatting code:", e);
+    }
 }
 
 // Starts the inactivity detection timer
@@ -1961,9 +2327,13 @@ function displayQuestions(questionsJsonString) {
                 case 'long_answer':
                     questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control" rows="5" placeholder="Enter your detailed answer">${escapeHtml(q.content || '')}</textarea>`;
                     break;
-                case 'code':
-                    questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control code-editor" rows="8" placeholder="Enter your code">${escapeHtml(q.content || '')}</textarea>`;
-                    break;
+				case 'code':
+					questionContentHtml += `<textarea id="${answerId}" name="${answerName}" class="form-control code-editor" rows="8" placeholder="Enter your code">${escapeHtml(q.content || '')}</textarea>`;
+					// Remember to initialize CodeMirror for this textarea later
+					setTimeout(() => {
+						initializeCodeEditor(answerId, q.language || 'python');
+					}, 100); // Short delay to ensure DOM is ready
+					break;
                 case 'attachment':
                     questionContentHtml += `<input type="file" id="${answerId}" name="${answerName}" class="form-control">`;
                     break;
@@ -2060,6 +2430,16 @@ function displayQuestions(questionsJsonString) {
 
             console.log(`Confirmed answer for question: ${questionId}`);
             checkAllConfirmed(); // Update overall submit button status
+			
+			const cmAnswerId = questionDiv.querySelector('.code-editor')?.id;
+if (cmAnswerId && codeEditors[cmAnswerId]) {
+    codeEditors[cmAnswerId].setOption('readOnly', true);
+    // Add a visual indicator that it's read-only
+    const wrapper = document.getElementById(`${cmAnswerId}-wrapper`);
+    if (wrapper) {
+        wrapper.classList.add('editor-confirmed');
+    }
+}
         }
 
         // Enables editing for an answer (Keep as is)
@@ -2077,6 +2457,16 @@ function displayQuestions(questionsJsonString) {
 
             console.log(`Enabled editing for question: ${questionId}`);
             checkAllConfirmed(); // Update overall submit button status
+			
+			const cmAnswerId = questionDiv.querySelector('.code-editor')?.id;
+if (cmAnswerId && codeEditors[cmAnswerId]) {
+    codeEditors[cmAnswerId].setOption('readOnly', false);
+    // Remove the visual indicator
+    const wrapper = document.getElementById(`${cmAnswerId}-wrapper`);
+    if (wrapper) {
+        wrapper.classList.remove('editor-confirmed');
+    }
+}
         }
 
 
@@ -2256,202 +2646,224 @@ function displayQuestions(questionsJsonString) {
         }
 
 
-        // Handles the final exam submission process by sending data to the backend
-        async function handleSubmitExam(isAutoSubmit = false) {
-            const timeIsUp = examEndTime && Date.now() >= examEndTime;
-            if (timeIsUp && !isAutoSubmit) {
-                 console.warn("Manual submit clicked after deadline. Treating as auto-submit.");
-                 showImprovedNotification('warning', 'Deadline Passed', 'Time expired. Submitting automatically.');
-                 isAutoSubmit = true;
-             }
+// Handles the final exam submission process by sending data to the backend
+async function handleSubmitExam(isAutoSubmit = false) {
+    const timeIsUp = examEndTime && Date.now() >= examEndTime;
+    if (timeIsUp && !isAutoSubmit) {
+         console.warn("Manual submit clicked after deadline. Treating as auto-submit.");
+         showImprovedNotification('warning', 'Deadline Passed', 'Time expired. Submitting automatically.');
+         isAutoSubmit = true;
+     }
 
-            stopTimer(); // Stop the timer immediately
+    stopTimer(); // Stop the timer immediately
 
-            // Disable submit button and show submitting state (always)
-            submitExamBtn.disabled = true;
-            submitExamBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    // Disable submit button and show submitting state (always)
+    submitExamBtn.disabled = true;
+    submitExamBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
 
-            // --- Mandatory Confirmation Check for MANUAL submit ---
-            if (!isAutoSubmit) {
-                if (confirmedQuestionsCount !== totalQuestions) {
-                    showImprovedNotification('error', 'Not All Confirmed', `Please confirm all ${totalQuestions} questions before submitting. You have confirmed ${confirmedQuestionsCount}.`, 5000);
-                    // Do not re-enable timer here, just update button state
-                    checkAllConfirmed(); // This will keep it disabled but update text
-                    return; // Stop submission
-                }
-                // If all confirmed manually, ask for final user confirmation
-                if (!confirm("You have confirmed all answers. Are you absolutely sure you want to submit your exam?\nThis action cannot be undone.")) {
-                     checkAllConfirmed(); // Re-enable button if online/all confirmed
-                     // Restart timer only if time still remains
-                     if (examEndTime && Date.now() < examEndTime) { startTimer(); }
-                     return; // Abort submission
-                 }
-            }
-            // --- End Manual Confirmation Check ---
+    // --- Mandatory Confirmation Check for MANUAL submit ---
+    if (!isAutoSubmit) {
+        if (confirmedQuestionsCount !== totalQuestions) {
+            showImprovedNotification('error', 'Not All Confirmed', `Please confirm all ${totalQuestions} questions before submitting. You have confirmed ${confirmedQuestionsCount}.`, 5000);
+            // Do not re-enable timer here, just update button state
+            checkAllConfirmed(); // This will keep it disabled but update text
+            return; // Stop submission
+        }
+        // If all confirmed manually, ask for final user confirmation
+        if (!confirm("You have confirmed all answers. Are you absolutely sure you want to submit your exam?\nThis action cannot be undone.")) {
+             checkAllConfirmed(); // Re-enable button if online/all confirmed
+             // Restart timer only if time still remains
+             if (examEndTime && Date.now() < examEndTime) { startTimer(); }
+             return; // Abort submission
+        }
+    }
+    // --- End Manual Confirmation Check ---
 
-            console.log("Processing submission..." + (isAutoSubmit ? " (Auto)" : " (Manual - All Confirmed)"));
-            const answers = {}; // Object to hold answers
-            const fingerprintObject = getFingerprintData(); // Get fingerprint OBJECT
+    console.log("Processing submission..." + (isAutoSubmit ? " (Auto)" : " (Manual - All Confirmed)"));
+    const answers = {}; // Object to hold answers
+    const fingerprintObject = getFingerprintData(); // Get fingerprint OBJECT
 
-            // Collect Answers - respecting ORIGINAL order AND confirmation status for auto-submit
-            if (!examDetails || !examDetails.OriginalOrderMap || totalQuestions <= 0) {
-                showImprovedNotification('error', 'Submission Error', 'Cannot collect answers. Exam data or question count is invalid.', 0);
-                checkAllConfirmed(); // Reset button state
-                return;
-            }
+    // Collect Answers - respecting ORIGINAL order AND confirmation status for auto-submit
+    if (!examDetails || !examDetails.OriginalOrderMap || totalQuestions <= 0) {
+        showImprovedNotification('error', 'Submission Error', 'Cannot collect answers. Exam data or question count is invalid.', 0);
+        checkAllConfirmed(); // Reset button state
+        return;
+    }
 
-            const originalIndices = Object.keys(examDetails.OriginalOrderMap).map(Number).sort((a, b) => a - b);
-            originalIndices.forEach(originalIndex => {
-                const originalQNum = originalIndex + 1;
-                const questionData = examDetails.OriginalOrderMap[originalIndex];
-                const answerName = `ans-${originalQNum}`;
-                const questionDivId = `q-${originalQNum}`;
-                const questionDiv = document.getElementById(questionDivId);
-                // Check confirmation status *reliably*
-                const isConfirmed = questionDiv ? questionDiv.classList.contains('confirmed') : false;
+    const originalIndices = Object.keys(examDetails.OriginalOrderMap).map(Number).sort((a, b) => a - b);
+    originalIndices.forEach(originalIndex => {
+        const originalQNum = originalIndex + 1;
+        const questionData = examDetails.OriginalOrderMap[originalIndex];
+        const answerName = `ans-${originalQNum}`;
+        const questionDivId = `q-${originalQNum}`;
+        const questionDiv = document.getElementById(questionDivId);
+        // Check confirmation status *reliably*
+        const isConfirmed = questionDiv ? questionDiv.classList.contains('confirmed') : false;
 
-                // For AUTO submit, ONLY collect CONFIRMED answers.
-                // For MANUAL submit, collect ALL (we already checked they are all confirmed).
-                if (isAutoSubmit && !isConfirmed) {
-                    answers[answerName] = "[NOT CONFIRMED]"; // Mark unconfirmed answers explicitly
-                    console.log(`Auto-submit: Answer for ${answerName} was not confirmed.`);
-                } else {
-                    // Collect answer normally (manual submit OR confirmed auto-submit)
-                    const formElementsWithName = examForm.elements[answerName];
-			                    if (formElementsWithName) {
-                        switch (questionData.type) {
-                            case 'attachment':
-                                const fileInput = formElementsWithName;
-                                answers[answerName] = (fileInput.files && fileInput.files.length > 0)
-                                    ? `FILE_UPLOADED:${fileInput.files[0].name}`
-                                    : '';
-                                console.log(`Collected answer for ${answerName} (attachment):`, answers[answerName]);
-                                break;
+        // For AUTO submit, ONLY collect CONFIRMED answers.
+        // For MANUAL submit, collect ALL (we already checked they are all confirmed).
+        if (isAutoSubmit && !isConfirmed) {
+            answers[answerName] = "[NOT CONFIRMED]"; // Mark unconfirmed answers explicitly
+            console.log(`Auto-submit: Answer for ${answerName} was not confirmed.`);
+        } else {
+            // Collect answer normally (manual submit OR confirmed auto-submit)
+            const formElementsWithName = examForm.elements[answerName];
+            if (formElementsWithName) {
+                switch (questionData.type) {
+                    case 'attachment':
+                        const fileInput = formElementsWithName;
+                        answers[answerName] = (fileInput.files && fileInput.files.length > 0)
+                            ? `FILE_UPLOADED:${fileInput.files[0].name}`
+                            : '';
+                        console.log(`Collected answer for ${answerName} (attachment):`, answers[answerName]);
+                        break; // Ends attachment case
 
-                            case 'multiple_select': // Handles RADIO BUTTONS
-                                const radioGroup = formElementsWithName;
-                                let selectedValue = null;
+                    case 'multiple_select': // Handles RADIO BUTTONS
+                        const radioGroup = formElementsWithName;
+                        let selectedValue = null; // Default to null
 
-                                if (radioGroup && typeof radioGroup.value !== 'undefined') {
-                                    if (radioGroup.value !== "") {
-                                        selectedValue = radioGroup.value;
-
-                                        if (!isAdmin && questionData.shuffledOptionIndices) {
-                                            const selectedOptionEl = document.querySelector(`input[name="${answerName}"]:checked`);
-                                            if (selectedOptionEl && selectedOptionEl.dataset.originalIndex) {
-                                                answers[`${answerName}_metadata`] = {
-                                                    originalIndex: selectedOptionEl.dataset.originalIndex
-                                                };
-                                            }
-                                        }
+                        if (radioGroup && typeof radioGroup.value !== 'undefined') {
+                            if (radioGroup.value !== "") {
+                                selectedValue = radioGroup.value;
+                                
+                                // If we're working with shuffled options, store additional metadata
+                                // This helps with grading on the admin side
+                                if (!isAdmin && questionData.shuffledOptionIndices) {
+                                    // Find which original option index this value corresponds to
+                                    const selectedOptionEl = document.querySelector(`input[name="${answerName}"]:checked`);
+                                    if (selectedOptionEl && selectedOptionEl.dataset.originalIndex) {
+                                        // Add metadata to track original option index
+                                        answers[`${answerName}_metadata`] = {
+                                            originalIndex: selectedOptionEl.dataset.originalIndex
+                                        };
                                     }
-                                } else {
-                                    console.warn(`Could not find radio button group or its value property for name: "${answerName}"`);
                                 }
-
-                                answers[answerName] = selectedValue;
-                                console.log(`Collected answer for ${answerName} (radio):`, selectedValue);
-                                break;
+                            }
+                        } else {
+                             console.warn(`Could not find radio button group or its value property for name: "${answerName}"`);
                         }
-                    } 
-                } 
-            }); 
+                        answers[answerName] = selectedValue;
+                        console.log(`Collected answer for ${answerName} (radio):`, selectedValue);
+                        break; // Ends multiple_select case
 
+                    default: // Handles short_answer, long_answer, code, etc.
+                        // For code questions using CodeMirror
+                        if (questionData.type === 'code' && codeEditors[answerName]) {
+                            answers[answerName] = codeEditors[answerName].getValue();
+                            console.log(`Collected answer for ${answerName} (code editor): "${answers[answerName].substring(0,50)}..."`);
+                        } else if (typeof formElementsWithName.value !== 'undefined') {
+                            answers[answerName] = formElementsWithName.value;
+                            console.log(`Collected answer for ${answerName} (default): "${answers[answerName].substring(0,50)}..."`);
+                        } else {
+                            console.warn(`Element "${answerName}" found but has no 'value' property.`);
+                            answers[answerName] = 'ERROR_NO_VALUE_PROP';
+                        }
+                        break; // Ends default case
+                }
+                // --- End of switch statement ---
 
-
-            // --- Create Backup Data --- (Keep this local backup)
-             const backupData = {
-                 submissionTimestamp: new Date().toISOString(),
-                 examDetails: { PIN: examDetails?.PIN, Name: examDetails?.Name, Mode: examDetails?.Mode, Code: examDetails?.Code },
-                 studentInfo: { pinEntered: studentPINEntered, studentExamId: examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined, name: currentUser?.name, email: currentUser?.email },
-                 answers: answers, // Keep raw answers object
-                 fingerprint: fingerprintObject, // Keep parsed object
-                 submittedLate: timeIsUp,
-                 autoSubmitted: isAutoSubmit, // Flag if it was an auto-submit
-                 confirmedCountOnSubmit: confirmedQuestionsCount, // Record how many were confirmed
-                 totalQuestionsOnSubmit: totalQuestions // Record total questions
-             };
-             const backupFilename = `exam_backup_${examDetails?.PIN || 'unknown'}_${(currentUser?.email || studentExamIdEntered || 'anon').replace(/@.*/, '')}_${Date.now()}.json`;
-             downloadJsonBackup(backupData, backupFilename);
-
-            // --- Prepare data payload for the backend ---
-            const submissionData = {
-                timestamp: backupData.submissionTimestamp, // Use consistent timestamp
-                pin: examDetails?.PIN,
-                courseCode: examDetails?.Code,
-                mode: examDetails?.Mode,
-                // Include identifiers based on mode
-                studentEmail: (examDetails?.Mode === 'quiz' ? currentUser?.email : undefined),
-                studentName: (examDetails?.Mode === 'quiz' ? currentUser?.name : undefined),
-                studentExamId: (examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined),
-                answers: answers, // The collected answers object
-                fingerprint: fingerprintObject, // Send parsed fingerprint object
-                isAutoSubmit: isAutoSubmit, // Let backend know if it was auto
-                timeIsUp: timeIsUp     // Let backend know if time was up
-            };
-
-            // --- Send data to Backend using Fetch ---
-            let submissionSuccess = false;
-            try {
-                console.log(`Sending data to backend: ${BACKEND_URL}`);
-                const response = await fetch(BACKEND_URL, {
-                    method: 'POST',
-                    mode: 'no-cors', // Simpler, but hides response details. Change to 'cors' if backend handles it.
-                    headers: {
-                        // 'Content-Type': 'application/json', // Not needed with Blobs/FormData or text/plain for Apps Script simple POST
-                        'Content-Type': 'text/plain;charset=utf-8', // Required for Apps Script e.postData.contents
-                    },
-                    // Send data within a 'submission' object, stringified
-                    body: JSON.stringify({ submission: submissionData })
-                });
-
-                // NOTE: With mode: 'no-cors', we CANNOT reliably check response.ok or response.status here.
-                // We assume success if the fetch promise resolves without a network error.
-                // The real confirmation is seeing the data appear in the Sheet.
-                console.log("Fetch request sent to backend (response status hidden due to no-cors).");
-                submissionSuccess = true; // Assume success after sending
-
-                 /* // If using mode: 'cors' and backend returns JSON:
-                 if (!response.ok) {
-                     let errorMsg = `Backend error! Status: ${response.status}`;
-                     try { const errorData = await response.json(); errorMsg += ` - ${errorData.message || 'Unknown error'}`; } catch (e) {}
-                     throw new Error(errorMsg);
-                 }
-                 const result = await response.json();
-                 console.log('Backend response:', result);
-                 submissionSuccess = result.success; // Check success flag from backend
-                 if (!submissionSuccess) {
-                    showImprovedNotification('error', 'Submission Failed', `Backend reported: ${result.message || 'Unknown error'} (backup downloaded).`, 0);
-                 }
-                 */
-
-            } catch (error) {
-                console.error('Error submitting data to backend:', error);
-                showImprovedNotification('error', 'Submission Error', `Could not send submission: ${error.message}. A backup file was downloaded.`, 0);
-                submissionSuccess = false; // Explicitly set failure
-            }
-
-            // --- Final UI Update based on assumed/checked success ---
-            if (submissionSuccess) {
-                showImprovedNotification('success', 'Exam Submitted Successfully!', `Your submission has been sent.`, 0);
-                examQuestionsModule.classList.add('hidden');
-                submissionConfirmationModule.classList.remove('hidden');
-                localStorage.removeItem(appStateKey); // Clear state on successful send
-                // Reset state variables fully
-                examDetails = null;
-                studentPINEntered = ''; studentExamIdEntered = ''; examEndTime = null; totalQuestions = 0; confirmedQuestionsCount = 0;
             } else {
-                 // Error notifications were already shown in the catch block or CORS success check
-                 console.error("Online submission failed after backup.");
-                 // Re-enable button ONLY if manual submit failed, allowing retry
-                 if (!isAutoSubmit) {
-                     checkAllConfirmed(); // Update button state (might remain disabled if offline)
-                 } else {
-                     showImprovedNotification('error', 'Auto-Submit Failed', 'Could not automatically send submission online. Backup downloaded.', 0);
-                     // Keep button disabled for auto-submit failure
-                 }
+                // This block executes if element not found (Keep this)
+                console.warn(`Could not find form element for answer name: "${answerName}"`);
+                answers[answerName] = 'ERROR_ELEMENT_NOT_FOUND';
             }
         }
+    });
+
+
+    // --- Create Backup Data --- (Keep this local backup)
+     const backupData = {
+         submissionTimestamp: new Date().toISOString(),
+         examDetails: { PIN: examDetails?.PIN, Name: examDetails?.Name, Mode: examDetails?.Mode, Code: examDetails?.Code },
+         studentInfo: { pinEntered: studentPINEntered, studentExamId: examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined, name: currentUser?.name, email: currentUser?.email },
+         answers: answers, // Keep raw answers object
+         fingerprint: fingerprintObject, // Keep parsed object
+         submittedLate: timeIsUp,
+         autoSubmitted: isAutoSubmit, // Flag if it was an auto-submit
+         confirmedCountOnSubmit: confirmedQuestionsCount, // Record how many were confirmed
+         totalQuestionsOnSubmit: totalQuestions // Record total questions
+     };
+     const backupFilename = `exam_backup_${examDetails?.PIN || 'unknown'}_${(currentUser?.email || studentExamIdEntered || 'anon').replace(/@.*/, '')}_${Date.now()}.json`;
+     downloadJsonBackup(backupData, backupFilename);
+
+    // --- Prepare data payload for the backend ---
+    const submissionData = {
+        timestamp: backupData.submissionTimestamp, // Use consistent timestamp
+        pin: examDetails?.PIN,
+        courseCode: examDetails?.Code,
+        mode: examDetails?.Mode,
+        // Include identifiers based on mode
+        studentEmail: (examDetails?.Mode === 'quiz' ? currentUser?.email : undefined),
+        studentName: (examDetails?.Mode === 'quiz' ? currentUser?.name : undefined),
+        studentExamId: (examDetails?.Mode === 'exam' ? studentExamIdEntered : undefined),
+        answers: answers, // The collected answers object
+        fingerprint: fingerprintObject, // Send parsed fingerprint object
+        isAutoSubmit: isAutoSubmit, // Let backend know if it was auto
+        timeIsUp: timeIsUp     // Let backend know if time was up
+    };
+
+    // --- Send data to Backend using Fetch ---
+    let submissionSuccess = false;
+    try {
+        console.log(`Sending data to backend: ${BACKEND_URL}`);
+        const response = await fetch(BACKEND_URL, {
+            method: 'POST',
+            mode: 'no-cors', // Simpler, but hides response details. Change to 'cors' if backend handles it.
+            headers: {
+                // 'Content-Type': 'application/json', // Not needed with Blobs/FormData or text/plain for Apps Script simple POST
+                'Content-Type': 'text/plain;charset=utf-8', // Required for Apps Script e.postData.contents
+            },
+            // Send data within a 'submission' object, stringified
+            body: JSON.stringify({ submission: submissionData })
+        });
+
+        // NOTE: With mode: 'no-cors', we CANNOT reliably check response.ok or response.status here.
+        // We assume success if the fetch promise resolves without a network error.
+        // The real confirmation is seeing the data appear in the Sheet.
+        console.log("Fetch request sent to backend (response status hidden due to no-cors).");
+        submissionSuccess = true; // Assume success after sending
+
+         /* // If using mode: 'cors' and backend returns JSON:
+         if (!response.ok) {
+             let errorMsg = `Backend error! Status: ${response.status}`;
+             try { const errorData = await response.json(); errorMsg += ` - ${errorData.message || 'Unknown error'}`; } catch (e) {}
+             throw new Error(errorMsg);
+         }
+         const result = await response.json();
+         console.log('Backend response:', result);
+         submissionSuccess = result.success; // Check success flag from backend
+         if (!submissionSuccess) {
+            showImprovedNotification('error', 'Submission Failed', `Backend reported: ${result.message || 'Unknown error'} (backup downloaded).`, 0);
+         }
+         */
+
+    } catch (error) {
+        console.error('Error submitting data to backend:', error);
+        showImprovedNotification('error', 'Submission Error', `Could not send submission: ${error.message}. A backup file was downloaded.`, 0);
+        submissionSuccess = false; // Explicitly set failure
+    }
+
+    // --- Final UI Update based on assumed/checked success ---
+    if (submissionSuccess) {
+        showImprovedNotification('success', 'Exam Submitted Successfully!', `Your submission has been sent.`, 0);
+        examQuestionsModule.classList.add('hidden');
+        submissionConfirmationModule.classList.remove('hidden');
+        localStorage.removeItem(appStateKey); // Clear state on successful send
+        // Reset state variables fully
+        examDetails = null;
+        studentPINEntered = ''; studentExamIdEntered = ''; examEndTime = null; totalQuestions = 0; confirmedQuestionsCount = 0;
+    } else {
+         // Error notifications were already shown in the catch block or CORS success check
+         console.error("Online submission failed after backup.");
+         // Re-enable button ONLY if manual submit failed, allowing retry
+         if (!isAutoSubmit) {
+             checkAllConfirmed(); // Update button state (might remain disabled if offline)
+         } else {
+             showImprovedNotification('error', 'Auto-Submit Failed', 'Could not automatically send submission online. Backup downloaded.', 0);
+             // Keep button disabled for auto-submit failure
+         }
+    }
+}
 
 
         // Updates online status and related UI elements (Keep as is)
