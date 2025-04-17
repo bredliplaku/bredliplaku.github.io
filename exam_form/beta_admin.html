@@ -692,25 +692,114 @@
              examsTableBody.innerHTML = rowsHtml;
          }
 
-        // NEW: Function to format questions for table preview
-        function formatQuestionsForPreview(questionsRaw) {
-            let previewHtml = 'N/A';
-            try {
-                const questions = JSON.parse(questionsRaw);
-                if (Array.isArray(questions)) {
-                    if (questions.length === 0) return '<em>No questions defined.</em>';
-                    previewHtml = questions.map((q, index) => {
-                        const promptSnippet = q.prompt ? q.prompt.substring(0, 50) + (q.prompt.length > 50 ? '...' : '') : 'No Prompt';
-                        return `<div class="question-list-item"><strong>${index + 1}.</strong> ${escapeHtml(promptSnippet)} <em>(${escapeHtml(q.type || 'N/A')})</em></div>`;
-                    }).join('');
-                } else {
-                    throw new Error("Not an array");
+function formatQuestionsForPreview(questionsRaw) {
+    let previewHtml = 'N/A';
+    try {
+        const questions = JSON.parse(questionsRaw);
+        if (Array.isArray(questions)) {
+            if (questions.length === 0) return '<em>No questions defined.</em>';
+            
+            // Only show first 3 questions plus a count if there are more
+            const displayLimit = 3;
+            const displayCount = Math.min(questions.length, displayLimit);
+            const remainingCount = questions.length - displayLimit;
+            
+            previewHtml = `<div class="question-summary-header">${questions.length} question${questions.length !== 1 ? 's' : ''}</div>`;
+            
+            // Add the first few questions
+            previewHtml += questions.slice(0, displayLimit).map((q, index) => {
+                // Get a very brief prompt snippet (first 30 chars)
+                const promptSnippet = q.prompt ? 
+                    (q.prompt.substring(0, 30) + (q.prompt.length > 30 ? '...' : '')) : 
+                    'No Prompt';
+                
+                // Display question type with icon
+                let typeIcon = '';
+                switch(q.type) {
+                    case 'short_answer': typeIcon = '<i class="fas fa-comment-alt"></i>'; break;
+                    case 'long_answer': typeIcon = '<i class="fas fa-paragraph"></i>'; break;
+                    case 'code': typeIcon = '<i class="fas fa-code"></i>'; break;
+                    case 'multiple_select': typeIcon = '<i class="fas fa-list-ul"></i>'; break;
+                    case 'attachment': typeIcon = '<i class="fas fa-paperclip"></i>'; break;
+                    default: typeIcon = '<i class="fas fa-question"></i>';
                 }
-            } catch (e) {
-                previewHtml = '<span style="color: red;">Error parsing</span>';
+                
+                // Show points if available
+                const pointsText = q.points ? `<span class="question-points-badge">${q.points} pts</span>` : '';
+                
+                return `<div class="question-list-item">
+                    <span class="question-type-badge">${typeIcon} ${q.type}</span>
+                    ${pointsText}
+                    <div class="question-snippet">${escapeHtml(promptSnippet)}</div>
+                </div>`;
+            }).join('');
+            
+            // Add a note about additional questions
+            if (remainingCount > 0) {
+                previewHtml += `<div class="question-list-more">+ ${remainingCount} more question${remainingCount !== 1 ? 's' : ''}...</div>`;
             }
-            return previewHtml;
+            
+            // Add button to view all questions
+            previewHtml += `<button type="button" class="btn-sm btn-info view-all-questions-btn" 
+                onclick="showQuestionsPopup(this.closest('tr'))">
+                <i class="fas fa-eye"></i> View All
+            </button>`;
+        } else {
+            throw new Error("Not an array");
         }
+    } catch (e) {
+        previewHtml = '<span style="color: red;">Error parsing</span>';
+    }
+    return previewHtml;
+}
+
+function showQuestionsPopup(row) {
+    if (!row || !row.dataset.questions) return;
+    
+    const questionsRaw = row.dataset.questions;
+    let contentHtml = '<div class="full-questions-preview">';
+    
+    try {
+        const questions = JSON.parse(questionsRaw);
+        if (Array.isArray(questions) && questions.length > 0) {
+            contentHtml += questions.map((q, index) => {
+                let details = `<strong>Type:</strong> ${escapeHtml(q.type || 'N/A')}`;
+                if (q.language) details += `, <strong>Lang:</strong> ${escapeHtml(q.language)}`;
+                if (q.allowed_types) details += `, <strong>Allowed:</strong> ${escapeHtml(q.allowed_types.join(', '))}`;
+                if (q.max_size_mb) details += `, <strong>Max MB:</strong> ${escapeHtml(q.max_size_mb)}`;
+                if (q.points) details += `, <strong>Points:</strong> ${escapeHtml(q.points)}`;
+
+                let optionsHtml = '';
+                if (q.type === 'multiple_select' && Array.isArray(q.options)) {
+                    optionsHtml += '<ul>';
+                    const correctAnswers = Array.isArray(q.correct_answers) ? q.correct_answers : [];
+                    optionsHtml += q.options.map(opt => {
+                        const isCorrect = correctAnswers.includes(opt);
+                        return `<li ${isCorrect ? 'style="font-weight: bold; color: var(--success-color);"' : ''}>${escapeHtml(opt)}${isCorrect ? ' <i class="fas fa-check" title="Correct Answer"></i>' : ''}</li>`;
+                    }).join('');
+                    optionsHtml += '</ul>';
+                }
+
+                let contentHtml = q.content ? `<div class="question-content"><strong>Content:</strong> ${escapeHtml(q.content)}</div>` : '';
+
+                return `<div class="question-detail-item">
+                    <h4>Question ${index + 1}</h4>
+                    <div class="question-prompt">${escapeHtml(q.prompt || 'No prompt')}</div>
+                    <div class="question-meta">${details}</div>
+                    ${contentHtml}
+                    ${optionsHtml ? `<div class="question-options"><strong>Options/Answers:</strong>${optionsHtml}</div>` : ''}
+                </div>`;
+            }).join('');
+        } else {
+            contentHtml += '<p>No questions found or invalid format.</p>';
+        }
+    } catch (e) {
+        contentHtml += `<p>Error parsing questions: ${e.message}</p>`;
+    }
+    
+    contentHtml += '</div>';
+    showContentPopup('Exam Questions', contentHtml);
+}
 
         async function loadAttemptsData() {
             if (!isAdminAllowed) return;
