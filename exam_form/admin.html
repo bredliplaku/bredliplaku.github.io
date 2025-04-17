@@ -895,51 +895,88 @@
                  return `<div style="color: red; font-weight: bold; margin-bottom: 5px;">Error parsing data: ${escapeHtml(e.message)}</div><pre>${escapeHtml(jsonString)}</pre>`;
              }
          }
-         // NEW: formatQuestionsForDisplay function (ensure it exists)
-        function formatQuestionsForDisplay(questionsRaw) {
-             let qHtml = 'N/A';
-             try {
-                 const qArray = JSON.parse(questionsRaw);
-                 if (Array.isArray(qArray)) {
-                     if (qArray.length === 0) return '<em>No questions defined.</em>';
-                     qHtml = qArray.map((q, index) => {
-                         let details = `<strong>Type:</strong> ${escapeHtml(q.type || 'N/A')}`;
-                         if (q.language) details += `, <strong>Lang:</strong> ${escapeHtml(q.language)}`;
-                         if (q.allowed_types) details += `, <strong>Allowed:</strong> ${escapeHtml(q.allowed_types.join(', '))}`;
-                         if (q.max_size_mb) details += `, <strong>Max MB:</strong> ${escapeHtml(q.max_size_mb)}`;
-                         if (q.points) details += `, <strong>Points:</strong> ${escapeHtml(q.points)}`; // Display points if defined
 
-                         let optionsHtml = '';
-                         if (q.type === 'multiple_select' && Array.isArray(q.options)) {
-                            optionsHtml += '<ul>';
-                            const correctAnswers = Array.isArray(q.correct_answers) ? q.correct_answers : [];
-                            optionsHtml += q.options.map(opt => {
-                                const isCorrect = correctAnswers.includes(opt);
-                                return `<li ${isCorrect ? 'style="font-weight: bold; color: var(--success-color);"' : ''}>${escapeHtml(opt)}${isCorrect ? ' <i class="fas fa-check" title="Correct Answer"></i>' : ''}</li>`;
-                            }).join('');
-                            optionsHtml += '</ul>';
-                         }
+ function formatQuestionsForDisplay(questionsRaw) {
+    let qHtml = 'N/A';
 
-                         let contentHtml = q.content ? `<dd><strong>Content:</strong> ${escapeHtml(q.content)}</dd>` : '';
+    try {
+        const qArray = JSON.parse(questionsRaw);
 
-                         return `<div class="question-item">
-                                     <dl>
-                                         <dt>${index + 1}. ${escapeHtml(q.prompt || 'Q')}</dt>
-                                         <dd><i>${details}</i></dd>
-                                         ${contentHtml}
-                                         ${optionsHtml ? `<dd><strong>Options/Answers:</strong>${optionsHtml}</dd>` : ''}
-                                     </dl>
-                                 </div>`;
-                     }).join('');
-                 } else {
-                     throw new Error("Not an array");
-                 }
-             } catch (e) {
-                 console.warn("Error parsing questions JSON for display:", questionsRaw, e);
-                 qHtml = `<div style="color: red; font-weight: bold;">Error parsing questions: ${escapeHtml(e.message)}</div><pre>${escapeHtml(questionsRaw)}</pre>`;
-             }
-             return qHtml || '<em>Error or no content.</em>';
+        if (!Array.isArray(qArray)) {
+            throw new Error('Not an array');
         }
+
+        if (qArray.length === 0) {
+            return '<em>No questions defined.</em>';
+        }
+
+        qHtml = qArray.map((q, index) => {
+            // Build metadata string
+            let details = `<strong>Type:</strong> ${escapeHtml(q.type || 'N/A')}`;
+            if (q.language) {
+                details += `, <strong>Lang:</strong> ${escapeHtml(q.language)}`;
+            }
+            if (q.allowed_types) {
+                details += `, <strong>Allowed:</strong> ${escapeHtml(q.allowed_types.join(', '))}`;
+            }
+            if (q.max_size_mb) {
+                details += `, <strong>Max MB:</strong> ${escapeHtml(q.max_size_mb)}`;
+            }
+            if (q.points) {
+                details += `, <strong>Points:</strong> ${escapeHtml(q.points)}`;
+            }
+
+            // Build options list if multiple choice
+            let optionsHtml = '';
+            if (q.type === 'multiple_select' && Array.isArray(q.options)) {
+                optionsHtml += '<ul>';
+                const correctAnswers = Array.isArray(q.correct_answers) ? q.correct_answers : [];
+                optionsHtml += q.options.map(opt => {
+                    const isCorrect = correctAnswers.includes(opt);
+                    return '<li' +
+                           (isCorrect ? ' style="font-weight: bold; color: var(--success-color);"' : '') +
+                           '>' +
+                           escapeHtml(opt) +
+                           (isCorrect ? ' <i class="fas fa-check" title="Correct Answer"></i>' : '') +
+                           '</li>';
+                }).join('');
+                optionsHtml += '</ul>';
+            }
+
+            // Optional content
+            const contentHtml = q.content
+                ? `<dd><strong>Content:</strong> ${escapeHtml(q.content)}</dd>`
+                : '';
+
+            // Assemble question block
+            return (
+                `<div class="question-item">` +
+                    `<dl>` +
+                        `<dt>${index + 1}. ${escapeHtml(q.prompt || 'Q')}</dt>` +
+                        `<dd><i>${details}</i></dd>` +
+                        contentHtml +
+                        (optionsHtml
+                            ? '<dd><strong>Options/Answers:</strong>' + optionsHtml + '</dd>'
+                            : ''
+                        ) +
+                    `</dl>` +
+                `</div>`
+            );
+        }).join('');
+
+    } catch (e) {
+        console.warn('Error parsing questions JSON for display:', questionsRaw, e);
+        qHtml = (
+            '<div style="color: red; font-weight: bold;">' +
+                'Error parsing questions: ' + escapeHtml(e.message) +
+            '</div>' +
+            '<pre>' + escapeHtml(questionsRaw) + '</pre>'
+        );
+    }
+
+    return qHtml || '<em>Error or no content.</em>';
+}
+
 
 
         // === Table Sorting === (Unchanged compareCells, updateSortIcons, resetSortIcon)
