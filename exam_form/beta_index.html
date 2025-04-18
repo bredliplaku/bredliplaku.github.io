@@ -519,7 +519,9 @@
 /* Confirm/Edit buttons */
 #exam-questions-area .btn-confirm    { /* keep default green */ }
 #exam-questions-area .btn-edit       { display: none; /* show only when confirmed */ }
-#exam-questions-area .question.confirmed .btn-edit    { display: inline-flex; }
+#exam-questions-area .question.confirmed .btn-edit {
+  display: inline-flex !important;
+}
 
 /* Collapse confirmed cards by default */
 #exam-questions-area .question.confirmed {
@@ -597,6 +599,7 @@
    ========================================================================== */
 .sticky-timer {
   position: fixed;
+  margin-top: 10px;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
@@ -2504,20 +2507,21 @@ function displayQuestions(questionsJsonString) {
         console.log(`Total questions loaded: ${totalQuestions}`);
 
         // Check if the exam has shuffle disabled
-        const shuffleDisabled = (examDetails.shuffleQuestions === 'no');
+        const maybe = String(examDetails.shuffleQuestions).trim().toLowerCase();
+		const shuffleDisabled = ['no','false','0'].includes(maybe);
         
         // RANDOMIZATION - Admins see original order OR shuffle is disabled
-        const skipShuffle = ADMIN_EMAILS.includes(currentUser.email) || shuffleDisabled;
+        const skipShuffle = Boolean(isAdmin) || shuffleDisabled;
         console.log(`User role: ${skipShuffle ? 'ADMIN/NO-SHUFFLE - KEEPING ORDER' : 'STUDENT - RANDOMIZING'}`);
         
         // Create a session-specific seed based on student info
         const seed = hashString(currentUser?.email || Date.now().toString());
         
         // Create a shuffled order of question indices
-        const originalIndices = [...Array(questionsArray.length).keys()];
-const displayIndices = skipShuffle
-  ? [...originalIndices]
-  : seededShuffle([...originalIndices], hashString(currentUser.email));
+        const originalIndices = Array.from(questionsArray.keys());
+		const displayIndices = skipShuffle
+		? originalIndices
+		: seededShuffle(originalIndices.slice(), hashString(currentUser.email));
             
         console.log("Display order:", displayIndices);
         
@@ -2669,16 +2673,6 @@ const displayIndices = skipShuffle
 
             // Add confirm/edit actions - not for text_only type
             let actionsHtml = '';
-            if (q.type !== 'text_only') {
-                actionsHtml = `<div class="question-actions"> 
-                    <button type="button" class="btn-confirm btn-green" onclick="confirmAnswer('${questionId}')">
-                        <i class="fas fa-check"></i> Confirm
-                    </button> 
-                    <button type="button" class="btn-edit btn-grey" onclick="editAnswer('${questionId}')">
-                        <i class="fas fa-pencil-alt"></i> Edit
-                    </button> 
-                </div>`;
-            }
 
             const labelTargetId = answerId; // Use answerId as the label's target
             questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
@@ -2758,11 +2752,6 @@ function confirmAnswer(questionId) {
     const questionDiv = document.getElementById(questionId);
     if (!questionDiv || questionDiv.classList.contains('confirmed')) return;
     
-    // Check if this is a text_only question
-    if (questionDiv.classList.contains('text-only-question')) {
-        // Text-only questions are already confirmed, nothing to do
-        return;
-    }
 
     questionDiv.classList.add('confirmed');
     confirmedQuestionsCount++;
