@@ -77,6 +77,10 @@
             0%   { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+		@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
         .content-hidden {
             visibility: hidden;
             opacity: 0;
@@ -439,47 +443,67 @@
     display: none !important;
 }
 
-        #exam-details-display strong {
-            color: var(--primary-dark);
-            margin-right: 5px;
-        }
-        #exam-questions-area {
-            margin-top: 20px;
-            padding: 20px;
-            background-color: #f9f9f9;
-            border: 1px solid #eee;
-            border-radius: 10px;
-        }
-        #exam-questions-area .question {
-            margin-bottom: 25px;
-            padding: 20px;
-            border-bottom: 1px dashed #ddd;
-            background-color: #fff;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            position: relative;
-             /* Add transition for smoother background change on confirm */
-             /* transition: background-color 0.3s; */
-        }
-        #exam-questions-area .question:last-child {
-            border-bottom: none;
-        }
-        /* Style for the question prompt label */
-        #exam-questions-area .question > label {
-            font-weight: bold;
-            margin-bottom: 10px;
-            display: block;
-            cursor: default; /* Ensure label isn't confusingly clickable */
-        }
-        #exam-questions-area .question-content {
-             margin-bottom: 15px;
-        }
-        #exam-questions-area .question-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-            justify-content: flex-end;
-        }
+#exam-details-display strong {
+    color: var(--primary-dark);
+    margin-right: 5px;
+}
+
+#exam-questions-area {
+    margin-top: 20px;
+    padding: 20px;
+    background-color: #f9f9f9;
+    border: 1px solid #eee;
+    border-radius: 10px;
+}
+
+#exam-questions-area .question {
+    margin-bottom: 25px;
+    padding: 20px;
+    border-bottom: 1px dashed #ddd;
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    position: relative;
+    /* Update with comprehensive transitions that work with our animations */
+    transition: max-height 0.5s ease-in-out, 
+                opacity 0.4s ease-in-out, 
+                background-color 0.3s ease,
+                border-left 0.3s ease,
+                box-shadow 0.3s ease;
+}
+
+#exam-questions-area .question:last-child {
+    border-bottom: none;
+}
+
+/* Style for the question prompt label */
+#exam-questions-area .question > label {
+    font-weight: bold;
+    margin-bottom: 10px;
+    display: block;
+    cursor: default; /* Ensure label isn't confusingly clickable */
+}
+
+#exam-questions-area .question-content {
+    margin-bottom: 15px;
+    transition: opacity 0.3s ease;
+}
+
+#exam-questions-area .question-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    justify-content: flex-end;
+    position: relative;
+    z-index: 2; /* Ensure buttons remain clickable */
+}
+		
+.btn-expand i {
+    transition: transform 0.3s ease;
+}
+.question.confirmed.expanded .btn-expand i.fas.fa-expand-alt {
+    transform: rotate(180deg);
+}
 
 .sticky-timer {
     position: fixed;
@@ -619,34 +643,40 @@ body.time-expired {
 }
 
 .question.confirmed {
-    max-height: 70px; /* Reduced height */
+    max-height: 70px; /* Collapsed height */
     overflow: hidden;
-    transition: max-height 0.3s, opacity 0.3s, background-color 0.3s;
-    position: relative;
-    padding-bottom: 40px; /* Space for the edit button */
     opacity: 0.7;
     border-left: 5px solid var(--success-color) !important;
+    padding-bottom: 40px; /* Space for the edit button */
+    transition: max-height 0.5s ease-in-out, 
+                opacity 0.4s ease-in-out, 
+                background-color 0.3s ease,
+                border-left 0.3s ease;
 }
 
 .question.confirmed:hover {
     opacity: 0.9;
+    transition: opacity 0.3s ease;
 }
 
 .question.confirmed::after {
     content: "✓ CONFIRMED";
     position: absolute;
-    left: 15px; /* Changed from right to left */
+    left: 15px;
     bottom: 10px;
     color: var(--success-color);
     font-weight: bold;
     font-size: 0.9em;
+    opacity: 0;
+    animation: fadeIn 0.5s ease forwards 0.3s; /* Animate after the collapse */
 }
 
 .question.confirmed.expanded {
-    max-height: none !important; /* Remove height restriction when expanded */
-    opacity: 0.9 !important; /* Make it more visible */
-	border-left-width: 8px !important; /* Thicker border */
-    padding-bottom: 50px; /* More space for buttons */
+    max-height: 800px; /* Large enough to show full content */
+    opacity: 0.95;
+    transition: max-height 0.5s ease-in-out, 
+                opacity 0.4s ease-in-out,
+                border-left 0.3s ease;
 }
 
 .question.confirmed .question-actions {
@@ -664,7 +694,9 @@ body.time-expired {
 
         /* Show edit button when confirmed */
         .question.confirmed .btn-edit {
-            display: inline-flex; /* Use inline-flex to match button styles */
+            display: inline-flex;
+    opacity: 1;
+    transition: opacity 0.3s ease 0.2s; /* Slight delay for sequential effect */
         }
 
         /* Hide confirm button when confirmed */
@@ -2452,10 +2484,16 @@ function displayQuestions(questionsJsonString) {
             questionDiv.dataset.displayIndex = displayIndex;
 
             // --- Process Prompt Text ---
-            let promptText = q.prompt || `Question ${displayQNum}`;
-            promptText = escapeHtml(promptText);
-            promptText = promptText.replace(/\*\*\*(.*?)\*\*\*/g, '<strong>$1</strong>');
-            promptText = promptText.replace(/(?<!\*)\*\*(?!\*)(.*?)\*\*(?!\*)/g, '<strong>$1</strong>');
+            let promptText = q.prompt || `Question`;
+			promptText = escapeHtml(promptText);
+			let questionLabel = `Question ${displayQNum}`;
+if (q.points) {
+    questionLabel += ` (${q.points} ${q.points == 1 ? 'point' : 'points'})`;
+}
+questionLabel += ": ";
+promptText = promptText.replace(/\*\*\*(.*?)\*\*\*/g, '<strong>$1</strong>');
+promptText = promptText.replace(/(?<!\*)\*\*(?!\*)(.*?)\*\*(?!\*)/g, '<strong>$1</strong>');
+promptText = `<strong>${questionLabel}</strong>${promptText}`;
             
             const termsToEmphasise = ['sep', 'end', 'print()', 'input()', 'range\\(5\\)', 'range\\(2, 8, 2\\)', 'TypeError', 'IDE'];
             termsToEmphasise.forEach(term => {
