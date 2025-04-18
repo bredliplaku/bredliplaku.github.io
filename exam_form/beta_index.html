@@ -81,6 +81,10 @@
     from { opacity: 0; transform: translateY(5px); }
     to { opacity: 1; transform: translateY(0); }
 }
+@keyframes glow {
+    from { box-shadow: 0 0 5px rgba(0,0,0,0.1); }
+    to { box-shadow: 0 0 15px rgba(0,0,0,0.2); }
+}
         .content-hidden {
             visibility: hidden;
             opacity: 0;
@@ -219,11 +223,11 @@
         }
         .in-page-notification {
             background-color: white;
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 15px;
             margin-bottom: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            animation: slide-in 0.3s ease-out forwards;
+			animation: slide-in 0.3s ease-out, glow 2s infinite alternate;
             overflow: hidden;
             display: flex;
             align-items: center;
@@ -476,6 +480,27 @@
     border-bottom: none;
 }
 
+.text-only-question {
+    background-color: #f8f9fd;
+    border-left: 4px solid var(--info-color);
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.text-only-question .text-content {
+    font-size: 1.05em;
+    line-height: 1.5;
+    color: #333;
+}
+
+.text-only-question.confirmed {
+    opacity: 1 !important; /* Override the normal opacity reduction */
+}
+
+.text-only-question.confirmed::after {
+    display: none; /* Hide the "CONFIRMED" text */
+}
+
 /* Style for the question prompt label */
 #exam-questions-area .question > label {
     font-weight: bold;
@@ -506,34 +531,23 @@
 }
 
 .sticky-timer {
-    position: fixed;
-    top: 0;
-    right: 20px;
-    background-color: var(--danger-color);
-    color: white;
-    padding: 8px 15px;
-    border-radius: 0 0 10px 10px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: background-color 0.3s, transform 0.3s;
+    border-radius: 0 0 15px 15px;
+    padding: 10px 20px;
+    font-weight: bold;
+    transition: all 0.3s ease;
 }
 
 .sticky-timer.warning {
-    background-color: #ff9800; /* Orange for warning */
-    animation: pulse 1s infinite alternate;
+    animation: pulse 1.5s infinite alternate;
 }
 
 .sticky-timer.danger {
-    background-color: #f44336; /* Red for danger */
     animation: pulse 0.7s infinite alternate;
 }
 
 @keyframes pulse {
-    from { transform: scale(1); }
-    to { transform: scale(1.05); }
+    from { transform: scale(1); box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+    to { transform: scale(1.05); box-shadow: 0 4px 20px rgba(255,0,0,0.3); }
 }
 
 /* 3. Time Warning Styles */
@@ -764,12 +778,32 @@ body.time-expired {
         color: var(--primary-dark); /* Use a distinct color */
     }
 
-        #submit-exam-btn {
-            margin-top: 30px;
-            width: 100%;
-            padding: 15px;
-            font-size: 1.1em;
-        }
+#submit-exam-btn {
+    margin-top: 30px;
+    width: 100%;
+    padding: 15px;
+    font-size: 1.1em;
+    border-radius: 30px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+#submit-exam-btn::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to right, rgba(255,255,255,0.1), transparent);
+    transform: translateX(-100%);
+    transition: transform 0.6s ease;
+}
+
+#submit-exam-btn:hover::after {
+    transform: translateX(100%);
+}
         .hidden {
             display: none !important;
         }
@@ -2065,6 +2099,7 @@ function createStickyTimer() {
 
             if (result.success && result.examData) {
                 const fetchedData = result.examData;
+				const shuffleQuestions = String(fetchedData.ShuffleQuestions || 'yes').trim().toLowerCase();
 
                 // Validate essential data
                 const duration = parseInt(fetchedData.Duration, 10);
@@ -2098,18 +2133,19 @@ function createStickyTimer() {
 
 
                 // Store the loaded exam details
-                examDetails = {
-                    PIN: fetchedData.PIN,
-                    Code: fetchedData.Code,
-                    Name: fetchedData.Name,
-                    Duration: duration,
-                    StartDate: startDateStr, // Keep formatted string for display
-                    StartTime: startTimeStr, // Keep formatted string for display
-                    Mode: mode,
-                    Questions: questionsJson,
-                    OriginalOrderMap: null,
-                    StartTimestampUTC: startTimestampUTC // Store timestamp if needed elsewhere
-                };
+            examDetails = {
+                PIN: fetchedData.PIN,
+                Code: fetchedData.Code,
+                Name: fetchedData.Name,
+                Duration: duration,
+                StartDate: startDateStr,
+                StartTime: startTimeStr,
+                Mode: mode,
+                Questions: questionsJson,
+                OriginalOrderMap: null,
+                StartTimestampUTC: startTimestampUTC,
+                shuffleQuestions: shuffleQuestions // Add the shuffle setting
+            };
                 console.log("Exam details processed successfully:", examDetails);
 
                 displayExamDetailsHeader(); // Update header info (uses formatted strings)
@@ -2217,35 +2253,37 @@ function createStickyTimer() {
          }
 
         // Checks if all questions are confirmed and updates the main submit button (Keep as is)
-        function checkAllConfirmed() {
-            // Only proceed if the questions area is visible and we know the total count
-            if (!examQuestionsArea || examQuestionsModule.classList.contains('hidden') || totalQuestions <= 0) {
-                if(submitExamBtn) {
-                    submitExamBtn.disabled = true;
-                    submitExamBtn.innerHTML = '<i class="fas fa-lock"></i> Submit Exam (Confirm All First)';
-                }
-                return;
-            }
-
-            const allConfirmed = confirmedQuestionsCount === totalQuestions;
-            console.log(`Confirmed ${confirmedQuestionsCount}/${totalQuestions} questions. All confirmed: ${allConfirmed}`);
-
-            if (submitExamBtn) {
-                // Enable button only if all questions are confirmed AND user is online
-                // Note: isOnline check might be less critical now if submission retries are handled,
-                // but still good to prevent submitting if definitely offline.
-                submitExamBtn.disabled = !allConfirmed || !isOnline;
-
-                // Update button text for clarity
-                if (allConfirmed && isOnline) {
-                    submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam Now';
-                } else if (!isOnline) {
-                     submitExamBtn.innerHTML = '<i class="fas fa-wifi"></i> Submit Exam (Offline)';
-                } else {
-                     submitExamBtn.innerHTML = `<i class="fas fa-lock"></i> Submit Exam (${confirmedQuestionsCount}/${totalQuestions} Confirmed)`;
-                }
-            }
+function checkAllConfirmed() {
+    // Only proceed if the questions area is visible and we know the total count
+    if (!examQuestionsArea || examQuestionsModule.classList.contains('hidden') || totalQuestions <= 0) {
+        if(submitExamBtn) {
+            submitExamBtn.disabled = true;
+            submitExamBtn.innerHTML = '<i class="fas fa-lock"></i> Submit Exam (Confirm All First)';
         }
+        return;
+    }
+
+    // Count questions that need confirmation (excluding text-only)
+    const questionsRequiringConfirmation = document.querySelectorAll('.question:not(.text-only-question)').length;
+    const confirmedNonTextOnly = document.querySelectorAll('.question.confirmed:not(.text-only-question)').length;
+    
+    const allConfirmed = confirmedNonTextOnly === questionsRequiringConfirmation;
+    console.log(`Confirmed ${confirmedNonTextOnly}/${questionsRequiringConfirmation} questions. All confirmed: ${allConfirmed}`);
+
+    if (submitExamBtn) {
+        // Enable button only if all questions are confirmed AND user is online
+        submitExamBtn.disabled = !allConfirmed || !isOnline;
+
+        // Update button text for clarity
+        if (allConfirmed && isOnline) {
+            submitExamBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Exam Now';
+        } else if (!isOnline) {
+             submitExamBtn.innerHTML = '<i class="fas fa-wifi"></i> Submit Exam (Offline)';
+        } else {
+             submitExamBtn.innerHTML = `<i class="fas fa-lock"></i> Submit Exam (${confirmedNonTextOnly}/${questionsRequiringConfirmation} Confirmed)`;
+        }
+    }
+}
 
         // Validates the 5-character input for Student Exam ID in Exam mode (Keep as is)
         function validateStudentExamIdInput() {
@@ -2454,18 +2492,21 @@ function displayQuestions(questionsJsonString) {
         totalQuestions = questionsArray.length;
         console.log(`Total questions loaded: ${totalQuestions}`);
 
-        // GUARANTEED RANDOMIZATION - Only admins see original order
-        const forceRandomize = !ADMIN_EMAILS.includes(currentUser?.email);
-        console.log(`User role: ${forceRandomize ? 'STUDENT - RANDOMIZING' : 'ADMIN - KEEPING ORDER'}`);
+        // Check if the exam has shuffle disabled
+        const shuffleDisabled = examDetails?.shuffleQuestions === 'no';
+        
+        // RANDOMIZATION - Admins see original order OR shuffle is disabled
+        const skipShuffle = ADMIN_EMAILS.includes(currentUser?.email) || shuffleDisabled;
+        console.log(`User role: ${skipShuffle ? 'ADMIN/NO-SHUFFLE - KEEPING ORDER' : 'STUDENT - RANDOMIZING'}`);
         
         // Create a session-specific seed based on student info
         const seed = hashString(currentUser?.email || Date.now().toString());
         
         // Create a shuffled order of question indices
         const originalIndices = [...Array(questionsArray.length).keys()];
-        const displayIndices = forceRandomize ? 
-            seededShuffle([...originalIndices], seed) : 
-            [...originalIndices];
+        const displayIndices = skipShuffle ? 
+            [...originalIndices] : 
+            seededShuffle([...originalIndices], seed);
             
         console.log("Display order:", displayIndices);
         
@@ -2486,22 +2527,36 @@ function displayQuestions(questionsJsonString) {
 
             const questionDiv = document.createElement('div');
             questionDiv.className = 'question form-group';
+            
+            // For text_only type, set a special class
+            if (q.type === 'text_only') {
+                questionDiv.className = 'question form-group text-only-question';
+            }
+            
             questionDiv.id = questionId;
             questionDiv.dataset.originalIndex = originalIndex;
             questionDiv.dataset.displayIndex = displayIndex;
 
             // --- Process Prompt Text ---
             let promptText = q.prompt || `Question`;
-			promptText = escapeHtml(promptText);
-			let questionLabel = `Question ${displayQNum}`;
-if (q.points) {
-    questionLabel += ` (${q.points} ${q.points == 1 ? 'point' : 'points'})`;
-}
-questionLabel += ": ";
-promptText = promptText.replace(/\*\*\*(.*?)\*\*\*/g, '<strong>$1</strong>');
-promptText = promptText.replace(/(?<!\*)\*\*(?!\*)(.*?)\*\*(?!\*)/g, '<strong>$1</strong>');
-promptText = `<strong>${questionLabel}</strong>${promptText}`;
+            promptText = escapeHtml(promptText);
             
+            let questionLabel = `Question ${displayQNum}`;
+            if (q.points && q.type !== 'text_only') {
+                questionLabel += ` (${q.points} ${q.points == 1 ? 'point' : 'points'})`;
+            }
+            questionLabel += ": ";
+            
+            // Skip the label for text_only type
+            if (q.type !== 'text_only') {
+                promptText = `<strong>${questionLabel}</strong>${promptText}`;
+            }
+            
+            // Process formatting
+            promptText = promptText.replace(/\*\*\*(.*?)\*\*\*/g, '<strong>$1</strong>');
+            promptText = promptText.replace(/(?<!\*)\*\*(?!\*)(.*?)\*\*(?!\*)/g, '<strong>$1</strong>');
+            
+            // Process special terms
             const termsToEmphasise = ['sep', 'end', 'print()', 'input()', 'range\\(5\\)', 'range\\(2, 8, 2\\)', 'TypeError', 'IDE'];
             termsToEmphasise.forEach(term => {
                 const termForRegex = (term.includes('\\(')) ? term : term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2509,6 +2564,7 @@ promptText = `<strong>${questionLabel}</strong>${promptText}`;
                 promptText = promptText.replace(regex, (match) => `<em class="term">${match}</em>`);
             });
             
+            // Additional replacements
             promptText = promptText.replace(/print'Hello World'/g, () => '<em class="term">print\'Hello World\'</em>');
             promptText = promptText.replace(/x = 5 \+ '3'/g, () => '<em class="term">x = 5 + \'3\'</em>');
             promptText = promptText.replace(/print\("Value:", value, sep = ':'\)/g, () => '<em class="term">print("Value:", value, sep = \':\')</em>');
@@ -2521,13 +2577,22 @@ promptText = `<strong>${questionLabel}</strong>${promptText}`;
             let questionContentHtml = '<div class="question-content">';
             let labelClass = '';
             let labelTag = 'label';
-
-            if (q.type === 'code') {
+            
+            // For text_only type, don't use a label
+            if (q.type === 'text_only') {
+                labelTag = 'div';
+                labelClass = 'text-content';
+            } else if (q.type === 'code') {
                 labelClass = 'code-prompt';
             }
 
             // Generate input HTML based on question type
             switch (q.type) {
+                case 'text_only':
+                    // No input needed
+                    questionContentHtml += `<div class="text-only-content"></div>`;
+                    break;
+                    
                 case 'short_answer':
                     questionContentHtml += `<input type="text" id="${answerId}" name="${answerName}" class="form-control" placeholder="Enter your answer">`;
                     break;
@@ -2557,9 +2622,9 @@ promptText = `<strong>${questionLabel}</strong>${promptText}`;
                         
                         // Shuffle options for students (with unique seed for this question)
                         const optionIndices = [...Array(q.options.length).keys()];
-                        const shuffledOptionIndices = forceRandomize ? 
-                            seededShuffle(optionIndices, seed + originalIndex) : 
-                            [...optionIndices];
+                        const shuffledOptionIndices = skipShuffle ? 
+                            [...optionIndices] : 
+                            seededShuffle(optionIndices, seed + originalIndex);
                             
                         console.log(`Q${originalQNum} option order:`, shuffledOptionIndices);
                         
@@ -2591,25 +2656,41 @@ promptText = `<strong>${questionLabel}</strong>${promptText}`;
             }
             questionContentHtml += '</div>'; // End question-content
 
-            // Add confirm/edit actions
-            const actionsHtml = `<div class="question-actions"> 
-                <button type="button" class="btn-confirm btn-green" onclick="confirmAnswer('${questionId}')">
-                    <i class="fas fa-check"></i> Confirm
-                </button> 
-                <button type="button" class="btn-edit btn-grey" onclick="editAnswer('${questionId}')">
-                    <i class="fas fa-pencil-alt"></i> Edit
-                </button> 
-            </div>`;
+            // Add confirm/edit actions - not for text_only type
+            let actionsHtml = '';
+            if (q.type !== 'text_only') {
+                actionsHtml = `<div class="question-actions"> 
+                    <button type="button" class="btn-confirm btn-green" onclick="confirmAnswer('${questionId}')">
+                        <i class="fas fa-check"></i> Confirm
+                    </button> 
+                    <button type="button" class="btn-edit btn-grey" onclick="editAnswer('${questionId}')">
+                        <i class="fas fa-pencil-alt"></i> Edit
+                    </button> 
+                </div>`;
+            }
 
             const labelTargetId = answerId; // Use answerId as the label's target
             questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
 
             examQuestionsArea.appendChild(questionDiv);
+            
+            // For text_only type, mark as confirmed automatically
+            if (q.type === 'text_only') {
+                // Add to confirmed count but no need for visual indication
+                confirmedQuestionsCount++;
+                // Add hidden class to count in total but not require confirmation
+                questionDiv.classList.add('confirmed', 'text-only-confirmed');
+            }
         });
     } catch (e) {
         console.error("Error displaying questions:", e);
         examQuestionsArea.innerHTML = '<p>Error loading questions.</p>';
     }
+    
+    // Update the total question count for confirmation purposes
+    // Text-only questions are already marked as confirmed
+    totalQuestionsRequiringConfirmation = totalQuestions - document.querySelectorAll('.text-only-confirmed').length;
+    
     checkAllConfirmed();
 }
 
@@ -2666,6 +2747,12 @@ function seededShuffle(array, seed) {
 function confirmAnswer(questionId) {
     const questionDiv = document.getElementById(questionId);
     if (!questionDiv || questionDiv.classList.contains('confirmed')) return;
+    
+    // Check if this is a text_only question
+    if (questionDiv.classList.contains('text-only-question')) {
+        // Text-only questions are already confirmed, nothing to do
+        return;
+    }
 
     questionDiv.classList.add('confirmed');
     confirmedQuestionsCount++;
@@ -2705,6 +2792,7 @@ function confirmAnswer(questionId) {
     console.log(`Confirmed answer for question: ${questionId}`);
     checkAllConfirmed();
 }
+
 
 // Function to toggle expanded state of confirmed questions
 function toggleQuestionExpand(questionId) {
@@ -3307,6 +3395,11 @@ async function handleSubmitExam(isAutoSubmit = false) {
         const answerName = `ans-${originalQNum}`;
         const questionDivId = `q-${originalQNum}`;
         const questionDiv = document.getElementById(questionDivId);
+		if (questionData.type === 'text_only') {
+            // Add a marker that this was a text-only item, but don't require an answer
+            answers[answerName] = "[TEXT_ONLY_NO_ANSWER_REQUIRED]";
+            return; // Skip the rest of this iteration
+        }
         // Check confirmation status *reliably*
         const isConfirmed = questionDiv ? questionDiv.classList.contains('confirmed') : false;
 
