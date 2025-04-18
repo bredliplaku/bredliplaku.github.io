@@ -2498,8 +2498,11 @@ function displayQuestions(questionsJsonString) {
         totalQuestions = questionsArray.length;
         console.log(`Total questions loaded: ${totalQuestions}`);
 
+const originalIndices = questionsArray.map((_, i) => i);
+
         // Check if the exam has shuffle disabled
-        const shuffleDisabled = examDetails?.shuffleQuestions === 'no';
+        const shuffleDisabled = (examDetails.shuffleQuestions === 'no');
+const skipShuffle = ADMIN_EMAILS.includes(currentUser.email) || shuffleDisabled;
         
         // RANDOMIZATION - Admins see original order OR shuffle is disabled
         const skipShuffle = ADMIN_EMAILS.includes(currentUser?.email) || shuffleDisabled;
@@ -2510,9 +2513,9 @@ function displayQuestions(questionsJsonString) {
         
         // Create a shuffled order of question indices
         const originalIndices = [...Array(questionsArray.length).keys()];
-        const displayIndices = skipShuffle ? 
-            [...originalIndices] : 
-            seededShuffle([...originalIndices], seed);
+const displayIndices = skipShuffle
+  ? [...originalIndices]
+  : seededShuffle([...originalIndices], hashString(currentUser.email));
             
         console.log("Display order:", displayIndices);
         
@@ -2714,29 +2717,28 @@ function hashString(str) {
     return Math.abs(hash);
 }
 
-// Seeded random number generator (predictable but random-looking)
-function seededRandom(seed) {
-    const a = 1664525;
-    const c = 1013904223;
-    const m = Math.pow(2, 32);
-    
-    seed = (a * seed + c) % m;
-    return seed / m;
+/**
+ * Deterministic (seeded) in‐place Fisher–Yates shuffle.
+ *
+ * @param {any[]} array
+ * @param {number} seed  // e.g. hashString(userEmail)
+ * @returns the same array, shuffled
+ */
+function seededShuffle(array, seed) {
+  let m = array.length, t, i;
+  // very simple PRNG: linear congruential
+  while (m > 0) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;     // update seed
+    i = seed % m;                                   // pick an index
+    m--;
+    // swap array[m] and array[i]
+    t = array[m];
+    array[m] = array[i];
+    array[i] = t;
+  }
+  return array;
 }
 
-// Shuffle array using a seed for consistent ordering
-function seededShuffle(array, seed) {
-    const result = [...array];
-    let currentSeed = seed;
-    
-    // Fisher-Yates shuffle with seeded randomness
-    for (let i = result.length - 1; i > 0; i--) {
-        currentSeed = Math.floor(seededRandom(currentSeed) * (i + 1));
-        [result[i], result[currentSeed]] = [result[currentSeed], result[i]];
-    }
-    
-    return result;
-}
 
     // Utility function to escape HTML (Ensure this exists)
     function escapeHtml(unsafe) {
