@@ -1,20 +1,19 @@
 <!DOCTYPE html>
-<html lang="en-GB"> 
-<head>
+<html lang="en-GB"> <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Exam Portal</title>
     <link rel="icon" type="image/png" href="https://bredliplaku.github.io/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
     <script src="https://apis.google.com/js/api.js" async defer></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/codemirror.min.css">
-	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/theme/monokai.min.css">
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/codemirror.min.js"></script>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/mode/python/python.min.js"></script>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/addon/edit/matchbrackets.min.js"></script>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.19/addon/edit/closebrackets.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/monokai.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/closebrackets.min.js"></script>
 <style>
 :root {
     --primary-color: #3949ab;
@@ -694,6 +693,7 @@ body.in-exam .app-header h2 {
 const CONFIG = {
     ADMIN_EMAILS: ['bplaku@epoka.edu.al'],
     CLIENT_ID: '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com',
+    API_KEY: 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE',
     SCOPES: "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
     BACKEND_URL: 'https://script.google.com/macros/s/AKfycbx-jSJ9gVzM6b975hEY6bEbM3JOTawq5Av8LE61-gJV8mi7cymPq9lj3k9OZJpxCrlD/exec',
     TOKEN_REFRESH_INTERVAL: 20 * 60 * 1000, // 20 minutes
@@ -733,47 +733,35 @@ window.addEventListener('load', init);
 
 function init() {
     console.log("Initializing...");
-    // Keep this check if init might be called before load somehow
-    if (document.readyState !== 'complete') {
+	    if (document.readyState !== 'complete') {
         window.addEventListener('load', init);
         return;
     }
     document.body.classList.remove('content-hidden');
-
+    
     // Cache all DOM elements
     cacheDOMElements();
-
+    
     // Basic setup
     if (DOM.mainContainer) DOM.mainContainer.classList.add('content-visible');
     updateYear();
     setupEventListeners();
     loadAppState();
-    updateOnlineStatus(); // Initial status check
-
+    updateOnlineStatus();
+    
     // Event listeners for online/offline detection
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
     setupBackupImportFeature();
 
-    // ADDED: Poll to check if Google API objects are loaded
-    let checkGoogleApiInterval = setInterval(() => {
-        if (typeof gapi !== 'undefined' && typeof google !== 'undefined' && typeof google.accounts !== 'undefined') {
-            clearInterval(checkGoogleApiInterval); // Stop polling
-            console.log("Google API objects detected.");
-            initGoogleApi(); // Initialize now that objects exist
-        } else {
-            console.log("Waiting for Google API objects to load...");
-        }
-    }, 200); // Check every 200ms
-
-    // Optional: Add a timeout to stop polling after a while to prevent infinite loops if scripts fail badly
+    // Initialize Google API with slight delay to ensure it's loaded
     setTimeout(() => {
-        if (checkGoogleApiInterval) { // Check if interval is still running
-             clearInterval(checkGoogleApiInterval);
-             console.error("Google API objects failed to load within 10 seconds.");
-             handleApiInitError(new Error("Google API objects did not load in time"));
+        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+            initGoogleApi();
+        } else {
+            handleApiInitError(new Error("Google API objects not loaded"));
         }
-    }, 10000); // Timeout after 10 seconds
+    }, 500);
 }
 
 function cacheDOMElements() {
@@ -1169,31 +1157,22 @@ async function refreshTokenIfNeeded(force = false) {
         console.log("Not refreshing token: not signed in or no tokenClient");
         return false;
     }
-
+    
     const savedTokenStr = localStorage.getItem('gapi_token');
     if (!savedTokenStr) {
         console.log("No token to refresh");
         return false;
     }
-
+    
     try {
         const savedToken = JSON.parse(savedTokenStr);
-        let tokenAgeMs = Infinity; // Default to needing refresh if issued_at is invalid
-
-        // ADDED: Check if issued_at exists and is a number
-        if (typeof savedToken.issued_at === 'number') {
-             tokenAgeMs = Date.now() - savedToken.issued_at;
-        } else {
-             console.warn("Token 'issued_at' timestamp missing or invalid. Assuming refresh is needed.");
-             force = true; // Force refresh if timestamp is bad
-        }
-
+        
         // If forced or token is older than 40 minutes, refresh it
-        const needsRefresh = force || tokenAgeMs > 40 * 60 * 1000; // 40 minutes
-
+        const tokenAgeMs = Date.now() - (savedToken.issued_at || 0);
+        const needsRefresh = force || tokenAgeMs > 40 * 60 * 1000;
+        
         if (needsRefresh) {
             console.log(`Token age: ${tokenAgeMs / 1000}s - Refreshing token...`);
-            // Use requestAccessToken without prompt for silent refresh
             STATE.tokenClient.requestAccessToken({ prompt: '' });
             return true;
         } else {
@@ -1201,7 +1180,7 @@ async function refreshTokenIfNeeded(force = false) {
             return false;
         }
     } catch (e) {
-        console.error("Error checking/refreshing token:", e);
+        console.error("Error refreshing token:", e);
         return false;
     }
 }
@@ -1692,159 +1671,157 @@ async function checkIfAttemptExists(email, pin, studentExamId, mode) {
 }
 
 // === Display Questions ===
-// === Display Questions ===
-// MODIFIED: Added async and returns a Promise
-async function displayQuestions(questionsJsonString) {
+function displayQuestions(questionsJsonString) {
     console.log("Parsing and displaying exam questions...");
     DOM['exam-questions-area'].innerHTML = '';
     STATE.totalQuestions = 0;
-    STATE.codeEditors = {}; // Reset code editors state
-
-    // Return a Promise that resolves after rendering and editor init attempt
-    return new Promise((resolve, reject) => {
+    
+    try {
+        let questionsArray = [];
         try {
-            let questionsArray = [];
-            try {
-                questionsArray = JSON.parse(questionsJsonString);
-                if (!Array.isArray(questionsArray)) {
-                    throw new Error("Parsed data is not an array.");
-                }
-            } catch (parseError) {
-                console.warn("Could not parse questions JSON. Displaying as a single block.", parseError);
-                questionsArray = [{
-                    type: "text_only", // Treat as text_only if JSON invalid
-                    prompt: "Exam Instructions / Questions",
-                    content: questionsJsonString // Show raw content
-                }];
+            questionsArray = JSON.parse(questionsJsonString);
+            if (!Array.isArray(questionsArray)) {
+                throw new Error("Parsed data is not an array.");
+            }
+        } catch (parseError) {
+            console.warn("Could not parse questions JSON. Displaying as a single block.", parseError);
+            questionsArray = [{
+                type: "long_answer",
+                prompt: "Exam Instructions / Questions",
+                content: questionsJsonString
+            }];
+        }
+
+        STATE.totalQuestions = questionsArray.length;
+        console.log(`Total questions loaded: ${STATE.totalQuestions}`);
+
+        // Check if shuffle is disabled
+        const shuffleSetting = String(STATE.examDetails.shuffleQuestions).trim().toLowerCase();
+        const shuffleDisabled = ['no', 'false', '0'].includes(shuffleSetting);
+        
+        // Determine if we should shuffle (admins always see original order)
+        const skipShuffle = Boolean(STATE.isAdmin) || shuffleDisabled;
+        console.log(`User role: ${skipShuffle ? 'ADMIN/NO-SHUFFLE - KEEPING ORDER' : 'STUDENT - RANDOMIZING'}`);
+        
+        // Create a session-specific seed
+        const seed = hashString(STATE.currentUser?.email || Date.now().toString());
+        
+        // Create display order
+        const originalIndices = Array.from(questionsArray.keys());
+        const displayIndices = skipShuffle
+            ? originalIndices
+            : seededShuffle(originalIndices.slice(), hashString(STATE.currentUser.email));
+            
+        console.log("Display order:", displayIndices);
+        
+        // Create mapping of questions
+        STATE.examDetails.OriginalOrderMap = {};
+        questionsArray.forEach((q, index) => {
+            STATE.examDetails.OriginalOrderMap[index] = q;
+        });
+
+        // Display questions in order
+        displayIndices.forEach((originalIndex, displayIndex) => {
+            const q = questionsArray[originalIndex];
+            const displayQNum = displayIndex + 1;
+            const originalQNum = originalIndex + 1;
+            const questionId = `q-${originalQNum}`;
+            const answerId = `ans-${originalQNum}`;
+            const answerName = `ans-${originalQNum}`;
+
+            const questionDiv = document.createElement('div');
+            questionDiv.className = 'question form-group';
+            
+            // Special class for text_only type
+            if (q.type === 'text_only') {
+                questionDiv.className = 'question form-group text-only-question';
+            }
+            
+            questionDiv.id = questionId;
+            questionDiv.dataset.originalIndex = originalIndex;
+            questionDiv.dataset.displayIndex = displayIndex;
+
+            // Process prompt text
+            let promptText = q.prompt || `Question`;
+            promptText = escapeHtml(promptText);
+            
+            let questionLabel = `Question ${displayQNum}`;
+            if (q.points && q.type !== 'text_only') {
+                questionLabel += ` (${q.points} ${q.points == 1 ? 'point' : 'points'})`;
+            }
+            questionLabel += ": ";
+            
+            // Skip label for text_only type
+            if (q.type !== 'text_only') {
+                promptText = `<strong>${questionLabel}</strong>${promptText}`;
+            }
+            
+            // Process formatting
+            promptText = processPromptFormatting(promptText);
+
+            let questionContentHtml = '<div class="question-content">';
+            let labelClass = '';
+            let labelTag = 'label';
+            
+            // For text_only type, don't use label
+            if (q.type === 'text_only') {
+                labelTag = 'div';
+                labelClass = 'text-content';
+            } else if (q.type === 'code') {
+                labelClass = 'code-prompt';
             }
 
-            STATE.totalQuestions = questionsArray.length;
-            console.log(`Total questions loaded: ${STATE.totalQuestions}`);
+            // Generate input HTML based on question type
+            questionContentHtml += generateQuestionInput(q, answerId, answerName, skipShuffle, seed, originalIndex);
+            questionContentHtml += '</div>'; // End question-content
 
-            // --- Shuffle Logic (as before) ---
-            const shuffleSetting = String(STATE.examDetails?.shuffleQuestions || 'yes').trim().toLowerCase();
-            const shuffleDisabled = ['no', 'false', '0'].includes(shuffleSetting);
-            const skipShuffle = Boolean(STATE.isAdmin) || shuffleDisabled;
-            console.log(`Shuffle Setting: ${shuffleSetting}, Skip Shuffle: ${skipShuffle}`);
-            const seed = hashString(STATE.currentUser?.email || Date.now().toString());
-            const originalIndices = Array.from(questionsArray.keys());
-            const displayIndices = skipShuffle
-                ? originalIndices
-                : seededShuffle(originalIndices.slice(), seed);
-            console.log("Display order:", displayIndices);
+            // Add confirm/edit actions - not for text_only type
+            let actionsHtml = '';
+            if (q.type !== 'text_only') {
+                actionsHtml = `
+                    <div class="question-actions">
+                        <button type="button" class="btn-sm btn-confirm" onclick="confirmAnswer('${questionId}')">
+                            <i class="fas fa-check"></i> Confirm
+                        </button>
+                        <button type="button" class="btn-sm btn-edit" onclick="editAnswer('${questionId}')">
+                            <i class="fas fa-pencil-alt"></i> Edit
+                        </button>
+                    </div>
+                `;
+            }
 
-            // --- Create Mapping (as before) ---
-            STATE.examDetails.OriginalOrderMap = {};
-            questionsArray.forEach((q, index) => {
-                STATE.examDetails.OriginalOrderMap[index] = q;
+            const labelTargetId = answerId;
+            questionDiv.innerHTML = `<${labelTag} for="${labelTargetId}" class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
+
+            DOM['exam-questions-area'].appendChild(questionDiv);
+            
+            // Mark text_only as confirmed automatically
+            if (q.type === 'text_only') {
+                STATE.confirmedQuestionsCount++;
+                questionDiv.classList.add('confirmed', 'text-only-confirmed');
+            }
+        });
+        
+        // Initialize code editors after rendering
+        setTimeout(() => {
+            const codeTextareas = document.querySelectorAll('.code-editor');
+            codeTextareas.forEach(textarea => {
+                initializeCodeEditor(textarea.id, 'python');
             });
-
-            // Reset confirmed count before rendering
-            STATE.confirmedQuestionsCount = 0;
-
-            // --- Display Questions Loop (as before) ---
-            displayIndices.forEach((originalIndex, displayIndex) => {
-                const q = questionsArray[originalIndex];
-                if (!q) {
-                    console.warn(`Question data missing for original index ${originalIndex}`);
-                    return; // Skip if question data is somehow missing
-                }
-                const displayQNum = displayIndex + 1;
-                const originalQNum = originalIndex + 1;
-                const questionId = `q-${originalQNum}`;
-                const answerId = `ans-${originalQNum}`; // Used as input ID/Name
-                const answerName = `ans-${originalQNum}`;
-
-                const questionDiv = document.createElement('div');
-                questionDiv.className = 'question form-group';
-                if (q.type === 'text_only') {
-                    questionDiv.className = 'question form-group text-only-question';
-                }
-                questionDiv.id = questionId;
-                questionDiv.dataset.originalIndex = originalIndex;
-                questionDiv.dataset.displayIndex = displayIndex;
-
-                // --- Process Prompt & Formatting (as before) ---
-                let promptText = q.prompt || `Question`;
-                promptText = escapeHtml(promptText);
-                let questionLabel = `Question ${displayQNum}`;
-                if (q.points && q.type !== 'text_only') {
-                     questionLabel += ` (${q.points} ${q.points == 1 ? 'point' : 'points'})`;
-                }
-                questionLabel += ": ";
-                if (q.type !== 'text_only') {
-                     promptText = `<strong>${questionLabel}</strong>${promptText}`;
-                }
-                promptText = processPromptFormatting(promptText); // Apply term highlighting etc.
-
-
-                let questionContentHtml = '<div class="question-content">';
-                let labelClass = '';
-                let labelTag = 'label';
-                if (q.type === 'text_only') {
-                    labelTag = 'div';
-                    labelClass = 'text-content';
-                } else if (q.type === 'code') {
-                    // The main prompt goes in the label/div above the editor
-                    // labelClass remains default here, input generated below
-                }
-
-                // Generate input HTML based on question type
-                questionContentHtml += generateQuestionInput(q, answerId, answerName, skipShuffle, seed, originalIndex);
-                questionContentHtml += '</div>'; // End question-content
-
-                // Add confirm/edit actions - not for text_only type
-                let actionsHtml = '';
-                if (q.type !== 'text_only') {
-                    actionsHtml = `
-                        <div class="question-actions">
-                            <button type="button" class="btn-sm btn-confirm" onclick="confirmAnswer('${questionId}')">
-                                <i class="fas fa-check"></i> Confirm
-                            </button>
-                            <button type="button" class="btn-sm btn-edit" onclick="editAnswer('${questionId}')">
-                                <i class="fas fa-pencil-alt"></i> Edit
-                            </button>
-                        </div>
-                    `;
-                }
-
-                // Target the input ID for the label's 'for' attribute
-                const labelTargetId = (q.type !== 'text_only' && q.type !== 'multiple_select') ? answerId : '';
-                questionDiv.innerHTML = `<${labelTag} ${labelTargetId ? `for="${labelTargetId}"` : ''} class="${labelClass}">${promptText}</${labelTag}>${questionContentHtml}${actionsHtml}`;
-
-                DOM['exam-questions-area'].appendChild(questionDiv);
-
-                // Mark text_only as confirmed automatically and count it
-                if (q.type === 'text_only') {
-                    STATE.confirmedQuestionsCount++;
-                    questionDiv.classList.add('confirmed', 'text-only-confirmed');
-                }
-            }); // End displayIndices.forEach
-
-            // --- Initialize Code Editors and Resolve Promise ---
-            // Use setTimeout to allow DOM to update before initializing editors
-            setTimeout(() => {
-                try {
-                    const codeTextareas = document.querySelectorAll('.code-editor');
-                    codeTextareas.forEach(textarea => {
-                        initializeCodeEditor(textarea.id, 'python'); // Assumes Python, adjust if needed
-                    });
-                    enhanceExamUI(); // Apply other UI enhancements
-                    checkAllConfirmed(); // Update submit button state based on initial render
-                    console.log("Questions displayed and editors initialized.");
-                    resolve(); // Resolve the promise successfully
-                } catch(editorError) {
-                     console.error("Error during post-render enhancements:", editorError);
-                     reject(editorError); // Reject the promise if enhancements fail
-                }
-            }, 100); // Short delay for DOM update
-
-        } catch (e) {
-            console.error("Error displaying questions:", e);
-            DOM['exam-questions-area'].innerHTML = '<p>Error loading questions.</p>';
-            reject(e); // Reject the promise on primary error
-        }
-    }); // End Promise constructor
+            
+            enhanceExamUI();
+        }, 300);
+        
+    } catch (e) {
+        console.error("Error displaying questions:", e);
+        DOM['exam-questions-area'].innerHTML = '<p>Error loading questions.</p>';
+    }
+    
+    // Update counters for confirmation
+    const totalQuestionsRequiringConfirmation = STATE.totalQuestions - 
+                                             document.querySelectorAll('.text-only-confirmed').length;
+    
+    checkAllConfirmed();
 }
 
 // Helper function to process prompt text formatting
@@ -2605,45 +2582,20 @@ async function sendSubmissionToBackend(submissionData) {
         console.log(`Sending data to backend: ${CONFIG.BACKEND_URL}`);
         const response = await fetch(CONFIG.BACKEND_URL, {
             method: 'POST',
+            mode: 'no-cors',
             headers: {
-                'Content-Type': 'application/json', // Send as JSON
-                'Accept': 'application/json'      // Expect JSON response
+                'Content-Type': 'text/plain;charset=utf-8',
             },
-            body: JSON.stringify({ submission: submissionData }) // Ensure body is JSON string
+            body: JSON.stringify({ submission: submissionData })
         });
 
-        // Check if the response status is OK (e.g., 200-299)
-        if (!response.ok) {
-            // Try to get error message from backend response body
-            let errorMsg = `Backend error! Status: ${response.status}`;
-            try {
-                const errorData = await response.json();
-                errorMsg = errorData.error || errorData.message || errorMsg;
-            } catch (e) {
-                // Could not parse error JSON, use status text
-                errorMsg = `${errorMsg} - ${response.statusText}`;
-            }
-            throw new Error(errorMsg);
-        }
-
-        // Parse the JSON response from the backend
-        const result = await response.json();
-        console.log("Backend submission response:", result);
-
-        // Check the success flag from the backend response
-        if (result && result.success === true) {
-            console.log("Submission successfully processed by backend.");
-            return true; // Indicate success
-        } else {
-            // Backend indicated failure
-            throw new Error(result.error || result.message || "Backend reported an unspecified error.");
-        }
-
+        // With no-cors, assume success if fetch resolves
+        console.log("Fetch request sent to backend (response status hidden due to no-cors).");
+        return true;
     } catch (error) {
         console.error('Error submitting data to backend:', error);
-        // Keep the notification about backup download
         showImprovedNotification('error', 'Submission Error', `Could not send submission: ${error.message}. A backup file was downloaded.`, 0);
-        return false; // Indicate failure
+        return false;
     }
 }
 
@@ -2991,9 +2943,9 @@ function loadAppState() {
 }
 
 // Restores the application UI and state
-async function restoreAppState(state) {
+function restoreAppState(state) {
     console.log("Restoring application state...");
-
+    
     // Restore key state variables
     STATE.examDetails = state.examDetails;
     STATE.studentPINEntered = state.studentPINEntered;
@@ -3004,10 +2956,9 @@ async function restoreAppState(state) {
     if (!STATE.examEndTime || isNaN(STATE.examEndTime) || Date.now() >= STATE.examEndTime) {
         console.warn("Restored exam state has expired or end time is invalid. Clearing state.");
         localStorage.removeItem(CONFIG.APP_STATE_KEY);
-        resetExamState(); // Reset UI fully
-        updateAuthUI();   // Ensure auth UI is correct
+        resetExamState();
         showImprovedNotification('warning', 'Session Expired', 'Your previous exam session has expired.', 0);
-        return; // Stop restoration
+        return;
     }
 
     showImprovedNotification('info', 'Exam Session Restored', 'Resuming your previous exam session.', 5000);
@@ -3022,125 +2973,62 @@ async function restoreAppState(state) {
     // Display header info
     displayExamDetailsHeader();
 
-    // Await the display of questions before proceeding
-    try {
-        if (STATE.examDetails && STATE.examDetails.Questions && STATE.examDetails.OriginalOrderMap) {
-            // Wait for questions to be rendered and editors initialized
-            await displayQuestions(STATE.examDetails.Questions);
-            console.log("Questions displayed, proceeding to restore answers.");
-
-            // Restore saved answers if available (Now happens AFTER await)
-            if (state.currentAnswers) {
-                console.log("Restoring saved answers...");
-                // Use try-catch specifically around answer/confirmation restoration
-                try {
-                    // Restore answers
-                    for (const answerName in state.currentAnswers) {
-                         // Check if the property belongs to the object itself
-                        if (!Object.hasOwnProperty.call(state.currentAnswers, answerName)) continue;
-
-                        const formElement = DOM['exam-form']?.elements[answerName];
-                        const answerValue = state.currentAnswers[answerName];
-
-                        if (formElement && answerValue !== 'FILE_SELECTED' && answerValue !== '[NOT CONFIRMED]') {
-                            if (formElement.classList?.contains('code-editor') && STATE.codeEditors[answerName]) {
-                                 // Restore CodeMirror content
-                                STATE.codeEditors[answerName].setValue(answerValue || '');
-                                console.log(`Restored CodeMirror for ${answerName}`);
-                            } else if (formElement.type === 'radio') {
-                                // Restore radio button selection
-                                const radioToSelect = document.querySelector(`input[name="${answerName}"][value="${CSS.escape(answerValue)}"]`);
-                                if (radioToSelect) {
-                                     radioToSelect.checked = true;
-                                     console.log(`Restored radio selection for ${answerName} to value "${answerValue}"`);
-                                } else {
-                                     console.warn(`Radio option with value "${answerValue}" not found for ${answerName}`);
-                                }
-                            } else if (formElement.type !== 'file') {
-                                 // Restore other input/textarea values
-                                formElement.value = answerValue || '';
-                                console.log(`Restored value for ${answerName}`);
-                            }
-                        } else if (!formElement) {
-                             console.warn(`Form element not found for restoring answer: ${answerName}`);
-                        }
-                    } // End answer loop
-
-                    // Restore confirmation status
-                    STATE.confirmedQuestionsCount = 0; // Recalculate based on restored state
-                     const textOnlyCount = document.querySelectorAll('.text-only-confirmed').length;
-                     STATE.confirmedQuestionsCount += textOnlyCount; // Add auto-confirmed text_only
-
-                    if (state.confirmationStatus) {
-                        for (const questionId in state.confirmationStatus) {
-                             // Check if the property belongs to the object itself
-                            if (!Object.hasOwnProperty.call(state.confirmationStatus, questionId)) continue;
-
-                            const questionDiv = document.getElementById(questionId);
-                            // Only confirm if the backup state says it was confirmed AND it's not text-only (already counted)
-                            if (questionDiv && state.confirmationStatus[questionId] && !questionDiv.classList.contains('text-only-question')) {
-                                // Re-apply confirmed class and disable inputs
-                                questionDiv.classList.add('confirmed');
-                                const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
-                                inputs.forEach(input => { input.disabled = true; });
-
-                                // Disable CodeMirror if present in this question
-                                const cmTextarea = questionDiv.querySelector('.code-editor');
-                                if (cmTextarea && cmTextarea.id && STATE.codeEditors[cmTextarea.id]) {
-                                    STATE.codeEditors[cmTextarea.id].setOption('readOnly', true);
-                                    STATE.codeEditors[cmTextarea.id].getWrapperElement()?.classList.add('cm-confirmed');
-                                }
-                                STATE.confirmedQuestionsCount++; // Increment counter
-                                console.log(`Restored confirmed status for ${questionId}`);
-                            } else if (questionDiv && !state.confirmationStatus[questionId] && !questionDiv.classList.contains('text-only-question')) {
-                                // Ensure non-confirmed questions are editable
-                                questionDiv.classList.remove('confirmed');
-                                const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
-                                inputs.forEach(input => { input.disabled = false; });
-                                const cmTextarea = questionDiv.querySelector('.code-editor');
-                                if (cmTextarea && cmTextarea.id && STATE.codeEditors[cmTextarea.id]) {
-                                    STATE.codeEditors[cmTextarea.id].setOption('readOnly', false);
-                                     STATE.codeEditors[cmTextarea.id].getWrapperElement()?.classList.remove('cm-confirmed');
-                                }
-                            }
-                        } // End confirmation loop
-                    } // End if (state.confirmationStatus)
-
-                    // Update submit button state AFTER restoring answers/confirmations
-                    checkAllConfirmed();
-                    console.log(`Restored state: ${STATE.confirmedQuestionsCount}/${STATE.totalQuestions} confirmed answers`);
-
-                } catch (restoreError) {
-                    console.error("Error applying restored answers/confirmations:", restoreError);
-                    showImprovedNotification('error', 'Restore Warning', 'Could not fully restore saved answers. Please check carefully.', 5000);
-                     checkAllConfirmed(); // Still update button state
-                }
-            } else {
-                 checkAllConfirmed(); // Update button state even if no answers were saved
-            } // End if (state.currentAnswers)
-
-        } else {
-            console.error("Cannot restore questions display: Missing Questions or Order Map in saved state.");
-            showImprovedNotification('error', 'Restore Failed', 'Could not restore exam questions. State might be corrupted.', 0);
-            localStorage.removeItem(CONFIG.APP_STATE_KEY);
-            resetExamState(); // Reset UI
-            updateAuthUI();
-            return; // Stop restoration
-        }
-    } catch (displayError) {
-        console.error("Error awaiting displayQuestions in restoreAppState:", displayError);
-        showImprovedNotification('error', 'Restore Failed', 'Could not display exam questions during restore.', 0);
+    // Display questions
+    if (STATE.examDetails && STATE.examDetails.Questions && STATE.examDetails.OriginalOrderMap) {
+        displayQuestions(STATE.examDetails.Questions);
+    } else {
+        console.error("Cannot restore questions display: Missing Questions or Order Map in saved state.");
+        showImprovedNotification('error', 'Restore Failed', 'Could not restore exam questions. State might be corrupted.', 0);
         localStorage.removeItem(CONFIG.APP_STATE_KEY);
-        resetExamState(); // Reset UI
-        updateAuthUI();
-        return; // Stop restoration
+        resetExamState();
+        return;
     }
 
     // Restart the timer
     startTimer();
-    // Start auto-save again for the restored session
-    startAutoSave();
+    checkAllConfirmed();
     console.log("Application state restored successfully.");
+    
+    // Restore saved answers if available
+    if (state.currentAnswers) {
+        console.log("Restoring saved answers...");
+        
+        // Wait for the UI to initialize
+        setTimeout(() => {
+            try {
+                // Restore answers
+                for (const answerName in state.currentAnswers) {
+                    const formElement = DOM['exam-form'].elements[answerName];
+                    if (formElement && state.currentAnswers[answerName] !== 'FILE_SELECTED') {
+                        formElement.value = state.currentAnswers[answerName];
+                    }
+                }
+                
+                // Restore confirmation status
+                if (state.confirmationStatus) {
+                    for (const questionId in state.confirmationStatus) {
+                        const questionDiv = document.getElementById(questionId);
+                        if (questionDiv && state.confirmationStatus[questionId]) {
+                            // Re-apply confirmed class and disable inputs
+                            questionDiv.classList.add('confirmed');
+                            
+                            // Disable all input elements within this question
+                            const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
+                            inputs.forEach(input => { input.disabled = true; });
+                            
+                            STATE.confirmedQuestionsCount++;
+                        }
+                    }
+                }
+                
+                // Update submit button state
+                checkAllConfirmed();
+                console.log(`Restored ${STATE.confirmedQuestionsCount}/${STATE.totalQuestions} confirmed answers`);
+            } catch (e) {
+                console.error("Error restoring saved answers:", e);
+            }
+        }, 500);
+    }
 }
 
 // === Backup Import Feature ===
