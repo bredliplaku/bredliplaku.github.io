@@ -1169,28 +1169,24 @@ function init() {
     window.addEventListener('offline', updateOnlineStatus);
     setupBackupImportFeature();
 
-    // --- Poll for Google API readiness ---
-    let checkGoogleApiInterval = setInterval(() => {
-        if (typeof gapi !== 'undefined' && typeof google !== 'undefined' && typeof google.accounts !== 'undefined') {
-            clearInterval(checkGoogleApiInterval);
-            console.log("Google API objects detected.");
-            initGoogleApi(); // Initialize Google Sign-In etc.
-        } else {
-            console.log("Waiting for Google API objects to load...");
-        }
-    }, 200); // Check every 200ms
+    const checkGoogleApiInterval = setInterval(() => {
+if (typeof gapi !== 'undefined'
+	&& typeof google !== 'undefined'
+	&& typeof google.accounts !== 'undefined') {
+	clearInterval(checkGoogleApiInterval);
+	clearTimeout(googleApiLoadTimeout);
+	console.log("Google API objects detected.");
+	initGoogleApi();
+	}
+	}, 200);
 
-    // Timeout for API polling
-    setTimeout(() => {
-        if (checkGoogleApiInterval) { // Check if polling is still active
-             clearInterval(checkGoogleApiInterval);
-             console.error("Google API objects failed to load within 10 seconds.");
-             handleApiInitError(new Error("Google API objects did not load in time"));
-        }
-    }, 10000); // Timeout after 10 seconds
-
-    console.log("init function completed setup calls.");
-}
+	// Timeout for API polling
+	const googleApiLoadTimeout = setTimeout(() => {
+	// if we haven't already cleared it above...
+	clearInterval(checkGoogleApiInterval);
+	console.error("Google API objects failed to load within 10 seconds.");
+	handleApiInitError(new Error("Google API objects did not load in time"));
+	}, 10000);
 
         function setupEventListeners() {
             loginBtn?.addEventListener('click', handleAuthClick);
@@ -3544,107 +3540,6 @@ async function handleSubmitExam(isAutoSubmit = false) {
                 localStorage.removeItem(appStateKey); // Clear corrupted state
             }
         }
-
-        // Restores the application UI and state based on loaded data (called after user signs in and state matches)
-        function restoreAppState(state) {
-            console.log("Restoring application state...");
-            // Restore key state variables
-            examDetails = state.examDetails;
-            studentPINEntered = state.studentPINEntered;
-            studentExamIdEntered = state.studentExamIdEntered;
-            examEndTime = state.examEndTime;
-
-             // Validate restored end time
-             if (!examEndTime || isNaN(examEndTime) || Date.now() >= examEndTime) {
-                 console.warn("Restored exam state has expired or end time is invalid. Clearing state.");
-                 localStorage.removeItem(appStateKey); // Clear expired state
-                 resetExamState(); // Reset UI
-                 showImprovedNotification('warning', 'Session Expired', 'Your previous exam session has expired.', 0);
-                 return; // Stop restoration
-             }
-
-
-             showImprovedNotification('info', 'Exam Session Restored', 'Resuming your previous exam session.', 5000);
-
-             // --- Rebuild UI to match the restored state ---
-             // Hide setup modules
-             signinPromptModule.classList.add('hidden');
-             examStartModule.classList.add('hidden');
-             examDetailsModule.classList.add('hidden');
-             submissionConfirmationModule.classList.add('hidden');
-
-             // Show questions module
-             examQuestionsModule.classList.remove('hidden');
-
-             // Display header info
-             displayExamDetailsHeader();
-
-             // Display the questions (will handle randomization based on stored map if needed)
-             // Ensure the OriginalOrderMap exists before displaying
-             if (examDetails && examDetails.Questions && examDetails.OriginalOrderMap) {
-                 displayQuestions(examDetails.Questions);
-                 // **TODO (Optional but Recommended):** Implement logic here to refill answers
-                 // based on `state.currentAnswers` if you added periodic saving.
-                 // Example: populateRestoredAnswers(state.currentAnswers);
-             } else {
-                  console.error("Cannot restore questions display: Missing Questions or Order Map in saved state.");
-                   showImprovedNotification('error', 'Restore Failed', 'Could not restore exam questions. State might be corrupted.', 0);
-                   localStorage.removeItem(appStateKey);
-                   resetExamState();
-                   return;
-             }
-
-
-             // Restart the timer
-             startTimer();
-
-             // Ensure submit button is enabled (subject to online status)
-             checkAllConfirmed(); // Let this function handle button state based on confirms/online
-
-             console.log("Application state restored successfully.");
-			 
-			 // Restore saved answers if available
-if (state.currentAnswers) {
-    console.log("Restoring saved answers...");
-    
-    // Wait a brief moment for the UI to initialize
-    setTimeout(() => {
-        try {
-            // Restore answers
-            for (const answerName in state.currentAnswers) {
-                const formElement = examForm.elements[answerName];
-                if (formElement && state.currentAnswers[answerName] !== 'FILE_SELECTED') {
-                    formElement.value = state.currentAnswers[answerName];
-                }
-            }
-            
-            // Restore confirmation status
-            if (state.confirmationStatus) {
-                for (const questionId in state.confirmationStatus) {
-                    const questionDiv = document.getElementById(questionId);
-                    if (questionDiv && state.confirmationStatus[questionId]) {
-                        // Re-apply confirmed class and disable inputs
-                        questionDiv.classList.add('confirmed');
-                        
-                        // Disable all relevant input elements within this question
-                        const inputs = questionDiv.querySelectorAll('.form-control, .form-control-checkbox');
-                        inputs.forEach(input => { input.disabled = true; });
-                        
-                        // Count this as confirmed
-                        confirmedQuestionsCount++;
-                    }
-                }
-            }
-            
-            // Update submit button state
-            checkAllConfirmed();
-            console.log(`Restored ${confirmedQuestionsCount}/${totalQuestions} confirmed answers`);
-        } catch (e) {
-            console.error("Error restoring saved answers:", e);
-        }
-    }, 500);
-}
-         }
 
     </script>
 
