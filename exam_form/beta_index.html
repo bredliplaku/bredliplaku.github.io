@@ -1138,47 +1138,52 @@ body.time-expired {
 
 function init() {
     console.log("Initializing...");
-    // Keep this check if init might be called before load somehow
-    if (document.readyState !== 'complete') {
-        window.addEventListener('load', init);
+
+    // Remove 'content-hidden' and make main container visible
+    // Assumes 'mainContainer' is defined as: const mainContainer = document.getElementById('main-container');
+    if (document.body) document.body.classList.remove('content-hidden');
+    if (mainContainer) {
+         mainContainer.classList.add('content-visible');
+    } else {
+        // Critical error if main container doesn't exist
+        console.error("#main-container not found! Cannot proceed.");
+        // Optionally display an error message to the user here
         return;
     }
-    document.body.classList.remove('content-hidden');
 
-    // Cache all DOM elements
-    cacheDOMElements();
-
-    // Basic setup
-    if (DOM.mainContainer) DOM.mainContainer.classList.add('content-visible');
+    // --- Call all necessary setup functions ---
     updateYear();
     setupEventListeners();
-    loadAppState();
-    updateOnlineStatus(); // Initial status check
+    setupSessionManagement(); // Ensures activity/inactivity logic runs
+    loadAppState();           // Loads any saved state from localStorage
+    updateOnlineStatus();     // Check initial online status
 
-    // Event listeners for online/offline detection
+    // Setup listeners for network changes and backup feature
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
     setupBackupImportFeature();
 
-    // ADDED: Poll to check if Google API objects are loaded
+    // --- Poll for Google API readiness ---
     let checkGoogleApiInterval = setInterval(() => {
         if (typeof gapi !== 'undefined' && typeof google !== 'undefined' && typeof google.accounts !== 'undefined') {
-            clearInterval(checkGoogleApiInterval); // Stop polling
+            clearInterval(checkGoogleApiInterval);
             console.log("Google API objects detected.");
-            initGoogleApi(); // Initialize now that objects exist
+            initGoogleApi(); // Initialize Google Sign-In etc.
         } else {
             console.log("Waiting for Google API objects to load...");
         }
     }, 200); // Check every 200ms
 
-    // Optional: Add a timeout to stop polling after a while to prevent infinite loops if scripts fail badly
+    // Timeout for API polling
     setTimeout(() => {
-        if (checkGoogleApiInterval) { // Check if interval is still running
+        if (checkGoogleApiInterval) { // Check if polling is still active
              clearInterval(checkGoogleApiInterval);
              console.error("Google API objects failed to load within 10 seconds.");
              handleApiInitError(new Error("Google API objects did not load in time"));
         }
     }, 10000); // Timeout after 10 seconds
+
+    console.log("init function completed setup calls.");
 }
 
         function setupEventListeners() {
@@ -1206,8 +1211,6 @@ function init() {
             if (submitExamBtn) submitExamBtn.disabled = true;
         }
 		
-		setupSessionManagement();
-
         function showAppContent() {
             loadingIndicator?.classList.add('hidden');
             mainContainer?.classList.add('content-visible');
