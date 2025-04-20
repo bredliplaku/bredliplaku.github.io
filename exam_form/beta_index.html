@@ -1069,7 +1069,7 @@ body.time-expired {
         const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
         // --- !!! ADD YOUR DEPLOYED APPS SCRIPT URL HERE !!! ---
-        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzqxjley9Vb8wVOBIvBFrJSzZ9Nd24Q6YL47DszOXq20SNX_SqKLqzcvxkCigv76Ex4/exec';
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycby9e2Mbz_0Q7oUl3V9PTdQaYlzt6F1ClR_0sgbOqntxdef90sbMafx0aIxaBjWNPvb4/exec';
 
         // === App State ===
         let isAdmin = false;
@@ -2427,7 +2427,7 @@ function displayQuestions(questionsJsonString) {
     }); // End of Promise constructor
 }
 
-// --- MODIFIED: restoreAppState now uses async/await ---
+// --- MODIFIED: restoreAppState now uses async/await AND checks for questionDiv existence ---
 async function restoreAppState(state) { // Added async
     console.log("Restoring application state...");
     // Restore key state variables
@@ -2469,25 +2469,40 @@ async function restoreAppState(state) { // Added async
                     // Restore answers
                     for (const answerName in state.currentAnswers) {
                         const formElement = examForm.elements[answerName];
-                        // ADDED: Check if element is CodeMirror editor
-                        if (formElement && formElement.classList.contains('code-editor') && codeEditors[answerName]) {
-                             if (state.currentAnswers[answerName] !== 'FILE_SELECTED') {
+                        // Find the corresponding question data
+                        const originalIndex = parseInt(answerName.split('-')[1], 10) - 1;
+                        const questionData = examDetails.OriginalOrderMap ? examDetails.OriginalOrderMap[originalIndex] : null;
+
+                        if (formElement && state.currentAnswers[answerName] !== 'FILE_SELECTED') {
+                            // Handle CodeMirror editor specifically
+                            if (questionData && questionData.type === 'code' && codeEditors[answerName]) {
                                 codeEditors[answerName].setValue(state.currentAnswers[answerName] || '');
-                             }
-                        }
-                        else if (formElement && state.currentAnswers[answerName] !== 'FILE_SELECTED') {
+                            }
                             // Handle radio buttons specifically
-                            if(formElement.type === 'radio' || (formElement.length > 0 && formElement[0]?.type === 'radio')) {
+                            else if (questionData && questionData.type === 'multiple_select') {
                                 const valueToSelect = state.currentAnswers[answerName];
                                 const radios = document.querySelectorAll(`input[name="${answerName}"]`);
+                                let foundRadio = false;
                                 radios.forEach(radio => {
-                                    radio.checked = (radio.value === valueToSelect);
+                                    if (radio.value === valueToSelect) {
+                                        radio.checked = true;
+                                        foundRadio = true;
+                                    } else {
+                                        radio.checked = false; // Ensure others are unchecked
+                                    }
                                 });
-                            } else {
-                                formElement.value = state.currentAnswers[answerName];
+                                if (!foundRadio && valueToSelect != null) { // Only log if value wasn't null/undefined
+                                    console.warn(`Restore: Could not find radio button with value "${valueToSelect}" for name "${answerName}"`);
+                                }
                             }
-                        }
-                    }
+                            // Handle other input types (text, textarea)
+                            else if (typeof formElement.value !== 'undefined') {
+                                formElement.value = state.currentAnswers[answerName] || '';
+                            }
+                         } else if (!formElement) {
+                              console.warn(`Restore: Form element not found for answer name "${answerName}"`);
+                         }
+                    } // end for loop for answers
 
                     // Restore confirmation status AFTER restoring answers
                     if (state.confirmationStatus) {
@@ -2495,20 +2510,27 @@ async function restoreAppState(state) { // Added async
                         confirmedQuestionsCount = document.querySelectorAll('.text-only-confirmed').length; // Start with text_only count
                         for (const questionId in state.confirmationStatus) {
                             const questionDiv = document.getElementById(questionId);
-                            // Confirm only if it was confirmed in the saved state AND is NOT text_only (which is handled separately)
-                            if (questionDiv && state.confirmationStatus[questionId] && !questionDiv.classList.contains('text-only-question')) {
-                                // Use confirmAnswer to apply class and disable inputs correctly
+
+                            // --- ADDED CHECK FOR questionDiv ---
+                            if (!questionDiv) {
+                                console.warn(`restoreAppState: Question element not found for ID '${questionId}' during confirmation restore. Skipping.`);
+                                continue; // Skip this iteration if the element doesn't exist
+                            }
+                            // --- END CHECK ---
+
+                            // Confirm only if it was confirmed in the saved state AND is NOT text_only
+                            if (state.confirmationStatus[questionId] && !questionDiv.classList.contains('text-only-question')) {
                                 confirmAnswer(questionId); // This increments confirmedQuestionsCount
                             }
                         }
                     }
-                     console.log(`Restored ${confirmedQuestionsCount}/${totalQuestions} confirmed answers`);
+                    console.log(`Restored ${confirmedQuestionsCount}/${totalQuestions} confirmed answers`);
 
                 } catch (e) {
-                    console.error("Error restoring saved answers:", e);
+                    console.error("Error applying restored saved answers:", e);
                 }
             }
-             // Check confirmation status AFTER restoring everything
+            // Check confirmation status AFTER restoring everything
             checkAllConfirmed();
 
         } else {
@@ -2520,11 +2542,11 @@ async function restoreAppState(state) { // Added async
         }
     } catch (displayError) {
         // Handle errors from displayQuestions if it rejects
-         console.error("Error during question display in restoreAppState:", displayError);
-         showImprovedNotification('error', 'Restore Failed', 'Could not display exam questions during restore.', 0);
-         localStorage.removeItem(appStateKey);
-         resetExamState();
-         return;
+        console.error("Error during question display in restoreAppState:", displayError);
+        showImprovedNotification('error', 'Restore Failed', 'Could not display exam questions during restore.', 0);
+        localStorage.removeItem(appStateKey);
+        resetExamState();
+        return;
     }
 
     // Restart the timer
