@@ -3513,7 +3513,7 @@ async function editExam(pin, originalIndex) {
         // calculateTotalPoints - Unchanged (uses question.points || 1)
         function calculateTotalPoints(questions) { return questions.reduce((sum, q) => sum + (parseFloat(q.points) || 1), 0); }
         // populateGradingQuestions - Modified to populate navigator and remove button text (see previous thought/code)
-     function populateGradingQuestions() {
+        function populateGradingQuestions() {
      if (!currentExamQuestions || !currentSubmissionAnswers) { 
          gradingQuestionsContainer.innerHTML = '<p style="color: red;">Error: Missing questions or answers.</p>'; 
          return; 
@@ -3524,6 +3524,18 @@ async function editExam(pin, originalIndex) {
      }
 
      let questionsHtml = ''; 
+     
+     // Add a critical emergency button to force GRADED status
+     questionsHtml += `
+        <div style="background-color: #fee2e2; padding: 15px; margin-bottom: 20px; border-radius: 6px; border: 2px solid #ef4444; text-align: center;">
+            <p style="font-weight: bold; color: #b91c1c; margin-bottom: 10px;">EMERGENCY STATUS FIX</p>
+            <button onclick="forceGradedStatus()" style="background-color: #ef4444; color: white; font-weight: bold; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer;">
+                FORCE GRADED STATUS
+            </button>
+            <p style="font-size: 0.8em; margin-top: 10px; color: #b91c1c;">Use this button if status remains SUBMITTED after grading</p>
+        </div>
+     `;
+     
      let navigatorHtml = '<option value="">-- Select Question --</option>';
      
      // Add "Confirm All" button at the top
@@ -3638,19 +3650,40 @@ async function editExam(pin, originalIndex) {
      gradingQuestionsContainer.innerHTML = questionsHtml;
      gradingNavigatorSelect.innerHTML = navigatorHtml; // Populate dropdown
      
-     // Apply styles to code snippets (black background)
-     document.querySelectorAll('.student-answer pre').forEach(codeBlock => {
-         codeBlock.style.backgroundColor = '#1f2937';
-         codeBlock.style.color = '#e5e7eb';
-         codeBlock.style.padding = '10px';
-         codeBlock.style.borderRadius = '6px';
-         codeBlock.style.fontFamily = 'monospace';
-         codeBlock.style.overflow = 'auto';
-         codeBlock.style.maxHeight = '200px';
-     });
-     
      updateTotalScore();
 }
+
+// Emergency function to forcibly update status
+function forceGradedStatus() {
+    if (!currentGradeSheetRow) {
+        alert("Error: Cannot determine which row to update!");
+        return;
+    }
+    
+    // Simply and directly update the status - no bells and whistles
+    const statusRange = `${EXAM_ATTEMPTS_SHEET_NAME}!G${currentGradeSheetRow}`;
+    
+    // Show progress
+    alert("Attempting to force status to GRADED...");
+    
+    // Direct call with minimal complications
+    gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: EXAM_SPREADSHEET_ID, 
+        range: statusRange, 
+        valueInputOption: 'RAW',
+        resource: { values: [["graded"]] }
+    }).then(response => {
+        alert("✅ SUCCESS! Status has been set to GRADED. Reloading data...");
+        // Force data reload
+        loadAttemptsData();
+    }).catch(error => {
+        alert("❌ ERROR! Could not update status: " + error.message);
+        console.error("Force status update failed:", error);
+    });
+}
+
+// Expose the emergency function globally
+window.forceGradedStatus = forceGradedStatus;
         // loadExistingGrades - Unchanged
         function loadExistingGrades(gradesRaw) { if (!gradesRaw || gradesRaw === '{}') return; try { const grades = JSON.parse(gradesRaw); console.log("Loading existing grades:", grades); gradingTotalScoreInput.value = grades.totalScore ?? 0; gradingFeedbackInput.value = grades.feedback ?? ''; if (grades.questionGrades) { for (const qId in grades.questionGrades) { if (qId.startsWith('q-')) { const qNum = parseInt(qId.substring(2), 10); const pointsInput = document.getElementById(`points-q-${qNum}`); const card = document.getElementById(`grading-q-${qNum}`); const qGrade = grades.questionGrades[qId]; if (pointsInput) pointsInput.value = qGrade.points ?? 0; if (card && qGrade.status) card.className = `question-grading-card ${qGrade.status}`; } } } updateGradePercentage(); } catch (e) { console.error("Error loading existing grades JSON:", e); showImprovedNotification('warning', 'Grade Load Warning', `Could not load previous grades: ${e.message}`); } }
         // formatStudentAnswer - Unchanged
