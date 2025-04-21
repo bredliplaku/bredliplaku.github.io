@@ -2307,7 +2307,59 @@
         // === Google Sheets Interaction === (Unchanged - get, append, update, clear)
         async function getSheetData(spreadsheetId, range) { if (!isSignedIn || !gapi?.client?.sheets) { if(!isAdminAllowed && isSignedIn) { showImprovedNotification('error', 'Access Denied', 'Your account cannot access Sheets data.'); } else { showImprovedNotification('error', 'API Error', 'Not signed in or Sheets API not ready.'); } return null; } if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot fetch Sheets data offline.'); return null; } console.log(`Admin fetching data from: ${spreadsheetId}, Range: ${range}`); setSyncing(true); try { const response = await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId, range }); console.log(`Admin fetched data for ${range}`); return response.result.values || []; } catch (err) { console.error(`Admin error fetching ${range}:`, err); const errorDetails = err.result?.error; let message = `Could not fetch data: ${errorDetails?.message || err.message}`; if (errorDetails?.status === 'PERMISSION_DENIED') message = 'Permission denied. Ensure admin has access.'; else if (errorDetails?.status === 'NOT_FOUND') message = `Sheet or range not found: ${range}`; showImprovedNotification('error', 'Sheet Read Error', message); return null; } finally { setSyncing(false); } }
         async function appendSheetData(spreadsheetId, sheetName, values) { if (!isAdminAllowed || !isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API/Auth Error', 'Not authorized or Sheets API not ready for append.'); return false; } if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets")) { console.warn("Write scope missing."); showImprovedNotification('warning', 'Permission Issue', 'Write scope missing for append.'); return false; } if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot append data offline.'); return false; } console.log(`Admin appending to Sheet: ${spreadsheetId}, Sheet: ${sheetName}`); setSyncing(true); try { const response = await gapi.client.sheets.spreadsheets.values.append({ spreadsheetId, range: sheetName, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', resource: { values } }); console.log('Append success:', response.result); return true; } catch (err) { console.error(`Error appending to ${sheetName}:`, err); const errDetail = err.result?.error; let message = `Could not save data: ${errDetail?.message || err.message}`; if (errDetail?.status === 'PERMISSION_DENIED') message = 'Permission denied. Ensure admin has editor access.'; showImprovedNotification('error', `Sheet Write Error (${errDetail?.status || 'Unknown'})`, message); return false; } finally { setSyncing(false); } }
-        async function updateSheetData(spreadsheetId, range, values) { if (!isAdminAllowed || !isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API/Auth Error', 'Not authorized or Sheets API not ready for update.'); return false; } if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets")) { console.warn("Write scope missing for update."); showImprovedNotification('warning', 'Permission Issue', 'Write scope missing for update operation.'); return false; } if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot update data while offline.'); return false; } console.log(`Admin updating Sheet: ${spreadsheetId}, Range: ${range}`); setSyncing(true); try { const response = await gapi.client.sheets.spreadsheets.values.update({ spreadsheetId, range, valueInputOption: 'USER_ENTERED', resource: { values } }); console.log('Update success:', response.result); return true; } catch (err) { console.error(`Error updating ${range}:`, err); const errDetail = err.result?.error; let message = `Could not update data: ${errDetail?.message || err.message}`; if (errDetail?.status === 'PERMISSION_DENIED') message = 'Permission denied. Ensure admin has editor access.'; showImprovedNotification('error', `Sheet Write Error (${errDetail?.status || 'Unknown'})`, message); return false; } finally { setSyncing(false); } }
+        // Fixed update sheet function to handle failures better
+        async function updateSheetData(spreadsheetId, range, values) { 
+            if (!isAdminAllowed || !isSignedIn || !gapi?.client?.sheets) { 
+                showImprovedNotification('error', 'API/Auth Error', 'Not authorized or Sheets API not ready for update.'); 
+                return false; 
+            } 
+            
+            if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets")) { 
+                console.warn("Write scope missing for update."); 
+                showImprovedNotification('warning', 'Permission Issue', 'Write scope missing for update operation.'); 
+                return false; 
+            } 
+            
+            if (!isOnline) { 
+                showImprovedNotification('warning', 'Offline', 'Cannot update data while offline.'); 
+                return false; 
+            } 
+            
+            console.log(`Admin updating Sheet: ${spreadsheetId}, Range: ${range}`, values);
+            setSyncing(true); 
+            
+            try { 
+                // More verbose logging for debugging
+                console.log("Making API call with params:", {
+                    spreadsheetId,
+                    range,
+                    valueInputOption: 'USER_ENTERED',
+                    resource: { values }
+                });
+                
+                const response = await gapi.client.sheets.spreadsheets.values.update({ 
+                    spreadsheetId, 
+                    range, 
+                    valueInputOption: 'USER_ENTERED', 
+                    resource: { values } 
+                }); 
+                
+                console.log('Update success:', response.result); 
+                return true; 
+            } catch (err) { 
+                console.error(`Error updating ${range}:`, err); 
+                const errDetail = err.result?.error; 
+                let message = `Could not update data: ${errDetail?.message || err.message}`; 
+                
+                if (errDetail?.status === 'PERMISSION_DENIED') 
+                    message = 'Permission denied. Ensure admin has editor access.'; 
+                
+                showImprovedNotification('error', `Sheet Write Error (${errDetail?.status || 'Unknown'})`, message); 
+                return false; 
+            } finally { 
+                setSyncing(false); 
+            } 
+        }
         async function clearSheetRows(spreadsheetId, sheetName, rowIndex, count = 1) { if (!isAdminAllowed || !isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API/Auth Error', 'Not authorized or Sheets API not ready for clear.'); return false; } if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets")) { console.warn("Write scope missing for clear."); showImprovedNotification('warning', 'Permission Issue', 'Write scope missing for clear operation.'); return false; } if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot clear data while offline.'); return false; } const sheetRowNumber = rowIndex + 1; const rangeToClear = `${sheetName}!A${sheetRowNumber}:${sheetRowNumber + count - 1}`; console.log(`Admin clearing Sheet: ${spreadsheetId}, Range: ${rangeToClear}`); setSyncing(true); try { const response = await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId, range: rangeToClear }); console.log('Clear success:', response.result); return true; } catch (err) { console.error(`Error clearing ${rangeToClear}:`, err); const errDetail = err.result?.error; let message = `Could not clear data: ${errDetail?.message || err.message}`; if (errDetail?.status === 'PERMISSION_DENIED') message = 'Permission denied. Ensure admin has editor access.'; showImprovedNotification('error', `Sheet Write Error (${errDetail?.status || 'Unknown'})`, message); return false; } finally { setSyncing(false); } }
 
         // === Admin Data Loading & Display ===
