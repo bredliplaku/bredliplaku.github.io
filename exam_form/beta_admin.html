@@ -2161,7 +2161,7 @@
         let currentSortColumn = { table: null, index: -1, ascending: true };
         let allExamsData = []; // Cache for exams: { data: rowArray, originalIndex: number }
         let allAttemptsData = []; // Cache for attempts: { data: rowArray, originalIndex: number }
-		let currentExportType = '';
+		window.currentExportType = '';
 
         // Grading State
 		let currentExamQuestions = null;
@@ -2254,6 +2254,8 @@
             window.addEventListener('offline', updateOnlineStatus);
             checkApiLoads();
 			diagnosePdfLibrary();
+			setTimeout(debugJsPDF, 2000);
+			setupExportButtons();
         }
 
         function checkApiLoads() {
@@ -2451,6 +2453,66 @@ document.getElementById('apply-export-filter-btn').onclick = function() {
             } 
         }
         async function clearSheetRows(spreadsheetId, sheetName, rowIndex, count = 1) { if (!isAdminAllowed || !isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API/Auth Error', 'Not authorized or Sheets API not ready for clear.'); return false; } if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets")) { console.warn("Write scope missing for clear."); showImprovedNotification('warning', 'Permission Issue', 'Write scope missing for clear operation.'); return false; } if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot clear data while offline.'); return false; } const sheetRowNumber = rowIndex + 1; const rangeToClear = `${sheetName}!A${sheetRowNumber}:${sheetRowNumber + count - 1}`; console.log(`Admin clearing Sheet: ${spreadsheetId}, Range: ${rangeToClear}`); setSyncing(true); try { const response = await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId, range: rangeToClear }); console.log('Clear success:', response.result); return true; } catch (err) { console.error(`Error clearing ${rangeToClear}:`, err); const errDetail = err.result?.error; let message = `Could not clear data: ${errDetail?.message || err.message}`; if (errDetail?.status === 'PERMISSION_DENIED') message = 'Permission denied. Ensure admin has editor access.'; showImprovedNotification('error', `Sheet Write Error (${errDetail?.status || 'Unknown'})`, message); return false; } finally { setSyncing(false); } }
+
+unction setupExportButtons() {
+    console.log("Setting up export buttons with direct assignments");
+    
+    // Direct button assignments - overwrites any previous handlers
+    const exportExamBtn = document.getElementById('export-exam-btn');
+    if (exportExamBtn) {
+        exportExamBtn.onclick = function(e) {
+            e.preventDefault(); // Prevent any default behavior
+            window.currentExportType = 'exam';
+            console.log("Export exam clicked, type set to:", window.currentExportType);
+            showExportFilterDialog();
+            return false; // Prevent event bubbling
+        };
+    }
+    
+    const exportSubmissionsBtn = document.getElementById('export-submissions-btn');
+    if (exportSubmissionsBtn) {
+        exportSubmissionsBtn.onclick = function(e) {
+            e.preventDefault();
+            window.currentExportType = 'submissions';
+            console.log("Export submissions clicked, type set to:", window.currentExportType);
+            showExportFilterDialog();
+            return false;
+        };
+    }
+    
+    const exportGradesBtn = document.getElementById('export-grades-btn');
+    if (exportGradesBtn) {
+        exportGradesBtn.onclick = function(e) {
+            e.preventDefault();
+            window.currentExportType = 'grades';
+            console.log("Export grades clicked, type set to:", window.currentExportType);
+            showExportFilterDialog();
+            return false;
+        };
+    }
+    
+    const cancelExportFilterBtn = document.getElementById('cancel-export-filter-btn');
+    if (cancelExportFilterBtn) {
+        cancelExportFilterBtn.onclick = function(e) {
+            e.preventDefault();
+            console.log("Cancel export filter clicked");
+            closeExportFilterDialog();
+            return false;
+        };
+    }
+    
+    const applyExportFilterBtn = document.getElementById('apply-export-filter-btn');
+    if (applyExportFilterBtn) {
+        applyExportFilterBtn.onclick = function(e) {
+            e.preventDefault();
+            console.log("Apply export filter clicked, current type:", window.currentExportType);
+            applyExportFilters();
+            return false;
+        };
+    }
+    
+    console.log("Export buttons setup complete");
+}
 
         // === Admin Data Loading & Display ===
  async function loadExamsData() {
@@ -4130,8 +4192,9 @@ function closeExportFilterDialog() {
 
 // Function to apply filters and run the appropriate export
 function applyExportFilters() {
+    console.log("In applyExportFilters. Current export type:", window.currentExportType);
+    
     try {
-        console.log("Applying export filters, type:", currentExportType);
         const selectedPin = document.getElementById('export-filter-pin').value;
         const selectedStudent = document.getElementById('export-filter-student').value;
         const selectedStudentId = document.getElementById('export-filter-studentid').value;
@@ -4145,18 +4208,22 @@ function applyExportFilters() {
         // Close dialog
         closeExportFilterDialog();
         
-        // Run with extensive error logging
-        console.log("About to execute export function");
+        // Check if export type exists
+        if (!window.currentExportType) {
+            console.error("Export type is empty or undefined!");
+            showImprovedNotification('error', 'Export Error', 'Export type not specified. Please try again.');
+            return;
+        }
         
-        // Direct calls with try/catch blocks
-        switch (currentExportType) {
+        // Switch based on the globally stored export type
+        switch (window.currentExportType) {
             case 'exam':
                 console.log("Calling exportExamToPDF");
                 try {
                     exportExamToPDF(selectedPin);
                 } catch (e) {
                     console.error("Error in exportExamToPDF:", e);
-                    alert("Export failed: " + e.message);
+                    showImprovedNotification('error', 'Export Failed', e.message);
                 }
                 break;
                 
@@ -4166,7 +4233,7 @@ function applyExportFilters() {
                     exportSubmissionsToPDF(selectedPin, selectedStudent, selectedStudentId);
                 } catch (e) {
                     console.error("Error in exportSubmissionsToPDF:", e);
-                    alert("Export failed: " + e.message);
+                    showImprovedNotification('error', 'Export Failed', e.message);
                 }
                 break;
                 
@@ -4176,17 +4243,44 @@ function applyExportFilters() {
                     exportGradesToPDF(selectedPin, selectedStudent, selectedStudentId);
                 } catch (e) {
                     console.error("Error in exportGradesToPDF:", e);
-                    alert("Export failed: " + e.message);
+                    showImprovedNotification('error', 'Export Failed', e.message);
                 }
                 break;
                 
             default:
-                console.error("Unknown export type:", currentExportType);
-                alert("Unknown export type: " + currentExportType);
+                console.error("Unknown export type:", window.currentExportType);
+                showImprovedNotification('error', 'Export Error', 'Unknown export type: ' + window.currentExportType);
         }
     } catch (e) {
         console.error("Error in applyExportFilters:", e);
-        alert("Export filter error: " + e.message);
+        showImprovedNotification('error', 'Export Error', e.message);
+    }
+}
+
+function debugJsPDF() {
+    console.log("JSPDF DEBUG INFO:");
+    console.log("window.jspdf exists:", !!window.jspdf);
+    console.log("window.jspdf type:", typeof window.jspdf);
+    
+    if (window.jspdf) {
+        console.log("window.jspdf.jsPDF exists:", !!window.jspdf.jsPDF);
+        console.log("window.jspdf.jsPDF type:", typeof window.jspdf.jsPDF);
+    }
+    
+    console.log("window.jsPDF exists:", !!window.jsPDF);
+    
+    // Try to create a document
+    try {
+        const constructor = window.jspdf ? window.jspdf.jsPDF : null;
+        if (constructor) {
+            const doc = new constructor();
+            console.log("Successfully created jsPDF document instance");
+            console.log("doc.autoTable exists:", !!doc.autoTable);
+        } else {
+            console.error("jsPDF constructor not found");
+        }
+    } catch (e) {
+        console.error("Error creating jsPDF instance:", e);
     }
 }
          
@@ -4210,116 +4304,39 @@ function exportExamToPDF(filterPin = 'all') {
     }
     
     try {
-        // CRITICAL FIX: Properly access jsPDF constructor
-        console.log("Initializing jsPDF...");
-        if (typeof window.jspdf === 'undefined') {
-            console.error("jspdf object not found on window!");
+        console.log("Attempting to access jsPDF");
+        
+        // Try different ways to access jsPDF
+        let jsPDF, doc;
+        
+        if (window.jspdf && window.jspdf.jsPDF) {
+            console.log("Using window.jspdf.jsPDF");
+            jsPDF = window.jspdf.jsPDF;
+        } else if (typeof jspdf !== 'undefined' && jspdf.jsPDF) {
+            console.log("Using jspdf.jsPDF");
+            jsPDF = jspdf.jsPDF;
+        } else if (typeof jsPDF !== 'undefined') {
+            console.log("Using global jsPDF");
+            // jsPDF is already defined
+        } else {
+            throw new Error("jsPDF library not found. Check console for details.");
         }
         
-        // Access jsPDF constructor from the global object
-        const jsPDF = window.jspdf.jsPDF;
-        console.log("jsPDF constructor type:", typeof jsPDF);
-        
-        // Create the PDF document
-        const doc = new jsPDF({
+        console.log("Creating jsPDF document");
+        doc = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
             format: 'a4'
         });
-        console.log("PDF document created");
         
-        // Add title and metadata
+        console.log("jsPDF document created successfully");
+        
+        // Continue with PDF generation...
         doc.setFontSize(16);
         doc.setTextColor(33, 33, 33);
         doc.text('Exam List Report', 15, 15);
         
-        // Add generation info
-        doc.setFontSize(9);
-        doc.setTextColor(100, 100, 100);
-        const generatedDate = new Date().toLocaleString();
-        doc.text(`Generated by: ${currentUser?.name || 'Admin'} on ${generatedDate}`, 15, 22);
-        
-        // Add table of exams
-        console.log("Creating exam table data");
-        const tableData = [];
-        const tableHeaders = [['PIN', 'Course', 'Name', 'Duration', 'Date', 'Time', 'Mode']];
-        
-        // Sort by course code first
-        const sortedData = [...filteredExams].sort((a, b) => {
-            const courseA = a.data[1] || '';
-            const courseB = b.data[1] || '';
-            return courseA.localeCompare(courseB);
-        });
-        
-        // Group by course code
-        let currentCourse = '';
-        
-        sortedData.forEach(item => {
-            const row = item.data;
-            const pin = row[0] || '';
-            const course = row[1] || '';
-            const name = row[2] || '';
-            const duration = row[3] || '';
-            const date = row[4] || '';
-            const time = row[5] || '';
-            const mode = row[6] || '';
-            
-            // Add course headers
-            if (course !== currentCourse) {
-                currentCourse = course;
-                tableData.push([{
-                    content: `Course: ${currentCourse}`,
-                    colSpan: 7,
-                    styles: {
-                        fontStyle: 'bold',
-                        fillColor: [59, 73, 171],
-                        textColor: [255, 255, 255],
-                        cellPadding: 3
-                    }
-                }]);
-            }
-            
-            tableData.push([pin, course, name, duration, date, time, mode]);
-        });
-        
-        // Generate the table
-        console.log("Generating table with autoTable plugin");
-        doc.autoTable({
-            head: tableHeaders,
-            body: tableData,
-            startY: 25,
-            theme: 'grid',
-            styles: {
-                fontSize: 9,
-                cellPadding: 2
-            },
-            headStyles: {
-                fillColor: [51, 102, 255],
-                textColor: [255, 255, 255],
-                fontStyle: 'bold'
-            },
-            alternateRowStyles: {
-                fillColor: [240, 240, 240]
-            },
-            columnStyles: {
-                0: { cellWidth: 15 }, // PIN
-                1: { cellWidth: 20 }, // Course
-                2: { cellWidth: 50 }, // Name
-                3: { cellWidth: 18 }, // Duration
-                4: { cellWidth: 25 }, // Date
-                5: { cellWidth: 20 }, // Time
-                6: { cellWidth: 20 }  // Mode
-            }
-        });
-        
-        // Add page number
-        const pageCount = doc.internal.getNumberOfPages();
-        for (let i = 1; i <= pageCount; i++) {
-            doc.setPage(i);
-            doc.setFontSize(9);
-            doc.setTextColor(100, 100, 100);
-            doc.text(`Page ${i} of ${pageCount}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 10);
-        }
+        // Rest of your code here...
         
         // Save PDF with appropriate filename
         const filename = filterPin !== 'all' ? `exam-list-${filterPin}.pdf` : 'exam-list-report.pdf';
@@ -4327,11 +4344,8 @@ function exportExamToPDF(filterPin = 'all') {
         doc.save(filename);
         
         showImprovedNotification('success', 'Export Complete', 'Exam list has been exported as PDF', 3000);
-        console.log("Export complete");
     } catch (error) {
-        console.error("Error in exportExamToPDF:", error);
-        console.error("Stack trace:", error.stack);
-        alert(`Export failed: ${error.message}\n\nCheck the console for details.`);
+        console.error("Error in exportExamToPDF:", error, error.stack);
         showImprovedNotification('error', 'Export Failed', error.message);
     }
 }
@@ -4998,6 +5012,45 @@ function exportGradesToPDF(filterPin = 'all', filterStudent = 'all', filterStude
                 return nameMatch && studentIdMatch && pinMatch && courseMatch;
             });
         }
+		
+		document.addEventListener('DOMContentLoaded', function() {
+    // Make sure the buttons exist before assigning handlers
+    if (document.getElementById('export-exam-btn')) {
+        document.getElementById('export-exam-btn').addEventListener('click', function() {
+            window.currentExportType = 'exam'; // Using window. to ensure global scope
+            console.log("Set export type to: exam");
+            showExportFilterDialog();
+        });
+    }
+    
+    if (document.getElementById('export-submissions-btn')) {
+        document.getElementById('export-submissions-btn').addEventListener('click', function() {
+            window.currentExportType = 'submissions'; // Using window. to ensure global scope
+            console.log("Set export type to: submissions");
+            showExportFilterDialog();
+        });
+    }
+    
+    if (document.getElementById('export-grades-btn')) {
+        document.getElementById('export-grades-btn').addEventListener('click', function() {
+            window.currentExportType = 'grades'; // Using window. to ensure global scope
+            console.log("Set export type to: grades");
+            showExportFilterDialog();
+        });
+    }
+    
+    // Make sure these work too
+    if (document.getElementById('cancel-export-filter-btn')) {
+        document.getElementById('cancel-export-filter-btn').addEventListener('click', closeExportFilterDialog);
+    }
+    
+    if (document.getElementById('apply-export-filter-btn')) {
+        document.getElementById('apply-export-filter-btn').addEventListener('click', function() {
+            console.log("Apply export filter clicked, current type:", window.currentExportType);
+            applyExportFilters();
+        });
+    }
+});
 
         window.setupEventListeners = setupEventListeners;
         window.showQuestionsPopup = showQuestionsPopup;
