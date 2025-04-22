@@ -3524,25 +3524,13 @@ async function editExam(pin, originalIndex) {
      }
 
      let questionsHtml = ''; 
-     
-     // Add a critical emergency button to force GRADED status
-     questionsHtml += `
-        <div style="background-color: #fee2e2; padding: 15px; margin-bottom: 20px; border-radius: 6px; border: 2px solid #ef4444; text-align: center;">
-            <p style="font-weight: bold; color: #b91c1c; margin-bottom: 10px;">EMERGENCY STATUS FIX</p>
-            <button onclick="forceGradedStatus()" style="background-color: #ef4444; color: white; font-weight: bold; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer;">
-                FORCE GRADED STATUS
-            </button>
-            <p style="font-size: 0.8em; margin-top: 10px; color: #b91c1c;">Use this button if status remains SUBMITTED after grading</p>
-        </div>
-     `;
-     
      let navigatorHtml = '<option value="">-- Select Question --</option>';
      
-     // Add "Confirm All" button at the top
+     // Replace "Confirm All" with "MARK AS GRADED"
      questionsHtml += `
         <div style="text-align: right; margin-bottom: 20px;">
-            <button type="button" class="btn-info" onclick="confirmAllQuestions()">
-                <i class="fas fa-check-double"></i> Confirm All Questions
+            <button type="button" onclick="markAsGraded()" style="background-color: #10b981; color: white; font-weight: bold; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer;">
+                MARK AS GRADED
             </button>
         </div>
      `;
@@ -3577,11 +3565,6 @@ async function editExam(pin, originalIndex) {
                                     min="0" max="${maxPoints}" value="0" step="0.1" 
                                     onchange="updateTotalScore()">
                              <span>/ ${maxPoints}</span>
-                         </div>
-                         <div class="grading-button-group">
-                             <button type="button" class="btn-sm btn-primary confirm-btn" data-question="${qNum}" onclick="confirmTextQuestion(${qNum})" title="Mark as Reviewed">
-                                 <i class="fas fa-check"></i> Confirm
-                             </button>
                          </div>
                      </div>
                  </div>
@@ -3637,11 +3620,7 @@ async function editExam(pin, originalIndex) {
                      </button>`;
              }
              
-             questionsHtml += `
-                         <button type="button" class="btn-sm btn-primary confirm-btn" data-question="${qNum}" onclick="confirmQuestion(${qNum})" title="Mark as Reviewed">
-                             <i class="fas fa-check"></i> Confirm
-                         </button>
-                     </div>
+             questionsHtml += `</div>
                  </div>
              </div>`;
          }
@@ -3653,37 +3632,33 @@ async function editExam(pin, originalIndex) {
      updateTotalScore();
 }
 
-// Emergency function to forcibly update status
-function forceGradedStatus() {
+// Direct function to mark as graded
+function markAsGraded() {
     if (!currentGradeSheetRow) {
         alert("Error: Cannot determine which row to update!");
         return;
     }
     
-    // Simply and directly update the status - no bells and whistles
+    // Update the status directly
     const statusRange = `${EXAM_ATTEMPTS_SHEET_NAME}!G${currentGradeSheetRow}`;
     
-    // Show progress
-    alert("Attempting to force status to GRADED...");
-    
-    // Direct call with minimal complications
+    // Direct call to update status
     gapi.client.sheets.spreadsheets.values.update({
         spreadsheetId: EXAM_SPREADSHEET_ID, 
         range: statusRange, 
         valueInputOption: 'RAW',
         resource: { values: [["graded"]] }
     }).then(response => {
-        alert("✅ SUCCESS! Status has been set to GRADED. Reloading data...");
-        // Force data reload
+        alert("Status has been set to GRADED. Reloading data...");
         loadAttemptsData();
     }).catch(error => {
-        alert("❌ ERROR! Could not update status: " + error.message);
-        console.error("Force status update failed:", error);
+        alert("Error: Could not update status: " + error.message);
+        console.error("Status update failed:", error);
     });
 }
 
-// Expose the emergency function globally
-window.forceGradedStatus = forceGradedStatus;
+// Expose the function globally
+window.markAsGraded = markAsGraded;
         // loadExistingGrades - Unchanged
         function loadExistingGrades(gradesRaw) { if (!gradesRaw || gradesRaw === '{}') return; try { const grades = JSON.parse(gradesRaw); console.log("Loading existing grades:", grades); gradingTotalScoreInput.value = grades.totalScore ?? 0; gradingFeedbackInput.value = grades.feedback ?? ''; if (grades.questionGrades) { for (const qId in grades.questionGrades) { if (qId.startsWith('q-')) { const qNum = parseInt(qId.substring(2), 10); const pointsInput = document.getElementById(`points-q-${qNum}`); const card = document.getElementById(`grading-q-${qNum}`); const qGrade = grades.questionGrades[qId]; if (pointsInput) pointsInput.value = qGrade.points ?? 0; if (card && qGrade.status) card.className = `question-grading-card ${qGrade.status}`; } } } updateGradePercentage(); } catch (e) { console.error("Error loading existing grades JSON:", e); showImprovedNotification('warning', 'Grade Load Warning', `Could not load previous grades: ${e.message}`); } }
         // formatStudentAnswer - Unchanged
