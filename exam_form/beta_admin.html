@@ -7,8 +7,10 @@
     <link rel="icon" type="image/png" href="https://bredliplaku.github.io/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://apis.google.com/js/api.js" async defer></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
@@ -4209,41 +4211,40 @@ function applyExportFilters() {
         // Close the dialog visually first
         closeExportFilterDialog();
 
-        // Check if export type is set (it should be at this point)
+        // Check if export type is set
         if (!window.currentExportType) {
             console.error("Export type is empty or undefined!");
             showImprovedNotification('error', 'Export Error', 'Export type not specified. Please try clicking the export button again.');
-            return; // Stop execution if type is missing
+            return;
         }
 
         // Switch based on the globally stored export type
         switch (window.currentExportType) {
             case 'exam':
                 console.log("Calling exportExamToPDF with filter:", selectedPin);
-                exportExamToPDF(selectedPin); // Pass only the relevant filter
+                exportExamToPDF(selectedPin); // Exports single PDF for exam definitions
                 break;
 
             case 'submissions':
-                console.log("Calling exportSubmissionsToPDF with filters:", selectedPin, selectedStudent, selectedStudentId);
-                exportSubmissionsToPDF(selectedPin, selectedStudent, selectedStudentId);
+                console.log("Calling exportSubmissionsToZip with filters:", selectedPin, selectedStudent, selectedStudentId);
+                // *** CALL THE NEW ZIP FUNCTION ***
+                exportSubmissionsToZip(selectedPin, selectedStudent, selectedStudentId);
                 break;
 
             case 'grades':
                 console.log("Calling exportGradesToPDF with filters:", selectedPin, selectedStudent, selectedStudentId);
-                exportGradesToPDF(selectedPin, selectedStudent, selectedStudentId);
+                exportGradesToPDF(selectedPin, selectedStudent, selectedStudentId); // Keep as single PDF for grades table
                 break;
 
             default:
-                // Handle unexpected export types
                 console.error("Unknown export type:", window.currentExportType);
                 showImprovedNotification('error', 'Export Error', 'Unknown export type: ' + window.currentExportType);
         }
     } catch (e) {
-        // Catch any errors during the export process itself
         console.error("Error during export process in applyExportFilters:", e);
         showImprovedNotification('error', 'Export Failed', `An error occurred during export: ${e.message}`);
     } finally {
-        // *** IMPORTANT: Reset the export type AFTER the export function has been called ***
+        // Reset the export type AFTER the export function has been called
         window.currentExportType = '';
         console.log("Export type reset after execution.");
     }
@@ -4273,6 +4274,338 @@ function debugJsPDF() {
         }
     } catch (e) {
         console.error("Error creating jsPDF instance:", e);
+    }
+}
+
+async function generateSingleStudentSubmissionPDF(item, examInfo) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+    });
+
+    const row = item.data;
+    const timestamp = row[0] || '';
+    const studentName = row[1] || '';
+    const email = row[2] || '';
+    const pin = row[3] || '';
+    const course = row[4] || '';
+    const studentId = row[5] || 'NoID'; // Use NoID if missing
+    const status = row[6] || '';
+    const answersRaw = row[7] || '{}';
+    const gradesRaw = row[9] || '{}';
+
+    // Add title and metadata
+    doc.setFontSize(16);
+    doc.setTextColor(33, 33, 33);
+    doc.text(`Submission Details: ${studentName} (${studentId})`, 15, 15);
+
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    const generatedDate = new Date().toLocaleString('en-GB'); // Use British English format
+    doc.text(`Generated on: ${generatedDate}`, 15, 22);
+
+    let yPosition = 30;
+
+    // Add exam info
+    doc.setTextColor(33, 33, 33);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Student: ${studentName} (${email})`, 15, yPosition);
+    doc.text(`Student ID: ${studentId}`, 105, yPosition);
+    yPosition += 6;
+    doc.text(`Course: ${course}`, 15, yPosition);
+    doc.text(`Exam: ${examInfo?.Name || 'Unknown'} (PIN: ${pin})`, 105, yPosition);
+    yPosition += 6;
+    doc.text(`Submitted: ${timestamp}`, 15, yPosition);
+    doc.text(`Status: ${status}`, 105, yPosition);
+    yPosition += 10;
+
+    // Parse answers and grades
+    let answers = {};
+    let grades = {};
+    let totalScore = 'Not graded';
+    let maxScore = '';
+    let percentage = '';
+    let feedback = '';
+
+    try { answers = JSON.parse(answersRaw); } catch (e) { console.error('Error parsing answers for PDF:', e); }
+    try {
+        if (gradesRaw && gradesRaw !== '{}') {
+            grades = JSON.parse(gradesRaw);
+            totalScore = grades.totalScore ?? 'Not graded';
+            maxScore = grades.maxScore ?? '';
+            percentage = grades.percentage ?? '';
+            feedback = grades.feedback ?? '';
+        }
+    } catch (e) { console.error('Error parsing grades for PDF:', e); }
+
+    // Add overall grade if graded
+    if (status.toLowerCase() === 'graded') {
+        doc.setFillColor(230, 245, 233); // Light success background
+        doc.setDrawColor(16, 185, 129); // Success border
+        doc.setTextColor(6, 95, 70); // Dark success text
+        doc.roundedRect(15, yPosition, 180, 10, 2, 2, 'FD');
+        doc.setFontSize(11);
+        doc.setFont(undefined, 'bold');
+        doc.text(`Overall Grade: ${totalScore}/${maxScore} (${percentage})`, 17, yPosition + 6.5);
+        yPosition += 14;
+    }
+
+    // Parse exam questions
+    let questions = [];
+    try { questions = JSON.parse(examInfo?.Questions || '[]'); } catch (e) { console.error('Error parsing questions for PDF:', e); }
+
+    // Add each question and answer
+    doc.setTextColor(33, 33, 33);
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.text('Questions and Answers:', 15, yPosition);
+    yPosition += 7;
+
+    for (let j = 0; j < questions.length; j++) {
+        const question = questions[j];
+        // Skip text_only questions in submissions export
+        if (question.type === 'text_only') continue;
+
+        const qNum = j + 1;
+        const answerId = `ans-${qNum}`;
+        const studentAnswer = answers[answerId] ?? '';
+        const questionPoints = question.points ?? 1; // Default to 1 if not specified
+        let questionScore = '';
+        let questionStatus = '';
+        let questionComment = '';
+
+        // Get the grade for this question if available
+        if (grades.questionGrades && grades.questionGrades[`q-${qNum}`]) {
+            const qGrade = grades.questionGrades[`q-${qNum}`];
+            questionScore = qGrade.points ?? ''; // Keep empty if not graded
+            questionStatus = qGrade.status || '';
+            questionComment = qGrade.comment || '';
+        }
+
+        // Estimate height needed for the question block
+        let blockHeightEstimate = 20; // Base height
+        if (studentAnswer) {
+            blockHeightEstimate += (String(studentAnswer).split('\n').length * 4); // Estimate lines for answer
+        }
+        if (questionComment) {
+            blockHeightEstimate += (String(questionComment).split('\n').length * 4) + 8; // Estimate lines for comment
+        }
+        if (questionScore !== '') blockHeightEstimate += 7;
+
+        // Check if we need a new page BEFORE drawing the block
+        if (yPosition + blockHeightEstimate > 275) { // 275 leaves margin for footer
+            doc.addPage();
+            yPosition = 20; // Reset Y for new page
+        }
+
+        // --- Draw Question Block ---
+        const startYBlock = yPosition;
+
+        // Question Header
+        doc.setFillColor(243, 244, 246); // Light gray background
+        doc.setDrawColor(209, 213, 219); // Gray border
+        doc.roundedRect(15, yPosition, 180, 10, 2, 2, 'FD');
+        doc.setTextColor(55, 65, 81); // Darker gray text
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        const questionText = `Q${qNum}: ${question.prompt || 'No prompt'}`;
+        const splitQText = doc.splitTextToSize(questionText, 175); // Wrap text
+        doc.text(splitQText, 17, yPosition + 6.5);
+        yPosition += (splitQText.length * 4) + 6; // Adjust Y based on lines
+
+        // Question Details (Type, Points)
+        doc.setTextColor(107, 114, 128); // Medium gray
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'italic');
+        let details = `Type: ${question.type || 'N/A'}, Max Points: ${questionPoints}`;
+        doc.text(details, 17, yPosition);
+        yPosition += 6;
+
+        // Student Answer Section
+        doc.setTextColor(33, 33, 33);
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.text('Student Answer:', 17, yPosition);
+        yPosition += 5;
+        doc.setFont(undefined, 'normal');
+
+        if (!studentAnswer) {
+            doc.setFont(undefined, 'italic');
+            doc.setTextColor(150, 150, 150);
+            doc.text('No answer provided', 20, yPosition);
+            yPosition += 5;
+        } else {
+            const answerLines = doc.splitTextToSize(String(studentAnswer), 170); // Wrap answer text
+            for (let k = 0; k < answerLines.length; k++) {
+                if (yPosition > 270) { // Check space per line
+                    doc.addPage();
+                    yPosition = 20;
+                    // Optionally repeat student/exam header on new page if needed
+                }
+                doc.text(answerLines[k], 20, yPosition);
+                yPosition += 5;
+            }
+        }
+
+        // Grading Info Section (if graded)
+        if (questionScore !== '') {
+            doc.setFontSize(9);
+            doc.setFont(undefined, 'bold');
+             // Set color based on status
+            if (questionStatus === 'correct') doc.setTextColor(16, 185, 129); // Green
+            else if (questionStatus === 'incorrect') doc.setTextColor(239, 68, 68); // Red
+            else if (questionStatus === 'partial') doc.setTextColor(245, 158, 11); // Orange
+            else doc.setTextColor(59, 130, 246); // Blue (default/manual)
+
+            doc.text(`Score: ${questionScore}/${questionPoints} (${questionStatus || 'manual'})`, 17, yPosition);
+            yPosition += 5;
+
+            // Instructor Comment (if exists)
+            if (questionComment) {
+                doc.setTextColor(100, 100, 100); // Comment color
+                doc.setFont(undefined, 'italic');
+                doc.text('Comment:', 17, yPosition);
+                yPosition += 4;
+                const commentLines = doc.splitTextToSize(questionComment, 170);
+                 for (let k = 0; k < commentLines.length; k++) {
+                    if (yPosition > 270) {
+                        doc.addPage(); yPosition = 20;
+                    }
+                    doc.text(commentLines[k], 20, yPosition);
+                    yPosition += 4;
+                }
+            }
+             yPosition += 2; // Extra space after grade info
+        } else {
+             yPosition += 3; // Space if not graded
+        }
+
+
+        // Add a light separator line between questions
+        doc.setDrawColor(229, 231, 235);
+        doc.setLineWidth(0.2);
+        doc.line(15, yPosition, 195, yPosition);
+        yPosition += 5; // Space before next question
+    }
+
+    // Add Teacher Feedback (if exists)
+    if (feedback) {
+        if (yPosition > 260) { doc.addPage(); yPosition = 20; } // Check space for feedback section
+        doc.setTextColor(33, 33, 33);
+        doc.setFontSize(11);
+        doc.setFont(undefined, 'bold');
+        doc.text('Overall Feedback:', 15, yPosition);
+        yPosition += 7;
+
+        doc.setFont(undefined, 'normal');
+        doc.setFontSize(10);
+        const feedbackLines = doc.splitTextToSize(feedback, 175);
+        for (let j = 0; j < feedbackLines.length; j++) {
+            if (yPosition > 270) { doc.addPage(); yPosition = 20; }
+            doc.text(feedbackLines[j], 15, yPosition);
+            yPosition += 5;
+        }
+    }
+
+    // Return the generated PDF document as a Blob
+    return doc.output('blob');
+}
+
+
+/**
+ * Exports detailed submissions for selected students, each as a separate PDF within a ZIP file.
+ */
+async function exportSubmissionsToZip(filterPin = 'all', filterStudent = 'all', filterStudentId = 'all') {
+    if (!isAdminAllowed || allAttemptsData.length === 0) {
+        showImprovedNotification('warning', 'Export Error', 'No submission data available to export');
+        return;
+    }
+     if (typeof JSZip === 'undefined') {
+        showImprovedNotification('error', 'Export Error', 'JSZip library is not loaded. Cannot create ZIP file.');
+        return;
+    }
+     if (typeof saveAs === 'undefined') {
+        showImprovedNotification('error', 'Export Error', 'FileSaver.js library is not loaded. Cannot trigger download.');
+        return;
+    }
+
+    // 1. Filter Data
+    let filteredData = applyCurrentFiltersToAttempts();
+    if (filterPin !== 'all') filteredData = filteredData.filter(item => item.data[3] === filterPin);
+    if (filterStudent !== 'all') filteredData = filteredData.filter(item => item.data[2] === filterStudent);
+    if (filterStudentId !== 'all') filteredData = filteredData.filter(item => item.data[5] === filterStudentId);
+
+    if (filteredData.length === 0) {
+        showImprovedNotification('warning', 'Export Error', 'No submissions match the selected filters');
+        return;
+    }
+
+    // 2. Confirmation for large exports
+    if (filteredData.length > 10 && !confirm(`This will generate and zip ${filteredData.length} individual PDF reports. This might take some time. Continue?`)) {
+        return;
+    }
+
+    // 3. Initialize JSZip and show progress
+    const zip = new JSZip();
+    showImprovedNotification('info', 'Exporting...', `Generating ${filteredData.length} PDF(s)...`, 0); // Indefinite notification
+
+    let pdfGeneratedCount = 0;
+    const totalPdfs = filteredData.length;
+
+    try {
+        // 4. Loop through filtered data and generate PDFs
+        for (const item of filteredData) {
+            const row = item.data;
+            const studentName = row[1] || 'UnknownStudent';
+            const studentId = row[5] || 'NoID';
+            const pin = row[3] || 'NoPIN';
+
+            // Fetch exam details for this submission's PIN
+            const examInfo = await findExamDetailsByPin(pin);
+            if (!examInfo) {
+                 console.warn(`Skipping submission for PIN ${pin} - Exam details not found.`);
+                 continue; // Skip if exam details aren't found
+            }
+
+            // Generate the PDF for this student
+            const pdfBlob = await generateSingleStudentSubmissionPDF(item, examInfo);
+
+            // Sanitize filename
+            const safeStudentName = studentName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const safeStudentId = studentId.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const filename = `submission_${pin}_${safeStudentId}_${safeStudentName}.pdf`;
+
+            // Add PDF to ZIP
+            zip.file(filename, pdfBlob);
+
+            pdfGeneratedCount++;
+            // Optional: Update progress notification (can be complex to update existing one)
+            console.log(`Generated PDF ${pdfGeneratedCount} of ${totalPdfs}: ${filename}`);
+             // Simple progress update via console or a dedicated UI element if needed
+             if (pdfGeneratedCount % 5 === 0 || pdfGeneratedCount === totalPdfs) {
+                 showImprovedNotification('info', 'Exporting...', `Generated ${pdfGeneratedCount} of ${totalPdfs} PDF(s)...`, 0);
+             }
+        }
+
+        // 5. Generate and Download ZIP
+        if (pdfGeneratedCount > 0) {
+             showImprovedNotification('info', 'Zipping...', `Compressing ${pdfGeneratedCount} PDF file(s)...`, 0);
+             const zipBlob = await zip.generateAsync({ type: "blob" });
+             const zipFilename = `submissions_export_${filterPin === 'all' ? 'all' : filterPin}_${new Date().toISOString().split('T')[0]}.zip`;
+             saveAs(zipBlob, zipFilename); // Use FileSaver.js
+             showImprovedNotification('success', 'Export Complete', `ZIP file with ${pdfGeneratedCount} submission(s) downloaded.`, 5000);
+        } else {
+             showImprovedNotification('warning', 'Export Issue', 'No PDFs were generated for the selected submissions.', 5000);
+        }
+
+    } catch (error) {
+        console.error("Error during ZIP export process:", error);
+        showImprovedNotification('error', 'Export Failed', `An error occurred: ${error.message}`);
+    } finally {
+         // Consider removing the indefinite 'Exporting...' notification here if you added one
     }
 }
          
@@ -5063,6 +5396,7 @@ function exportGradesToPDF(filterPin = 'all', filterStudent = 'all', filterStude
 		window.applyExportFilters = applyExportFilters;
 		window.populateExamsTable = populateExamsTable;
 		window.editExam = editExam;
+		window.exportSubmissionsToZip = exportSubmissionsToZip;
     </script>
 
 </body>
