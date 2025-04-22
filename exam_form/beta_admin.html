@@ -3568,123 +3568,116 @@ async function editExam(pin, originalIndex) {
         // calculateTotalPoints - Unchanged (uses question.points || 1)
         function calculateTotalPoints(questions) { return questions.reduce((sum, q) => sum + (parseFloat(q.points) || 1), 0); }
         // populateGradingQuestions - Modified to populate navigator and remove button text (see previous thought/code)
-        function populateGradingQuestions() {
-     if (!currentExamQuestions || !currentSubmissionAnswers) { 
-         gradingQuestionsContainer.innerHTML = '<p style="color: red;">Error: Missing questions or answers.</p>'; 
-         return; 
-     }
-     if (currentExamQuestions.length === 0) { 
-         gradingQuestionsContainer.innerHTML = '<p style="color: #777;">No questions found.</p>'; 
-         return; 
-     }
+function populateGradingQuestions() {
+    if (!currentExamQuestions || !currentSubmissionAnswers) { 
+        gradingQuestionsContainer.innerHTML = '<p style="color: red;">Error: Missing questions or answers.</p>'; 
+        return; 
+    }
+    if (currentExamQuestions.length === 0) { 
+        gradingQuestionsContainer.innerHTML = '<p style="color: #777;">No questions found.</p>'; 
+        return; 
+    }
 
-     let questionsHtml = ''; 
-     let navigatorHtml = '<option value="">-- Select Question --</option>';
-     
-     // Replace "Confirm All" with "MARK AS GRADED"
-     questionsHtml += `
-        <div style="text-align: right; margin-bottom: 20px;">
-            <button type="button" onclick="markAsGraded()" style="background-color: #10b981; color: white; font-weight: bold; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer;">
-                MARK AS GRADED
-            </button>
-        </div>
-     `;
-     
-     currentExamQuestions.forEach((question, index) => {
-         const qNum = index + 1;
-         // Default points to 1 if not specified, including for text-only fields
-         const maxPoints = parseFloat(question.points) || 1;
-         const answerId = `ans-${qNum}`;
-         const studentAnswer = currentSubmissionAnswers[answerId] ?? '';
-         const isMultipleChoice = question.type === 'multiple_select';
-         const isTextOnly = question.type === 'text_only';
+    let questionsHtml = ''; 
+    let navigatorHtml = '<option value="">-- Select Question --</option>';
+    
+    // REMOVE THE MARK AS GRADED BUTTON - this functionality will be in the Save Grades button
+    
+    currentExamQuestions.forEach((question, index) => {
+        const qNum = index + 1;
+        // Default points to 1 if not specified, including for text-only fields
+        const maxPoints = parseFloat(question.points) || 1;
+        const answerId = `ans-${qNum}`;
+        const studentAnswer = currentSubmissionAnswers[answerId] ?? '';
+        const isMultipleChoice = question.type === 'multiple_select';
+        const isTextOnly = question.type === 'text_only';
 
-         // Add to navigator dropdown
-         navigatorHtml += `<option value="grading-q-${qNum}">Question ${qNum} (${escapeHtml(question.prompt.substring(0, 20))}...)</option>`;
+        // Add to navigator dropdown
+        navigatorHtml += `<option value="grading-q-${qNum}">Question ${qNum} (${escapeHtml(question.prompt.substring(0, 20))}...)</option>`;
 
-         // Add appropriate question card based on type
-         if (isTextOnly) {
-             // Text-only questions now have points
-             questionsHtml += `
-                 <div class="question-grading-card text-only-question" id="grading-q-${qNum}" data-question-index="${index}">
-                     <div class="text-content">${escapeHtml(question.prompt)}</div>
-                     <div class="question-grading-controls" style="margin-top: 12px;">
-                         <div class="form-group" style="flex-grow: 1;">
-                             <label for="comment-q-${qNum}">Instructor Comments:</label>
-                             <textarea id="comment-q-${qNum}" class="form-control" rows="2" 
-                                 placeholder="Add comments about this text (optional)"></textarea>
-                         </div>
-                         <div class="question-points" style="margin: 10px 0;">
-                             <label for="points-q-${qNum}">Points:</label>
-                             <input type="number" class="form-control" id="points-q-${qNum}" 
-                                    min="0" max="${maxPoints}" value="0" step="0.1" 
-                                    onchange="updateTotalScore()">
-                             <span>/ ${maxPoints}</span>
-                         </div>
-                     </div>
-                 </div>
-             `;
-         } else {
-             // Regular graded questions
-             questionsHtml += `
-                 <div class="question-grading-card ungraded" id="grading-q-${qNum}" data-question-index="${index}">
-                     <div class="question-grading-main">
-                         <div class="question-prompt">Question ${qNum}: ${escapeHtml(question.prompt)}</div>
-                         
-                         <div class="student-answer">
-                             <span class="answer-label">Student Answer:</span>
-                             <div>${formatStudentAnswer(studentAnswer, question.type)}</div>
-                         </div>`;
-                         
-             if (isMultipleChoice && Array.isArray(question.correct_answers) && question.correct_answers.length > 0) {
-                 questionsHtml += `
-                     <div class="correct-answer">
-                         <span class="answer-label">Correct Answer(s):</span>
-                         <div>${formatCorrectAnswer(question)}</div>
-                     </div>`;
-             }
-             
-             questionsHtml += `
-                     </div>
-                     <div class="form-group" style="margin: 10px 0;">
-                         <label for="comment-q-${qNum}">Instructor Comments:</label>
-                         <textarea id="comment-q-${qNum}" class="form-control" rows="2" 
-                             placeholder="Add feedback for this question (optional)"></textarea>
-                     </div>
-                     <div class="question-grading-controls">
-                         <div class="question-points">
-                             <label for="points-q-${qNum}">Points:</label>
-                             <input type="number" class="form-control" id="points-q-${qNum}" 
-                                    min="0" max="${maxPoints}" value="0" step="0.1" 
-                                    onchange="updateTotalScore()">
-                             <span>/ ${maxPoints}</span>
-                         </div>
-                         <div class="grading-button-group">`;
-             
-             // Only show Correct/Incorrect buttons for multiple choice questions
-             if (isMultipleChoice) {
-                 questionsHtml += `
-                     <button type="button" class="btn-sm btn-success" onclick="markCorrect(${qNum}, ${maxPoints})" title="Mark Correct (Full Points)">
-                         <i class="fas fa-check"></i> Correct
-                     </button>
-                     <button type="button" class="btn-sm btn-danger" onclick="markIncorrect(${qNum})" title="Mark Incorrect (Zero Points)">
-                         <i class="fas fa-times"></i> Incorrect
-                     </button>
-                     <button type="button" class="btn-sm btn-info" onclick="autoGradeQuestion(${qNum}, ${maxPoints})" title="Auto Grade">
-                         <i class="fas fa-magic"></i> Auto
-                     </button>`;
-             }
-             
-             questionsHtml += `</div>
-                 </div>
-             </div>`;
-         }
-     });
-     
-     gradingQuestionsContainer.innerHTML = questionsHtml;
-     gradingNavigatorSelect.innerHTML = navigatorHtml; // Populate dropdown
-     
-     updateTotalScore();
+        // Add appropriate question card based on type
+        if (isTextOnly) {
+            // Text-only questions now have points
+            questionsHtml += `
+                <div class="question-grading-card text-only-question" id="grading-q-${qNum}" data-question-index="${index}">
+                    <div class="text-content">${escapeHtml(question.prompt)}</div>
+                    <div class="question-grading-controls" style="margin-top: 12px;">
+                        <div class="form-group" style="flex-grow: 1;">
+                            <label for="comment-q-${qNum}">Instructor Comments:</label>
+                            <textarea id="comment-q-${qNum}" class="form-control" rows="2" 
+                                placeholder="Add comments about this text (optional)"></textarea>
+                        </div>
+                        <div class="question-points" style="margin: 10px 0;">
+                            <label for="points-q-${qNum}">Points:</label>
+                            <input type="number" class="form-control" id="points-q-${qNum}" 
+                                   min="0" max="${maxPoints}" value="0" step="0.1" 
+                                   onchange="updateTotalScore()">
+                            <span>/ ${maxPoints}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Regular graded questions
+            questionsHtml += `
+                <div class="question-grading-card ungraded" id="grading-q-${qNum}" data-question-index="${index}">
+                    <div class="question-grading-main">
+                        <div class="question-prompt">Question ${qNum}: ${escapeHtml(question.prompt)}</div>
+                        
+                        <div class="student-answer">
+                            <span class="answer-label">Student Answer:</span>
+                            <div>${formatStudentAnswer(studentAnswer, question.type)}</div>
+                        </div>`;
+                        
+            if (isMultipleChoice && Array.isArray(question.correct_answers) && question.correct_answers.length > 0) {
+                questionsHtml += `
+                    <div class="correct-answer">
+                        <span class="answer-label">Correct Answer(s):</span>
+                        <div>${formatCorrectAnswer(question)}</div>
+                    </div>`;
+            }
+            
+            questionsHtml += `
+                    </div>
+                    <div class="form-group" style="margin: 10px 0;">
+                        <label for="comment-q-${qNum}">Instructor Comments:</label>
+                        <textarea id="comment-q-${qNum}" class="form-control" rows="2" 
+                            placeholder="Add feedback for this question (optional)"></textarea>
+                    </div>
+                    <div class="question-grading-controls">
+                        <div class="question-points">
+                            <label for="points-q-${qNum}">Points:</label>
+                            <input type="number" class="form-control" id="points-q-${qNum}" 
+                                   min="0" max="${maxPoints}" value="0" step="0.1" 
+                                   onchange="updateTotalScore()">
+                            <span>/ ${maxPoints}</span>
+                        </div>
+                        <div class="grading-button-group">`;
+            
+            // Only show Correct/Incorrect buttons for multiple choice questions
+            if (isMultipleChoice) {
+                questionsHtml += `
+                    <button type="button" class="btn-sm btn-success" onclick="markCorrect(${qNum}, ${maxPoints})" title="Mark Correct (Full Points)">
+                        <i class="fas fa-check"></i> Correct
+                    </button>
+                    <button type="button" class="btn-sm btn-danger" onclick="markIncorrect(${qNum})" title="Mark Incorrect (Zero Points)">
+                        <i class="fas fa-times"></i> Incorrect
+                    </button>
+                    <button type="button" class="btn-sm btn-info" onclick="autoGradeQuestion(${qNum}, ${maxPoints})" title="Auto Grade">
+                        <i class="fas fa-magic"></i> Auto
+                    </button>`;
+            }
+            
+            questionsHtml += `</div>
+                </div>
+            </div>`;
+        }
+    });
+    
+    gradingQuestionsContainer.innerHTML = questionsHtml;
+    gradingNavigatorSelect.innerHTML = navigatorHtml; // Populate dropdown
+    
+    updateTotalScore();
 }
 
 // Direct function to mark as graded
@@ -3715,7 +3708,39 @@ function markAsGraded() {
 // Expose the function globally
 window.markAsGraded = markAsGraded;
         // loadExistingGrades - Unchanged
-        function loadExistingGrades(gradesRaw) { if (!gradesRaw || gradesRaw === '{}') return; try { const grades = JSON.parse(gradesRaw); console.log("Loading existing grades:", grades); gradingTotalScoreInput.value = grades.totalScore ?? 0; gradingFeedbackInput.value = grades.feedback ?? ''; if (grades.questionGrades) { for (const qId in grades.questionGrades) { if (qId.startsWith('q-')) { const qNum = parseInt(qId.substring(2), 10); const pointsInput = document.getElementById(`points-q-${qNum}`); const card = document.getElementById(`grading-q-${qNum}`); const qGrade = grades.questionGrades[qId]; if (pointsInput) pointsInput.value = qGrade.points ?? 0; if (card && qGrade.status) card.className = `question-grading-card ${qGrade.status}`; } } } updateGradePercentage(); } catch (e) { console.error("Error loading existing grades JSON:", e); showImprovedNotification('warning', 'Grade Load Warning', `Could not load previous grades: ${e.message}`); } }
+        function loadExistingGrades(gradesRaw) { 
+    if (!gradesRaw || gradesRaw === '{}') return; 
+    
+    try { 
+        const grades = JSON.parse(gradesRaw); 
+        console.log("Loading existing grades:", grades); 
+        
+        gradingTotalScoreInput.value = grades.totalScore ?? 0; 
+        gradingFeedbackInput.value = grades.feedback ?? ''; 
+        
+        if (grades.questionGrades) { 
+            for (const qId in grades.questionGrades) { 
+                if (qId.startsWith('q-')) { 
+                    const qNum = parseInt(qId.substring(2), 10); 
+                    const pointsInput = document.getElementById(`points-q-${qNum}`); 
+                    const commentInput = document.getElementById(`comment-q-${qNum}`); // Get comment field
+                    const card = document.getElementById(`grading-q-${qNum}`); 
+                    const qGrade = grades.questionGrades[qId]; 
+                    
+                    if (pointsInput) pointsInput.value = qGrade.points ?? 0; 
+                    if (commentInput) commentInput.value = qGrade.comment ?? ''; // Load comment
+                    if (card && qGrade.status) card.className = `question-grading-card ${qGrade.status}`; 
+                } 
+            } 
+        } 
+        
+        updateGradePercentage(); 
+    } catch (e) { 
+        console.error("Error loading existing grades JSON:", e); 
+        showImprovedNotification('warning', 'Grade Load Warning', 
+            `Could not load previous grades: ${e.message}`); 
+    } 
+}
         // formatStudentAnswer - Unchanged
         function formatStudentAnswer(answer, questionType) {
     if (answer === null || typeof answer === 'undefined' || answer === '') 
@@ -3788,7 +3813,7 @@ function copyToClipboard(button) {
         // updateGradePercentage - Unchanged
         function updateGradePercentage() { const totalScore = parseFloat(gradingTotalScoreInput.value) || 0; const maxScore = parseFloat(gradingMaxScoreSpan.textContent) || 0; let percentage = 0; if (maxScore > 0) percentage = (totalScore / maxScore) * 100; gradingPercentageSpan.textContent = `${percentage.toFixed(1)}%`; }
         // saveGrades - Unchanged
-        function saveGrades() {
+function saveGrades() {
     if (!currentGradeSheetRow || !currentExamQuestions) {
         showImprovedNotification('error', 'Save Error', 'Missing data for saving grades.');
         return;
@@ -3809,6 +3834,7 @@ function copyToClipboard(button) {
     currentExamQuestions.forEach((q, index) => {
         const qNum = index + 1;
         const pointsInput = document.getElementById(`points-q-${qNum}`);
+        const commentInput = document.getElementById(`comment-q-${qNum}`); // Get comment field
         const card = document.getElementById(`grading-q-${qNum}`);
         let status = 'ungraded';
         
@@ -3831,7 +3857,8 @@ function copyToClipboard(button) {
         
         questionGrades[`q-${qNum}`] = {
             points: parseFloat(pointsInput?.value || 0),
-            status: status
+            status: status,
+            comment: commentInput?.value || '' // Save comment/feedback for each question
         };
     });
     
@@ -3856,34 +3883,37 @@ function copyToClipboard(button) {
     const gradeRange = `${EXAM_ATTEMPTS_SHEET_NAME}!J${currentGradeSheetRow}`;
     const statusRange = `${EXAM_ATTEMPTS_SHEET_NAME}!G${currentGradeSheetRow}`;
     
-    // Always set as graded when saving - this is the key fix
+    // Always set status to 'graded' when saving grades
     const newStatus = 'graded';
     
-    let gradeSaveSuccess = false;
-    let statusUpdateSuccess = false;
-    
-    try {
-        gradeSaveSuccess = updateSheetData(EXAM_SPREADSHEET_ID, gradeRange, [[gradeJson]]);
-        if (gradeSaveSuccess) {
-            statusUpdateSuccess = updateSheetData(EXAM_SPREADSHEET_ID, statusRange, [[newStatus]]);
-            if (gradeSaveSuccess && statusUpdateSuccess) {
-                showImprovedNotification('success', 'Grades Saved', `Grades saved & status updated for row ${currentGradeSheetRow}.`);
-                closeGradingDialog();
-                loadAttemptsData();
-            } else if (gradeSaveSuccess && !statusUpdateSuccess) {
-                showImprovedNotification('warning', 'Partial Save', `Grades saved, but failed to update status for row ${currentGradeSheetRow}.`);
-                loadAttemptsData();
-            } else {
-                console.error('Grade save failed.');
-            }
-        }
-    } catch (error) {
+    // Use Promise.all to ensure both updates complete
+    Promise.all([
+        gapi.client.sheets.spreadsheets.values.update({
+            spreadsheetId: EXAM_SPREADSHEET_ID,
+            range: gradeRange,
+            valueInputOption: 'USER_ENTERED',
+            resource: { values: [[gradeJson]] }
+        }),
+        gapi.client.sheets.spreadsheets.values.update({
+            spreadsheetId: EXAM_SPREADSHEET_ID,
+            range: statusRange,
+            valueInputOption: 'USER_ENTERED',
+            resource: { values: [[newStatus]] }
+        })
+    ]).then(responses => {
+        console.log('Grade and status update successful:', responses);
+        showImprovedNotification('success', 'Grades Saved', 
+            `Grades and comments saved & status updated to "graded" for row ${currentGradeSheetRow}.`);
+        closeGradingDialog();
+        loadAttemptsData();
+    }).catch(error => {
         console.error('Error during saveGrades:', error);
-        showImprovedNotification('error', 'Save Failed', `Unexpected error: ${error.message}`);
-    } finally {
+        showImprovedNotification('error', 'Save Failed', 
+            `Error: ${error.result?.error?.message || error.message}`);
+    }).finally(() => {
         saveGradingDialogBtn.disabled = !isOnline || !isAdminAllowed;
         saveGradingDialogBtn.innerHTML = 'Save Grades';
-    }
+    });
 }
 
          // NEW: Handle Grade Navigator Change
