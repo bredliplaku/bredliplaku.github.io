@@ -4194,7 +4194,8 @@ function closeExportFilterDialog() {
 
 // Function to apply filters and run the appropriate export
 function applyExportFilters() {
-    console.log("In applyExportFilters. Current export type:", window.currentExportType);
+    // *** ADDED: Log the export type right at the start ***
+    console.log("applyExportFilters called. Current window.currentExportType:", window.currentExportType);
 
     try {
         // Get selected filter values from the dialog
@@ -4213,27 +4214,27 @@ function applyExportFilters() {
 
         // Check if export type is set
         if (!window.currentExportType) {
-            console.error("Export type is empty or undefined!");
+            // This notification should only appear if the type is genuinely missing
+            console.error("Export type is empty or undefined inside the IF check!");
             showImprovedNotification('error', 'Export Error', 'Export type not specified. Please try clicking the export button again.');
-            return;
+            return; // Stop execution if type is missing
         }
 
         // Switch based on the globally stored export type
         switch (window.currentExportType) {
             case 'exam':
                 console.log("Calling exportExamToPDF with filter:", selectedPin);
-                exportExamToPDF(selectedPin); // Exports single PDF for exam definitions
+                exportExamToPDF(selectedPin);
                 break;
 
             case 'submissions':
                 console.log("Calling exportSubmissionsToZip with filters:", selectedPin, selectedStudent, selectedStudentId);
-                // *** CALL THE NEW ZIP FUNCTION ***
                 exportSubmissionsToZip(selectedPin, selectedStudent, selectedStudentId);
                 break;
 
             case 'grades':
                 console.log("Calling exportGradesToPDF with filters:", selectedPin, selectedStudent, selectedStudentId);
-                exportGradesToPDF(selectedPin, selectedStudent, selectedStudentId); // Keep as single PDF for grades table
+                exportGradesToPDF(selectedPin, selectedStudent, selectedStudentId);
                 break;
 
             default:
@@ -4249,6 +4250,7 @@ function applyExportFilters() {
         console.log("Export type reset after execution.");
     }
 }
+
 
 function debugJsPDF() {
     console.log("JSPDF DEBUG INFO:");
@@ -4548,9 +4550,10 @@ async function exportSubmissionsToZip(filterPin = 'all', filterStudent = 'all', 
         return;
     }
 
-    // 3. Initialize JSZip and show progress
+    // 3. Initialize JSZip and show initial progress notification
     const zip = new JSZip();
-    showImprovedNotification('info', 'Exporting...', `Generating ${filteredData.length} PDF(s)...`, 0); // Indefinite notification
+    // Show only the initial notification
+    showImprovedNotification('info', 'Exporting...', `Preparing to generate ${filteredData.length} PDF(s)...`, 0);
 
     let pdfGeneratedCount = 0;
     const totalPdfs = filteredData.length;
@@ -4582,20 +4585,20 @@ async function exportSubmissionsToZip(filterPin = 'all', filterStudent = 'all', 
             zip.file(filename, pdfBlob);
 
             pdfGeneratedCount++;
-            // Optional: Update progress notification (can be complex to update existing one)
+            // Log progress to console instead of showing notification
             console.log(`Generated PDF ${pdfGeneratedCount} of ${totalPdfs}: ${filename}`);
-             // Simple progress update via console or a dedicated UI element if needed
-             if (pdfGeneratedCount % 5 === 0 || pdfGeneratedCount === totalPdfs) {
-                 showImprovedNotification('info', 'Exporting...', `Generated ${pdfGeneratedCount} of ${totalPdfs} PDF(s)...`, 0);
-             }
+
+            // *** REMOVED the per-PDF notification update line from here ***
         }
 
         // 5. Generate and Download ZIP
         if (pdfGeneratedCount > 0) {
+             // Show zipping notification
              showImprovedNotification('info', 'Zipping...', `Compressing ${pdfGeneratedCount} PDF file(s)...`, 0);
              const zipBlob = await zip.generateAsync({ type: "blob" });
              const zipFilename = `submissions_export_${filterPin === 'all' ? 'all' : filterPin}_${new Date().toISOString().split('T')[0]}.zip`;
              saveAs(zipBlob, zipFilename); // Use FileSaver.js
+             // Show final success notification
              showImprovedNotification('success', 'Export Complete', `ZIP file with ${pdfGeneratedCount} submission(s) downloaded.`, 5000);
         } else {
              showImprovedNotification('warning', 'Export Issue', 'No PDFs were generated for the selected submissions.', 5000);
@@ -4605,10 +4608,12 @@ async function exportSubmissionsToZip(filterPin = 'all', filterStudent = 'all', 
         console.error("Error during ZIP export process:", error);
         showImprovedNotification('error', 'Export Failed', `An error occurred: ${error.message}`);
     } finally {
-         // Consider removing the indefinite 'Exporting...' notification here if you added one
+         // You might want to clear the "Exporting..." or "Zipping..." notification
+         // This is tricky without IDs, but you could clear *all* info/warning notifications after a delay
+         // Or simply rely on the final success/error message overwriting them visually.
     }
 }
-         
+
         // === PDF Export Functions ===
 function exportExamToPDF(filterPin = 'all') {
     console.log("Starting exam export, filterPin:", filterPin);
