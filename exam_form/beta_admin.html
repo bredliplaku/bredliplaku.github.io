@@ -2305,25 +2305,23 @@ function setupEventListeners() {
         th.addEventListener('click', () => handleSortTable(th));
     });
     
-    // CRITICAL FIX: Properly connect export buttons
-    document.getElementById('export-exam-btn')?.addEventListener('click', function() {
-        currentExportType = 'exam';
-        showExportFilterDialog();
-    });
+document.getElementById('export-exam-btn').onclick = function() {
+    currentExportType = 'exam';
+    showExportFilterDialog();
+};
 
-    document.getElementById('export-submissions-btn')?.addEventListener('click', function() {
-        currentExportType = 'submissions';
-        showExportFilterDialog();
-    });
+document.getElementById('export-submissions-btn').onclick = function() {
+    currentExportType = 'submissions';
+    showExportFilterDialog();
+};
 
-    document.getElementById('export-grades-btn')?.addEventListener('click', function() {
-        currentExportType = 'grades';
-        showExportFilterDialog();
-    });
-    
-    // Cancel and Apply filter buttons
-    document.getElementById('cancel-export-filter-btn')?.addEventListener('click', closeExportFilterDialog);
-    document.getElementById('apply-export-filter-btn')?.addEventListener('click', applyExportFilters);
+document.getElementById('export-grades-btn').onclick = function() {
+    currentExportType = 'grades';
+    showExportFilterDialog();
+};
+
+document.getElementById('cancel-export-filter-btn').onclick = closeExportFilterDialog;
+document.getElementById('apply-export-filter-btn').onclick = applyExportFilters;
 }
 
         function updateYear() {
@@ -2419,54 +2417,58 @@ function setupEventListeners() {
         async function clearSheetRows(spreadsheetId, sheetName, rowIndex, count = 1) { if (!isAdminAllowed || !isSignedIn || !gapi?.client?.sheets) { showImprovedNotification('error', 'API/Auth Error', 'Not authorized or Sheets API not ready for clear.'); return false; } if (!SCOPES.includes("https://www.googleapis.com/auth/spreadsheets")) { console.warn("Write scope missing for clear."); showImprovedNotification('warning', 'Permission Issue', 'Write scope missing for clear operation.'); return false; } if (!isOnline) { showImprovedNotification('warning', 'Offline', 'Cannot clear data while offline.'); return false; } const sheetRowNumber = rowIndex + 1; const rangeToClear = `${sheetName}!A${sheetRowNumber}:${sheetRowNumber + count - 1}`; console.log(`Admin clearing Sheet: ${spreadsheetId}, Range: ${rangeToClear}`); setSyncing(true); try { const response = await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId, range: rangeToClear }); console.log('Clear success:', response.result); return true; } catch (err) { console.error(`Error clearing ${rangeToClear}:`, err); const errDetail = err.result?.error; let message = `Could not clear data: ${errDetail?.message || err.message}`; if (errDetail?.status === 'PERMISSION_DENIED') message = 'Permission denied. Ensure admin has editor access.'; showImprovedNotification('error', `Sheet Write Error (${errDetail?.status || 'Unknown'})`, message); return false; } finally { setSyncing(false); } }
 
         // === Admin Data Loading & Display ===
-        async function loadExamsData() {
-            if (!isAdminAllowed) return;
-            console.log("Loading exams data...");
-            examsLoading.style.display = 'inline-block';
-            refreshExamsBtn.disabled = true;
-            examsTableBody.innerHTML = '';
-            allExamsData = [];
+ async function loadExamsData() {
+    if (!isAdminAllowed) return;
+    console.log("Loading exams data...");
+    examsLoading.style.display = 'inline-block';
+    refreshExamsBtn.disabled = true;
+    examsTableBody.innerHTML = '';
+    allExamsData = [];
 
-            const data = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_DETAILS_SHEET_NAME}!A:H`);
+    // CRITICAL FIX: Changed range from A:H to A:I to include shuffle column
+    const data = await getSheetData(EXAM_SPREADSHEET_ID, `${EXAM_DETAILS_SHEET_NAME}!A:I`);
 
-            examsLoading.style.display = 'none';
-            refreshExamsBtn.disabled = !isOnline;
+    examsLoading.style.display = 'none';
+    refreshExamsBtn.disabled = !isOnline;
 
-            if (data && data.length > 1) {
-                allExamsData = data.slice(1).map((row, index) => ({
-                    data: row,
-                    originalIndex: index
-                }));
-                // Apply current sort before populating
-                if (currentSortColumn.table === examsTable && currentSortColumn.index !== -1) {
-                    allExamsData.sort((a, b) => {
-                         const cellA = a.data[currentSortColumn.index]?.trim() || '';
-                         const cellB = b.data[currentSortColumn.index]?.trim() || '';
-                         return compareCells(cellA, cellB, currentSortColumn.ascending);
-                    });
-                } else {
-                    // Default sort: Course Code, then PIN
-                     allExamsData.sort((a, b) => {
-                         const codeA = a.data[1] || ''; const codeB = b.data[1] || '';
-                         const pinA = a.data[0] || ''; const pinB = b.data[0] || '';
-                         const codeCompare = codeA.localeCompare(codeB);
-                         return codeCompare !== 0 ? codeCompare : pinA.localeCompare(pinB);
-                     });
-                }
-                populateExamsTable(allExamsData);
-                 updateSortIcons(examsTable, currentSortColumn.index, currentSortColumn.ascending);
-            } else if (data) {
-                examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`;
-            } else {
-                examsTableBody.innerHTML = `<tr><td colspan="9">Failed to load exam data. Check permissions or connection.</td></tr>`;
-            }
+    if (data && data.length > 1) {
+        allExamsData = data.slice(1).map((row, index) => ({
+            data: row,
+            originalIndex: index
+        }));
+        // Apply current sort before populating
+        if (currentSortColumn.table === examsTable && currentSortColumn.index !== -1) {
+            allExamsData.sort((a, b) => {
+                 const cellA = a.data[currentSortColumn.index]?.trim() || '';
+                 const cellB = b.data[currentSortColumn.index]?.trim() || '';
+                 return compareCells(cellA, cellB, currentSortColumn.ascending);
+            });
+        } else {
+            // Default sort: Course Code, then PIN
+             allExamsData.sort((a, b) => {
+                 const codeA = a.data[1] || ''; const codeB = b.data[1] || '';
+                 const pinA = a.data[0] || ''; const pinB = b.data[0] || '';
+                 const codeCompare = codeA.localeCompare(codeB);
+                 return codeCompare !== 0 ? codeCompare : pinA.localeCompare(pinB);
+             });
         }
+        populateExamsTable(allExamsData);
+         updateSortIcons(examsTable, currentSortColumn.index, currentSortColumn.ascending);
+    } else if (data) {
+        examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`;
+    } else {
+        examsTableBody.innerHTML = `<tr><td colspan="9">Failed to load exam data. Check permissions or connection.</td></tr>`;
+    }
+}
 
- function populateExamsTable(sortedExamData) {
+function populateExamsTable(sortedExamData) {
     if (!sortedExamData || sortedExamData.length === 0) {
         examsTableBody.innerHTML = `<tr><td colspan="9">No exams found.</td></tr>`;
         return;
     }
+    
+    console.log("All exam data:", sortedExamData); // Debug log to see data
+    
     let currentCourseCode = null;
     let rowsHtml = '';
 
@@ -2482,8 +2484,10 @@ function setupEventListeners() {
         const startTime = row[5] || '';
         const mode = row[6] || '';
         const questionsRaw = row[7] || '[]';
-        // FIXED: Correctly handle shuffle setting, defaulting to 'yes' only if undefined
-        const shuffleSetting = row[8] !== undefined ? row[8] : 'yes';
+        
+        // CRITICAL FIX: Log and properly handle the shuffle value
+        const shuffleSetting = row[8] || 'yes';
+        console.log(`Exam ${pin} shuffle setting:`, shuffleSetting);
 
         // Add group header if course code changes
         if (courseCode !== currentCourseCode) {
@@ -2494,10 +2498,13 @@ function setupEventListeners() {
         // Generate question preview HTML
         const questionsPreviewHtml = formatQuestionsForPreview(questionsRaw);
         
-        // FIXED: Correctly display shuffle badge based on actual value
-        const shuffleDisplay = shuffleSetting && shuffleSetting.toLowerCase() === 'yes' ? 
-            '<span class="badge badge-info">Shuffled</span>' : 
-            '<span class="badge badge-secondary">Fixed Order</span>';
+        // CRITICAL FIX: Create shuffle badge based on actual value, with strict check
+        let shuffleDisplay;
+        if (shuffleSetting === 'no') {
+            shuffleDisplay = '<span class="badge badge-secondary">Fixed Order</span>';
+        } else {
+            shuffleDisplay = '<span class="badge badge-info">Shuffled</span>';
+        }
 
         rowsHtml += `<tr data-original-index="${originalIndex}" data-sheet-row="${sheetRowNumber}" data-pin="${escapeHtml(pin)}" data-questions='${escapeHtml(questionsRaw)}'>
             <td>${escapeHtml(pin)}</td>
@@ -3456,6 +3463,8 @@ async function editExam(pin, originalIndex) {
     }
 
     const examData = examItem.data;
+    console.log("Exam data to edit:", examData); // Debug to check all data
+    
     examDialogTitle.textContent = `Edit Exam (PIN: ${escapeHtml(examData[0])})`;
     saveExamDialogBtn.textContent = "Save Changes";
     examRowIndexInput.value = originalIndex;
@@ -3467,7 +3476,15 @@ async function editExam(pin, originalIndex) {
     examStartDateInput.value = examData[4] || '';
     examStartTimeInput.value = examData[5] || '';
     examModeInput.value = examData[6] || 'Quiz';
-    examShuffleInput.value = examData[8] !== undefined ? examData[8] : 'yes';
+    
+    // CRITICAL FIX: Properly set shuffle value from data
+    // If the value is exactly 'no', set to 'no', otherwise default to 'yes'
+    if (examData[8] === 'no') {
+        examShuffleInput.value = 'no';
+    } else {
+        examShuffleInput.value = 'yes';
+    }
+    console.log("Setting shuffle input to:", examShuffleInput.value);
     
     questionsBuilderDiv.innerHTML = '';
     const questionsRaw = examData[7] || '[]';
