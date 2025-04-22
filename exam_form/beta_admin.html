@@ -3903,21 +3903,32 @@ function saveGrades() {
     saveGradingDialogBtn.disabled = true;
     saveGradingDialogBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
     
-    // Fill in empty points with zeros
+    // Check if all points fields are filled (not empty)
+    let allFieldsFilled = true;
+    let anyFieldHasValue = false;
+    
     currentExamQuestions.forEach((q, index) => {
         const qNum = index + 1;
         const pointsInput = document.getElementById(`points-q-${qNum}`);
-        if (pointsInput && (pointsInput.value === "" || pointsInput.value === null)) {
-            pointsInput.value = "0";
+        
+        // Skip text_only questions in the check
+        if (q.type !== 'text_only') {
+            if (pointsInput && (pointsInput.value === "" || pointsInput.value === null)) {
+                allFieldsFilled = false;
+            } else if (pointsInput && pointsInput.value !== "") {
+                anyFieldHasValue = true;
+            }
         }
     });
     
+    // Get values for the grade data
     const totalScore = parseFloat(gradingTotalScoreInput.value) || 0;
     const maxScore = parseFloat(gradingMaxScoreSpan.textContent) || 0;
     const percentage = gradingPercentageSpan.textContent || '0%';
     const feedback = gradingFeedbackInput.value.trim();
     const questionGrades = {};
     
+    // Store the grades for individual questions
     currentExamQuestions.forEach((q, index) => {
         const qNum = index + 1;
         const pointsInput = document.getElementById(`points-q-${qNum}`);
@@ -3925,7 +3936,7 @@ function saveGrades() {
         const card = document.getElementById(`grading-q-${qNum}`);
         let status = 'ungraded';
         
-        // Determine status based on points and card classes
+        // Determine status based on card classes and points
         const isTextOnly = q.type === 'text_only';
         
         if (card) {
@@ -3934,28 +3945,27 @@ function saveGrades() {
             else if (card.classList.contains('partial')) status = 'partial';
             else if (card.classList.contains('confirmed')) status = 'confirmed';
             else if (isTextOnly) status = 'confirmed'; // Auto-confirm text-only
-            else {
-                // If not marked yet, set based on points
-                const points = parseFloat(pointsInput?.value || 0);
+            else if (pointsInput && pointsInput.value !== "") {
+                // Only set status if there's a value
+                const points = parseFloat(pointsInput.value || 0);
                 const maxPoints = parseFloat(q.points) || 1;
                 
                 if (points === 0) status = 'incorrect';
                 else if (points === maxPoints) status = 'correct';
                 else if (points > 0 && points < maxPoints) status = 'partial';
-                else status = 'ungraded';
             }
         }
         
+        // Store the grade information
         questionGrades[`q-${qNum}`] = {
-            points: parseFloat(pointsInput?.value || 0),
+            // Only include points if they're provided (not empty)
+            points: pointsInput && pointsInput.value !== "" ? parseFloat(pointsInput.value) : "",
             status: status,
             comment: commentInput?.value || ''
         };
     });
     
-    // Always update total score after filling in zeros
-    updateTotalScore();
-    
+    // Create the grade data
     const gradeData = {
         totalScore: totalScore.toFixed(1),
         maxScore: maxScore,
@@ -3972,27 +3982,43 @@ function saveGrades() {
     const gradeRange = `${EXAM_ATTEMPTS_SHEET_NAME}!J${currentGradeSheetRow}`;
     const statusRange = `${EXAM_ATTEMPTS_SHEET_NAME}!G${currentGradeSheetRow}`;
     
-    // Always set status to 'graded' when saving grades
-    const newStatus = 'graded';
+    // Determine whether to change status based on complete grading
+    // Only change to 'graded' if all fields are filled
+    const newStatus = allFieldsFilled ? 'graded' : 'submit';
     
-    // Use Promise.all to ensure both updates complete
+    // If it's not fully graded but has some values, we still want to save those values
+    // without changing the status from 'submit' to 'graded'
     Promise.all([
+        // Always save the grade data
         gapi.client.sheets.spreadsheets.values.update({
             spreadsheetId: EXAM_SPREADSHEET_ID,
             range: gradeRange,
             valueInputOption: 'USER_ENTERED',
             resource: { values: [[gradeJson]] }
         }),
-        gapi.client.sheets.spreadsheets.values.update({
-            spreadsheetId: EXAM_SPREADSHEET_ID,
-            range: statusRange,
-            valueInputOption: 'USER_ENTERED',
-            resource: { values: [[newStatus]] }
-        })
+        
+        // Only update the status if all fields are filled
+        // OR if no status update is needed (use Promise.resolve for empty case)
+        allFieldsFilled ? 
+            gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: EXAM_SPREADSHEET_ID,
+                range: statusRange,
+                valueInputOption: 'USER_ENTERED',
+                resource: { values: [[newStatus]] }
+            }) : 
+            Promise.resolve() // No-op Promise if we're not changing status
     ]).then(responses => {
-        console.log('Grade and status update successful:', responses);
-        showImprovedNotification('success', 'Grades Saved', 
-            `Grades and comments saved & status updated to "graded" for row ${currentGradeSheetRow}.`);
+        console.log('Grade update successful:', responses);
+        
+        let message = anyFieldHasValue ? 
+            `Grades and comments saved. Status remains "${newStatus}".` :
+            `Feedback saved. No grades entered yet.`;
+            
+        if (allFieldsFilled) {
+            message = `Grades and comments saved & status updated to "graded" for row ${currentGradeSheetRow}.`;
+        }
+        
+        showImprovedNotification('success', 'Grades Saved', message);
         closeGradingDialog();
         loadAttemptsData();
     }).catch(error => {
