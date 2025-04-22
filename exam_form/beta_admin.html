@@ -2253,6 +2253,7 @@
             window.addEventListener('online', updateOnlineStatus);
             window.addEventListener('offline', updateOnlineStatus);
             checkApiLoads();
+			diagnosePdfLibrary();
         }
 
         function checkApiLoads() {
@@ -2306,22 +2307,57 @@ function setupEventListeners() {
     });
     
 document.getElementById('export-exam-btn').onclick = function() {
-    currentExportType = 'exam';
-    showExportFilterDialog();
+    try {
+        console.log("Export exam button clicked");
+        currentExportType = 'exam';
+        showExportFilterDialog();
+    } catch (e) {
+        console.error("Error in export exam button handler:", e);
+        alert("Export error: " + e.message);
+    }
 };
 
 document.getElementById('export-submissions-btn').onclick = function() {
-    currentExportType = 'submissions';
-    showExportFilterDialog();
+    try {
+        console.log("Export submissions button clicked");
+        currentExportType = 'submissions';
+        showExportFilterDialog();
+    } catch (e) {
+        console.error("Error in export submissions button handler:", e);
+        alert("Export error: " + e.message);
+    }
 };
 
 document.getElementById('export-grades-btn').onclick = function() {
-    currentExportType = 'grades';
-    showExportFilterDialog();
+    try {
+        console.log("Export grades button clicked");
+        currentExportType = 'grades';
+        showExportFilterDialog();
+    } catch (e) {
+        console.error("Error in export grades button handler:", e);
+        alert("Export error: " + e.message);
+    }
 };
 
-document.getElementById('cancel-export-filter-btn').onclick = closeExportFilterDialog;
-document.getElementById('apply-export-filter-btn').onclick = applyExportFilters;
+document.getElementById('cancel-export-filter-btn').onclick = function() {
+    try {
+        console.log("Cancel export filter button clicked");
+        closeExportFilterDialog();
+    } catch (e) {
+        console.error("Error in cancel filter button handler:", e);
+        alert("Error: " + e.message);
+    }
+};
+
+document.getElementById('apply-export-filter-btn').onclick = function() {
+    try {
+        console.log("Apply export filter button clicked");
+        applyExportFilters();
+    } catch (e) {
+        console.error("Error in apply filter button handler:", e);
+        alert("Error: " + e.message);
+    }
+};
 }
 
         function updateYear() {
@@ -4068,29 +4104,70 @@ function closeExportFilterDialog() {
 
 // Function to apply filters and run the appropriate export
 function applyExportFilters() {
-    const selectedPin = document.getElementById('export-filter-pin').value;
-    const selectedStudent = document.getElementById('export-filter-student').value;
-    const selectedStudentId = document.getElementById('export-filter-studentid').value;
-    
-    // Close dialog
-    closeExportFilterDialog();
-    
-    // Run the appropriate export with filters
-    switch (currentExportType) {
-        case 'exam':
-            exportExamToPDF(selectedPin);
-            break;
-        case 'submissions':
-            exportSubmissionsToPDF(selectedPin, selectedStudent, selectedStudentId);
-            break;
-        case 'grades':
-            exportGradesToPDF(selectedPin, selectedStudent, selectedStudentId);
-            break;
+    try {
+        console.log("Applying export filters, type:", currentExportType);
+        const selectedPin = document.getElementById('export-filter-pin').value;
+        const selectedStudent = document.getElementById('export-filter-student').value;
+        const selectedStudentId = document.getElementById('export-filter-studentid').value;
+        
+        console.log("Selected filters:", {
+            pin: selectedPin,
+            student: selectedStudent,
+            studentId: selectedStudentId
+        });
+        
+        // Close dialog
+        closeExportFilterDialog();
+        
+        // Run with extensive error logging
+        console.log("About to execute export function");
+        
+        // Direct calls with try/catch blocks
+        switch (currentExportType) {
+            case 'exam':
+                console.log("Calling exportExamToPDF");
+                try {
+                    exportExamToPDF(selectedPin);
+                } catch (e) {
+                    console.error("Error in exportExamToPDF:", e);
+                    alert("Export failed: " + e.message);
+                }
+                break;
+                
+            case 'submissions':
+                console.log("Calling exportSubmissionsToPDF");
+                try {
+                    exportSubmissionsToPDF(selectedPin, selectedStudent, selectedStudentId);
+                } catch (e) {
+                    console.error("Error in exportSubmissionsToPDF:", e);
+                    alert("Export failed: " + e.message);
+                }
+                break;
+                
+            case 'grades':
+                console.log("Calling exportGradesToPDF");
+                try {
+                    exportGradesToPDF(selectedPin, selectedStudent, selectedStudentId);
+                } catch (e) {
+                    console.error("Error in exportGradesToPDF:", e);
+                    alert("Export failed: " + e.message);
+                }
+                break;
+                
+            default:
+                console.error("Unknown export type:", currentExportType);
+                alert("Unknown export type: " + currentExportType);
+        }
+    } catch (e) {
+        console.error("Error in applyExportFilters:", e);
+        alert("Export filter error: " + e.message);
     }
 }
          
         // === PDF Export Functions ===
 function exportExamToPDF(filterPin = 'all') {
+    console.log("Starting exam export, filterPin:", filterPin);
+    
     if (!isAdminAllowed || allExamsData.length === 0) {
         showImprovedNotification('warning', 'Export Error', 'No exam data available to export');
         return;
@@ -4105,109 +4182,168 @@ function exportExamToPDF(filterPin = 'all') {
             return;
         }
     }
-            
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-    });
     
-    // Add title and metadata
-    doc.setFontSize(16);
-    doc.setTextColor(33, 33, 33);
-    doc.text('Exam List Report', 15, 15);
-    
-    // Add generation info
-    doc.setFontSize(9);
-    doc.setTextColor(100, 100, 100);
-    const generatedDate = new Date().toLocaleString();
-    doc.text(`Generated by: ${currentUser?.name || 'Admin'} on ${generatedDate}`, 15, 22);
-    
-    // Add table of exams
-    const tableData = [];
-    const tableHeaders = [['PIN', 'Course', 'Name', 'Duration', 'Date', 'Time', 'Mode']];
-    
-    // Sort by course code first
-    const sortedData = [...filteredExams].sort((a, b) => {
-        const courseA = a.data[1] || '';
-        const courseB = b.data[1] || '';
-        return courseA.localeCompare(courseB);
-    });
-    
-    // Group by course code
-    let currentCourse = '';
-    
-    sortedData.forEach(item => {
-        const row = item.data;
-        const pin = row[0] || '';
-        const course = row[1] || '';
-        const name = row[2] || '';
-        const duration = row[3] || '';
-        const date = row[4] || '';
-        const time = row[5] || '';
-        const mode = row[6] || '';
-        
-        // Add course headers
-        if (course !== currentCourse) {
-            currentCourse = course;
-            tableData.push([{
-                content: `Course: ${currentCourse}`,
-                colSpan: 7,
-                styles: {
-                    fontStyle: 'bold',
-                    fillColor: [59, 73, 171],
-                    textColor: [255, 255, 255],
-                    cellPadding: 3
-                }
-            }]);
+    try {
+        // CRITICAL FIX: Properly access jsPDF constructor
+        console.log("Initializing jsPDF...");
+        if (typeof window.jspdf === 'undefined') {
+            console.error("jspdf object not found on window!");
         }
         
-        tableData.push([pin, course, name, duration, date, time, mode]);
-    });
-    
-    // Generate the table
-    doc.autoTable({
-        head: tableHeaders,
-        body: tableData,
-        startY: 25,
-        theme: 'grid',
-        styles: {
-            fontSize: 9,
-            cellPadding: 2
-        },
-        headStyles: {
-            fillColor: [51, 102, 255],
-            textColor: [255, 255, 255],
-            fontStyle: 'bold'
-        },
-        alternateRowStyles: {
-            fillColor: [240, 240, 240]
-        },
-        columnStyles: {
-            0: { cellWidth: 15 }, // PIN
-            1: { cellWidth: 20 }, // Course
-            2: { cellWidth: 50 }, // Name
-            3: { cellWidth: 18 }, // Duration
-            4: { cellWidth: 25 }, // Date
-            5: { cellWidth: 20 }, // Time
-            6: { cellWidth: 20 }  // Mode
-        }
-    });
-    
-    // Add page number
-    const pageCount = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
+        // Access jsPDF constructor from the global object
+        const jsPDF = window.jspdf.jsPDF;
+        console.log("jsPDF constructor type:", typeof jsPDF);
+        
+        // Create the PDF document
+        const doc = new jsPDF({
+            orientation: 'portrait',
+            unit: 'mm',
+            format: 'a4'
+        });
+        console.log("PDF document created");
+        
+        // Add title and metadata
+        doc.setFontSize(16);
+        doc.setTextColor(33, 33, 33);
+        doc.text('Exam List Report', 15, 15);
+        
+        // Add generation info
         doc.setFontSize(9);
         doc.setTextColor(100, 100, 100);
-        doc.text(`Page ${i} of ${pageCount}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 10);
+        const generatedDate = new Date().toLocaleString();
+        doc.text(`Generated by: ${currentUser?.name || 'Admin'} on ${generatedDate}`, 15, 22);
+        
+        // Add table of exams
+        console.log("Creating exam table data");
+        const tableData = [];
+        const tableHeaders = [['PIN', 'Course', 'Name', 'Duration', 'Date', 'Time', 'Mode']];
+        
+        // Sort by course code first
+        const sortedData = [...filteredExams].sort((a, b) => {
+            const courseA = a.data[1] || '';
+            const courseB = b.data[1] || '';
+            return courseA.localeCompare(courseB);
+        });
+        
+        // Group by course code
+        let currentCourse = '';
+        
+        sortedData.forEach(item => {
+            const row = item.data;
+            const pin = row[0] || '';
+            const course = row[1] || '';
+            const name = row[2] || '';
+            const duration = row[3] || '';
+            const date = row[4] || '';
+            const time = row[5] || '';
+            const mode = row[6] || '';
+            
+            // Add course headers
+            if (course !== currentCourse) {
+                currentCourse = course;
+                tableData.push([{
+                    content: `Course: ${currentCourse}`,
+                    colSpan: 7,
+                    styles: {
+                        fontStyle: 'bold',
+                        fillColor: [59, 73, 171],
+                        textColor: [255, 255, 255],
+                        cellPadding: 3
+                    }
+                }]);
+            }
+            
+            tableData.push([pin, course, name, duration, date, time, mode]);
+        });
+        
+        // Generate the table
+        console.log("Generating table with autoTable plugin");
+        doc.autoTable({
+            head: tableHeaders,
+            body: tableData,
+            startY: 25,
+            theme: 'grid',
+            styles: {
+                fontSize: 9,
+                cellPadding: 2
+            },
+            headStyles: {
+                fillColor: [51, 102, 255],
+                textColor: [255, 255, 255],
+                fontStyle: 'bold'
+            },
+            alternateRowStyles: {
+                fillColor: [240, 240, 240]
+            },
+            columnStyles: {
+                0: { cellWidth: 15 }, // PIN
+                1: { cellWidth: 20 }, // Course
+                2: { cellWidth: 50 }, // Name
+                3: { cellWidth: 18 }, // Duration
+                4: { cellWidth: 25 }, // Date
+                5: { cellWidth: 20 }, // Time
+                6: { cellWidth: 20 }  // Mode
+            }
+        });
+        
+        // Add page number
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`Page ${i} of ${pageCount}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 10);
+        }
+        
+        // Save PDF with appropriate filename
+        const filename = filterPin !== 'all' ? `exam-list-${filterPin}.pdf` : 'exam-list-report.pdf';
+        console.log("Saving PDF as:", filename);
+        doc.save(filename);
+        
+        showImprovedNotification('success', 'Export Complete', 'Exam list has been exported as PDF', 3000);
+        console.log("Export complete");
+    } catch (error) {
+        console.error("Error in exportExamToPDF:", error);
+        console.error("Stack trace:", error.stack);
+        alert(`Export failed: ${error.message}\n\nCheck the console for details.`);
+        showImprovedNotification('error', 'Export Failed', error.message);
+    }
+}
+
+function diagnosePdfLibrary() {
+    console.log("PDF Library Diagnostic:");
+    console.log("- window.jspdf:", typeof window.jspdf);
+    if (window.jspdf) {
+        console.log("  - Keys:", Object.keys(window.jspdf));
+        console.log("  - jsPDF constructor:", typeof window.jspdf.jsPDF);
     }
     
-    // Save PDF with appropriate filename
-    const filename = filterPin !== 'all' ? `exam-list-${filterPin}.pdf` : 'exam-list-report.pdf';
-    doc.save(filename);
-    showImprovedNotification('success', 'Export Complete', 'Exam list has been exported as PDF', 3000);
+    console.log("- window.jsPDF:", typeof window.jsPDF);
+    console.log("- window.jspdf?.jsPDF:", typeof window.jspdf?.jsPDF);
+    
+    // Check for autotable plugin
+    console.log("AutoTable Plugin:");
+    if (window.jspdf && window.jspdf.jsPDF) {
+        try {
+            const testDoc = new window.jspdf.jsPDF();
+            console.log("- doc.autoTable:", typeof testDoc.autoTable);
+            if (!testDoc.autoTable) {
+                console.error("autoTable plugin not available on jsPDF instance");
+            }
+        } catch (e) {
+            console.error("Error creating test jsPDF instance:", e);
+        }
+    }
+    
+    // Check script tags
+    const scriptTags = document.getElementsByTagName('script');
+    console.log("PDF-related script tags:");
+    for (let i = 0; i < scriptTags.length; i++) {
+        const src = scriptTags[i].src || '';
+        if (src.includes('jspdf') || src.includes('pdf')) {
+            console.log(`- ${src}`);
+        }
+    }
 }
         
 function exportSubmissionsToPDF(filterPin = 'all', filterStudent = 'all', filterStudentId = 'all') {
