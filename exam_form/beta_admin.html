@@ -3581,8 +3581,6 @@ function populateGradingQuestions() {
     let questionsHtml = ''; 
     let navigatorHtml = '<option value="">-- Select Question --</option>';
     
-    // REMOVE THE MARK AS GRADED BUTTON - this functionality will be in the Save Grades button
-    
     currentExamQuestions.forEach((question, index) => {
         const qNum = index + 1;
         // Default points to 1 if not specified, including for text-only fields
@@ -3610,7 +3608,7 @@ function populateGradingQuestions() {
                         <div class="question-points" style="margin: 10px 0;">
                             <label for="points-q-${qNum}">Points:</label>
                             <input type="number" class="form-control" id="points-q-${qNum}" 
-                                   min="0" max="${maxPoints}" value="0" step="0.1" 
+                                   min="0" max="${maxPoints}" value="" step="0.1" 
                                    onchange="updateTotalScore()">
                             <span>/ ${maxPoints}</span>
                         </div>
@@ -3648,7 +3646,7 @@ function populateGradingQuestions() {
                         <div class="question-points">
                             <label for="points-q-${qNum}">Points:</label>
                             <input type="number" class="form-control" id="points-q-${qNum}" 
-                                   min="0" max="${maxPoints}" value="0" step="0.1" 
+                                   min="0" max="${maxPoints}" value="" step="0.1" 
                                    onchange="updateTotalScore()">
                             <span>/ ${maxPoints}</span>
                         </div>
@@ -3809,10 +3807,28 @@ function copyToClipboard(button) {
         // runAutograder - Unchanged
         function runAutograder() { if (!currentExamQuestions) return; let autoGradedCount = 0; currentExamQuestions.forEach((q, index) => { const qNum = index + 1; const maxPoints = parseFloat(q.points) || 1; if (q.type === 'multiple_select' && Array.isArray(q.correct_answers) && q.correct_answers.length > 0) { autoGradeQuestion(qNum, maxPoints); autoGradedCount++; } }); showImprovedNotification('info', 'Auto-grading Complete', `Attempted to auto-grade ${autoGradedCount} question(s).`); }
         // updateTotalScore - Unchanged
-        function updateTotalScore() { if (!currentExamQuestions) return; const maxPossibleScore = calculateTotalPoints(currentExamQuestions); let currentTotalScore = 0; currentExamQuestions.forEach((q, index) => { const qNum = index + 1; const pointsInput = document.getElementById(`points-q-${qNum}`); if (pointsInput) currentTotalScore += parseFloat(pointsInput.value) || 0; }); gradingTotalScoreInput.value = currentTotalScore.toFixed(1); updateGradePercentage(); }
+function updateTotalScore() {
+    if (!currentExamQuestions) return;
+    const maxPossibleScore = calculateTotalPoints(currentExamQuestions);
+    let currentTotalScore = 0;
+    
+    currentExamQuestions.forEach((q, index) => {
+        const qNum = index + 1;
+        const pointsInput = document.getElementById(`points-q-${qNum}`);
+        // Skip empty fields for calculating current total
+        // Only add points that have been explicitly set
+        if (pointsInput && pointsInput.value !== "" && pointsInput.value !== null) {
+            currentTotalScore += parseFloat(pointsInput.value) || 0;
+        }
+    });
+    
+    gradingTotalScoreInput.value = currentTotalScore.toFixed(1);
+    updateGradePercentage();
+}
         // updateGradePercentage - Unchanged
         function updateGradePercentage() { const totalScore = parseFloat(gradingTotalScoreInput.value) || 0; const maxScore = parseFloat(gradingMaxScoreSpan.textContent) || 0; let percentage = 0; if (maxScore > 0) percentage = (totalScore / maxScore) * 100; gradingPercentageSpan.textContent = `${percentage.toFixed(1)}%`; }
-        // saveGrades - Unchanged
+        
+		// saveGrades - Unchanged
 function saveGrades() {
     if (!currentGradeSheetRow || !currentExamQuestions) {
         showImprovedNotification('error', 'Save Error', 'Missing data for saving grades.');
@@ -3822,23 +3838,29 @@ function saveGrades() {
     saveGradingDialogBtn.disabled = true;
     saveGradingDialogBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
     
+    // Fill in empty points with zeros
+    currentExamQuestions.forEach((q, index) => {
+        const qNum = index + 1;
+        const pointsInput = document.getElementById(`points-q-${qNum}`);
+        if (pointsInput && (pointsInput.value === "" || pointsInput.value === null)) {
+            pointsInput.value = "0";
+        }
+    });
+    
     const totalScore = parseFloat(gradingTotalScoreInput.value) || 0;
     const maxScore = parseFloat(gradingMaxScoreSpan.textContent) || 0;
     const percentage = gradingPercentageSpan.textContent || '0%';
     const feedback = gradingFeedbackInput.value.trim();
     const questionGrades = {};
     
-    let allGraded = true;
-    let gradableQuestionsExist = false;
-    
     currentExamQuestions.forEach((q, index) => {
         const qNum = index + 1;
         const pointsInput = document.getElementById(`points-q-${qNum}`);
-        const commentInput = document.getElementById(`comment-q-${qNum}`); // Get comment field
+        const commentInput = document.getElementById(`comment-q-${qNum}`);
         const card = document.getElementById(`grading-q-${qNum}`);
         let status = 'ungraded';
         
-        // Skip text-only questions in the graded check
+        // Determine status based on points and card classes
         const isTextOnly = q.type === 'text_only';
         
         if (card) {
@@ -3847,25 +3869,27 @@ function saveGrades() {
             else if (card.classList.contains('partial')) status = 'partial';
             else if (card.classList.contains('confirmed')) status = 'confirmed';
             else if (isTextOnly) status = 'confirmed'; // Auto-confirm text-only
-        }
-        
-        // Only check non-text-only questions for grading status
-        if (!isTextOnly) {
-            gradableQuestionsExist = true;
-            if (status === 'ungraded') allGraded = false;
+            else {
+                // If not marked yet, set based on points
+                const points = parseFloat(pointsInput?.value || 0);
+                const maxPoints = parseFloat(q.points) || 1;
+                
+                if (points === 0) status = 'incorrect';
+                else if (points === maxPoints) status = 'correct';
+                else if (points > 0 && points < maxPoints) status = 'partial';
+                else status = 'ungraded';
+            }
         }
         
         questionGrades[`q-${qNum}`] = {
             points: parseFloat(pointsInput?.value || 0),
             status: status,
-            comment: commentInput?.value || '' // Save comment/feedback for each question
+            comment: commentInput?.value || ''
         };
     });
     
-    // If there are no gradable questions, consider it all graded
-    if (!gradableQuestionsExist) {
-        allGraded = true;
-    }
+    // Always update total score after filling in zeros
+    updateTotalScore();
     
     const gradeData = {
         totalScore: totalScore.toFixed(1),
@@ -4791,8 +4815,16 @@ function exportGradesToPDF(filterPin = 'all', filterStudent = 'all', filterStude
         window.markCorrect = markCorrect;
         window.markIncorrect = markIncorrect;
         window.autoGradeQuestion = autoGradeQuestion;
-        window.updateTotalScore = updateTotalScore;
+		window.updateTotalScore = updateTotalScore;
+		window.populateGradingQuestions = populateGradingQuestions;
+		window.saveGrades = saveGrades;
 		window.copyToClipboard = copyToClipboard;
+		window.exportExamToPDF = exportExamToPDF;
+		window.exportSubmissionsToPDF = exportSubmissionsToPDF;
+		window.exportGradesToPDF = exportGradesToPDF;
+		window.showExportFilterDialog = showExportFilterDialog;
+		window.closeExportFilterDialog = closeExportFilterDialog;
+		window.applyExportFilters = applyExportFilters;
     </script>
 
 </body>
