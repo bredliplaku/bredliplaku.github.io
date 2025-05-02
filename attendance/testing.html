@@ -1052,17 +1052,19 @@ body.is-admin td.admin-only {
     </div>
     
 <script>
-	// Config
-	const ADMIN_EMAILS = ['bplaku@epoka.edu.al', 'bredliplaku@gmail.com']; // Add any admin emails here
-	const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com'; 
-	const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
-	const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
-	const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
-	const LOGS_STORAGE_KEY = 'attendance_logs';
-	
-	// Discovery docs and scopes for Google API
-	const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
-	const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+// Config
+const ADMIN_EMAILS = ['bplaku@epoka.edu.al', 'bredliplaku@gmail.com']; 
+const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com'; 
+const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
+const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
+const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
+const LOGS_STORAGE_KEY = 'attendance_logs';
+
+// Add this line - replace with your deployed script URL
+const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxv7iwUmHtv2x5pSzGJA92WA3X8P54_0HTNkg0GS-XRYdhnF8wwDH2oDB7xrZKqlQLIig/exec'; 
+
+// Authentication scopes - simplified since we don't need direct spreadsheet access
+const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 	
 	// App state
 	let logs = [];
@@ -1897,119 +1899,65 @@ if (pendingNotifications.length > 0) {
 	 * Set up auth token client and event listeners for login/logout.
 	 */
 function initGoogleApi() {
-console.log('Initializing Google API...');
+  console.log('Initializing Google Sign-In...');
 
-// Handle auth redirect token at the very start
-if (window.location.hash.includes('access_token=')) {
-	const hash = window.location.hash.substring(1);
-	const params = new URLSearchParams(hash);
-	const token = params.get('access_token');
+  try {
+    // Initialize the token client
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: handleTokenResponse
+    });
+
+    // Load the base GAPI client library
+    gapi.load('client', async () => {
+      console.log('GAPI client library loaded.');
+
+      // Check for saved token
+      const savedToken = localStorage.getItem('gapi_token');
+      if (savedToken) {
+        try {
+          const tokenObj = JSON.parse(savedToken);
+          gapi.client.setToken(tokenObj);
+          isSignedIn = true;
+
+          fetchUserInfo()
+            .then(() => {
+              isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+              updateAuthUI();
+              if (isOnline) {
+                fetchAvailableCourses().catch(err => console.error('Error:', err));
+                fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
+              }
+            })
+            .catch(e => {
+              console.error('Error fetching user info:', e);
+              isSignedIn = false;
+              isAdmin = false;
+              localStorage.removeItem('gapi_token');
+              gapi.client.setToken('');
+              updateAuthUI();
+            });
+        } catch (e) {
+          console.error('Error restoring token:', e);
+          isSignedIn = false;
+          localStorage.removeItem('gapi_token');
+          updateAuthUI();
+        }
+      } else {
+        updateAuthUI();
+        if (isOnline) {
+          fetchAvailableCourses();
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error initializing Google Sign-In:', error);
+    showImprovedNotification('error', 'API Error', 'Failed to initialize Google Sign-In.');
+    updateAuthUI();
+  }
+}
 	
-	if (token) {
-		console.log('Found token in URL, processing...');
-		localStorage.setItem('gapi_token', JSON.stringify({access_token: token}));
-		isSignedIn = true;
-		
-		// Clean URL
-		history.replaceState(null, null, window.location.pathname);
-	}
-}
-
-// Set default courses
-availableCourses = [];
-populateCourseDropdown();
-
-// Check if APIs are loaded
-if (typeof gapi === 'undefined') {
-	console.error('gapi object is undefined');
-	showImprovedNotification('error', 'API Error', 'Google API client not loaded.');
-	updateAuthUI();
-	return;
-}
-
-if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
-	console.error('google.accounts object is undefined');
-	showImprovedNotification('error', 'API Error', 'Google Identity Services not loaded.');
-	updateAuthUI();
-	return;
-}
-
-// Initialize with basic scopes first
-try {
-	console.log('Setting up token client first...');
-	tokenClient = google.accounts.oauth2.initTokenClient({
-		client_id: CLIENT_ID,
-		scope: currentScopes,
-		callback: function(resp) {
-			console.log('Token response received:', resp);
-			// Only process if we have an access token
-			if (resp && resp.access_token) {
-				handleTokenResponse(resp);
-			} else if (resp.error) {
-				console.error('Token error:', resp.error);
-				showImprovedNotification('error', 'Auth Error', 'Failed to obtain access token.');
-			}
-		}
-	});
-	console.log('Token client initialized successfully');
-} catch (error) {
-	console.error('Failed to initialize token client:', error);
-	showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
-}
-
-// Load the GAPI client
-gapi.load('client', () => {
-	gapi.client.init({
-		apiKey: API_KEY,
-		discoveryDocs: DISCOVERY_DOCS
-	}).then(() => {
-		console.log('GAPI client initialized successfully');
-		
-		// Try to restore saved session
-		const savedToken = localStorage.getItem('gapi_token');
-		if (savedToken) {
-			try {
-				const tokenObj = JSON.parse(savedToken);
-				gapi.client.setToken(tokenObj);
-				isSignedIn = true;
-				
-				fetchUserInfo()
-					.then(() => {
-						isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-						updateAuthUI();
-						if (isOnline) {
-							fetchAvailableCourses().catch(err => console.error('Error:', err));
-							fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
-						}
-					})
-					.catch(e => {
-						console.error('Error fetching user info:', e);
-						isSignedIn = false;
-						isAdmin = false;
-						localStorage.removeItem('gapi_token');
-						gapi.client.setToken('');
-						updateAuthUI();
-					});
-			} catch (e) {
-				console.error('Error restoring token:', e);
-				isSignedIn = false;
-				localStorage.removeItem('gapi_token');
-				updateAuthUI();
-			}
-		} else {
-			updateAuthUI();
-			if (isOnline) {
-				fetchAvailableCourses();
-			}
-		}
-		
-	}).catch(error => {
-		console.error('Error initializing GAPI client:', error);
-		showImprovedNotification('error', 'API Error', 'Failed to initialize Google API.');
-		updateAuthUI();
-	});
-});
-}
 	/**
 	 * Handle token response from Google OAuth.
 	 * @param {Object} resp - The token response object.
@@ -2714,39 +2662,34 @@ async function syncData() {
 	 * Updates uidToNameMap with the latest data.
 	 */
 async function fetchDatabaseFromSheet() {
-try {
-	const response = await gapi.client.sheets.spreadsheets.values.get({
-		spreadsheetId: DATABASE_SPREADSHEET_ID,
-		range: 'Database!A2:C'
-	});
-	
-	const rows = response.result.values || [];
-	const sheetMappings = {};
-	
-	// Expecting each row as [Index, Name, UID]
-	rows.forEach(row => {
-		if (row.length >= 3) {
-			const name = row[1];
-			const uid = row[2];
-			if (name && uid) {
-				sheetMappings[uid] = name;
-			}
-		}
-	});
-	
-	uidToNameMap = sheetMappings;
-	updateDatabaseStatus();
-	updateDatabaseList();
-	console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
-} catch (error) {
-	console.error('Error fetching database:', error);
-	// Only show error for admin users
-	if (!isInitializing && isAdmin) {
-		showImprovedNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
-	}
-	throw error;
+  try {
+    const fetchUrl = `${BACKEND_URL}?action=getDatabaseEntries`;
+    const response = await fetch(fetchUrl);
+    
+    if (!response.ok) {
+      throw new Error(`Backend error! Status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      uidToNameMap = result.entries || {};
+      updateDatabaseStatus();
+      updateDatabaseList();
+      console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database from backend`);
+    } else {
+      throw new Error(result.message || 'Backend error');
+    }
+  } catch (error) {
+    console.error('Error fetching database:', error);
+    // Only show error for admin users
+    if (!isInitializing && isAdmin) {
+      showImprovedNotification('error', 'Database Error', 'Failed to fetch database from backend');
+    }
+    throw error;
+  }
 }
-}
+
 
 function updatePageTitle() {
 const titleElement = document.querySelector('h1');
@@ -2788,11 +2731,10 @@ function formatSheetName(sheetName) {
  */
 async function fetchAvailableCourses() {
   try {
-    console.log('Fetching available courses from spreadsheet...');
+    console.log('Fetching available courses from backend...');
     
     if (!isOnline) {
-      console.log('Not online or not signed in, using default courses');
-      // Default courses if offline or not signed in
+      console.log('Not online, using default courses');
       availableCourses = [];
       courseIDMap = {};
       sheetNameMap = {};
@@ -2800,82 +2742,42 @@ async function fetchAvailableCourses() {
       return;
     }
     
-    const response = await gapi.client.sheets.spreadsheets.get({
-      spreadsheetId: LOGS_SPREADSHEET_ID
-    });
+    const fetchUrl = `${BACKEND_URL}?action=getCourses`;
+    const response = await fetch(fetchUrl);
     
-    const sheets = response.result.sheets || [];
-    const allSheetNames = sheets.map(sheet => sheet.properties.title);
-    
-    // Check if we have a COURSE_INFO sheet
-    if (allSheetNames.includes('COURSE_INFO')) {
-      try {
-        console.log('COURSE_INFO sheet found, fetching course information...');
-        
-        // FIXED: Changed range from A2:C to A2:G to be consistent with fetchCourseInfo
-        const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
-          spreadsheetId: LOGS_SPREADSHEET_ID,
-          range: "'COURSE_INFO'!A2:G" // Reading all columns
-        });
-        
-        const rows = codeResponse.result.values || [];
-        
-        if (rows.length > 0) {
-          // We found course codes, use this data
-          availableCourses = [];
-          courseIDMap = {};
-          sheetNameMap = {};
-          
-          rows.forEach(row => {
-            if (row.length >= 1 && row[0]) {
-              const courseDisplayName = row[0].trim();
-              
-              const courseID = (row.length >= 7 && row[6]) ? row[6].trim() : "";
-
-              // Let's use display name by default for simplicity
-              const sheetName = courseDisplayName;
-              
-              availableCourses.push(courseDisplayName);
-              
-              if (courseID) {
-                courseIDMap[courseDisplayName] = courseID;
-              }
-              
-              sheetNameMap[courseDisplayName] = sheetName;
-            }
-          });
-          
-          console.log('Fetched courses from COURSE_INFO:', availableCourses);
-          console.log('Course ID mapping:', courseIDMap);
-          console.log('Sheet name mapping:', sheetNameMap);
-        } else {
-          // No data in COURSE_INFO, fall back to sheet names
-          availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
-          console.log('No data in COURSE_INFO, using sheet names:', availableCourses);
-        }
-      } catch (codeError) {
-        console.warn('Error reading COURSE_INFO sheet:', codeError);
-        availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
-      }
-    } else {
-      // No COURSE_INFO sheet, use sheet names directly
-      availableCourses = allSheetNames;
-      console.log('No COURSE_INFO sheet found, using all sheet names:', availableCourses);
+    if (!response.ok) {
+      throw new Error(`Backend error! Status: ${response.status}`);
     }
     
-    // If no courses found, use defaults
-    if (availableCourses.length === 0) {
-      console.warn('No courses found in spreadsheet, using defaults');
-      availableCourses = [];
+    const result = await response.json();
+    console.log('Backend response (Courses):', result);
+    
+    if (result.success) {
+      availableCourses = result.courses || [];
+      courseIDMap = {};
+      sheetNameMap = {};
+      
+      // Process course info if available
+      if (result.courseInfo) {
+        Object.entries(result.courseInfo).forEach(([course, info]) => {
+          if (info.eisId) {
+            courseIDMap[course] = info.eisId;
+          }
+        });
+      }
+      
+      console.log('Fetched courses from backend:', availableCourses);
+      console.log('Course ID mapping:', courseIDMap);
+    } else {
+      throw new Error(result.message || 'Backend error');
     }
     
     populateCourseDropdown();
-    console.log(`Found ${availableCourses.length} courses in spreadsheet`);
+    console.log(`Found ${availableCourses.length} courses from backend`);
   } catch (error) {
     console.error('Error fetching courses:', error);
     
     // Use default courses if fetch fails
-    console.log('Using default courses due to error');
     availableCourses = [];
     courseIDMap = {};
     sheetNameMap = {};
@@ -2885,7 +2787,6 @@ async function fetchAvailableCourses() {
     throw error;
   }
 }
-
 
 /**
  * Get the EIS ID for the current course
@@ -2906,45 +2807,31 @@ async function fetchLogsFromSheet() {
   }
 
   try {
-    // Get the actual sheet name to use (might be different from display name)
-    const sheetName = getSheetNameForCourse(currentCourse);
+    const fetchUrl = `${BACKEND_URL}?action=getLogs&course=${encodeURIComponent(currentCourse)}`;
+    console.log(`Fetching logs from backend: ${fetchUrl}`);
     
-    // Format the sheet name for the API request
-    const formattedSheetName = formatSheetName(sheetName);
-    const range = `${formattedSheetName}!A2:D`;
+    const response = await fetch(fetchUrl);
     
-    console.log(`Fetching logs from sheet: ${sheetName}, using range: ${range}`);
+    if (!response.ok) {
+      throw new Error(`Backend error! Status: ${response.status}`);
+    }
     
-    const response = await gapi.client.sheets.spreadsheets.values.get({
-      spreadsheetId: LOGS_SPREADSHEET_ID,
-      range: range,
-    });
+    const result = await response.json();
     
-    const rows = response.result.values || [];
-    const sheetLogs = [];
-    
-    rows.forEach(row => {
-      if (row.length >= 3) {
-        const uid = String(row[0]);
-        const timestamp = new Date(row[1]).getTime();
-        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
-        const manual = row.length >= 4 ? row[3] === 'true' : false;
-        
-        if (uid && !isNaN(timestamp)) {
-          sheetLogs.push({ uid, timestamp, id, manual });
-        }
-      }
-    });
-    
-    // Sort logs by timestamp (newest first)
-    sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
-    logs = sheetLogs;
-    
-    // Also save to localStorage as backup
-    saveLogsToLocalStorage();
-    
-    console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
-    return true;
+    if (result.success) {
+      logs = result.logs || [];
+      
+      // Sort logs by timestamp (newest first)
+      logs.sort((a, b) => b.timestamp - a.timestamp);
+      
+      // Also save to localStorage as backup
+      saveLogsToLocalStorage();
+      
+      console.log(`Loaded ${logs.length} logs from ${currentCourse} from backend`);
+      return true;
+    } else {
+      throw new Error(result.message || 'Backend error');
+    }
   } catch (error) {
     console.error('Error fetching logs:', error);
     
@@ -2955,7 +2842,7 @@ async function fetchLogsFromSheet() {
     }
     
     if (!isInitializing) {
-      showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
+      showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from backend');
     }
     throw error;
   }
@@ -3000,7 +2887,7 @@ async function syncLogsWithSheet() {
   }
 
   try {
-    console.log("Starting sync with spreadsheet...");
+    console.log("Starting sync with backend...");
     // Show syncing indicator on the sync button
     const syncIcon = syncBtn.querySelector('i');
     if (syncIcon) {
@@ -3008,40 +2895,37 @@ async function syncLogsWithSheet() {
     }
     isSyncing = true;
     
-    // Get the actual sheet name
-    const sheetName = getSheetNameForCourse(currentCourse);
-    const formattedSheetName = formatSheetName(sheetName);
+    // Prepare the data for the backend
+    const data = {
+      action: 'syncLogs',
+      course: currentCourse,
+      logs: logs
+    };
     
-    // Prepare the data for the spreadsheet using the universal timestamp conversion.
-    const sheetData = logs.map(log => [
-      log.uid,
-      convertTimestampToLocalISOString(log.timestamp),
-      log.id,
-      log.manual ? 'true' : 'false'
-    ]);
+    console.log(`Syncing ${logs.length} logs to backend...`);
     
-    console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
-    
-    // Clear existing data in the target range
-    await gapi.client.sheets.spreadsheets.values.clear({
-      spreadsheetId: LOGS_SPREADSHEET_ID,
-      range: `${formattedSheetName}!A2:D`,
+    const response = await fetch(BACKEND_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
     });
     
-    // Write the new data if there is any
-    if (sheetData.length > 0) {
-      await gapi.client.sheets.spreadsheets.values.update({
-        spreadsheetId: LOGS_SPREADSHEET_ID,
-        range: `${formattedSheetName}!A2:D`,
-        valueInputOption: 'RAW',
-        resource: { values: sheetData }
-      });
+    if (!response.ok) {
+      throw new Error(`Backend error! Status: ${response.status}`);
     }
     
-    console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log(`Successfully synced ${logs.length} logs with ${currentCourse} to backend`);
+    } else {
+      throw new Error(result.message || 'Backend error');
+    }
   } catch (error) {
     console.error('Error syncing logs:', error);
-    showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+    showImprovedNotification('error', 'Sync Error', 'Failed to sync logs with backend');
     throw error;
   } finally {
     // Remove syncing indicator
@@ -3053,51 +2937,50 @@ async function syncLogsWithSheet() {
   }
 }
 
-	
+
 	/**
 	 * Sync database (UID-name map) to Google Sheets.
 	 */
 async function syncDatabaseToSheet() {
-// Only allow sync if the user is signed in as admin.
-if (!isSignedIn || !isAdmin || !isOnline) {
-	console.warn('Database sync aborted: Not signed in as admin or not online.');
-	return;
+  // Only allow sync if the user is signed in as admin.
+  if (!isSignedIn || !isAdmin || !isOnline) {
+    console.warn('Database sync aborted: Not signed in as admin or not online.');
+    return;
+  }
+
+  try {
+    const data = {
+      action: 'syncDatabase',
+      entries: uidToNameMap
+    };
+    
+    const response = await fetch(BACKEND_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Backend error! Status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log(`Synced ${Object.keys(uidToNameMap).length} database entries to backend`);
+    } else {
+      throw new Error(result.message || 'Backend error');
+    }
+  } catch (error) {
+    console.error('Error syncing database:', error);
+    showImprovedNotification('error', 'Sync Error', 'Failed to sync database with backend');
+    throw error;
+  }
 }
 
-try {
-	const entries = Object.entries(uidToNameMap);
-	// Format data as [Index, Name, UID]
-	const sheetData = entries.map(([uid, name], index) => [
-		index + 1,
-		name,
-		uid
-	]);
-	
-	// Clear existing data in the range
-	await gapi.client.sheets.spreadsheets.values.clear({
-		spreadsheetId: DATABASE_SPREADSHEET_ID,
-		range: 'Database!A2:C'
-	});
-	
-	// Write new data if there are entries
-	if (sheetData.length > 0) {
-		await gapi.client.sheets.spreadsheets.values.update({
-			spreadsheetId: DATABASE_SPREADSHEET_ID,
-			range: 'Database!A2:C',
-			valueInputOption: 'RAW',
-			resource: { values: sheetData }
-		});
-	}
-	
-	console.log(`Synced ${entries.length} database entries to sheet`);
-} catch (error) {
-	console.error('Error syncing database:', error);
-	showImprovedNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
-	throw error;
-}
-}
 
- 
 /**
  * Append a single log to Google Sheet (for immediate sync).
  */
@@ -3107,26 +2990,31 @@ async function appendLogToSheet(log) {
   }
 
   try {
-    // Get the actual sheet name
-    const sheetName = getSheetNameForCourse(currentCourse);
-    const formattedSheetName = formatSheetName(sheetName);
+    const data = {
+      action: 'appendLog',
+      course: currentCourse,
+      log: log
+    };
     
-    await gapi.client.sheets.spreadsheets.values.append({
-      spreadsheetId: LOGS_SPREADSHEET_ID,
-      range: `${formattedSheetName}!A2:D`,
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      resource: {
-        values: [[
-          log.uid,
-          new Date(log.timestamp).toISOString(),
-          log.id,
-          log.manual ? 'true' : 'false'
-        ]]
-      }
+    const response = await fetch(BACKEND_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
     });
     
-    console.log('Log appended to Google Sheet');
+    if (!response.ok) {
+      throw new Error(`Backend error! Status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log('Log appended to backend successfully');
+    } else {
+      throw new Error(result.message || 'Backend error');
+    }
   } catch (error) {
     console.error('Error appending log:', error);
     showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
@@ -3278,74 +3166,39 @@ if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the databas
  * @returns {Promise} A promise that resolves when course info is fetched
  */
 async function fetchCourseInfo() {
-    if (!isOnline || !isSignedIn) {
-        console.log("Not fetching course info: not signed in or offline");
-        return;
+  if (!isOnline || !isSignedIn) {
+    console.log("Not fetching course info: not signed in or offline");
+    return;
+  }
+  
+  try {
+    console.log("Fetching course info from backend...");
+    
+    const fetchUrl = `${BACKEND_URL}?action=getCourseInfo`;
+    const response = await fetch(fetchUrl);
+    
+    if (!response.ok) {
+      throw new Error(`Backend error! Status: ${response.status}`);
     }
     
-    try {
-        console.log("Fetching course info from spreadsheet...");
-        
-        // Check if the COURSE_INFO sheet exists
-        const spreadsheetResponse = await gapi.client.sheets.spreadsheets.get({
-            spreadsheetId: LOGS_SPREADSHEET_ID
-        });
-        
-        const sheets = spreadsheetResponse.result.sheets || [];
-        const hasInfoSheet = sheets.some(sheet => sheet.properties.title === 'COURSE_INFO');
-        
-        if (!hasInfoSheet) {
-            console.log("No COURSE_INFO sheet found");
-            return;
-        }
-        
-        // Fetch the course info data
-        const response = await gapi.client.sheets.spreadsheets.values.get({
-            spreadsheetId: LOGS_SPREADSHEET_ID,
-            range: 'COURSE_INFO!A2:G'
-        });
-        
-        const rows = response.result.values || [];
-        if (rows.length === 0) {
-            console.log("No course info data found");
-            return;
-        }
-        
-        // Initialize global courseInfoMap if it doesn't exist
-        if (!window.courseInfoMap) {
-            window.courseInfoMap = {};
-        }
-        
-        // Process the course info data
-        // Columns: A=Course, B=Start Date, C=End Date, D=Holiday Weeks, E=Default Hours, F=Default Category, G=EIS ID
-        rows.forEach(row => {
-            if (row.length < 4) return; // Skip incomplete rows
-            
-            const course = row[0];
-            if (!course) return;
-            
-            // Store in the global courseInfoMap - FIXED INDICES HERE
-            window.courseInfoMap[course] = {
-                start_date: row[1] || "",         // Column B - Start Date
-                end_date: row[2] || "",           // Column C - End Date
-                holiday_weeks: row[3] || "0",     // Column D - Holiday Weeks
-                default_hours: row[4] || "2",     // Column E - Default Hours
-                default_category: row[5] || "theory", // Column F - Default Category
-                eis_id: row[6] || ""              // Column G - EIS ID
-            };
-            
-            // If EIS ID is provided, update the courseIDMap
-            if (row[6]) {
-                if (!courseIDMap) courseIDMap = {};
-                courseIDMap[course] = row[6];     // Use EIS ID from column G
-            }
-        });
-        
-        console.log("Course info loaded successfully:", window.courseInfoMap);
-    } catch (error) {
-        console.error("Error fetching course info:", error);
+    const result = await response.json();
+    
+    if (result.success) {
+      // Initialize global courseInfoMap if it doesn't exist
+      if (!window.courseInfoMap) {
+        window.courseInfoMap = {};
+      }
+      
+      window.courseInfoMap = result.courseInfo || {};
+      console.log("Course info loaded successfully:", window.courseInfoMap);
+    } else {
+      throw new Error(result.message || 'Backend error');
     }
+  } catch (error) {
+    console.error("Error fetching course info:", error);
+  }
 }
+	
 	/**
 	 * Clear the entire database.
 	 */
