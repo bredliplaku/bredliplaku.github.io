@@ -1052,18 +1052,13 @@ body.is-admin td.admin-only {
     </div>
     
 <script>
-// Config
-const ADMIN_EMAILS = ['bplaku@epoka.edu.al', 'bredliplaku@gmail.com']; 
-const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com'; 
-const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
-const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
-const LOGS_STORAGE_KEY = 'attendance_logs';
-
-// Add this line - replace with your deployed script URL
-const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyiEF2nObu6Y-ogCpDV7odzoZDhVeEVg8RaVhL9MI8o3U2_imqekzvv7X_Li5WMJP6JXQ/exec'; 
-
-// Authentication scopes - simplified since we don't need direct spreadsheet access
-const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+	// Config
+	const ADMIN_EMAILS = ['bplaku@epoka.edu.al', 'bredliplaku@gmail.com']; // Add any admin emails here
+	const LOGS_STORAGE_KEY = 'attendance_logs';
+	const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzt1ofZ5wIq908cnnPiIoTxL6ngNUZ_1_vCRgHmGT_vCuquPYoQITsppBz0T0tMl9BRlg/exec';
+	
+	// Discovery docs and scopes for Google API
+	const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 	
 	// App state
 	let logs = [];
@@ -1898,61 +1893,35 @@ if (pendingNotifications.length > 0) {
 	 * Set up auth token client and event listeners for login/logout.
 	 */
 function initGoogleApi() {
-  console.log('Initializing Google Sign-In...');
-
-  try {
-    // Initialize the token client
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: handleTokenResponse
-    });
-
-    // Load the base GAPI client library
-    gapi.load('client', async () => {
-      console.log('GAPI client library loaded.');
-
-      // Check for saved token
-      const savedToken = localStorage.getItem('gapi_token');
-      if (savedToken) {
-        try {
-          const tokenObj = JSON.parse(savedToken);
-          gapi.client.setToken(tokenObj);
-          isSignedIn = true;
-
-          fetchUserInfo()
-            .then(() => {
-              isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-              updateAuthUI();
-              if (isOnline) {
-                fetchAvailableCourses().catch(err => console.error('Error:', err));
-                fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
-              }
-            })
-            .catch(e => {
-              console.error('Error fetching user info:', e);
-              isSignedIn = false;
-              isAdmin = false;
-              localStorage.removeItem('gapi_token');
-              gapi.client.setToken('');
-              updateAuthUI();
-            });
-        } catch (e) {
-          console.error('Error restoring token:', e);
-          isSignedIn = false;
-          localStorage.removeItem('gapi_token');
-          updateAuthUI();
-        }
-      } else {
+  console.log('Initializing API connection...');
+  
+  // Set default courses
+  availableCourses = [];
+  populateCourseDropdown();
+  
+  // Try to restore saved session
+  const savedToken = localStorage.getItem('access_token');
+  if (savedToken) {
+    // Fetch user info to validate token
+    fetchUserInfo()
+      .then(user => {
+        currentUser = user;
+        isAdmin = user.isAdmin;
+        isSignedIn = true;
         updateAuthUI();
+        
         if (isOnline) {
-          fetchAvailableCourses();
+          fetchAvailableCourses().catch(err => console.error('Error:', err));
+          fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
         }
-      }
-    });
-  } catch (error) {
-    console.error('Error initializing Google Sign-In:', error);
-    showImprovedNotification('error', 'API Error', 'Failed to initialize Google Sign-In.');
+      })
+      .catch(() => {
+        // Token invalid
+        localStorage.removeItem('access_token');
+        isSignedIn = false;
+        updateAuthUI();
+      });
+  } else {
     updateAuthUI();
   }
 }
@@ -2053,81 +2022,38 @@ try {
 	 * @returns {Promise} A promise that resolves when user info is fetched.
 	 */
 async function fetchUserInfo() {
-	try {
-		const tokenObj = gapi.client.getToken();
-		if (!tokenObj || !tokenObj.access_token) {
-			console.error('No valid token available');
-			throw new Error('No valid token available');
-		}
-		
-		console.log('Fetching user info with token:', tokenObj.access_token.substring(0, 10) + '...');
-		
-		const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-			headers: { 'Authorization': `Bearer ${tokenObj.access_token}` }
-		});
-		
-		if (!response.ok) {
-			console.error('Failed to fetch user info, status:', response.status);
-			throw new Error(`Failed to fetch user info: ${response.status} ${response.statusText}`);
-		}
-		
-		const userInfo = await response.json();
-		console.log('User info fetched successfully:', userInfo.email);
-		
-		currentUser = {
-			id: userInfo.sub,
-			name: userInfo.name || userInfo.email,
-			email: userInfo.email,
-			picture: userInfo.picture || 'https://via.placeholder.com/32'
-		};
-		
-		// Update user info in UI
-		userName.textContent = currentUser.name;
-		userAvatar.src = currentUser.picture;
-		
-		// Check if user is admin
-		isAdmin = ADMIN_EMAILS.includes(currentUser.email);
-		console.log('User is admin:', isAdmin);
-		
-		return currentUser;
-	} catch (error) {
-		console.error('Error fetching user info:', error);
-		showImprovedNotification('error', 'User Info Error', error.message || 'Failed to get user information');
-		throw error;
-	}
+  try {
+    const token = localStorage.getItem('access_token');
+    if (!token) throw new Error('No token available');
+    
+    const response = await fetch(`${BACKEND_URL}?action=getUserInfo`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (!response.ok) throw new Error('Failed to fetch user info');
+    
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
+    
+    return {
+      name: data.user.email.split('@')[0],
+      email: data.user.email,
+      picture: 'https://via.placeholder.com/32',
+      isAdmin: data.user.isAdmin
+    };
+  } catch (error) {
+    console.error('Error fetching user info:', error);
+    throw error;
+  }
 }
+
 
 	/**
 	 * Handle auth button click to sign in.
 	 */
-// Replace your handleAuthClick function with this updated version
-function handleAuthClick(e) {
-    if (e) e.preventDefault();
-    
-    console.log('Auth button clicked - redirecting to Google auth');
-    
-    // Show notification that we're redirecting
-    showImprovedNotification('info', 'Signing In', 'Redirecting to Google...');
-    
-    // Get the exact current URL as redirect URI (very important!)
-    const redirectUri = window.location.origin + window.location.pathname;
-    console.log('Using redirect URI:', redirectUri);
-    
-    // Create Google OAuth URL with scopes
-    const scopes = encodeURIComponent('openid email profile https://www.googleapis.com/auth/spreadsheets');
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-                    `client_id=${CLIENT_ID}&` +
-                    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-                    `response_type=token&` +
-                    `scope=${scopes}`;
-    
-    console.log('Auth URL:', authUrl);
-    
-    // Add a small delay before redirecting to ensure the notification is displayed
-    setTimeout(() => {
-        // Redirect to Google login
-        window.location.href = authUrl;
-    }, 100);
+function handleAuthClick() {
+  // Redirect to backend OAuth flow
+  window.location.href = `${BACKEND_URL}?action=authorize&redirect_uri=${encodeURIComponent(window.location.href)}`;
 }
 
 /**
@@ -2204,46 +2130,15 @@ function getSuggestedDate(metadata) {
 }
 	
 function handleSignoutClick() {
-try {
-	const token = gapi.client.getToken();
-	if (token !== null) {
-		console.log('Revoking token and signing out');
-		google.accounts.oauth2.revoke(token.access_token, () => {
-			gapi.client.setToken('');
-			localStorage.removeItem('gapi_token');
-			isSignedIn = false;
-			isAdmin = false;
-			currentUser = null;
-			updateAuthUI();
-			logs = [];
-			uidToNameMap = {};
-			updateUI();
-			showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
-		});
-	} else {
-		// If no token, just clear the UI state
-		console.log('No token to revoke, cleaning up state');
-		localStorage.removeItem('gapi_token');
-		isSignedIn = false;
-		isAdmin = false;
-		currentUser = null;
-		updateAuthUI();
-		logs = [];
-		uidToNameMap = {};
-		updateUI();
-	}
-} catch (error) {
-	console.error('Error during sign out:', error);
-	// Force sign-out even if there's an error
-	localStorage.removeItem('gapi_token');
-	isSignedIn = false;
-	isAdmin = false;
-	currentUser = null;
-	updateAuthUI();
-	logs = [];
-	uidToNameMap = {};
-	updateUI();
-}
+  localStorage.removeItem('access_token');
+  isSignedIn = false;
+  isAdmin = false;
+  currentUser = null;
+  updateAuthUI();
+  logs = [];
+  uidToNameMap = {};
+  updateUI();
+  showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
 }
 
 function updateAuthUI() {
@@ -2662,33 +2557,23 @@ async function syncData() {
 	 */
 async function fetchDatabaseFromSheet() {
   try {
-    const fetchUrl = `${BACKEND_URL}?action=getDatabaseEntries`;
-    const response = await fetch(fetchUrl);
+    const response = await fetch(`${BACKEND_URL}?action=getDatabase`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    });
     
-    if (!response.ok) {
-      throw new Error(`Backend error! Status: ${response.status}`);
-    }
+    if (!response.ok) throw new Error('Failed to fetch database');
     
-    const result = await response.json();
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
     
-    if (result.success) {
-      uidToNameMap = result.entries || {};
-      updateDatabaseStatus();
-      updateDatabaseList();
-      console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database from backend`);
-    } else {
-      throw new Error(result.message || 'Backend error');
-    }
+    uidToNameMap = data.database;
+    updateDatabaseStatus();
+    updateDatabaseList();
   } catch (error) {
     console.error('Error fetching database:', error);
-    // Only show error for admin users
-    if (!isInitializing && isAdmin) {
-      showImprovedNotification('error', 'Database Error', 'Failed to fetch database from backend');
-    }
     throw error;
   }
 }
-
 
 function updatePageTitle() {
 const titleElement = document.querySelector('h1');
@@ -2730,62 +2615,34 @@ function formatSheetName(sheetName) {
  */
 async function fetchAvailableCourses() {
   try {
-    console.log('Fetching available courses from backend...');
-    
-    if (!isOnline) {
-      console.log('Not online, using default courses');
+    if (!isOnline || !isSignedIn) {
       availableCourses = [];
-      courseIDMap = {};
-      sheetNameMap = {};
       populateCourseDropdown();
       return;
     }
     
-    const fetchUrl = `${BACKEND_URL}?action=getCourses`;
-    const response = await fetch(fetchUrl);
+    const response = await fetch(`${BACKEND_URL}?action=getCourses`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    });
     
-    if (!response.ok) {
-      throw new Error(`Backend error! Status: ${response.status}`);
-    }
+    if (!response.ok) throw new Error('Failed to fetch courses');
     
-    const result = await response.json();
-    console.log('Backend response (Courses):', result);
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
     
-    if (result.success) {
-      availableCourses = result.courses || [];
-      courseIDMap = {};
-      sheetNameMap = {};
-      
-      // Process course info if available
-      if (result.courseInfo) {
-        Object.entries(result.courseInfo).forEach(([course, info]) => {
-          if (info.eisId) {
-            courseIDMap[course] = info.eisId;
-          }
-        });
-      }
-      
-      console.log('Fetched courses from backend:', availableCourses);
-      console.log('Course ID mapping:', courseIDMap);
-    } else {
-      throw new Error(result.message || 'Backend error');
-    }
+    availableCourses = data.courses;
+    courseIDMap = data.courseIDMap || {};
+    sheetNameMap = data.sheetNameMap || {};
     
     populateCourseDropdown();
-    console.log(`Found ${availableCourses.length} courses from backend`);
   } catch (error) {
     console.error('Error fetching courses:', error);
-    
-    // Use default courses if fetch fails
     availableCourses = [];
-    courseIDMap = {};
-    sheetNameMap = {};
     populateCourseDropdown();
-    
-    showImprovedNotification('warning', 'Courses Warning', 'Using default course list');
     throw error;
   }
 }
+
 
 /**
  * Get the EIS ID for the current course
@@ -2802,30 +2659,27 @@ function getCurrentCourseEisId() {
  */
 async function fetchLogsFromSheet() {
   if (!currentCourse) return;
-
+  
   try {
-    // For reads, load from localStorage first
-    const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-    if (storedLogs) {
-      logs = JSON.parse(storedLogs);
-    } else {
-      logs = []; // Start with empty if nothing stored
-    }
+    const response = await fetch(`${BACKEND_URL}?action=getLogs&course=${encodeURIComponent(currentCourse)}`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    });
     
-    // Trigger background sync - just send the request, don't try to read response
-    fetch(`${BACKEND_URL}?action=getLogs&course=${encodeURIComponent(currentCourse)}`, {
-      mode: 'no-cors'
-    }).catch(err => console.log("Background sync error:", err));
+    if (!response.ok) throw new Error('Failed to fetch logs');
     
-    // Always update UI with what we have locally
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
+    
+    logs = data.logs;
+    saveLogsToLocalStorage();
+    
     return true;
   } catch (error) {
-    console.error('Error in fetchLogsFromSheet:', error);
-    return false;
+    console.error('Error fetching logs:', error);
+    throw error;
   }
 }
-
-
+	
 function mergeLogs(localLogs, remoteLogs) {
 const merged = {};
 // Add remote logs first.
@@ -2863,20 +2717,25 @@ async function syncLogsWithSheet() {
   if (!currentCourse || !isAdmin) return;
   
   try {
-    const data = { action: 'syncLogs', course: currentCourse, logs: logs };
-    
-    fetch(BACKEND_URL, {
+    const response = await fetch(`${BACKEND_URL}?action=syncLogs`, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(data)
+      headers: { 
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        course: currentCourse,
+        logs: logs
+      })
     });
     
-    console.log('Sync request sent');
-    return true;
+    if (!response.ok) throw new Error('Failed to sync logs');
+    
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
   } catch (error) {
-    console.error('Error initiating sync:', error);
-    return false;
+    console.error('Error syncing logs:', error);
+    throw error;
   }
 }
 
@@ -2884,46 +2743,31 @@ async function syncLogsWithSheet() {
 	 * Sync database (UID-name map) to Google Sheets.
 	 */
 async function syncDatabaseToSheet() {
-  // Only allow sync if the user is signed in as admin.
-  if (!isSignedIn || !isAdmin || !isOnline) {
-    console.warn('Database sync aborted: Not signed in as admin or not online.');
-    return;
-  }
-
+  if (!isSignedIn || !isAdmin || !isOnline) return;
+  
   try {
-    const data = {
-      action: 'syncDatabase',
-      entries: uidToNameMap
-    };
-    
-    const response = await fetch(BACKEND_URL, {
+    const response = await fetch(`${BACKEND_URL}?action=updateDatabase`, {
       method: 'POST',
-	  mode: 'no-cors',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
+      headers: { 
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify({
+        database: uidToNameMap
+      })
     });
     
-    if (!response.ok) {
-      throw new Error(`Backend error! Status: ${response.status}`);
-    }
+    if (!response.ok) throw new Error('Failed to sync database');
     
-    const result = await response.json();
-    
-    if (result.success) {
-      console.log(`Synced ${Object.keys(uidToNameMap).length} database entries to backend`);
-    } else {
-      throw new Error(result.message || 'Backend error');
-    }
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
   } catch (error) {
     console.error('Error syncing database:', error);
-    showImprovedNotification('error', 'Sync Error', 'Failed to sync database with backend');
     throw error;
   }
 }
 
-
+ 
 /**
  * Append a single log to Google Sheet (for immediate sync).
  */
@@ -2931,22 +2775,27 @@ async function appendLogToSheet(log) {
   if (!currentCourse || !isOnline || !isSignedIn) return;
   
   try {
-    const data = { action: 'appendLog', course: currentCourse, log: log };
-    
-    // Fire-and-forget approach - don't try to read response
-    fetch(BACKEND_URL, {
+    const response = await fetch(`${BACKEND_URL}?action=addLog`, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(data)
+      headers: { 
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        course: currentCourse,
+        log: log
+      })
     });
     
-    console.log('Log sync request sent');
+    if (!response.ok) throw new Error('Failed to append log');
+    
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
   } catch (error) {
-    console.error('Error initiating log sync:', error);
+    console.error('Error appending log:', error);
+    throw error;
   }
 }
-
 
 	/**
 	 * Update sort icons in the table headers.
@@ -3093,39 +2942,24 @@ if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the databas
  * @returns {Promise} A promise that resolves when course info is fetched
  */
 async function fetchCourseInfo() {
-  if (!isOnline || !isSignedIn) {
-    console.log("Not fetching course info: not signed in or offline");
-    return;
-  }
+  if (!isOnline || !isSignedIn) return;
   
   try {
-    console.log("Fetching course info from backend...");
+    const response = await fetch(`${BACKEND_URL}?action=getCourseInfo`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    });
     
-    const fetchUrl = `${BACKEND_URL}?action=getCourseInfo`;
-    const response = await fetch(fetchUrl);
+    if (!response.ok) throw new Error('Failed to fetch course info');
     
-    if (!response.ok) {
-      throw new Error(`Backend error! Status: ${response.status}`);
-    }
+    const data = await response.json();
+    if (data.status !== 'success') throw new Error(data.message);
     
-    const result = await response.json();
-    
-    if (result.success) {
-      // Initialize global courseInfoMap if it doesn't exist
-      if (!window.courseInfoMap) {
-        window.courseInfoMap = {};
-      }
-      
-      window.courseInfoMap = result.courseInfo || {};
-      console.log("Course info loaded successfully:", window.courseInfoMap);
-    } else {
-      throw new Error(result.message || 'Backend error');
-    }
+    window.courseInfoMap = data.courseInfoMap;
   } catch (error) {
-    console.error("Error fetching course info:", error);
+    console.error('Error fetching course info:', error);
+    throw error;
   }
 }
-	
 	/**
 	 * Clear the entire database.
 	 */
