@@ -1216,9 +1216,17 @@ function processPendingNotifications() {
  */
 function init() {
     isInitializing = true;
+    
+    // First check if this page load is an auth response
+    // If it is, it will handle the auth and reload the page
+    if (detectAndHandleAuthResponse()) {
+        return; // Stop initialization if this was an auth response
+    }
+    
+    // Then check for stored authentication
     checkStoredAuth();
     
-    // Update current year in footer
+    // Rest of your initialization code
     updateYear();
     
     // Set up online/offline listeners
@@ -1239,18 +1247,11 @@ function init() {
     }
     
     updateScanButtons();
-    updateAuthUI();
     
     // Set up event listeners
     setupEventListeners();
     
-    // If authenticated, fetch initial data
-    if (isSignedIn && isOnline) {
-        fetchAvailableCourses().catch(err => console.error('Error:', err));
-        fetchDatabaseFromScript().catch(err => console.error('Error:', err));
-    }
-    
-    // Show main content
+    // Show content after a reasonable timeout
     setTimeout(() => {
         showMainContent();
         isInitializing = false;
@@ -1482,19 +1483,22 @@ function updateAuthUI() {
 /**
  * Handle auth button click to sign in.
  */
-function handleAuthClick() {
-    // Just redirect directly to the script URL
-    // Google handles everything else
+function handleAuthClick(e) {
+    if (e) e.preventDefault();
+    
+    // Show notification
+    showImprovedNotification('info', 'Signing In', 'Redirecting to Google authentication...');
+    
+    // Redirect to Google auth via your script
     window.location.href = `${SCRIPT_URL}?action=getUserInfo`;
 }
-
 
 
 /**
  * Handle sign out
  */
 function handleSignoutClick() {
-    // Clear local storage
+    // Clear stored authentication
     localStorage.removeItem('attendance_user');
     
     // Reset state
@@ -1508,7 +1512,7 @@ function handleSignoutClick() {
     uidToNameMap = {};
     updateUI();
     
-    showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
+    showImprovedNotification('success', 'Signed Out', 'You have been successfully signed out');
 }
 
 /**
@@ -2626,6 +2630,35 @@ function editDatabaseEntry(uid) {
     showImprovedNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
 }
 
+function detectAndHandleAuthResponse() {
+    // Check if the page content appears to be JSON
+    const bodyText = document.body.innerText || '';
+    
+    if (bodyText.trim().startsWith('{') && bodyText.includes('"success":true')) {
+        try {
+            // Hide the loading spinner immediately
+            const loadingElement = document.getElementById('app-loading');
+            if (loadingElement) loadingElement.style.display = 'none';
+            
+            // Parse the JSON
+            const authData = JSON.parse(bodyText);
+            
+            if (authData.success && authData.data) {
+                // Store the user info in localStorage
+                localStorage.setItem('attendance_user', JSON.stringify(authData.data));
+                
+                // Reload the page to clear the JSON response
+                window.location.href = window.location.pathname;
+                return true;
+            }
+        } catch (e) {
+            console.error('Error parsing authentication response:', e);
+        }
+    }
+    
+    return false;
+}
+
 /**
  * Delete database entry.
  * @param {string} uid - The UID of the entry to delete.
@@ -2684,29 +2717,31 @@ function handleAuthResponse() {
 }
 
 function checkStoredAuth() {
-    // First check if this is a redirect with auth data
-    if (document.body.innerText.includes('"success":true')) {
-        handleAuthResponse();
-        return;
-    }
-    
-    // Then check for stored user data
     const storedUser = localStorage.getItem('attendance_user');
-    
     if (storedUser) {
         try {
+            // Parse the user data
             currentUser = JSON.parse(storedUser);
             isSignedIn = true;
-            isAdmin = currentUser.isAdmin;
+            isAdmin = currentUser.isAdmin === true;
             
-            console.log('Restored auth from storage:', currentUser);
+            console.log('Authenticated as:', currentUser.email, 'Admin:', isAdmin);
+            
+            // Update UI based on authentication
+            updateAuthUI();
+            
+            // Load initial data if online
+            if (isOnline) {
+                fetchAvailableCourses().catch(err => console.error('Error fetching courses:', err));
+                fetchDatabaseFromScript().catch(err => console.error('Error fetching database:', err));
+            }
+            
             return true;
         } catch (e) {
             console.error('Error parsing stored user:', e);
             localStorage.removeItem('attendance_user');
         }
     }
-    
     return false;
 }
 
