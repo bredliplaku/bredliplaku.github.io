@@ -2153,886 +2153,886 @@
         }
 
 
-/**
-* Get the EIS ID for the current course
-*/
-function getCurrentCourseEisId() {
-if (!currentCourse) return null;
-return courseIDMap[currentCourse] || null;
-}
-
-/**
-* Update online/offline status indicator.
-*/
-function updateOnlineStatus() {
-isOnline = navigator.onLine;
-console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
-
-const syncStatus = document.getElementById('sync-status');
-const syncText = document.getElementById('sync-text');
-const syncBtn = document.getElementById('sync-btn');
-
-if (!syncStatus || !syncText || !syncBtn) return;
-
-if (isOnline) {
-syncStatus.className = 'sync-status online';
-syncText.textContent = 'Online';
-// Only disable if not signed in or syncing in progress
-syncBtn.disabled = !isSignedIn || isSyncing;
-} else {
-syncStatus.className = 'sync-status offline';
-syncText.textContent = 'Offline';
-syncBtn.disabled = true;
-}
-
-// Ensure we show the button for admins regardless
-syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
-}
-
-/**
-* Sync all data with Apps Script backend
-*/
-async function syncData() {
-if (!isOnline || !isSignedIn || isSyncing) {
-return;
-}
-
-isSyncing = true;
-
-// Show syncing indicator
-const syncBtn = document.getElementById('sync-btn');
-const syncIcon = syncBtn ? syncBtn.querySelector('i') : null;
-if (syncIcon) {
-syncIcon.classList.add('fa-spin');
-}
-if (syncBtn) syncBtn.disabled = true;
-
-showImprovedNotification('info', 'Syncing', 'Syncing data with server...');
-
-try {
-// First sync database to get up-to-date UID-name mappings
-try {
-await fetchDatabaseFromScript();
-} catch (dbError) {
-console.error('Database sync error:', dbError);
-// Continue with logs sync even if database sync fails
-}
-
-// Fetch course info data
-try {
-await fetchCourseInfo();
-} catch (infoError) {
-console.error('Course info sync error:', infoError);
-// Continue with logs sync even if course info sync fails
-}
-
-// Then sync logs if a course is selected
-if (currentCourse && isAdmin) {
-await syncLogsWithScript();
-} else if (currentCourse) {
-await fetchLogsFromScript();
-} else if (availableCourses.length > 0) {
-// If no course selected but courses are available, select the first one
-currentCourse = availableCourses[0];
-const courseSelect = document.getElementById('course-select');
-if (courseSelect) courseSelect.value = currentCourse;
-await fetchLogsFromScript();
-}
-
-showImprovedNotification('success', 'Sync Complete', 'Data has been synced with server');
-} catch (error) {
-console.error('Sync error:', error);
-showImprovedNotification('error', 'Sync Failed', 'Failed to sync with server');
-} finally {
-isSyncing = false;
-
-if (syncIcon) {
-syncIcon.classList.remove('fa-spin');
-}
-
-if (syncBtn) syncBtn.disabled = !isSignedIn || !isOnline;
-updateUI();
-}
-}
-
-/**
-* Sync logs with Apps Script backend
-*/
-async function syncLogsWithScript() {
-if (!currentCourse || !isAdmin || !isOnline) {
-return false;
-}
-
-try {
-console.log("Starting sync with script...");
-
-// Show syncing indicator
-const syncBtn = document.getElementById('sync-btn');
-const syncIcon = syncBtn ? syncBtn.querySelector('i') : null;
-if (syncIcon) {
-syncIcon.classList.add('fa-spin');
-}
-isSyncing = true;
-
-// Format logs for sending
-const logsToSync = logs.map(log => ({
-uid: log.uid,
-timestamp: log.timestamp,
-id: log.id,
-manual: log.manual
-}));
-
-// Send logs to script
-const response = await fetch(`${SCRIPT_URL}?action=saveLogs&course=${encodeURIComponent(currentCourse)}`, {
-method: 'POST',
-headers: {
-'Content-Type': 'application/json'
-},
-body: JSON.stringify(logsToSync)
-});
-
-if (!response.ok) {
-throw new Error(`HTTP error: ${response.status}`);
-}
-
-const result = await response.json();
-
-if (!result.success) {
-throw new Error(result.error || 'Failed to sync logs');
-}
-
-console.log(`Successfully synced ${result.data.count} logs for ${currentCourse}`);
-return true;
-} catch (error) {
-console.error('Error syncing logs:', error);
-showImprovedNotification('error', 'Sync Error', 'Failed to sync logs');
-throw error;
-} finally {
-// Remove syncing indicator
-const syncBtn = document.getElementById('sync-btn');
-const syncIcon = syncBtn ? syncBtn.querySelector('i') : null;
-if (syncIcon) {
-syncIcon.classList.remove('fa-spin');
-}
-isSyncing = false;
-}
-}
-
-/**
-* Sync database with Apps Script backend
-*/
-async function syncDatabaseToScript() {
-if (!isAdmin || !isOnline) {
-console.warn('Database sync aborted: Not admin or not online');
-return false;
-}
-
-try {
-// Send database to script
-const response = await fetch(`${SCRIPT_URL}?action=saveDatabase`, {
-method: 'POST',
-headers: {
-'Content-Type': 'application/json'
-},
-body: JSON.stringify(uidToNameMap)
-});
-
-if (!response.ok) {
-throw new Error(`HTTP error: ${response.status}`);
-}
-
-const result = await response.json();
-
-if (!result.success) {
-throw new Error(result.error || 'Failed to sync database');
-}
-
-console.log(`Synced ${result.data.count} database entries`);
-return true;
-} catch (error) {
-console.error('Error syncing database:', error);
-showImprovedNotification('error', 'Sync Error', 'Failed to sync database');
-throw error;
-}
-}
-
-/**
-* Append a single log to Apps Script backend
-*/
-async function appendLogToScript(log) {
-if (!currentCourse || !isOnline) {
-return false;
-}
-
-try {
-const response = await fetch(`${SCRIPT_URL}?action=appendLog&course=${encodeURIComponent(currentCourse)}`, {
-method: 'POST',
-headers: {
-'Content-Type': 'application/json'
-},
-body: JSON.stringify(log)
-});
-
-if (!response.ok) {
-throw new Error(`HTTP error: ${response.status}`);
-}
-
-const result = await response.json();
-
-if (!result.success) {
-throw new Error(result.error || 'Failed to append log');
-}
-
-console.log('Log appended successfully');
-return true;
-} catch (error) {
-console.error('Error appending log:', error);
-showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately');
-return false;
-}
-}
-
-/**
-* Update the filtered and sorted logs list in the UI.
-*/
-function updateLogsList() {
-// If no course selected, show message
-if (!currentCourse) {
-const emptyLogs = document.getElementById('empty-logs');
-const filteredCount = document.getElementById('filtered-count');
-const logsTbody = document.getElementById('logs-tbody');
-
-if (emptyLogs) emptyLogs.style.display = 'block';
-if (filteredCount) filteredCount.textContent = '0';
-if (logsTbody) logsTbody.innerHTML = '';
-return;
-}
-
-// Filter logs based on search input
-const filter = document.getElementById('filter-input') ?
-document.getElementById('filter-input').value.toLowerCase() : '';
-
-const filteredLogs = filter
-? logs.filter(log => {
-// Match UID
-if (log.uid.toLowerCase().includes(filter)) {
-return true;
-}
-// Match name if in database
-const name = uidToNameMap[log.uid];
-if (name && name.toLowerCase().includes(filter)) {
-return true;
-}
-return false;
-})
-: logs;
-
-// Group logs by date and UID
-const grouped = {};
-
-filteredLogs.forEach(log => {
-// Get date object
-const dateObj = new Date(log.timestamp);
-
-if (isNaN(dateObj.getTime())) {
-console.warn('Invalid timestamp:', log.timestamp);
-return;
-}
-
-// Format date for display (DD-MM-YYYY)
-const day = String(dateObj.getDate()).padStart(2, '0');
-const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-const year = dateObj.getFullYear();
-const date = `${day}-${month}-${year}`;
-
-const uid = log.uid;
-const time = dateObj.toLocaleTimeString();
-const name = uidToNameMap[uid] || 'Unknown';
-
-// Create key for date and UID combination
-const key = `${date}_${uid}`;
-
-if (!grouped[key]) {
-grouped[key] = {
-date,
-dateObj: new Date(year, month - 1, day), // For sorting
-uid,
-name,
-times: [],
-timeObjs: [], // Store time objects for sorting
-originalLogs: [] // Store original log references for edit/delete
-};
-}
-
-grouped[key].times.push(time);
-grouped[key].timeObjs.push(dateObj.getTime());
-grouped[key].originalLogs.push(log);
-});
-
-// Convert to array
-let result = Object.values(grouped);
-
-// Apply sort based on currentSort value
-const sortSelect = document.getElementById('sort-select');
-const currentSort = sortSelect ? sortSelect.value : 'date-desc';
-const [field, direction] = currentSort.split('-');
-const sortMultiplier = direction === 'asc' ? 1 : -1;
-
-switch (field) {
-case 'date':
-// First sort by date
-result.sort((a, b) => sortMultiplier * (a.dateObj - b.dateObj));
-
-// Now group entries by date
-const dateGroups = {};
-result.forEach(entry => {
-const dateStr = entry.date;
-if (!dateGroups[dateStr]) {
-dateGroups[dateStr] = [];
-}
-dateGroups[dateStr].push(entry);
-});
-
-// Sort each date group by name or UID depending on user role
-Object.keys(dateGroups).forEach(dateStr => {
-if (isSignedIn && !isAdmin) {
-// For non-admin signed-in users, sort by name
-dateGroups[dateStr].sort((a, b) => a.name.localeCompare(b.name));
-} else if (!isSignedIn) {
-// For non-signed-in users, sort by UID
-dateGroups[dateStr].sort((a, b) => a.uid.localeCompare(b.uid));
-} else {
-// For admins, sort by name first, then by earliest time
-dateGroups[dateStr].sort((a, b) => {
-const nameCompare = a.name.localeCompare(b.name);
-if (nameCompare !== 0) return nameCompare;
-const aEarliestTime = Math.min(...a.timeObjs);
-const bEarliestTime = Math.min(...b.timeObjs);
-return aEarliestTime - bEarliestTime;
-});
-}
-});
-
-// Reconstruct result based on sorted dates
-result = [];
-const dates = Object.keys(dateGroups).sort((a, b) => {
-const dateA = new Date(a.split('-').reverse().join('-'));
-const dateB = new Date(b.split('-').reverse().join('-'));
-return sortMultiplier * (dateA - dateB);
-});
-
-dates.forEach(dateStr => {
-result = result.concat(dateGroups[dateStr]);
-});
-break;
-
-case 'name':
-result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
-break;
-case 'uid':
-result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
-break;
-default:
-result.sort((a, b) => -1 * (a.dateObj - b.dateObj));
-}
-
-// Update filtered count
-const filteredCount = document.getElementById('filtered-count');
-if (filteredCount) filteredCount.textContent = filteredLogs.length;
-
-// Show/hide empty message
-const emptyLogs = document.getElementById('empty-logs');
-if (emptyLogs) emptyLogs.style.display = filteredLogs.length > 0 ? 'none' : 'block';
-
-// Clear the table body
-const logsTbody = document.getElementById('logs-tbody');
-if (!logsTbody) return;
-logsTbody.innerHTML = '';
-
-// Track current day for separators
-let currentDay = null;
-
-// Add grouped logs to table with day separators
-result.forEach((group) => {
-// Check if we need to add a day separator
-if (currentSort.startsWith('date')) {
-const thisDay = group.date;
-if (thisDay !== currentDay) {
-currentDay = thisDay;
-// Show day separators for all signed-in users
-if (isSignedIn) {
-const separatorRow = document.createElement('tr');
-separatorRow.className = 'day-separator';
-const separatorCell = document.createElement('td');
-separatorCell.colSpan = isAdmin ? 5 : 3; // Different colspan for admin/non-admin
-separatorCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-separatorRow.appendChild(separatorCell);
-logsTbody.appendChild(separatorRow);
-}
-}
-}
-
-// Create log entry row
-const row = document.createElement('tr');
-
-if (!isSignedIn) {
-// For non-signed-in users, we only show UID and Time
-// UID cell
-const uidCell = document.createElement('td');
-uidCell.className = 'uid-cell uid-column';
-uidCell.textContent = group.uid;
-row.appendChild(uidCell);
-
-// Time cell
-const timesCell = document.createElement('td');
-timesCell.className = 'times-cell';
-const sortedIndices = group.timeObjs
-.map((timeObj, index) => ({ timeObj, index }))
-.sort((a, b) => a.timeObj - b.timeObj)
-.map(item => item.index);
-sortedIndices.forEach(index => {
-const timeTag = document.createElement('span');
-timeTag.className = 'time-tag';
-timeTag.textContent = group.times[index];
-timesCell.appendChild(timeTag);
-});
-row.appendChild(timesCell);
-
-logsTbody.appendChild(row);
-}
-else {
-// For signed-in users (both admin and non-admin)
-
-// Name cell - always visible for signed-in users
-const nameCell = document.createElement('td');
-nameCell.className = 'name-cell name-column';
-nameCell.textContent = group.name;
-if (group.originalLogs.some(log => log.manual)) {
-// Create the excused icon
-const excusedIcon = document.createElement('i');
-excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
-// Add click event listener to show a notification
-excusedIcon.addEventListener('click', function(e) {
-e.stopPropagation(); // Prevent event from bubbling up
-showImprovedNotification(
-'info',
-'Excused Absence',
-'This attendance record was <b>manually added</b> as an excused absence.'
-);
-});
-
-// Add the icon to the name cell
-nameCell.appendChild(document.createTextNode(' ')); // Add space
-nameCell.appendChild(excusedIcon);
-}
-row.appendChild(nameCell);
-
-// UID cell - only for admin
-if (isAdmin) {
-const uidCell = document.createElement('td');
-uidCell.className = 'uid-cell uid-column';
-uidCell.textContent = group.uid;
-row.appendChild(uidCell);
-
-// Date cell - only for admin
-const dateCell = document.createElement('td');
-dateCell.className = 'date-cell date-column';
-dateCell.textContent = group.date;
-row.appendChild(dateCell);
-}
-
-// Times cell
-const timesCell = document.createElement('td');
-timesCell.className = 'times-cell';
-const sortedIndices = group.timeObjs
-.map((timeObj, index) => ({ timeObj, index }))
-.sort((a, b) => a.timeObj - b.timeObj)
-.map(item => item.index);
-sortedIndices.forEach(index => {
-const timeTag = document.createElement('span');
-timeTag.className = 'time-tag';
-timeTag.textContent = group.times[index];
-timesCell.appendChild(timeTag);
-});
-row.appendChild(timesCell);
-
-// Actions cell for admin users only
-if (isAdmin) {
-const actionsCell = document.createElement('td');
-actionsCell.className = 'actions-cell';
-
-const editIcon = document.createElement('i');
-editIcon.className = 'fas fa-edit action-icon edit-icon';
-editIcon.title = 'Edit';
-editIcon.addEventListener('click', () => showEditLogDialog(group));
-
-const deleteIcon = document.createElement('i');
-deleteIcon.className = 'fas fa-trash-alt action-icon delete-icon';
-deleteIcon.title = 'Delete';
-deleteIcon.addEventListener('click', () => confirmDeleteLog(group));
-
-actionsCell.appendChild(editIcon);
-actionsCell.appendChild(deleteIcon);
-row.appendChild(actionsCell);
-}
-
-logsTbody.appendChild(row);
-}
-});
-}
-
-/**
-* Update database status indicator.
-*/
-function updateDatabaseStatus() {
-const databaseStatus = document.getElementById('database-status');
-if (!databaseStatus) return;
-
-const count = Object.keys(uidToNameMap).length;
-databaseStatus.textContent = count > 0 ? `${count} entries` : 'Not loaded';
-}
-
-/**
-* Update the database list in the UI.
-*/
-function updateDatabaseList() {
-const dbFilterInput = document.getElementById('db-filter-input');
-const dbFilter = dbFilterInput ? dbFilterInput.value.toLowerCase() : '';
-
-// Filter database entries
-const entries = Object.entries(uidToNameMap)
-.filter(([uid, name]) => {
-if (!dbFilter) return true;
-return (
-uid.toLowerCase().includes(dbFilter) ||
-name.toLowerCase().includes(dbFilter)
-);
-})
-.sort((a, b) => a[1].localeCompare(b[1])); // Sort by name
-
-// Update entry count
-const dbEntryCount = document.getElementById('db-entry-count');
-if (dbEntryCount) dbEntryCount.textContent = Object.keys(uidToNameMap).length;
-
-// Show/hide empty message
-const emptyDatabase = document.getElementById('empty-database');
-if (emptyDatabase) emptyDatabase.style.display = Object.keys(uidToNameMap).length > 0 ? 'none' : 'block';
-
-// Clear table
-const databaseTbody = document.getElementById('database-tbody');
-if (!databaseTbody) return;
-databaseTbody.innerHTML = '';
-
-// Add entries to table
-entries.forEach(([uid, name]) => {
-const row = document.createElement('tr');
-
-// Name cell
-const nameCell = document.createElement('td');
-nameCell.className = 'name-cell';
-nameCell.textContent = name;
-
-// UID cell
-const uidCell = document.createElement('td');
-uidCell.className = 'uid-cell';
-uidCell.textContent = uid;
-
-row.appendChild(nameCell);
-row.appendChild(uidCell);
-
-// Actions cell (admin only)
-if (isAdmin) {
-const actionsCell = document.createElement('td');
-actionsCell.className = 'actions-cell';
-
-// Edit button
-const editIcon = document.createElement('i');
-editIcon.className = 'fas fa-edit action-icon edit-icon';
-editIcon.title = 'Edit';
-editIcon.addEventListener('click', () => editDatabaseEntry(uid));
-
-// Delete button
-const deleteIcon = document.createElement('i');
-deleteIcon.className = 'fas fa-trash-alt action-icon delete-icon';
-deleteIcon.title = 'Delete';
-deleteIcon.addEventListener('click', () => deleteDatabaseEntry(uid));
-
-actionsCell.appendChild(editIcon);
-actionsCell.appendChild(deleteIcon);
-row.appendChild(actionsCell);
-}
-
-databaseTbody.appendChild(row);
-});
-}
-
-/**
-* Update sort icons in the table headers.
-*/
-function updateSortIcons() {
-// Reset all sort icons
-document.querySelectorAll('.sort-icon').forEach(icon => {
-icon.className = 'sort-icon fas fa-sort';
-});
-
-// Set sort icon for current sort field
-const sortSelect = document.getElementById('sort-select');
-const currentSort = sortSelect ? sortSelect.value : 'date-desc';
-const [field, direction] = currentSort.split('-');
-const header = document.querySelector(`.sortable[data-sort="${field}"]`);
-
-if (header) {
-const icon = header.querySelector('.sort-icon');
-if (icon) {
-icon.className = `sort-icon fas fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
-}
-}
-}
-
-/**
-* Handle filter input change for logs.
-*/
-function handleFilterChange() {
-updateLogsList();
-}
-
-/**
-* Handle sort dropdown change for logs.
-*/
-function handleSortChange() {
-updateSortIcons();
-updateLogsList();
-}
-
-/**
-* Handle filter input change for database.
-*/
-function handleDbFilterChange() {
-updateDatabaseList();
-}
-
-/**
-* Add new database entry.
-*/
-function showAddEntryDialog() {
-if (!isAdmin) return;
-
-// Prompt for UID and name
-const uid = prompt("Enter UID for new entry:");
-if (uid === null) return;
-
-const trimmedUid = uid.trim();
-if (!trimmedUid) {
-alert("UID cannot be empty.");
-return;
-}
-
-if (uidToNameMap[trimmedUid]) {
-alert("This UID already exists in the database.");
-return;
-}
-
-const name = prompt("Enter name for UID " + trimmedUid + ":");
-if (name === null) return;
-
-const trimmedName = name.trim();
-if (!trimmedName) {
-alert("Name cannot be empty.");
-return;
-}
-
-// Add to database
-uidToNameMap[trimmedUid] = trimmedName;
-
-// Sync to script if online
-if (isOnline && isSignedIn) {
-syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
-}
-
-updateUI();
-showImprovedNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
-}
-
-/**
-* Edit database entry (change name).
-* @param {string} uid - The UID of the entry to edit.
-*/
-function editDatabaseEntry(uid) {
-if (!isAdmin) return;
-
-const currentName = uidToNameMap[uid] || '';
-const newName = prompt(`Enter a new name for ${uid}:`, currentName);
-
-if (newName === null) return;
-
-const trimmed = newName.trim();
-if (!trimmed) {
-alert('Name cannot be empty.');
-return;
-}
-
-uidToNameMap[uid] = trimmed;
-
-// Sync to script if online
-if (isOnline && isSignedIn) {
-syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
-}
-
-updateUI();
-showImprovedNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
-}
-
-function detectAndHandleAuthResponse() {
-// Check if the page content appears to be JSON
-const bodyText = document.body.innerText || '';
-
-if (bodyText.trim().startsWith('{') && bodyText.includes('"success":true')) {
-try {
-// Hide the loading spinner immediately
-const loadingElement = document.getElementById('app-loading');
-if (loadingElement) loadingElement.style.display = 'none';
-
-// Parse the JSON
-const authData = JSON.parse(bodyText);
-
-if (authData.success && authData.data) {
-// Store the user info in localStorage
-localStorage.setItem('attendance_user', JSON.stringify(authData.data));
-
-// Reload the page to clear the JSON response
-window.location.href = window.location.pathname;
-return true;
-}
-} catch (e) {
-console.error('Error parsing authentication response:', e);
-}
-}
-
-return false;
-}
-
-/**
-* Delete database entry.
-* @param {string} uid - The UID of the entry to delete.
-*/
-function deleteDatabaseEntry(uid) {
-if (!isAdmin) return;
-
-const name = uidToNameMap[uid];
-if (!name) return;
-
-if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the database?`)) {
-delete uidToNameMap[uid];
-
-// Sync to script if online
-if (isOnline && isSignedIn) {
-syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
-}
-
-updateUI();
-showImprovedNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
-}
-}
-
-/**
-* New function to parse authentication response
-*/
-function handleAuthResponse() {
-// Check if we have a valid JSON response in the page
-const pageContent = document.body.innerText;
-
-if (pageContent && pageContent.includes('"success":true')) {
-try {
-// Parse the JSON response
-const response = JSON.parse(pageContent);
-
-if (response.success && response.data) {
-// Store user data
-localStorage.setItem('attendance_user', JSON.stringify(response.data));
-
-// Set up user session
-currentUser = response.data;
-isSignedIn = true;
-isAdmin = currentUser.isAdmin;
-
-// Alert user with success message
-alert(`Successfully signed in as ${currentUser.name}`);
-
-// Redirect back to app
-window.location.href = window.location.origin + window.location.pathname;
-return;
-}
-} catch (e) {
-console.error('Error parsing auth response:', e);
-}
-}
-}
-
-function checkStoredAuth() {
-const storedUser = localStorage.getItem('attendance_user');
-if (storedUser) {
-try {
-// Parse the user data
-currentUser = JSON.parse(storedUser);
-isSignedIn = true;
-isAdmin = currentUser.isAdmin === true;
-
-console.log('Authenticated as:', currentUser.email, 'Admin:', isAdmin);
-return true;
-} catch (e) {
-console.error('Error parsing stored user:', e);
-localStorage.removeItem('attendance_user');
-}
-}
-return false;
-}
-
-/**
-* Clear the entire database.
-*/
-function clearDatabase() {
-if (!isAdmin) return;
-
-if (confirm('Are you sure you want to clear the entire database? This will remove all UID-name mappings.')) {
-uidToNameMap = {};
-
-// Sync to script if online
-if (isOnline && isSignedIn) {
-syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
-}
-
-updateUI();
-showImprovedNotification('success', 'Database Cleared', 'All database entries have been removed.');
-}
-}
-
-/**
-* Show dialog to edit a log entry group.
-* @param {Object} group - The log group to edit.
-*/
-function showEditLogDialog(group) {
-if (!isAdmin) return;
-
-// Create dialog backdrop
-const dialogBackdrop = document.createElement('div');
-dialogBackdrop.className = 'dialog-backdrop';
-
-// Create dialog box
-const dialog = document.createElement('div');
-dialog.className = 'dialog';
-
-// Get date from first log in group
-const firstLog = group.originalLogs[0];
-const commonDateObj = new Date(firstLog.timestamp);
-const formattedDate = commonDateObj.toISOString().split('T')[0];
-
-// Create timestamp edit fields for each log in group
-let timestampFields = '';
-group.originalLogs.forEach((log, index) => {
-const timeObj = new Date(log.timestamp);
-const formattedTime = timeObj.toTimeString().split(' ')[0].substring(0, 5);
-
-timestampFields += `
+        /**
+        * Get the EIS ID for the current course
+        */
+        function getCurrentCourseEisId() {
+            if (!currentCourse) return null;
+            return courseIDMap[currentCourse] || null;
+        }
+
+        /**
+        * Update online/offline status indicator.
+        */
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
+
+            const syncStatus = document.getElementById('sync-status');
+            const syncText = document.getElementById('sync-text');
+            const syncBtn = document.getElementById('sync-btn');
+
+            if (!syncStatus || !syncText || !syncBtn) return;
+
+            if (isOnline) {
+                syncStatus.className = 'sync-status online';
+                syncText.textContent = 'Online';
+                // Only disable if not signed in or syncing in progress
+                syncBtn.disabled = !isSignedIn || isSyncing;
+            } else {
+                syncStatus.className = 'sync-status offline';
+                syncText.textContent = 'Offline';
+                syncBtn.disabled = true;
+            }
+
+            // Ensure we show the button for admins regardless
+            syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+        }
+
+        /**
+        * Sync all data with Apps Script backend
+        */
+        async function syncData() {
+            if (!isOnline || !isSignedIn || isSyncing) {
+                return;
+            }
+
+            isSyncing = true;
+
+            // Show syncing indicator
+            const syncBtn = document.getElementById('sync-btn');
+            const syncIcon = syncBtn ? syncBtn.querySelector('i') : null;
+            if (syncIcon) {
+                syncIcon.classList.add('fa-spin');
+            }
+            if (syncBtn) syncBtn.disabled = true;
+
+            showImprovedNotification('info', 'Syncing', 'Syncing data with server...');
+
+            try {
+                // First sync database to get up-to-date UID-name mappings
+                try {
+                    await fetchDatabaseFromScript();
+                } catch (dbError) {
+                    console.error('Database sync error:', dbError);
+                    // Continue with logs sync even if database sync fails
+                }
+
+                // Fetch course info data
+                try {
+                    await fetchCourseInfo();
+                } catch (infoError) {
+                    console.error('Course info sync error:', infoError);
+                    // Continue with logs sync even if course info sync fails
+                }
+
+                // Then sync logs if a course is selected
+                if (currentCourse && isAdmin) {
+                    await syncLogsWithScript();
+                } else if (currentCourse) {
+                    await fetchLogsFromScript();
+                } else if (availableCourses.length > 0) {
+                    // If no course selected but courses are available, select the first one
+                    currentCourse = availableCourses[0];
+                    const courseSelect = document.getElementById('course-select');
+                    if (courseSelect) courseSelect.value = currentCourse;
+                    await fetchLogsFromScript();
+                }
+
+                showImprovedNotification('success', 'Sync Complete', 'Data has been synced with server');
+            } catch (error) {
+                console.error('Sync error:', error);
+                showImprovedNotification('error', 'Sync Failed', 'Failed to sync with server');
+            } finally {
+                isSyncing = false;
+
+                if (syncIcon) {
+                    syncIcon.classList.remove('fa-spin');
+                }
+
+                if (syncBtn) syncBtn.disabled = !isSignedIn || !isOnline;
+                updateUI();
+            }
+        }
+
+        /**
+        * Sync logs with Apps Script backend
+        */
+        async function syncLogsWithScript() {
+            if (!currentCourse || !isAdmin || !isOnline) {
+                return false;
+            }
+
+            try {
+                console.log("Starting sync with script...");
+
+                // Show syncing indicator
+                const syncBtn = document.getElementById('sync-btn');
+                const syncIcon = syncBtn ? syncBtn.querySelector('i') : null;
+                if (syncIcon) {
+                    syncIcon.classList.add('fa-spin');
+                }
+                isSyncing = true;
+
+                // Format logs for sending
+                const logsToSync = logs.map(log => ({
+                    uid: log.uid,
+                    timestamp: log.timestamp,
+                    id: log.id,
+                    manual: log.manual
+                }));
+
+                // Send logs to script
+                const response = await fetch(`${SCRIPT_URL}?action=saveLogs&course=${encodeURIComponent(currentCourse)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(logsToSync)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to sync logs');
+                }
+
+                console.log(`Successfully synced ${result.data.count} logs for ${currentCourse}`);
+                return true;
+            } catch (error) {
+                console.error('Error syncing logs:', error);
+                showImprovedNotification('error', 'Sync Error', 'Failed to sync logs');
+                throw error;
+            } finally {
+                // Remove syncing indicator
+                const syncBtn = document.getElementById('sync-btn');
+                const syncIcon = syncBtn ? syncBtn.querySelector('i') : null;
+                if (syncIcon) {
+                    syncIcon.classList.remove('fa-spin');
+                }
+                isSyncing = false;
+            }
+        }
+
+        /**
+        * Sync database with Apps Script backend
+        */
+        async function syncDatabaseToScript() {
+            if (!isAdmin || !isOnline) {
+                console.warn('Database sync aborted: Not admin or not online');
+                return false;
+            }
+
+            try {
+                // Send database to script
+                const response = await fetch(`${SCRIPT_URL}?action=saveDatabase`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(uidToNameMap)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to sync database');
+                }
+
+                console.log(`Synced ${result.data.count} database entries`);
+                return true;
+            } catch (error) {
+                console.error('Error syncing database:', error);
+                showImprovedNotification('error', 'Sync Error', 'Failed to sync database');
+                throw error;
+            }
+        }
+
+        /**
+        * Append a single log to Apps Script backend
+        */
+        async function appendLogToScript(log) {
+            if (!currentCourse || !isOnline) {
+                return false;
+            }
+
+            try {
+                const response = await fetch(`${SCRIPT_URL}?action=appendLog&course=${encodeURIComponent(currentCourse)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(log)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to append log');
+                }
+
+                console.log('Log appended successfully');
+                return true;
+            } catch (error) {
+                console.error('Error appending log:', error);
+                showImprovedNotification('warning', 'Sync Warning', 'Failed to sync log immediately');
+                return false;
+            }
+        }
+
+        /**
+        * Update the filtered and sorted logs list in the UI.
+        */
+        function updateLogsList() {
+            // If no course selected, show message
+            if (!currentCourse) {
+                const emptyLogs = document.getElementById('empty-logs');
+                const filteredCount = document.getElementById('filtered-count');
+                const logsTbody = document.getElementById('logs-tbody');
+
+                if (emptyLogs) emptyLogs.style.display = 'block';
+                if (filteredCount) filteredCount.textContent = '0';
+                if (logsTbody) logsTbody.innerHTML = '';
+                return;
+            }
+
+            // Filter logs based on search input
+            const filter = document.getElementById('filter-input') ?
+                document.getElementById('filter-input').value.toLowerCase() : '';
+
+            const filteredLogs = filter
+                ? logs.filter(log => {
+                    // Match UID
+                    if (log.uid.toLowerCase().includes(filter)) {
+                        return true;
+                    }
+                    // Match name if in database
+                    const name = uidToNameMap[log.uid];
+                    if (name && name.toLowerCase().includes(filter)) {
+                        return true;
+                    }
+                    return false;
+                })
+                : logs;
+
+            // Group logs by date and UID
+            const grouped = {};
+
+            filteredLogs.forEach(log => {
+                // Get date object
+                const dateObj = new Date(log.timestamp);
+
+                if (isNaN(dateObj.getTime())) {
+                    console.warn('Invalid timestamp:', log.timestamp);
+                    return;
+                }
+
+                // Format date for display (DD-MM-YYYY)
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const year = dateObj.getFullYear();
+                const date = `${day}-${month}-${year}`;
+
+                const uid = log.uid;
+                const time = dateObj.toLocaleTimeString();
+                const name = uidToNameMap[uid] || 'Unknown';
+
+                // Create key for date and UID combination
+                const key = `${date}_${uid}`;
+
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        date,
+                        dateObj: new Date(year, month - 1, day), // For sorting
+                        uid,
+                        name,
+                        times: [],
+                        timeObjs: [], // Store time objects for sorting
+                        originalLogs: [] // Store original log references for edit/delete
+                    };
+                }
+
+                grouped[key].times.push(time);
+                grouped[key].timeObjs.push(dateObj.getTime());
+                grouped[key].originalLogs.push(log);
+            });
+
+            // Convert to array
+            let result = Object.values(grouped);
+
+            // Apply sort based on currentSort value
+            const sortSelect = document.getElementById('sort-select');
+            const currentSort = sortSelect ? sortSelect.value : 'date-desc';
+            const [field, direction] = currentSort.split('-');
+            const sortMultiplier = direction === 'asc' ? 1 : -1;
+
+            switch (field) {
+                case 'date':
+                    // First sort by date
+                    result.sort((a, b) => sortMultiplier * (a.dateObj - b.dateObj));
+
+                    // Now group entries by date
+                    const dateGroups = {};
+                    result.forEach(entry => {
+                        const dateStr = entry.date;
+                        if (!dateGroups[dateStr]) {
+                            dateGroups[dateStr] = [];
+                        }
+                        dateGroups[dateStr].push(entry);
+                    });
+
+                    // Sort each date group by name or UID depending on user role
+                    Object.keys(dateGroups).forEach(dateStr => {
+                        if (isSignedIn && !isAdmin) {
+                            // For non-admin signed-in users, sort by name
+                            dateGroups[dateStr].sort((a, b) => a.name.localeCompare(b.name));
+                        } else if (!isSignedIn) {
+                            // For non-signed-in users, sort by UID
+                            dateGroups[dateStr].sort((a, b) => a.uid.localeCompare(b.uid));
+                        } else {
+                            // For admins, sort by name first, then by earliest time
+                            dateGroups[dateStr].sort((a, b) => {
+                                const nameCompare = a.name.localeCompare(b.name);
+                                if (nameCompare !== 0) return nameCompare;
+                                const aEarliestTime = Math.min(...a.timeObjs);
+                                const bEarliestTime = Math.min(...b.timeObjs);
+                                return aEarliestTime - bEarliestTime;
+                            });
+                        }
+                    });
+
+                    // Reconstruct result based on sorted dates
+                    result = [];
+                    const dates = Object.keys(dateGroups).sort((a, b) => {
+                        const dateA = new Date(a.split('-').reverse().join('-'));
+                        const dateB = new Date(b.split('-').reverse().join('-'));
+                        return sortMultiplier * (dateA - dateB);
+                    });
+
+                    dates.forEach(dateStr => {
+                        result = result.concat(dateGroups[dateStr]);
+                    });
+                    break;
+
+                case 'name':
+                    result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
+                    break;
+                case 'uid':
+                    result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
+                    break;
+                default:
+                    result.sort((a, b) => -1 * (a.dateObj - b.dateObj));
+            }
+
+            // Update filtered count
+            const filteredCount = document.getElementById('filtered-count');
+            if (filteredCount) filteredCount.textContent = filteredLogs.length;
+
+            // Show/hide empty message
+            const emptyLogs = document.getElementById('empty-logs');
+            if (emptyLogs) emptyLogs.style.display = filteredLogs.length > 0 ? 'none' : 'block';
+
+            // Clear the table body
+            const logsTbody = document.getElementById('logs-tbody');
+            if (!logsTbody) return;
+            logsTbody.innerHTML = '';
+
+            // Track current day for separators
+            let currentDay = null;
+
+            // Add grouped logs to table with day separators
+            result.forEach((group) => {
+                // Check if we need to add a day separator
+                if (currentSort.startsWith('date')) {
+                    const thisDay = group.date;
+                    if (thisDay !== currentDay) {
+                        currentDay = thisDay;
+                        // Show day separators for all signed-in users
+                        if (isSignedIn) {
+                            const separatorRow = document.createElement('tr');
+                            separatorRow.className = 'day-separator';
+                            const separatorCell = document.createElement('td');
+                            separatorCell.colSpan = isAdmin ? 5 : 3; // Different colspan for admin/non-admin
+                            separatorCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                            separatorRow.appendChild(separatorCell);
+                            logsTbody.appendChild(separatorRow);
+                        }
+                    }
+                }
+
+                // Create log entry row
+                const row = document.createElement('tr');
+
+                if (!isSignedIn) {
+                    // For non-signed-in users, we only show UID and Time
+                    // UID cell
+                    const uidCell = document.createElement('td');
+                    uidCell.className = 'uid-cell uid-column';
+                    uidCell.textContent = group.uid;
+                    row.appendChild(uidCell);
+
+                    // Time cell
+                    const timesCell = document.createElement('td');
+                    timesCell.className = 'times-cell';
+                    const sortedIndices = group.timeObjs
+                        .map((timeObj, index) => ({ timeObj, index }))
+                        .sort((a, b) => a.timeObj - b.timeObj)
+                        .map(item => item.index);
+                    sortedIndices.forEach(index => {
+                        const timeTag = document.createElement('span');
+                        timeTag.className = 'time-tag';
+                        timeTag.textContent = group.times[index];
+                        timesCell.appendChild(timeTag);
+                    });
+                    row.appendChild(timesCell);
+
+                    logsTbody.appendChild(row);
+                }
+                else {
+                    // For signed-in users (both admin and non-admin)
+
+                    // Name cell - always visible for signed-in users
+                    const nameCell = document.createElement('td');
+                    nameCell.className = 'name-cell name-column';
+                    nameCell.textContent = group.name;
+                    if (group.originalLogs.some(log => log.manual)) {
+                        // Create the excused icon
+                        const excusedIcon = document.createElement('i');
+                        excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
+                        // Add click event listener to show a notification
+                        excusedIcon.addEventListener('click', function (e) {
+                            e.stopPropagation(); // Prevent event from bubbling up
+                            showImprovedNotification(
+                                'info',
+                                'Excused Absence',
+                                'This attendance record was <b>manually added</b> as an excused absence.'
+                            );
+                        });
+
+                        // Add the icon to the name cell
+                        nameCell.appendChild(document.createTextNode(' ')); // Add space
+                        nameCell.appendChild(excusedIcon);
+                    }
+                    row.appendChild(nameCell);
+
+                    // UID cell - only for admin
+                    if (isAdmin) {
+                        const uidCell = document.createElement('td');
+                        uidCell.className = 'uid-cell uid-column';
+                        uidCell.textContent = group.uid;
+                        row.appendChild(uidCell);
+
+                        // Date cell - only for admin
+                        const dateCell = document.createElement('td');
+                        dateCell.className = 'date-cell date-column';
+                        dateCell.textContent = group.date;
+                        row.appendChild(dateCell);
+                    }
+
+                    // Times cell
+                    const timesCell = document.createElement('td');
+                    timesCell.className = 'times-cell';
+                    const sortedIndices = group.timeObjs
+                        .map((timeObj, index) => ({ timeObj, index }))
+                        .sort((a, b) => a.timeObj - b.timeObj)
+                        .map(item => item.index);
+                    sortedIndices.forEach(index => {
+                        const timeTag = document.createElement('span');
+                        timeTag.className = 'time-tag';
+                        timeTag.textContent = group.times[index];
+                        timesCell.appendChild(timeTag);
+                    });
+                    row.appendChild(timesCell);
+
+                    // Actions cell for admin users only
+                    if (isAdmin) {
+                        const actionsCell = document.createElement('td');
+                        actionsCell.className = 'actions-cell';
+
+                        const editIcon = document.createElement('i');
+                        editIcon.className = 'fas fa-edit action-icon edit-icon';
+                        editIcon.title = 'Edit';
+                        editIcon.addEventListener('click', () => showEditLogDialog(group));
+
+                        const deleteIcon = document.createElement('i');
+                        deleteIcon.className = 'fas fa-trash-alt action-icon delete-icon';
+                        deleteIcon.title = 'Delete';
+                        deleteIcon.addEventListener('click', () => confirmDeleteLog(group));
+
+                        actionsCell.appendChild(editIcon);
+                        actionsCell.appendChild(deleteIcon);
+                        row.appendChild(actionsCell);
+                    }
+
+                    logsTbody.appendChild(row);
+                }
+            });
+        }
+
+        /**
+        * Update database status indicator.
+        */
+        function updateDatabaseStatus() {
+            const databaseStatus = document.getElementById('database-status');
+            if (!databaseStatus) return;
+
+            const count = Object.keys(uidToNameMap).length;
+            databaseStatus.textContent = count > 0 ? `${count} entries` : 'Not loaded';
+        }
+
+        /**
+        * Update the database list in the UI.
+        */
+        function updateDatabaseList() {
+            const dbFilterInput = document.getElementById('db-filter-input');
+            const dbFilter = dbFilterInput ? dbFilterInput.value.toLowerCase() : '';
+
+            // Filter database entries
+            const entries = Object.entries(uidToNameMap)
+                .filter(([uid, name]) => {
+                    if (!dbFilter) return true;
+                    return (
+                        uid.toLowerCase().includes(dbFilter) ||
+                        name.toLowerCase().includes(dbFilter)
+                    );
+                })
+                .sort((a, b) => a[1].localeCompare(b[1])); // Sort by name
+
+            // Update entry count
+            const dbEntryCount = document.getElementById('db-entry-count');
+            if (dbEntryCount) dbEntryCount.textContent = Object.keys(uidToNameMap).length;
+
+            // Show/hide empty message
+            const emptyDatabase = document.getElementById('empty-database');
+            if (emptyDatabase) emptyDatabase.style.display = Object.keys(uidToNameMap).length > 0 ? 'none' : 'block';
+
+            // Clear table
+            const databaseTbody = document.getElementById('database-tbody');
+            if (!databaseTbody) return;
+            databaseTbody.innerHTML = '';
+
+            // Add entries to table
+            entries.forEach(([uid, name]) => {
+                const row = document.createElement('tr');
+
+                // Name cell
+                const nameCell = document.createElement('td');
+                nameCell.className = 'name-cell';
+                nameCell.textContent = name;
+
+                // UID cell
+                const uidCell = document.createElement('td');
+                uidCell.className = 'uid-cell';
+                uidCell.textContent = uid;
+
+                row.appendChild(nameCell);
+                row.appendChild(uidCell);
+
+                // Actions cell (admin only)
+                if (isAdmin) {
+                    const actionsCell = document.createElement('td');
+                    actionsCell.className = 'actions-cell';
+
+                    // Edit button
+                    const editIcon = document.createElement('i');
+                    editIcon.className = 'fas fa-edit action-icon edit-icon';
+                    editIcon.title = 'Edit';
+                    editIcon.addEventListener('click', () => editDatabaseEntry(uid));
+
+                    // Delete button
+                    const deleteIcon = document.createElement('i');
+                    deleteIcon.className = 'fas fa-trash-alt action-icon delete-icon';
+                    deleteIcon.title = 'Delete';
+                    deleteIcon.addEventListener('click', () => deleteDatabaseEntry(uid));
+
+                    actionsCell.appendChild(editIcon);
+                    actionsCell.appendChild(deleteIcon);
+                    row.appendChild(actionsCell);
+                }
+
+                databaseTbody.appendChild(row);
+            });
+        }
+
+        /**
+        * Update sort icons in the table headers.
+        */
+        function updateSortIcons() {
+            // Reset all sort icons
+            document.querySelectorAll('.sort-icon').forEach(icon => {
+                icon.className = 'sort-icon fas fa-sort';
+            });
+
+            // Set sort icon for current sort field
+            const sortSelect = document.getElementById('sort-select');
+            const currentSort = sortSelect ? sortSelect.value : 'date-desc';
+            const [field, direction] = currentSort.split('-');
+            const header = document.querySelector(`.sortable[data-sort="${field}"]`);
+
+            if (header) {
+                const icon = header.querySelector('.sort-icon');
+                if (icon) {
+                    icon.className = `sort-icon fas fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
+                }
+            }
+        }
+
+        /**
+        * Handle filter input change for logs.
+        */
+        function handleFilterChange() {
+            updateLogsList();
+        }
+
+        /**
+        * Handle sort dropdown change for logs.
+        */
+        function handleSortChange() {
+            updateSortIcons();
+            updateLogsList();
+        }
+
+        /**
+        * Handle filter input change for database.
+        */
+        function handleDbFilterChange() {
+            updateDatabaseList();
+        }
+
+        /**
+        * Add new database entry.
+        */
+        function showAddEntryDialog() {
+            if (!isAdmin) return;
+
+            // Prompt for UID and name
+            const uid = prompt("Enter UID for new entry:");
+            if (uid === null) return;
+
+            const trimmedUid = uid.trim();
+            if (!trimmedUid) {
+                alert("UID cannot be empty.");
+                return;
+            }
+
+            if (uidToNameMap[trimmedUid]) {
+                alert("This UID already exists in the database.");
+                return;
+            }
+
+            const name = prompt("Enter name for UID " + trimmedUid + ":");
+            if (name === null) return;
+
+            const trimmedName = name.trim();
+            if (!trimmedName) {
+                alert("Name cannot be empty.");
+                return;
+            }
+
+            // Add to database
+            uidToNameMap[trimmedUid] = trimmedName;
+
+            // Sync to script if online
+            if (isOnline && isSignedIn) {
+                syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
+            }
+
+            updateUI();
+            showImprovedNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
+        }
+
+        /**
+        * Edit database entry (change name).
+        * @param {string} uid - The UID of the entry to edit.
+        */
+        function editDatabaseEntry(uid) {
+            if (!isAdmin) return;
+
+            const currentName = uidToNameMap[uid] || '';
+            const newName = prompt(`Enter a new name for ${uid}:`, currentName);
+
+            if (newName === null) return;
+
+            const trimmed = newName.trim();
+            if (!trimmed) {
+                alert('Name cannot be empty.');
+                return;
+            }
+
+            uidToNameMap[uid] = trimmed;
+
+            // Sync to script if online
+            if (isOnline && isSignedIn) {
+                syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
+            }
+
+            updateUI();
+            showImprovedNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
+        }
+
+        function detectAndHandleAuthResponse() {
+            // Check if the page content appears to be JSON
+            const bodyText = document.body.innerText || '';
+
+            if (bodyText.trim().startsWith('{') && bodyText.includes('"success":true')) {
+                try {
+                    // Hide the loading spinner immediately
+                    const loadingElement = document.getElementById('app-loading');
+                    if (loadingElement) loadingElement.style.display = 'none';
+
+                    // Parse the JSON
+                    const authData = JSON.parse(bodyText);
+
+                    if (authData.success && authData.data) {
+                        // Store the user info in localStorage
+                        localStorage.setItem('attendance_user', JSON.stringify(authData.data));
+
+                        // Reload the page to clear the JSON response
+                        window.location.href = window.location.pathname;
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Error parsing authentication response:', e);
+                }
+            }
+
+            return false;
+        }
+
+        /**
+        * Delete database entry.
+        * @param {string} uid - The UID of the entry to delete.
+        */
+        function deleteDatabaseEntry(uid) {
+            if (!isAdmin) return;
+
+            const name = uidToNameMap[uid];
+            if (!name) return;
+
+            if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the database?`)) {
+                delete uidToNameMap[uid];
+
+                // Sync to script if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
+                }
+
+                updateUI();
+                showImprovedNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
+            }
+        }
+
+        /**
+        * New function to parse authentication response
+        */
+        function handleAuthResponse() {
+            // Check if we have a valid JSON response in the page
+            const pageContent = document.body.innerText;
+
+            if (pageContent && pageContent.includes('"success":true')) {
+                try {
+                    // Parse the JSON response
+                    const response = JSON.parse(pageContent);
+
+                    if (response.success && response.data) {
+                        // Store user data
+                        localStorage.setItem('attendance_user', JSON.stringify(response.data));
+
+                        // Set up user session
+                        currentUser = response.data;
+                        isSignedIn = true;
+                        isAdmin = currentUser.isAdmin;
+
+                        // Alert user with success message
+                        alert(`Successfully signed in as ${currentUser.name}`);
+
+                        // Redirect back to app
+                        window.location.href = window.location.origin + window.location.pathname;
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Error parsing auth response:', e);
+                }
+            }
+        }
+
+        function checkStoredAuth() {
+            const storedUser = localStorage.getItem('attendance_user');
+            if (storedUser) {
+                try {
+                    // Parse the user data
+                    currentUser = JSON.parse(storedUser);
+                    isSignedIn = true;
+                    isAdmin = currentUser.isAdmin === true;
+
+                    console.log('Authenticated as:', currentUser.email, 'Admin:', isAdmin);
+                    return true;
+                } catch (e) {
+                    console.error('Error parsing stored user:', e);
+                    localStorage.removeItem('attendance_user');
+                }
+            }
+            return false;
+        }
+
+        /**
+        * Clear the entire database.
+        */
+        function clearDatabase() {
+            if (!isAdmin) return;
+
+            if (confirm('Are you sure you want to clear the entire database? This will remove all UID-name mappings.')) {
+                uidToNameMap = {};
+
+                // Sync to script if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
+                }
+
+                updateUI();
+                showImprovedNotification('success', 'Database Cleared', 'All database entries have been removed.');
+            }
+        }
+
+        /**
+        * Show dialog to edit a log entry group.
+        * @param {Object} group - The log group to edit.
+        */
+        function showEditLogDialog(group) {
+            if (!isAdmin) return;
+
+            // Create dialog backdrop
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+
+            // Get date from first log in group
+            const firstLog = group.originalLogs[0];
+            const commonDateObj = new Date(firstLog.timestamp);
+            const formattedDate = commonDateObj.toISOString().split('T')[0];
+
+            // Create timestamp edit fields for each log in group
+            let timestampFields = '';
+            group.originalLogs.forEach((log, index) => {
+                const timeObj = new Date(log.timestamp);
+                const formattedTime = timeObj.toTimeString().split(' ')[0].substring(0, 5);
+
+                timestampFields += `
 <div class="timestamp-edit-group" data-log-id="${log.id}">
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <h4>Timestamp ${index + 1}</h4>
@@ -3046,9 +3046,9 @@ timestampFields += `
     </div>
 </div>
 `;
-});
+            });
 
-dialog.innerHTML = `
+            dialog.innerHTML = `
 <h3 class="dialog-title">Edit Log Entry</h3>
 <div class="form-group">
     <label for="edit-name">Name:</label>
@@ -3072,9 +3072,9 @@ dialog.innerHTML = `
 </div>
 `;
 
-// Add some custom styling
-const style = document.createElement('style');
-style.textContent = `
+            // Add some custom styling
+            const style = document.createElement('style');
+            style.textContent = `
 .timestamp-edit-group {
 background-color: #f9f9f9;
 padding: 10px;
@@ -3091,196 +3091,201 @@ display: none;
 }
 `;
 
-dialog.appendChild(style);
-dialogBackdrop.appendChild(dialog);
-document.body.appendChild(dialogBackdrop);
+            dialog.appendChild(style);
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
 
-// Track logs to delete
-const logsToDelete = new Set();
+            // Track logs to delete
+            const logsToDelete = new Set();
 
-// Handle delete time buttons
-dialog.querySelectorAll('.delete-time-btn').forEach(btn => {
-btn.addEventListener('click', function() {
-const index = parseInt(this.getAttribute('data-index'));
-const logId = group.originalLogs[index].id;
-const timestampGroup = this.closest('.timestamp-edit-group');
+            // Handle delete time buttons
+            dialog.querySelectorAll('.delete-time-btn').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    const index = parseInt(this.getAttribute('data-index'));
+                    const logId = group.originalLogs[index].id;
+                    const timestampGroup = this.closest('.timestamp-edit-group');
 
-// Count visible timestamp groups (not deleted)
-const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)').length;
+                    // Count visible timestamp groups (not deleted)
+                    const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)').length;
 
-// Don't allow deleting the last timestamp
-if (visibleGroups <= 1) { showImprovedNotification('warning', 'Cannot Delete' , 'At least one timestamp must remain.' );
-    return; } // Mark for deletion logsToDelete.add(logId); timestampGroup.classList.add('deleted');
-    showImprovedNotification('info', 'Timestamp Marked for Deletion'
-    , 'The timestamp will be deleted when you save changes.' ); }); }); // Handle save button
-    document.getElementById('save-edit-log-btn').addEventListener('click', function() { const
-    newName=document.getElementById('edit-name').value.trim(); const newDate=document.getElementById('edit-date').value;
-    if (!newName) { alert('Name cannot be empty.'); return; } // Update name in database
-    uidToNameMap[group.uid]=newName; // Update each log in the group const
-    visibleGroups=dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)'); visibleGroups.forEach(groupElement=> {
-    const logId = groupElement.getAttribute('data-log-id');
-    const timeInput = groupElement.querySelector('.timestamp-time').value;
+                    // Don't allow deleting the last timestamp
+                    if (visibleGroups <= 1) {
+                        showImprovedNotification('warning', 'Cannot Delete', 'At least one timestamp must remain.');
+                        return;
+                    } // Mark for deletion logsToDelete.add(logId); timestampGroup.classList.add('deleted');
+                    showImprovedNotification('info', 'Timestamp Marked for Deletion'
+                        , 'The timestamp will be deleted when you save changes.');
+                });
+            }); // Handle save button
+            document.getElementById('save-edit-log-btn').addEventListener('click', function () {
+                const
+                newName = document.getElementById('edit-name').value.trim(); const newDate = document.getElementById('edit-date').value;
+                if (!newName) { alert('Name cannot be empty.'); return; } // Update name in database
+                uidToNameMap[group.uid] = newName; // Update each log in the group const
+                visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)'); visibleGroups.forEach(groupElement => {
+                    const logId = groupElement.getAttribute('data-log-id');
+                    const timeInput = groupElement.querySelector('.timestamp-time').value;
 
-    // Find the corresponding log
-    const log = logs.find(log => log.id === logId);
+                    // Find the corresponding log
+                    const log = logs.find(log => log.id === logId);
 
-    if (log) {
-    // Update timestamp with new date and time
-    const newTimestamp = new Date(`${newDate}T${timeInput}:00`);
-    log.timestamp = newTimestamp.getTime();
-    }
-    });
+                    if (log) {
+                        // Update timestamp with new date and time
+                        const newTimestamp = new Date(`${newDate}T${timeInput}:00`);
+                        log.timestamp = newTimestamp.getTime();
+                    }
+                });
 
-    // Remove logs marked for deletion
-    if (logsToDelete.size > 0) {
-    logs = logs.filter(log => !logsToDelete.has(log.id));
-    }
+                // Remove logs marked for deletion
+                if (logsToDelete.size > 0) {
+                    logs = logs.filter(log => !logsToDelete.has(log.id));
+                }
 
-    // Sort logs by timestamp
-    logs.sort((a, b) => b.timestamp - a.timestamp);
+                // Sort logs by timestamp
+                logs.sort((a, b) => b.timestamp - a.timestamp);
 
-    // Sync with script if online
-    if (isOnline && isSignedIn) {
-    Promise.all([
-    syncDatabaseToScript(),
-    syncLogsWithScript()
-    ]).catch(err => console.error('Error syncing after edit:', err));
-    }
+                // Sync with script if online
+                if (isOnline && isSignedIn) {
+                    Promise.all([
+                        syncDatabaseToScript(),
+                        syncLogsWithScript()
+                    ]).catch(err => console.error('Error syncing after edit:', err));
+                }
 
-    // Save to localStorage
-    saveLogsToLocalStorage();
+                // Save to localStorage
+                saveLogsToLocalStorage();
 
-    updateUI();
+                updateUI();
 
-    showImprovedNotification('success', 'Log Updated', 'Log entry has been updated successfully.');
-    document.body.removeChild(dialogBackdrop);
-    });
+                showImprovedNotification('success', 'Log Updated', 'Log entry has been updated successfully.');
+                document.body.removeChild(dialogBackdrop);
+            });
 
-    // Handle cancel button
-    document.getElementById('cancel-edit-log-btn').addEventListener('click', function() {
-    document.body.removeChild(dialogBackdrop);
-    });
-    }
+            // Handle cancel button
+            document.getElementById('cancel-edit-log-btn').addEventListener('click', function () {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
 
-    /**
-    * Delete a log group.
-    * @param {Object} group - The log group to delete.
-    */
-    function confirmDeleteLog(group) {
-    if (!isAdmin) return;
+        /**
+        * Delete a log group.
+        * @param {Object} group - The log group to delete.
+        */
+        function confirmDeleteLog(group) {
+            if (!isAdmin) return;
 
-    if (confirm(`Are you sure you want to delete all log entries for ${group.name} on ${group.date}?`)) {
-    // Get IDs of all logs in this group
-    const idsToRemove = group.originalLogs.map(log => log.id);
+            if (confirm(`Are you sure you want to delete all log entries for ${group.name} on ${group.date}?`)) {
+                // Get IDs of all logs in this group
+                const idsToRemove = group.originalLogs.map(log => log.id);
 
-    // First remove the logs locally
-    logs = logs.filter(log => !idsToRemove.includes(log.id));
+                // First remove the logs locally
+                logs = logs.filter(log => !idsToRemove.includes(log.id));
 
-    // Save to localStorage
-    saveLogsToLocalStorage();
+                // Save to localStorage
+                saveLogsToLocalStorage();
 
-    // Update UI immediately
-    updateUI();
+                // Update UI immediately
+                updateUI();
 
-    // Track deletion in progress to prevent refetching
-    const deletionInProgress = true;
+                // Track deletion in progress to prevent refetching
+                const deletionInProgress = true;
 
-    // Sync with script if online and admin
-    if (isOnline && isSignedIn && isAdmin) {
-    // Disable buttons during sync
-    const clearBtn = document.getElementById('clear-btn');
-    const exportBtn = document.getElementById('export-btn');
+                // Sync with script if online and admin
+                if (isOnline && isSignedIn && isAdmin) {
+                    // Disable buttons during sync
+                    const clearBtn = document.getElementById('clear-btn');
+                    const exportBtn = document.getElementById('export-btn');
 
-    if (clearBtn) clearBtn.disabled = true;
-    if (exportBtn) exportBtn.disabled = true;
+                    if (clearBtn) clearBtn.disabled = true;
+                    if (exportBtn) exportBtn.disabled = true;
 
-    syncLogsWithScript()
-    .then(() => {
-    showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
-    })
-    .catch(err => {
-    console.error('Error syncing after delete:', err);
-    showImprovedNotification('error', 'Sync Error', 'Changes saved locally but not synced to server');
-    })
-    .finally(() => {
-    // Re-enable buttons
-    if (clearBtn) clearBtn.disabled = logs.length === 0;
-    if (exportBtn) exportBtn.disabled = logs.length === 0;
-    });
-    } else {
-    showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
-    }
-    }
-    }
+                    syncLogsWithScript()
+                        .then(() => {
+                            showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
+                        })
+                        .catch(err => {
+                            console.error('Error syncing after delete:', err);
+                            showImprovedNotification('error', 'Sync Error', 'Changes saved locally but not synced to server');
+                        })
+                        .finally(() => {
+                            // Re-enable buttons
+                            if (clearBtn) clearBtn.disabled = logs.length === 0;
+                            if (exportBtn) exportBtn.disabled = logs.length === 0;
+                        });
+                } else {
+                    showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
+                }
+            }
+        }
 
-    /**
-    * Clear all logs.
-    */
-    function clearLogs() {
-    if (!isAdmin) return;
-    if (!confirm('Are you sure you want to delete ALL logs?')) return;
+        /**
+        * Clear all logs.
+        */
+        function clearLogs() {
+            if (!isAdmin) return;
+            if (!confirm('Are you sure you want to delete ALL logs?')) return;
 
-    // First clear logs locally
-    logs = [];
-    saveLogsToLocalStorage();
-    updateUI();
+            // First clear logs locally
+            logs = [];
+            saveLogsToLocalStorage();
+            updateUI();
 
-    if (isOnline && isSignedIn) {
-    // Disable buttons during sync
-    const clearBtn = document.getElementById('clear-btn');
-    const exportBtn = document.getElementById('export-btn');
+            if (isOnline && isSignedIn) {
+                // Disable buttons during sync
+                const clearBtn = document.getElementById('clear-btn');
+                const exportBtn = document.getElementById('export-btn');
 
-    if (clearBtn) clearBtn.disabled = true;
-    if (exportBtn) exportBtn.disabled = true;
+                if (clearBtn) clearBtn.disabled = true;
+                if (exportBtn) exportBtn.disabled = true;
 
-    syncLogsWithScript()
-    .then(() => {
-    showImprovedNotification('success', 'Logs Cleared', 'All logs have been removed.');
-    })
-    .catch(err => {
-    console.error('Error clearing logs:', err);
-    showImprovedNotification('error', 'Clear Error', 'Failed to remove logs from the server.');
-    })
-    .finally(() => {
-    // Force UI update again to ensure logs stay cleared
-    logs = [];
-    updateUI();
-    });
-    }
-    }
+                syncLogsWithScript()
+                    .then(() => {
+                        showImprovedNotification('success', 'Logs Cleared', 'All logs have been removed.');
+                    })
+                    .catch(err => {
+                        console.error('Error clearing logs:', err);
+                        showImprovedNotification('error', 'Clear Error', 'Failed to remove logs from the server.');
+                    })
+                    .finally(() => {
+                        // Force UI update again to ensure logs stay cleared
+                        logs = [];
+                        updateUI();
+                    });
+            }
+        }
 
-    /**
-    * Add manual log entry.
-    */
-    function showAddLogEntryDialog() {
-    if (!isAdmin) return;
+        /**
+        * Add manual log entry.
+        */
+        function showAddLogEntryDialog() {
+            if (!isAdmin) return;
 
-    if (!currentCourse) {
-    showImprovedNotification('warning', 'No Course Selected', 'Please select a course before adding a log entry');
-    return;
-    }
+            if (!currentCourse) {
+                showImprovedNotification('warning', 'No Course Selected', 'Please select a course before adding a log entry');
+                return;
+            }
 
-    // Create dialog for adding a manual log entry
-    const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+            // Create dialog for adding a manual log entry
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
 
-    const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
 
-    // Get current date and time for default values
-    const now = new Date();
-    const formattedDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
-    const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+            // Get current date and time for default values
+            const now = new Date();
+            const formattedDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+            const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
 
-    // Build options for known people from database
-    let nameOptions = '';
-    const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
+            // Build options for known people from database
+            let nameOptions = '';
+            const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
 
-    sortedEntries.forEach(([uid, name]) => {
-    nameOptions += `<option value="${uid}">${name} (${uid})</option>`;
-    });
+            sortedEntries.forEach(([uid, name]) => {
+                nameOptions += `<option value="${uid}">${name} (${uid})</option>`;
+            });
 
-    dialog.innerHTML = `
+            dialog.innerHTML = `
     <h3 class="dialog-title">Add Manual Log Entry</h3>
     <div class="form-group">
         <label for="manual-name">Person:</label>
@@ -3303,175 +3308,175 @@ if (visibleGroups <= 1) { showImprovedNotification('warning', 'Cannot Delete' , 
     </div>
     `;
 
-    dialogBackdrop.appendChild(dialog);
-    document.body.appendChild(dialogBackdrop);
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
 
-    // Handle save button
-    document.getElementById('save-manual-log-btn').addEventListener('click', function() {
-    const selectedUid = document.getElementById('manual-name').value;
-    const manualDate = document.getElementById('manual-date').value;
-    const manualTime = document.getElementById('manual-time').value;
+            // Handle save button
+            document.getElementById('save-manual-log-btn').addEventListener('click', function () {
+                const selectedUid = document.getElementById('manual-name').value;
+                const manualDate = document.getElementById('manual-date').value;
+                const manualTime = document.getElementById('manual-time').value;
 
-    if (!selectedUid) {
-    alert('Please select a person.');
-    return;
-    }
+                if (!selectedUid) {
+                    alert('Please select a person.');
+                    return;
+                }
 
-    if (!manualDate) {
-    alert('Please enter a date.');
-    return;
-    }
+                if (!manualDate) {
+                    alert('Please enter a date.');
+                    return;
+                }
 
-    if (!manualTime) {
-    alert('Please enter a time.');
-    return;
-    }
+                if (!manualTime) {
+                    alert('Please enter a time.');
+                    return;
+                }
 
-    // Create new log entry
-    const timestamp = new Date(`${manualDate}T${manualTime}:00`);
-    const newLog = {
-    uid: selectedUid,
-    timestamp: timestamp.getTime(),
-    id: Date.now() + Math.random().toString(36).substr(2, 9),
-    manual: true
-    };
+                // Create new log entry
+                const timestamp = new Date(`${manualDate}T${manualTime}:00`);
+                const newLog = {
+                    uid: selectedUid,
+                    timestamp: timestamp.getTime(),
+                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    manual: true
+                };
 
-    // Add to logs
-    logs.unshift(newLog);
+                // Add to logs
+                logs.unshift(newLog);
 
-    // Save to localStorage
-    saveLogsToLocalStorage();
+                // Save to localStorage
+                saveLogsToLocalStorage();
 
-    // Sync with script if online
-    if (isOnline && isSignedIn) {
-    appendLogToScript(newLog).catch(err => console.error('Error appending log:', err));
-    }
+                // Sync with script if online
+                if (isOnline && isSignedIn) {
+                    appendLogToScript(newLog).catch(err => console.error('Error appending log:', err));
+                }
 
-    updateUI();
+                updateUI();
 
-    const name = uidToNameMap[selectedUid] || 'Unknown';
-    showImprovedNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate}
+                const name = uidToNameMap[selectedUid] || 'Unknown';
+                showImprovedNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate}
     ${manualTime}`);
 
-    document.body.removeChild(dialogBackdrop);
-    });
+                document.body.removeChild(dialogBackdrop);
+            });
 
-    // Handle cancel button
-    document.getElementById('cancel-manual-btn').addEventListener('click', function() {
-    document.body.removeChild(dialogBackdrop);
-    });
-    }
+            // Handle cancel button
+            document.getElementById('cancel-manual-btn').addEventListener('click', function () {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
 
-    /**
-    * Export logs to JSON file.
-    */
-    function exportLogs() {
-    if (logs.length === 0) {
-    showImprovedNotification('warning', 'Export Failed', 'No logs to export');
-    return;
-    }
+        /**
+        * Export logs to JSON file.
+        */
+        function exportLogs() {
+            if (logs.length === 0) {
+                showImprovedNotification('warning', 'Export Failed', 'No logs to export');
+                return;
+            }
 
-    // Format timestamps for export
-    const exportData = logs.map(log => ({
-    ...log,
-    timestamp: new Date(log.timestamp).toISOString()
-    }));
+            // Format timestamps for export
+            const exportData = logs.map(log => ({
+                ...log,
+                timestamp: new Date(log.timestamp).toISOString()
+            }));
 
-    // Create download link
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `${currentCourse || 'attendance'}_logs.json`);
+            // Create download link
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `${currentCourse || 'attendance'}_logs.json`);
 
-    // Trigger download
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    document.body.removeChild(downloadAnchor);
+            // Trigger download
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            document.body.removeChild(downloadAnchor);
 
-    showImprovedNotification('success', 'Export Complete', 'Logs exported to JSON file');
-    }
+            showImprovedNotification('success', 'Export Complete', 'Logs exported to JSON file');
+        }
 
-    /**
-    * Handle file selection for logs JSON import.
-    * @param {Event} event - The change event from the file input.
-    */
-    function handleImportFile(event) {
-    if (!isAdmin) return;
+        /**
+        * Handle file selection for logs JSON import.
+        * @param {Event} event - The change event from the file input.
+        */
+        function handleImportFile(event) {
+            if (!isAdmin) return;
 
-    if (!currentCourse) {
-    showImprovedNotification('warning', 'No Course Selected', 'Please select a course before importing logs');
-    return;
-    }
+            if (!currentCourse) {
+                showImprovedNotification('warning', 'No Course Selected', 'Please select a course before importing logs');
+                return;
+            }
 
-    const file = event.target.files[0];
-    if (!file) return;
+            const file = event.target.files[0];
+            if (!file) return;
 
-    const reader = new FileReader();
+            const reader = new FileReader();
 
-    reader.onload = function(e) {
-    try {
-    const importedLogs = JSON.parse(e.target.result);
+            reader.onload = function (e) {
+                try {
+                    const importedLogs = JSON.parse(e.target.result);
 
-    if (!Array.isArray(importedLogs)) {
-    throw new Error('Invalid format: Logs must be an array');
-    }
+                    if (!Array.isArray(importedLogs)) {
+                        throw new Error('Invalid format: Logs must be an array');
+                    }
 
-    // Normalize timestamps to milliseconds and ensure IDs
-    importedLogs.forEach(log => {
-    if (log.timestamp) {
-    try {
-    log.timestamp = new Date(log.timestamp).getTime();
+                    // Normalize timestamps to milliseconds and ensure IDs
+                    importedLogs.forEach(log => {
+                        if (log.timestamp) {
+                            try {
+                                log.timestamp = new Date(log.timestamp).getTime();
 
-    if (isNaN(log.timestamp)) {
-    console.warn(`Invalid timestamp: ${log.timestamp}`);
-    log.timestamp = Date.now();
-    }
-    } catch (err) {
-    console.warn(`Error parsing timestamp: ${err}`);
-    log.timestamp = Date.now();
-    }
-    } else {
-    log.timestamp = Date.now();
-    }
+                                if (isNaN(log.timestamp)) {
+                                    console.warn(`Invalid timestamp: ${log.timestamp}`);
+                                    log.timestamp = Date.now();
+                                }
+                            } catch (err) {
+                                console.warn(`Error parsing timestamp: ${err}`);
+                                log.timestamp = Date.now();
+                            }
+                        } else {
+                            log.timestamp = Date.now();
+                        }
 
-    // Ensure each log has an ID
-    if (!log.id) {
-    log.id = Date.now() + Math.random().toString(36).substr(2, 9);
-    }
-    });
+                        // Ensure each log has an ID
+                        if (!log.id) {
+                            log.id = Date.now() + Math.random().toString(36).substr(2, 9);
+                        }
+                    });
 
-    // Show import dialog
-    showImportDialog(importedLogs);
-    } catch (error) {
-    showImprovedNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
-    console.error('Import error:', error);
-    }
-    };
+                    // Show import dialog
+                    showImportDialog(importedLogs);
+                } catch (error) {
+                    showImprovedNotification('error', 'Import Failed', 'The selected file is not a valid logs file.');
+                    console.error('Import error:', error);
+                }
+            };
 
-    reader.onerror = function() {
-    showImprovedNotification('error', 'Import Failed', 'Failed to read the file.');
-    };
+            reader.onerror = function () {
+                showImprovedNotification('error', 'Import Failed', 'Failed to read the file.');
+            };
 
-    reader.readAsText(file);
+            reader.readAsText(file);
 
-    // Reset the file input
-    event.target.value = '';
-    }
+            // Reset the file input
+            event.target.value = '';
+        }
 
-    /**
-    * Show import dialog for logs.
-    * @param {Array} importedLogs - The logs to import.
-    */
-    function showImportDialog(importedLogs) {
-    // Create dialog backdrop
-    const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+        /**
+        * Show import dialog for logs.
+        * @param {Array} importedLogs - The logs to import.
+        */
+        function showImportDialog(importedLogs) {
+            // Create dialog backdrop
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
 
-    // Create dialog box
-    const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+            // Create dialog box
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
 
-    dialog.innerHTML = `
+            dialog.innerHTML = `
     <h3 class="dialog-title">Import Logs</h3>
     <p>Imported ${importedLogs.length} log entries. How would you like to proceed?</p>
     <div class="dialog-actions">
@@ -3481,143 +3486,143 @@ if (visibleGroups <= 1) { showImprovedNotification('warning', 'Cannot Delete' , 
     </div>
     `;
 
-    dialogBackdrop.appendChild(dialog);
-    document.body.appendChild(dialogBackdrop);
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
 
-    // Merge option
-    document.getElementById('merge-logs-btn').addEventListener('click', () => {
-    // Create map of existing log IDs
-    const existingIds = new Set(logs.map(log => log.id));
+            // Merge option
+            document.getElementById('merge-logs-btn').addEventListener('click', () => {
+                // Create map of existing log IDs
+                const existingIds = new Set(logs.map(log => log.id));
 
-    // Add only new logs
-    let newCount = 0;
+                // Add only new logs
+                let newCount = 0;
 
-    importedLogs.forEach(log => {
-    if (!existingIds.has(log.id)) {
-    logs.push(log);
-    newCount++;
-    }
-    });
+                importedLogs.forEach(log => {
+                    if (!existingIds.has(log.id)) {
+                        logs.push(log);
+                        newCount++;
+                    }
+                });
 
-    // Sort logs by timestamp
-    logs.sort((a, b) => b.timestamp - a.timestamp);
+                // Sort logs by timestamp
+                logs.sort((a, b) => b.timestamp - a.timestamp);
 
-    // Save to localStorage
-    saveLogsToLocalStorage();
+                // Save to localStorage
+                saveLogsToLocalStorage();
 
-    // Sync with script if online
-    if (isOnline && isSignedIn) {
-    syncLogsWithScript().catch(err => console.error('Error syncing logs:', err));
-    }
+                // Sync with script if online
+                if (isOnline && isSignedIn) {
+                    syncLogsWithScript().catch(err => console.error('Error syncing logs:', err));
+                }
 
-    updateUI();
-    showImprovedNotification('success', 'Import Complete', `Added ${newCount} new log entries.`);
-    document.body.removeChild(dialogBackdrop);
-    });
+                updateUI();
+                showImprovedNotification('success', 'Import Complete', `Added ${newCount} new log entries.`);
+                document.body.removeChild(dialogBackdrop);
+            });
 
-    // Replace option
-    document.getElementById('replace-logs-btn').addEventListener('click', () => {
-    logs = [...importedLogs];
-    logs.sort((a, b) => b.timestamp - a.timestamp);
+            // Replace option
+            document.getElementById('replace-logs-btn').addEventListener('click', () => {
+                logs = [...importedLogs];
+                logs.sort((a, b) => b.timestamp - a.timestamp);
 
-    // Save to localStorage
-    saveLogsToLocalStorage();
+                // Save to localStorage
+                saveLogsToLocalStorage();
 
-    // Sync with script if online
-    if (isOnline && isSignedIn) {
-    syncLogsWithScript().catch(err => console.error('Error syncing logs:', err));
-    }
+                // Sync with script if online
+                if (isOnline && isSignedIn) {
+                    syncLogsWithScript().catch(err => console.error('Error syncing logs:', err));
+                }
 
-    updateUI();
-    showImprovedNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported
+                updateUI();
+                showImprovedNotification('success', 'Import Complete', `Replaced logs with ${importedLogs.length} imported
     entries.`);
-    document.body.removeChild(dialogBackdrop);
-    });
+                document.body.removeChild(dialogBackdrop);
+            });
 
-    // Cancel option
-    document.getElementById('cancel-import-btn').addEventListener('click', () => {
-    document.body.removeChild(dialogBackdrop);
-    });
-    }
+            // Cancel option
+            document.getElementById('cancel-import-btn').addEventListener('click', () => {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
 
-    /**
-    * Handle file selection for Excel import.
-    * @param {Event} event - The change event from the file input.
-    */
-    function handleExcelFile(event) {
-    if (!isAdmin) return;
+        /**
+        * Handle file selection for Excel import.
+        * @param {Event} event - The change event from the file input.
+        */
+        function handleExcelFile(event) {
+            if (!isAdmin) return;
 
-    const file = event.target.files[0];
-    if (!file) return;
+            const file = event.target.files[0];
+            if (!file) return;
 
-    const reader = new FileReader();
+            const reader = new FileReader();
 
-    reader.onload = function(e) {
-    try {
-    const data = new Uint8Array(e.target.result);
-    const workbook = XLSX.read(data, { type: 'array' });
+            reader.onload = function (e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
 
-    // Get the first sheet
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
+                    // Get the first sheet
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
 
-    // Convert to JSON
-    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                    // Convert to JSON
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-    // Extract UID-name mappings
-    const excelMappings = {};
+                    // Extract UID-name mappings
+                    const excelMappings = {};
 
-    jsonData.forEach(row => {
-    // Get first two columns (name and UID)
-    const keys = Object.keys(row);
+                    jsonData.forEach(row => {
+                        // Get first two columns (name and UID)
+                        const keys = Object.keys(row);
 
-    if (keys.length >= 2) {
-    const name = row[keys[0]];
-    const uid = String(row[keys[1]]);
+                        if (keys.length >= 2) {
+                            const name = row[keys[0]];
+                            const uid = String(row[keys[1]]);
 
-    if (name && uid) {
-    excelMappings[uid] = name;
-    }
-    }
-    });
+                            if (name && uid) {
+                                excelMappings[uid] = name;
+                            }
+                        }
+                    });
 
-    const excelCount = Object.keys(excelMappings).length;
+                    const excelCount = Object.keys(excelMappings).length;
 
-    if (excelCount === 0) {
-    showImprovedNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns.');
-    return;
-    }
+                    if (excelCount === 0) {
+                        showImprovedNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns.');
+                        return;
+                    }
 
-    // Show import dialog
-    showDatabaseImportDialog(excelMappings);
-    } catch (error) {
-    console.error('Excel import error:', error);
-    showImprovedNotification('error', 'Import Failed', 'Could not process the Excel file.');
-    }
-    };
+                    // Show import dialog
+                    showDatabaseImportDialog(excelMappings);
+                } catch (error) {
+                    console.error('Excel import error:', error);
+                    showImprovedNotification('error', 'Import Failed', 'Could not process the Excel file.');
+                }
+            };
 
-    reader.onerror = function() {
-    showImprovedNotification('error', 'Import Failed', 'Failed to read the Excel file.');
-    };
+            reader.onerror = function () {
+                showImprovedNotification('error', 'Import Failed', 'Failed to read the Excel file.');
+            };
 
-    reader.readAsArrayBuffer(file);
+            reader.readAsArrayBuffer(file);
 
-    // Reset the file input
-    event.target.value = '';
-    }
+            // Reset the file input
+            event.target.value = '';
+        }
 
-    /**
-    * Show import dialog for database Excel data.
-    * @param {Object} excelMappings - The UID-name mappings from Excel.
-    */
-    function showDatabaseImportDialog(excelMappings) {
-    const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+        /**
+        * Show import dialog for database Excel data.
+        * @param {Object} excelMappings - The UID-name mappings from Excel.
+        */
+        function showDatabaseImportDialog(excelMappings) {
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
 
-    const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
 
-    dialog.innerHTML = `
+            dialog.innerHTML = `
     <h3 class="dialog-title">Import UID Database</h3>
     <p>Found ${Object.keys(excelMappings).length} entries in the Excel file.</p>
     <p>How would you like to import them?</p>
@@ -3628,483 +3633,483 @@ if (visibleGroups <= 1) { showImprovedNotification('warning', 'Cannot Delete' , 
     </div>
     `;
 
-    dialogBackdrop.appendChild(dialog);
-    document.body.appendChild(dialogBackdrop);
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
 
-    // Merge option
-    document.getElementById('merge-db-btn').addEventListener('click', () => {
-    // Add new mappings without overwriting existing ones
-    let newCount = 0;
+            // Merge option
+            document.getElementById('merge-db-btn').addEventListener('click', () => {
+                // Add new mappings without overwriting existing ones
+                let newCount = 0;
 
-    for (const [uid, name] of Object.entries(excelMappings)) {
-    if (!uidToNameMap[uid]) {
-    uidToNameMap[uid] = name;
-    newCount++;
-    }
-    }
+                for (const [uid, name] of Object.entries(excelMappings)) {
+                    if (!uidToNameMap[uid]) {
+                        uidToNameMap[uid] = name;
+                        newCount++;
+                    }
+                }
 
-    // Sync to script if online
-    if (isOnline && isSignedIn) {
-    syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
-    }
+                // Sync to script if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
+                }
 
-    updateUI();
-    showImprovedNotification('success', 'Database Merged', `Added ${newCount} new entries to the database.`);
-    document.body.removeChild(dialogBackdrop);
-    });
+                updateUI();
+                showImprovedNotification('success', 'Database Merged', `Added ${newCount} new entries to the database.`);
+                document.body.removeChild(dialogBackdrop);
+            });
 
-    // Replace option
-    document.getElementById('replace-db-btn').addEventListener('click', () => {
-    uidToNameMap = { ...excelMappings };
+            // Replace option
+            document.getElementById('replace-db-btn').addEventListener('click', () => {
+                uidToNameMap = { ...excelMappings };
 
-    // Sync to script if online
-    if (isOnline && isSignedIn) {
-    syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
-    }
+                // Sync to script if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToScript().catch(err => console.error('Error syncing database:', err));
+                }
 
-    updateUI();
-    showImprovedNotification('success', 'Database Replaced', `Database now contains ${Object.keys(excelMappings).length}
+                updateUI();
+                showImprovedNotification('success', 'Database Replaced', `Database now contains ${Object.keys(excelMappings).length}
     entries from Excel.`);
-    document.body.removeChild(dialogBackdrop);
-    });
+                document.body.removeChild(dialogBackdrop);
+            });
 
-    // Cancel import
-    document.getElementById('cancel-db-import-btn').addEventListener('click', () => {
-    document.body.removeChild(dialogBackdrop);
-    });
-    }
+            // Cancel import
+            document.getElementById('cancel-db-import-btn').addEventListener('click', () => {
+                document.body.removeChild(dialogBackdrop);
+            });
+        }
 
-    /**
-    * Export database to Excel file.
-    */
-    function exportDatabaseToExcel() {
-    const entries = Object.entries(uidToNameMap);
+        /**
+        * Export database to Excel file.
+        */
+        function exportDatabaseToExcel() {
+            const entries = Object.entries(uidToNameMap);
 
-    if (entries.length === 0) {
-    showImprovedNotification('warning', 'Export Failed', 'No database entries to export');
-    return;
-    }
+            if (entries.length === 0) {
+                showImprovedNotification('warning', 'Export Failed', 'No database entries to export');
+                return;
+            }
 
-    // Create worksheet data
-    const wsData = [["Name", "UID"]]; // header
+            // Create worksheet data
+            const wsData = [["Name", "UID"]]; // header
 
-    entries.sort((a, b) => a[1].localeCompare(b[1])).forEach(([uid, name]) => {
-    wsData.push([name, uid]);
-    });
+            entries.sort((a, b) => a[1].localeCompare(b[1])).forEach(([uid, name]) => {
+                wsData.push([name, uid]);
+            });
 
-    // Create worksheet
-    const worksheet = XLSX.utils.aoa_to_sheet(wsData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Database");
+            // Create worksheet
+            const worksheet = XLSX.utils.aoa_to_sheet(wsData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Database");
 
-    // Generate Excel file
-    XLSX.writeFile(workbook, "uid_database.xlsx");
+            // Generate Excel file
+            XLSX.writeFile(workbook, "uid_database.xlsx");
 
-    showImprovedNotification('success', 'Export Complete', 'Database exported to Excel file');
-    }
+            showImprovedNotification('success', 'Export Complete', 'Database exported to Excel file');
+        }
 
-    /**
-    * Start NFC scanning.
-    */
-    async function startScanning() {
-    if (!nfcSupported) {
-    // Only show the notification if the user is on a mobile device.
-    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-    showImprovedNotification('error', 'NFC Not Supported', 'NFC scanning is only supported in Chrome on Android.');
-    }
-    return;
-    }
+        /**
+        * Start NFC scanning.
+        */
+        async function startScanning() {
+            if (!nfcSupported) {
+                // Only show the notification if the user is on a mobile device.
+                if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                    showImprovedNotification('error', 'NFC Not Supported', 'NFC scanning is only supported in Chrome on Android.');
+                }
+                return;
+            }
 
-    if (!currentCourse) {
-    showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
-    return;
-    }
+            if (!currentCourse) {
+                showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+                return;
+            }
 
-    try {
-    // Show scanning notification
-    showImprovedNotification('info', 'Starting scanner', 'Requesting permission to use NFC...');
+            try {
+                // Show scanning notification
+                showImprovedNotification('info', 'Starting scanner', 'Requesting permission to use NFC...');
 
-    // Create NFC reader
-    nfcReader = new NDEFReader();
+                // Create NFC reader
+                nfcReader = new NDEFReader();
 
-    // Request permission and start scan
-    nfcReader.scan().then(() => {
-    // Scan started successfully
-    isScanning = true;
-    updateScanButtons();
-    showImprovedNotification('success', 'Scanner active', 'Ready to scan NFC tags');
+                // Request permission and start scan
+                nfcReader.scan().then(() => {
+                    // Scan started successfully
+                    isScanning = true;
+                    updateScanButtons();
+                    showImprovedNotification('success', 'Scanner active', 'Ready to scan NFC tags');
 
-    // Set up event listeners
-    nfcReader.addEventListener("reading", handleNfcReading);
-    nfcReader.addEventListener("error", handleNfcError);
-    }).catch(error => {
-    handleScanningError(error);
-    });
-    } catch (error) {
-    handleScanningError(error);
-    }
-    }
+                    // Set up event listeners
+                    nfcReader.addEventListener("reading", handleNfcReading);
+                    nfcReader.addEventListener("error", handleNfcError);
+                }).catch(error => {
+                    handleScanningError(error);
+                });
+            } catch (error) {
+                handleScanningError(error);
+            }
+        }
 
-    /**
-    * Handle NFC scanning errors.
-    */
-    function handleScanningError(error) {
-    // Handle permission denied and other errors
-    let errorMessage = error.message;
-    let errorTitle = 'Scanner error';
+        /**
+        * Handle NFC scanning errors.
+        */
+        function handleScanningError(error) {
+            // Handle permission denied and other errors
+            let errorMessage = error.message;
+            let errorTitle = 'Scanner error';
 
-    if (error.name === 'NotAllowedError' || errorMessage.includes('permission')) {
-    errorTitle = 'Permission denied';
-    errorMessage = 'You need to grant permission to use NFC. Please try again.';
-    } else if (error.name === 'NotSupportedError') {
-    errorTitle = 'NFC not supported';
-    errorMessage = 'Your device doesn\'t support NFC or it\'s turned off.';
-    }
+            if (error.name === 'NotAllowedError' || errorMessage.includes('permission')) {
+                errorTitle = 'Permission denied';
+                errorMessage = 'You need to grant permission to use NFC. Please try again.';
+            } else if (error.name === 'NotSupportedError') {
+                errorTitle = 'NFC not supported';
+                errorMessage = 'Your device doesn\'t support NFC or it\'s turned off.';
+            }
 
-    showImprovedNotification('error', errorTitle, errorMessage);
-    stopScanning();
-    }
+            showImprovedNotification('error', errorTitle, errorMessage);
+            stopScanning();
+        }
 
-    /**
-    * Stop NFC scanning.
-    */
-    function stopScanning() {
-    isScanning = false;
-    updateScanButtons();
+        /**
+        * Stop NFC scanning.
+        */
+        function stopScanning() {
+            isScanning = false;
+            updateScanButtons();
 
-    // There's no official way to abort scanning, but we can remove the reader
-    if (nfcReader) {
-    nfcReader.removeEventListener("reading", handleNfcReading);
-    nfcReader.removeEventListener("error", handleNfcError);
-    nfcReader = null;
-    }
+            // There's no official way to abort scanning, but we can remove the reader
+            if (nfcReader) {
+                nfcReader.removeEventListener("reading", handleNfcReading);
+                nfcReader.removeEventListener("error", handleNfcError);
+                nfcReader = null;
+            }
 
-    showImprovedNotification('info', 'Scanner stopped', 'NFC scanning has been stopped.');
-    }
+            showImprovedNotification('info', 'Scanner stopped', 'NFC scanning has been stopped.');
+        }
 
-    /**
-    * Update scan buttons based on scanning state and user role.
-    */
-    function updateScanButtons() {
-    console.log('Updating scan buttons - NFC supported:', nfcSupported);
+        /**
+        * Update scan buttons based on scanning state and user role.
+        */
+        function updateScanButtons() {
+            console.log('Updating scan buttons - NFC supported:', nfcSupported);
 
-    // Get references to buttons to ensure we have the latest elements
-    const startScanBtn = document.getElementById('start-scan-btn');
-    const stopScanBtn = document.getElementById('stop-scan-btn');
+            // Get references to buttons to ensure we have the latest elements
+            const startScanBtn = document.getElementById('start-scan-btn');
+            const stopScanBtn = document.getElementById('stop-scan-btn');
 
-    if (!startScanBtn || !stopScanBtn) {
-    console.warn('Scan buttons not found in the DOM');
-    return;
-    }
+            if (!startScanBtn || !stopScanBtn) {
+                console.warn('Scan buttons not found in the DOM');
+                return;
+            }
 
-    // ALWAYS check NFC support first - this takes highest priority
-    if (!nfcSupported) {
-    console.log('NFC not supported - hiding all scan buttons');
-    startScanBtn.style.display = 'none';
-    stopScanBtn.style.display = 'none';
-    return; // Exit early!
-    }
+            // ALWAYS check NFC support first - this takes highest priority
+            if (!nfcSupported) {
+                console.log('NFC not supported - hiding all scan buttons');
+                startScanBtn.style.display = 'none';
+                stopScanBtn.style.display = 'none';
+                return; // Exit early!
+            }
 
-    // Only proceed if NFC is supported
-    console.log('NFC supported - updating buttons based on user role');
-    console.log('isSignedIn:', isSignedIn, 'isAdmin:', isAdmin, 'isScanning:', isScanning);
+            // Only proceed if NFC is supported
+            console.log('NFC supported - updating buttons based on user role');
+            console.log('isSignedIn:', isSignedIn, 'isAdmin:', isAdmin, 'isScanning:', isScanning);
 
-    if (isScanning) {
-    // When scanning, only show stop button
-    startScanBtn.style.display = 'none';
-    stopScanBtn.style.display = 'flex';
-    } else {
-    // Only show START button for non-signed-in users OR admin users
-    if (!isSignedIn || (isSignedIn && isAdmin)) {
-    startScanBtn.style.display = 'flex';
-    } else {
-    startScanBtn.style.display = 'none';
-    }
-    stopScanBtn.style.display = 'none';
-    }
-    }
+            if (isScanning) {
+                // When scanning, only show stop button
+                startScanBtn.style.display = 'none';
+                stopScanBtn.style.display = 'flex';
+            } else {
+                // Only show START button for non-signed-in users OR admin users
+                if (!isSignedIn || (isSignedIn && isAdmin)) {
+                    startScanBtn.style.display = 'flex';
+                } else {
+                    startScanBtn.style.display = 'none';
+                }
+                stopScanBtn.style.display = 'none';
+            }
+        }
 
-    /**
-    * Handle NFC reading.
-    * @param {Object} event - The NFC reading event.
-    */
-    async function handleNfcReading({ serialNumber }) {
-    lastScannedUID = serialNumber;
+        /**
+        * Handle NFC reading.
+        * @param {Object} event - The NFC reading event.
+        */
+        async function handleNfcReading({ serialNumber }) {
+            lastScannedUID = serialNumber;
 
-    // For non-signed-in users, only show UID without saving anything
-    if (!isSignedIn) {
-    // Play success sound
-    playSound(true);
+            // For non-signed-in users, only show UID without saving anything
+            if (!isSignedIn) {
+                // Play success sound
+                playSound(true);
 
-    // Update the welcome message to show the UID
-    let notSignedInMsg = document.getElementById('not-signed-in-message');
-    if (notSignedInMsg) {
-    notSignedInMsg.innerHTML = `
+                // Update the welcome message to show the UID
+                let notSignedInMsg = document.getElementById('not-signed-in-message');
+                if (notSignedInMsg) {
+                    notSignedInMsg.innerHTML = `
     <h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
     <h2 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h2>
     `;
-    }
-    return;
-    }
+                }
+                return;
+            }
 
-    // Standard flow for signed-in users
-    if (!currentCourse) {
-    showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
-    return;
-    }
+            // Standard flow for signed-in users
+            if (!currentCourse) {
+                showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
+                return;
+            }
 
-    // Create log entry
-    const timestamp = new Date();
-    const newLog = {
-    uid: serialNumber,
-    timestamp: timestamp.getTime(),
-    id: Date.now() + Math.random().toString(36).substr(2, 9),
-    manual: false
-    };
+            // Create log entry
+            const timestamp = new Date();
+            const newLog = {
+                uid: serialNumber,
+                timestamp: timestamp.getTime(),
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                manual: false
+            };
 
-    // Add to logs
-    logs.unshift(newLog);
+            // Add to logs
+            logs.unshift(newLog);
 
-    // Save to localStorage
-    saveLogsToLocalStorage();
+            // Save to localStorage
+            saveLogsToLocalStorage();
 
-    // Update UI
-    updateUI();
+            // Update UI
+            updateUI();
 
-    // Determine name for notification
-    const name = uidToNameMap[serialNumber] || 'Unknown';
+            // Determine name for notification
+            const name = uidToNameMap[serialNumber] || 'Unknown';
 
-    // Play success sound
-    playSound(true);
+            // Play success sound
+            playSound(true);
 
-    // Create welcome banner for admin users only
-    if (isAdmin) {
-    // Create or get the welcome message element
-    let adminWelcomeMsg = document.getElementById('admin-welcome-message');
-    if (!adminWelcomeMsg) {
-    adminWelcomeMsg = document.createElement('div');
-    adminWelcomeMsg.id = 'admin-welcome-message';
-    adminWelcomeMsg.className = 'not-signed-in-message'; // Using same style class
+            // Create welcome banner for admin users only
+            if (isAdmin) {
+                // Create or get the welcome message element
+                let adminWelcomeMsg = document.getElementById('admin-welcome-message');
+                if (!adminWelcomeMsg) {
+                    adminWelcomeMsg = document.createElement('div');
+                    adminWelcomeMsg.id = 'admin-welcome-message';
+                    adminWelcomeMsg.className = 'not-signed-in-message'; // Using same style class
 
-    // Insert after the course buttons container
-    const courseButtonsContainer = document.getElementById('course-buttons-container');
-    if (courseButtonsContainer && courseButtonsContainer.nextSibling) {
-    courseButtonsContainer.parentNode.insertBefore(adminWelcomeMsg, courseButtonsContainer.nextSibling);
-    } else {
-    // Fallback - after header
-    const appHeader = document.querySelector('.app-header');
-    if (appHeader) {
-    appHeader.parentNode.insertBefore(adminWelcomeMsg, appHeader.nextSibling);
-    }
-    }
-    }
+                    // Insert after the course buttons container
+                    const courseButtonsContainer = document.getElementById('course-buttons-container');
+                    if (courseButtonsContainer && courseButtonsContainer.nextSibling) {
+                        courseButtonsContainer.parentNode.insertBefore(adminWelcomeMsg, courseButtonsContainer.nextSibling);
+                    } else {
+                        // Fallback - after header
+                        const appHeader = document.querySelector('.app-header');
+                        if (appHeader) {
+                            appHeader.parentNode.insertBefore(adminWelcomeMsg, appHeader.nextSibling);
+                        }
+                    }
+                }
 
-    // Update the admin welcome message with the name
-    adminWelcomeMsg.innerHTML = `
+                // Update the admin welcome message with the name
+                adminWelcomeMsg.innerHTML = `
     <h3><i class="fas fa-check-circle"></i> Welcome<br></h3>
     <h2 style="margin-top: 10px; font-weight: bold;"> ${name}!</h2>
     <h3>Your attendance has been recorded.</h3>
     `;
 
-    // Add CSS to make message appear with animation
-    adminWelcomeMsg.style.animation = 'none';
-    adminWelcomeMsg.offsetHeight; // Trigger reflow
-    adminWelcomeMsg.style.animation = 'fadeIn 0.5s ease-in-out';
+                // Add CSS to make message appear with animation
+                adminWelcomeMsg.style.animation = 'none';
+                adminWelcomeMsg.offsetHeight; // Trigger reflow
+                adminWelcomeMsg.style.animation = 'fadeIn 0.5s ease-in-out';
 
-    // Auto-hide the message after some time
-    setTimeout(() => {
-    adminWelcomeMsg.style.animation = 'fadeOut 0.5s ease-in-out forwards';
-    setTimeout(() => {
-    if (adminWelcomeMsg && adminWelcomeMsg.parentNode) {
-    adminWelcomeMsg.parentNode.removeChild(adminWelcomeMsg);
-    }
-    }, 500);
-    }, 10000); // Display for 10 seconds
-    }
+                // Auto-hide the message after some time
+                setTimeout(() => {
+                    adminWelcomeMsg.style.animation = 'fadeOut 0.5s ease-in-out forwards';
+                    setTimeout(() => {
+                        if (adminWelcomeMsg && adminWelcomeMsg.parentNode) {
+                            adminWelcomeMsg.parentNode.removeChild(adminWelcomeMsg);
+                        }
+                    }, 500);
+                }, 10000); // Display for 10 seconds
+            }
 
-    // Show success notification
-    showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
+            // Show success notification
+            showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
 
-    // If online and signed in, append log to script
-    if (isOnline && isSignedIn) {
-    try {
-    await appendLogToScript(newLog);
-    console.log('Log synced successfully');
-    } catch (err) {
-    console.error('Error appending log:', err);
-    showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
-    }
-    }
-    }
+            // If online and signed in, append log to script
+            if (isOnline && isSignedIn) {
+                try {
+                    await appendLogToScript(newLog);
+                    console.log('Log synced successfully');
+                } catch (err) {
+                    console.error('Error appending log:', err);
+                    showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
+                }
+            }
+        }
 
-    /**
-    * Handle NFC error.
-    * @param {Object} error - The NFC error.
-    */
-    function handleNfcError(error) {
-    // Play error sound
-    playSound(false);
+        /**
+        * Handle NFC error.
+        * @param {Object} error - The NFC error.
+        */
+        function handleNfcError(error) {
+            // Play error sound
+            playSound(false);
 
-    showImprovedNotification('error', 'Scanner error', error.message);
-    stopScanning();
-    }
+            showImprovedNotification('error', 'Scanner error', error.message);
+            stopScanning();
+        }
 
-    /**
-    * Play sound effect (success or error).
-    * @param {boolean} success - Whether to play success or error sound.
-    */
-    function playSound(success) {
-    if (!soundEnabled) return;
+        /**
+        * Play sound effect (success or error).
+        * @param {boolean} success - Whether to play success or error sound.
+        */
+        function playSound(success) {
+            if (!soundEnabled) return;
 
-    try {
-    const successSound = document.getElementById('success-sound');
-    const errorSound = document.getElementById('error-sound');
+            try {
+                const successSound = document.getElementById('success-sound');
+                const errorSound = document.getElementById('error-sound');
 
-    if (success && successSound) {
-    successSound.currentTime = 0;
-    successSound.play().catch(e => console.error("Error playing sound:", e));
-    } else if (!success && errorSound) {
-    errorSound.currentTime = 0;
-    errorSound.play().catch(e => console.error("Error playing sound:", e));
-    }
-    } catch (e) {
-    console.error("Error playing sound:", e);
-    }
-    }
+                if (success && successSound) {
+                    successSound.currentTime = 0;
+                    successSound.play().catch(e => console.error("Error playing sound:", e));
+                } else if (!success && errorSound) {
+                    errorSound.currentTime = 0;
+                    errorSound.play().catch(e => console.error("Error playing sound:", e));
+                }
+            } catch (e) {
+                console.error("Error playing sound:", e);
+            }
+        }
 
-    /**
-    * Update the entire UI.
-    */
-    function updateUI() {
-    updateLogsList();
-    updateDatabaseList();
-    updateDatabaseStatus();
-    updatePageTitle();
+        /**
+        * Update the entire UI.
+        */
+        function updateUI() {
+            updateLogsList();
+            updateDatabaseList();
+            updateDatabaseStatus();
+            updatePageTitle();
 
-    // Update total scans and last scan info
-    const totalScans = document.getElementById('total-scans');
-    const lastScan = document.getElementById('last-scan');
+            // Update total scans and last scan info
+            const totalScans = document.getElementById('total-scans');
+            const lastScan = document.getElementById('last-scan');
 
-    if (totalScans) totalScans.textContent = logs.length;
+            if (totalScans) totalScans.textContent = logs.length;
 
-    if (lastScan) {
-    if (logs.length > 0) {
-    const latestLog = logs.reduce((latest, log) =>
-    log.timestamp > latest.timestamp ? log : latest, logs[0]);
+            if (lastScan) {
+                if (logs.length > 0) {
+                    const latestLog = logs.reduce((latest, log) =>
+                        log.timestamp > latest.timestamp ? log : latest, logs[0]);
 
-    const lastTimestamp = new Date(latestLog.timestamp);
-    lastScan.textContent = lastTimestamp.toLocaleString();
-    } else {
-    lastScan.textContent = 'Never';
-    }
-    }
+                    const lastTimestamp = new Date(latestLog.timestamp);
+                    lastScan.textContent = lastTimestamp.toLocaleString();
+                } else {
+                    lastScan.textContent = 'Never';
+                }
+            }
 
-    // Enable/disable buttons
-    const exportBtn = document.getElementById('export-btn');
-    const clearBtn = document.getElementById('clear-btn');
+            // Enable/disable buttons
+            const exportBtn = document.getElementById('export-btn');
+            const clearBtn = document.getElementById('clear-btn');
 
-    if (exportBtn) exportBtn.disabled = logs.length === 0;
-    if (clearBtn) clearBtn.disabled = logs.length === 0;
+            if (exportBtn) exportBtn.disabled = logs.length === 0;
+            if (clearBtn) clearBtn.disabled = logs.length === 0;
 
-    if (isAdmin) {
-    // Admin-specific UI updates
-    const clearDbBtn = document.getElementById('clear-db-btn');
-    const exportExcelBtn = document.getElementById('export-excel-btn');
+            if (isAdmin) {
+                // Admin-specific UI updates
+                const clearDbBtn = document.getElementById('clear-db-btn');
+                const exportExcelBtn = document.getElementById('export-excel-btn');
 
-    if (clearDbBtn) clearDbBtn.disabled = Object.keys(uidToNameMap).length === 0;
-    if (exportExcelBtn) exportExcelBtn.disabled = Object.keys(uidToNameMap).length === 0;
-    }
+                if (clearDbBtn) clearDbBtn.disabled = Object.keys(uidToNameMap).length === 0;
+                if (exportExcelBtn) exportExcelBtn.disabled = Object.keys(uidToNameMap).length === 0;
+            }
 
-    // IMPORTANT: Always respect NFC support status
-    updateScanButtons();
+            // IMPORTANT: Always respect NFC support status
+            updateScanButtons();
 
-    populateCourseButtons();
-    }
+            populateCourseButtons();
+        }
 
-    /**
-    * Update current year in footer.
-    */
-    function updateYear() {
-    const yearElement = document.getElementById('currentYear');
-    if (yearElement) {
-    yearElement.textContent = new Date().getFullYear();
-    }
-    }
+        /**
+        * Update current year in footer.
+        */
+        function updateYear() {
+            const yearElement = document.getElementById('currentYear');
+            if (yearElement) {
+                yearElement.textContent = new Date().getFullYear();
+            }
+        }
 
-    /**
-    * Show improved notification.
-    */
-    function showImprovedNotification(type, title, message, duration) {
-    // Skip redundant notifications
-    if (title === 'Courses Warning' && message === 'Using default course list') {
-    return;
-    }
+        /**
+        * Show improved notification.
+        */
+        function showImprovedNotification(type, title, message, duration) {
+            // Skip redundant notifications
+            if (title === 'Courses Warning' && message === 'Using default course list') {
+                return;
+            }
 
-    // Skip Auth Errors during initialization
-    if (isInitializing && title === 'Auth Error') {
-    return;
-    }
+            // Skip Auth Errors during initialization
+            if (isInitializing && title === 'Auth Error') {
+                return;
+            }
 
-    // Skip User Info errors that often resolve themselves
-    if (title === 'User Info Error' || message.includes('user info')) {
-    return;
-    }
+            // Skip User Info errors that often resolve themselves
+            if (title === 'User Info Error' || message.includes('user info')) {
+                return;
+            }
 
-    // During initialization, only show critical notifications immediately
-    if (isInitializing || criticalErrorsOnly) {
-    const isCritical = type === 'error' &&
-    (title.includes('Critical') ||
-    message.includes('Permission denied'));
+            // During initialization, only show critical notifications immediately
+            if (isInitializing || criticalErrorsOnly) {
+                const isCritical = type === 'error' &&
+                    (title.includes('Critical') ||
+                        message.includes('Permission denied'));
 
-    if (!isCritical) {
-    // Store non-critical notifications for later
-    pendingNotifications.push({type, title, message, duration});
-    return;
-    }
-    }
+                if (!isCritical) {
+                    // Store non-critical notifications for later
+                    pendingNotifications.push({ type, title, message, duration });
+                    return;
+                }
+            }
 
-    // Safely remove notifications
-    const safeRemove = (element) => {
-    try {
-    if (element && element.parentNode) {
-    element.parentNode.removeChild(element);
-    }
-    } catch (e) {
-    console.log('Error removing notification:', e);
-    }
-    };
+            // Safely remove notifications
+            const safeRemove = (element) => {
+                try {
+                    if (element && element.parentNode) {
+                        element.parentNode.removeChild(element);
+                    }
+                } catch (e) {
+                    console.log('Error removing notification:', e);
+                }
+            };
 
-    const notificationArea = document.getElementById('in-page-notification-area');
-    if (!notificationArea) return;
+            const notificationArea = document.getElementById('in-page-notification-area');
+            if (!notificationArea) return;
 
-    // Clear existing notifications of the same type
-    const existingNotifications = notificationArea.querySelectorAll(`.in-page-notification-${type}`);
-    existingNotifications.forEach(notification => {
-    notification.classList.add('removing');
-    setTimeout(() => safeRemove(notification), 300);
-    });
+            // Clear existing notifications of the same type
+            const existingNotifications = notificationArea.querySelectorAll(`.in-page-notification-${type}`);
+            existingNotifications.forEach(notification => {
+                notification.classList.add('removing');
+                setTimeout(() => safeRemove(notification), 300);
+            });
 
-    // Limit total notifications to 2
-    const allNotifications = notificationArea.querySelectorAll('.in-page-notification');
-    if (allNotifications.length >= 2) {
-    const oldest = allNotifications[0];
-    oldest.classList.add('removing');
-    setTimeout(() => safeRemove(oldest), 300);
-    }
+            // Limit total notifications to 2
+            const allNotifications = notificationArea.querySelectorAll('.in-page-notification');
+            if (allNotifications.length >= 2) {
+                const oldest = allNotifications[0];
+                oldest.classList.add('removing');
+                setTimeout(() => safeRemove(oldest), 300);
+            }
 
-    // Create the new notification
-    const notification = document.createElement('div');
-    notification.className = `in-page-notification in-page-notification-${type}`;
+            // Create the new notification
+            const notification = document.createElement('div');
+            notification.className = `in-page-notification in-page-notification-${type}`;
 
-    let icon;
-    switch(type) {
-    case 'success': icon = 'check-circle'; break;
-    case 'error': icon = 'times-circle'; break;
-    case 'warning': icon = 'exclamation-circle'; break;
-    default: icon = 'info-circle';
-    }
+            let icon;
+            switch (type) {
+                case 'success': icon = 'check-circle'; break;
+                case 'error': icon = 'times-circle'; break;
+                case 'warning': icon = 'exclamation-circle'; break;
+                default: icon = 'info-circle';
+            }
 
-    notification.innerHTML = `
+            notification.innerHTML = `
     <i class="fas fa-${icon}"></i>
     <div style="flex-grow:1;">
         <strong>${title}</strong><br>
@@ -4113,35 +4118,35 @@ if (visibleGroups <= 1) { showImprovedNotification('warning', 'Cannot Delete' , 
     <button class="notification-close">&times;</button>
     `;
 
-    notificationArea.appendChild(notification);
+            notificationArea.appendChild(notification);
 
-    // Add click handler to close button
-    const closeBtn = notification.querySelector('.notification-close');
-    if (closeBtn) {
-    closeBtn.addEventListener('click', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    notification.classList.add('removing');
-    setTimeout(() => safeRemove(notification), 300);
-    });
-    }
+            // Add click handler to close button
+            const closeBtn = notification.querySelector('.notification-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    notification.classList.add('removing');
+                    setTimeout(() => safeRemove(notification), 300);
+                });
+            }
 
-    // Auto-remove non-error notifications
-    if (type !== 'error') {
-    setTimeout(() => {
-    notification.classList.add('removing');
-    setTimeout(() => safeRemove(notification), 300);
-    }, duration || 5000);
-    }
-    }
+            // Auto-remove non-error notifications
+            if (type !== 'error') {
+                setTimeout(() => {
+                    notification.classList.add('removing');
+                    setTimeout(() => safeRemove(notification), 300);
+                }, duration || 5000);
+            }
+        }
 
-    // Initialize the application when window loads
-    window.addEventListener('load', function() {
-    // Initialize the app UI
-    init();
-    });
+        // Initialize the application when window loads
+        window.addEventListener('load', function () {
+            // Initialize the app UI
+            init();
+        });
     </script>
 
-    </body>
+</body>
 
-    </html>
+</html>
