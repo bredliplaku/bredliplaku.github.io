@@ -1216,6 +1216,24 @@ function processPendingNotifications() {
  */
 function init() {
     isInitializing = true;
+    // Check for stored authentication at the beginning of init
+const storedUser = localStorage.getItem('attendance_user');
+if (storedUser) {
+    try {
+        // Parse the user data
+        currentUser = JSON.parse(storedUser);
+        isSignedIn = true;
+        isAdmin = currentUser.isAdmin === true;
+        
+        console.log('Authenticated as:', currentUser.email, 'Admin:', isAdmin);
+    } catch (e) {
+        console.error('Error parsing stored user:', e);
+        localStorage.removeItem('attendance_user');
+        isSignedIn = false;
+        isAdmin = false;
+        currentUser = null;
+    }
+}
     
     // Start with nfcSupported as false
     nfcSupported = false;
@@ -1546,71 +1564,13 @@ function handleAuthClick(e) {
     if (e) e.preventDefault();
     
     // Show notification
-    showImprovedNotification('info', 'Signing In', 'Opening authentication window...');
+    showImprovedNotification('info', 'Signing In', 'Redirecting to Google authentication...');
     
-    // Open authentication in a popup window
-    const authWindow = window.open(`${SCRIPT_URL}?action=getUserInfo`, "auth_window", 
-        "width=600,height=600");
-    
-    // Set up a timer to check the popup window content
-    const authCheckInterval = setInterval(function() {
-        try {
-            // Check if the window has loaded and has content
-            if (authWindow.document.body.innerText) {
-                const content = authWindow.document.body.innerText;
-                
-                // Check if content is JSON response
-                if (content.includes('"success":true')) {
-                    // Clear the interval
-                    clearInterval(authCheckInterval);
-                    
-                    // Parse the JSON
-                    const authData = JSON.parse(content);
-                    
-                    // Store the user data
-                    localStorage.setItem('attendance_user', JSON.stringify(authData.data));
-                    
-                    // Close the popup
-                    authWindow.close();
-                    
-                    // Update user state
-                    currentUser = authData.data;
-                    isSignedIn = true;
-                    isAdmin = currentUser.isAdmin;
-                    
-                    // Update UI
-                    updateAuthUI();
-                    
-                    // Fetch initial data
-                    if (isOnline) {
-                        fetchAvailableCourses()
-                            .then(() => {
-                                if (availableCourses.length > 0) {
-                                    currentCourse = availableCourses[0];
-                                    const courseSelect = document.getElementById('course-select');
-                                    if (courseSelect) courseSelect.value = currentCourse;
-                                    handleCourseChange();
-                                }
-                            });
-                        fetchDatabaseFromScript();
-                        fetchCourseInfo();
-                    }
-                    
-                    // Show success notification
-                    showImprovedNotification('success', 'Signed In', 
-                        `Successfully signed in as ${currentUser.name}`);
-                }
-            }
-        } catch (e) {
-            // If the popup was closed or there's any other error
-            if (authWindow.closed) {
-                clearInterval(authCheckInterval);
-            }
-        }
-    }, 500);
+    // Simply redirect to the auth endpoint
+    window.location.href = `${SCRIPT_URL}?action=getUserInfo`;
 }
 
-/**
+ /**
  * Handle sign out
  */
 function handleSignoutClick() {
@@ -2015,6 +1975,45 @@ async function fetchCourseInfo() {
         console.error("Error fetching course info:", error);
         throw error;
     }
+}
+
+function getUserInfo() {
+  const email = Session.getActiveUser().getEmail();
+  
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
+  
+  const userInfo = {
+    email: email,
+    isAdmin: ADMIN_EMAILS.indexOf(email) !== -1,
+    name: email.split('@')[0]
+  };
+  
+  // Create HTML with auto-redirect back to your app
+  const appUrl = "https://bredliplaku.com/attendance/testing"; // Replace with your actual app URL
+  
+  const html = HtmlService.createHtmlOutput(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Authentication Complete</title>
+      <script>
+        // Store user info in localStorage
+        localStorage.setItem('attendance_user', '${JSON.stringify(userInfo)}');
+        
+        // Redirect back to app
+        window.location.href = "${appUrl}";
+      </script>
+    </head>
+    <body>
+      <h2>Authentication Successful</h2>
+      <p>Redirecting back to application...</p>
+    </body>
+    </html>
+  `);
+  
+  return html;
 }
 
 /**
