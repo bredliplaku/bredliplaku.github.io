@@ -1054,12 +1054,11 @@ body.is-admin td.admin-only {
 <script>
 	// Config
 	const ADMIN_EMAILS = ['bplaku@epoka.edu.al', 'bredliplaku@gmail.com']; // Add any admin emails here
+	const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com'; 
 	const LOGS_STORAGE_KEY = 'attendance_logs';
-	const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzt1ofZ5wIq908cnnPiIoTxL6ngNUZ_1_vCRgHmGT_vCuquPYoQITsppBz0T0tMl9BRlg/exec';
-	
-	// Discovery docs and scopes for Google API
-	const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
-	
+	const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+	const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwh7jn7obwPdML8Z0ZRIcfMG8NpW4M748TLsxJUrwSQfyoLzMRMti4RQuvHOh3nPizF/exec'; // Replace with your actual deployed web app URL
+
 	// App state
 	let logs = [];
 	let isScanning = false;
@@ -1893,39 +1892,119 @@ if (pendingNotifications.length > 0) {
 	 * Set up auth token client and event listeners for login/logout.
 	 */
 function initGoogleApi() {
-  console.log('Initializing API connection...');
-  
-  // Set default courses
-  availableCourses = [];
-  populateCourseDropdown();
-  
-  // Try to restore saved session
-  const savedToken = localStorage.getItem('access_token');
-  if (savedToken) {
-    // Fetch user info to validate token
-    fetchUserInfo()
-      .then(user => {
-        currentUser = user;
-        isAdmin = user.isAdmin;
-        isSignedIn = true;
-        updateAuthUI();
-        
-        if (isOnline) {
-          fetchAvailableCourses().catch(err => console.error('Error:', err));
-          fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
-        }
-      })
-      .catch(() => {
-        // Token invalid
-        localStorage.removeItem('access_token');
-        isSignedIn = false;
-        updateAuthUI();
-      });
-  } else {
-    updateAuthUI();
-  }
-}
+console.log('Initializing Google API...');
+
+// Handle auth redirect token at the very start
+if (window.location.hash.includes('access_token=')) {
+	const hash = window.location.hash.substring(1);
+	const params = new URLSearchParams(hash);
+	const token = params.get('access_token');
 	
+	if (token) {
+		console.log('Found token in URL, processing...');
+		localStorage.setItem('gapi_token', JSON.stringify({access_token: token}));
+		isSignedIn = true;
+		
+		// Clean URL
+		history.replaceState(null, null, window.location.pathname);
+	}
+}
+
+// Set default courses
+availableCourses = [];
+populateCourseDropdown();
+
+// Check if APIs are loaded
+if (typeof gapi === 'undefined') {
+	console.error('gapi object is undefined');
+	showImprovedNotification('error', 'API Error', 'Google API client not loaded.');
+	updateAuthUI();
+	return;
+}
+
+if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
+	console.error('google.accounts object is undefined');
+	showImprovedNotification('error', 'API Error', 'Google Identity Services not loaded.');
+	updateAuthUI();
+	return;
+}
+
+// Initialize with basic scopes first
+try {
+	console.log('Setting up token client first...');
+	tokenClient = google.accounts.oauth2.initTokenClient({
+		client_id: CLIENT_ID,
+		scope: currentScopes,
+		callback: function(resp) {
+			console.log('Token response received:', resp);
+			// Only process if we have an access token
+			if (resp && resp.access_token) {
+				handleTokenResponse(resp);
+			} else if (resp.error) {
+				console.error('Token error:', resp.error);
+				showImprovedNotification('error', 'Auth Error', 'Failed to obtain access token.');
+			}
+		}
+	});
+	console.log('Token client initialized successfully');
+} catch (error) {
+	console.error('Failed to initialize token client:', error);
+	showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
+}
+
+// Load the GAPI client
+gapi.load('client', () => {
+	gapi.client.init({
+		apiKey: API_KEY,
+		discoveryDocs: DISCOVERY_DOCS
+	}).then(() => {
+		console.log('GAPI client initialized successfully');
+		
+		// Try to restore saved session
+		const savedToken = localStorage.getItem('gapi_token');
+		if (savedToken) {
+			try {
+				const tokenObj = JSON.parse(savedToken);
+				gapi.client.setToken(tokenObj);
+				isSignedIn = true;
+				
+				fetchUserInfo()
+					.then(() => {
+						isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+						updateAuthUI();
+						if (isOnline) {
+							fetchAvailableCourses().catch(err => console.error('Error:', err));
+							fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
+						}
+					})
+					.catch(e => {
+						console.error('Error fetching user info:', e);
+						isSignedIn = false;
+						isAdmin = false;
+						localStorage.removeItem('gapi_token');
+						gapi.client.setToken('');
+						updateAuthUI();
+					});
+			} catch (e) {
+				console.error('Error restoring token:', e);
+				isSignedIn = false;
+				localStorage.removeItem('gapi_token');
+				updateAuthUI();
+			}
+		} else {
+			updateAuthUI();
+			if (isOnline) {
+				fetchAvailableCourses();
+			}
+		}
+		
+	}).catch(error => {
+		console.error('Error initializing GAPI client:', error);
+		showImprovedNotification('error', 'API Error', 'Failed to initialize Google API.');
+		updateAuthUI();
+	});
+});
+}
 	/**
 	 * Handle token response from Google OAuth.
 	 * @param {Object} resp - The token response object.
@@ -2022,38 +2101,81 @@ try {
 	 * @returns {Promise} A promise that resolves when user info is fetched.
 	 */
 async function fetchUserInfo() {
-  try {
-    const token = localStorage.getItem('access_token');
-    if (!token) throw new Error('No token available');
-    
-    const response = await fetch(`${BACKEND_URL}?action=getUserInfo`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
-    if (!response.ok) throw new Error('Failed to fetch user info');
-    
-    const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
-    
-    return {
-      name: data.user.email.split('@')[0],
-      email: data.user.email,
-      picture: 'https://via.placeholder.com/32',
-      isAdmin: data.user.isAdmin
-    };
-  } catch (error) {
-    console.error('Error fetching user info:', error);
-    throw error;
-  }
+	try {
+		const tokenObj = gapi.client.getToken();
+		if (!tokenObj || !tokenObj.access_token) {
+			console.error('No valid token available');
+			throw new Error('No valid token available');
+		}
+		
+		console.log('Fetching user info with token:', tokenObj.access_token.substring(0, 10) + '...');
+		
+		const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+			headers: { 'Authorization': `Bearer ${tokenObj.access_token}` }
+		});
+		
+		if (!response.ok) {
+			console.error('Failed to fetch user info, status:', response.status);
+			throw new Error(`Failed to fetch user info: ${response.status} ${response.statusText}`);
+		}
+		
+		const userInfo = await response.json();
+		console.log('User info fetched successfully:', userInfo.email);
+		
+		currentUser = {
+			id: userInfo.sub,
+			name: userInfo.name || userInfo.email,
+			email: userInfo.email,
+			picture: userInfo.picture || 'https://via.placeholder.com/32'
+		};
+		
+		// Update user info in UI
+		userName.textContent = currentUser.name;
+		userAvatar.src = currentUser.picture;
+		
+		// Check if user is admin
+		isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+		console.log('User is admin:', isAdmin);
+		
+		return currentUser;
+	} catch (error) {
+		console.error('Error fetching user info:', error);
+		showImprovedNotification('error', 'User Info Error', error.message || 'Failed to get user information');
+		throw error;
+	}
 }
-
 
 	/**
 	 * Handle auth button click to sign in.
 	 */
-function handleAuthClick() {
-  // Redirect to backend OAuth flow
-  window.location.href = `${BACKEND_URL}?action=authorize&redirect_uri=${encodeURIComponent(window.location.href)}`;
+// Replace your handleAuthClick function with this updated version
+function handleAuthClick(e) {
+    if (e) e.preventDefault();
+    
+    console.log('Auth button clicked - redirecting to Google auth');
+    
+    // Show notification that we're redirecting
+    showImprovedNotification('info', 'Signing In', 'Redirecting to Google...');
+    
+    // Get the exact current URL as redirect URI (very important!)
+    const redirectUri = window.location.origin + window.location.pathname;
+    console.log('Using redirect URI:', redirectUri);
+    
+    // Create Google OAuth URL with scopes
+    const scopes = encodeURIComponent('openid email profile https://www.googleapis.com/auth/spreadsheets');
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                    `client_id=${CLIENT_ID}&` +
+                    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                    `response_type=token&` +
+                    `scope=${scopes}`;
+    
+    console.log('Auth URL:', authUrl);
+    
+    // Add a small delay before redirecting to ensure the notification is displayed
+    setTimeout(() => {
+        // Redirect to Google login
+        window.location.href = authUrl;
+    }, 100);
 }
 
 /**
@@ -2130,15 +2252,46 @@ function getSuggestedDate(metadata) {
 }
 	
 function handleSignoutClick() {
-  localStorage.removeItem('access_token');
-  isSignedIn = false;
-  isAdmin = false;
-  currentUser = null;
-  updateAuthUI();
-  logs = [];
-  uidToNameMap = {};
-  updateUI();
-  showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
+try {
+	const token = gapi.client.getToken();
+	if (token !== null) {
+		console.log('Revoking token and signing out');
+		google.accounts.oauth2.revoke(token.access_token, () => {
+			gapi.client.setToken('');
+			localStorage.removeItem('gapi_token');
+			isSignedIn = false;
+			isAdmin = false;
+			currentUser = null;
+			updateAuthUI();
+			logs = [];
+			uidToNameMap = {};
+			updateUI();
+			showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
+		});
+	} else {
+		// If no token, just clear the UI state
+		console.log('No token to revoke, cleaning up state');
+		localStorage.removeItem('gapi_token');
+		isSignedIn = false;
+		isAdmin = false;
+		currentUser = null;
+		updateAuthUI();
+		logs = [];
+		uidToNameMap = {};
+		updateUI();
+	}
+} catch (error) {
+	console.error('Error during sign out:', error);
+	// Force sign-out even if there's an error
+	localStorage.removeItem('gapi_token');
+	isSignedIn = false;
+	isAdmin = false;
+	currentUser = null;
+	updateAuthUI();
+	logs = [];
+	uidToNameMap = {};
+	updateUI();
+}
 }
 
 function updateAuthUI() {
@@ -2555,23 +2708,48 @@ async function syncData() {
 	 * Fetch database entries from Google Sheet.
 	 * Updates uidToNameMap with the latest data.
 	 */
-async function fetchDatabaseFromSheet() {
+async function fetchDatabaseFromSheet() { // Keep original name
+  // No need to check isOnline here, fetch handles network errors
+  if (!isSignedIn) {
+      console.log("Not signed in, skipping database fetch.");
+      uidToNameMap = {}; // Clear map if not signed in
+      updateDatabaseStatus();
+      updateDatabaseList();
+      return; // Don't fetch if not signed in
+  }
+
+  console.log("Fetching database from backend...");
   try {
-    const response = await fetch(`${BACKEND_URL}?action=getDatabase`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    // Use the APPS_SCRIPT_URL defined globally
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getDatabase`, {
+        method: 'GET',
+        headers: { /* ... headers if needed ... */ }
     });
-    
-    if (!response.ok) throw new Error('Failed to fetch database');
-    
+
+    if (!response.ok) {
+      let errorData = { message: `Server responded with status: ${response.status}` };
+      try {
+        const errorJson = await response.json();
+        errorData.message = errorJson.error?.message || errorData.message;
+      } catch (e) { /* Ignore */ }
+      throw new Error(errorData.message);
+    }
+
     const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
-    
-    uidToNameMap = data.database;
+    if (data.error) { throw new Error(data.error.message || 'Backend returned an error.'); }
+
+    uidToNameMap = data || {}; // Ensure it's an object
     updateDatabaseStatus();
     updateDatabaseList();
+    console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from backend`);
+
   } catch (error) {
-    console.error('Error fetching database:', error);
-    throw error;
+    console.error('Error fetching database from backend:', error);
+    if (!isInitializing) {
+        showImprovedNotification('error', 'Database Error', 'Failed to load UID database: ' + error.message);
+    }
+    updateDatabaseStatus(); // Update status even on error
+    updateDatabaseList();   // Update list even on error
   }
 }
 
@@ -2613,33 +2791,51 @@ function formatSheetName(sheetName) {
 /**
  * Fetch available courses (sheet names) from logs spreadsheet.
  */
-async function fetchAvailableCourses() {
+async function fetchAvailableCourses() { // Keep original name
+  console.log("Fetching available courses from backend...");
   try {
-    if (!isOnline || !isSignedIn) {
-      availableCourses = [];
-      populateCourseDropdown();
-      return;
-    }
-    
-    const response = await fetch(`${BACKEND_URL}?action=getCourses`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getCourses`, {
+        method: 'GET'
     });
-    
-    if (!response.ok) throw new Error('Failed to fetch courses');
-    
+
+    if (!response.ok) {
+        let errorData = { message: `Server responded with status: ${response.status}` };
+        try { errorData = await response.json(); } catch (e) {}
+        throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+    }
+
     const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
-    
-    availableCourses = data.courses;
-    courseIDMap = data.courseIDMap || {};
+     if (data.error) {
+        throw new Error(data.error.message || 'Backend returned an error fetching courses.');
+    }
+
+    // Assuming backend returns { availableCourses: [], courseInfoMap: {}, sheetNameMap: {}, courseIDMap: {} }
+    availableCourses = data.availableCourses || [];
+    window.courseInfoMap = data.courseInfoMap || {}; // Store globally
     sheetNameMap = data.sheetNameMap || {};
-    
-    populateCourseDropdown();
+    courseIDMap = data.courseIDMap || {};
+
+    console.log(`Found ${availableCourses.length} courses via backend.`);
+    console.log('Backend Course Info:', window.courseInfoMap);
+    console.log('Backend Sheet Name Map:', sheetNameMap);
+    console.log('Backend Course ID Map:', courseIDMap);
+
+
+    populateCourseDropdown(); // Update UI
+    return true; // Indicate success
+
   } catch (error) {
-    console.error('Error fetching courses:', error);
+    console.error('Error fetching courses from backend:', error);
+    if (!isInitializing) {
+        showImprovedNotification('warning', 'Courses Error', 'Failed to load course list: ' + error.message + '. Using defaults.');
+    }
+    // Fallback to empty defaults
     availableCourses = [];
+    window.courseInfoMap = {};
+    sheetNameMap = {};
+    courseIDMap = {};
     populateCourseDropdown();
-    throw error;
+    return false; // Indicate failure
   }
 }
 
@@ -2657,29 +2853,67 @@ function getCurrentCourseEisId() {
 /**
  * Fetch logs from Google Sheet for current course.
  */
-async function fetchLogsFromSheet() {
-  if (!currentCourse) return;
-  
+async function fetchLogsFromSheet() { // Keep original name
+  const course = currentCourse; // Use the globally selected course
+  if (!course) {
+    console.warn("fetchLogsFromSheet called without a course selected.");
+    logs = [];
+    updateUI(); // Update UI to show empty logs
+    return false;
+  }
+   if (!isSignedIn) {
+     console.log("Not signed in, attempting to load logs from localStorage for", course);
+     loadLogsFromLocalStorage(course); // Load local logs if not signed in
+     updateUI();
+     return true; // Return true as local load is the intended action
+   }
+
+  console.log(`Workspaceing logs for ${course} from backend...`);
   try {
-    const response = await fetch(`${BACKEND_URL}?action=getLogs&course=${encodeURIComponent(currentCourse)}`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    const response = await fetch(`${APPS_SCRIPT_URL}?action=getLogs&course=${encodeURIComponent(course)}`, {
+        method: 'GET'
     });
-    
-    if (!response.ok) throw new Error('Failed to fetch logs');
-    
-    const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
-    
-    logs = data.logs;
-    saveLogsToLocalStorage();
-    
-    return true;
+
+    if (!response.ok) {
+        let errorData = { message: `Server responded with status: ${response.status}` };
+        try { errorData = await response.json(); } catch (e) {}
+        throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+    }
+
+    const fetchedLogs = await response.json();
+     if (fetchedLogs.error) {
+        throw new Error(fetchedLogs.error.message || 'Backend returned an error fetching logs.');
+    }
+
+    if (!Array.isArray(fetchedLogs)) {
+        throw new Error("Backend did not return a valid array of logs.");
+    }
+
+    // Process timestamps (ensure they are numbers/milliseconds)
+    logs = fetchedLogs.map(log => ({
+        ...log,
+        timestamp: Number(log.timestamp) // Convert backend timestamp to number
+    })).filter(log => !isNaN(log.timestamp)); // Filter out any invalid timestamps
+
+    logs.sort((a, b) => b.timestamp - a.timestamp); // Sort descending
+    console.log(`Loaded ${logs.length} logs for ${course} from backend`);
+    saveLogsToLocalStorage(); // Save fetched logs locally as backup/cache
+    // updateUI() should be called by the function that called fetchLogsFromSheet (e.g., handleCourseChange)
+    return true; // Indicate success
+
   } catch (error) {
-    console.error('Error fetching logs:', error);
-    throw error;
+    console.error(`Error fetching logs for ${course} from backend:`, error);
+     if (!isInitializing) {
+        showImprovedNotification('error', 'Logs Error', `Failed to load logs for ${course}: ${error.message}. Trying local backup.`);
+    }
+    // Fallback to local storage on error
+    loadLogsFromLocalStorage(course);
+    // updateUI() should be called by the calling function
+    return false; // Indicate failure
   }
 }
-	
+
+
 function mergeLogs(localLogs, remoteLogs) {
 const merged = {};
 // Add remote logs first.
@@ -2713,91 +2947,209 @@ return date.getFullYear() + '-' +
 /**
  * Sync logs with Google Sheet.
  */
-async function syncLogsWithSheet() {
-  if (!currentCourse || !isAdmin) return;
-  
+async function syncLogsWithSheet() { // Keep original name
+  // Ensure admin, online, signed in, and course selected
+  if (!isAdmin || !isOnline || !isSignedIn || !currentCourse) {
+    console.warn("syncLogsWithSheet aborted: Preconditions not met.", {isAdmin, isOnline, isSignedIn, currentCourse});
+    // Optionally show a message to the user
+    // showImprovedNotification('info', 'Sync Skipped', 'Cannot sync logs. Ensure you are online, signed in as admin, and have selected a course.');
+    return;
+  }
+
+  console.log(`Syncing ${logs.length} logs for ${currentCourse} to backend...`);
+  isSyncing = true; // Use the global isSyncing flag
+  setSyncButtonState(true); // Show visual syncing state
+
   try {
-    const response = await fetch(`${BACKEND_URL}?action=syncLogs`, {
+    const idToken = getIdToken_(); // Helper to get current user's token
+    if (!idToken && isAdmin) { // Check if token needed and available
+         // If backend *requires* admin token verification for this action
+         console.warn("Cannot sync without ID token for admin verification.");
+         throw new Error("Admin authentication token not found.");
+     }
+
+    const payload = {
+      action: 'syncLogs',
+      logs: logs, // Send the current local logs array
+      course: currentCourse,
+      idToken: idToken // Include token for backend verification
+    };
+
+    const response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        course: currentCourse,
-        logs: logs
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      mode: 'cors'
     });
-    
-    if (!response.ok) throw new Error('Failed to sync logs');
-    
-    const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
+
+    if (!response.ok) {
+        let errorData = { message: `Server responded with status: ${response.status}` };
+        try { errorData = await response.json(); } catch (e) {}
+        throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+     if (result.error) {
+        throw new Error(result.error.message || 'Backend returned an error during log sync.');
+    }
+
+    console.log('Logs sync response:', result);
+    // Don't show notification here if called from syncData, let syncData handle the final message
+    // showImprovedNotification('success', 'Logs Synced', result.message || `Logs for ${currentCourse} synced successfully.`);
+
   } catch (error) {
-    console.error('Error syncing logs:', error);
-    throw error;
+    console.error('Error syncing logs via backend:', error);
+    // Don't show notification here if called from syncData
+    // showImprovedNotification('error', 'Sync Error', `Failed to sync logs: ${error.message}`);
+    throw error; // Re-throw error so syncData can catch it
+  } finally {
+      // isSyncing and button state are handled by the calling function (syncData)
+      // isSyncing = false;
+      // setSyncButtonState(false);
   }
 }
+ 
 
 	/**
 	 * Sync database (UID-name map) to Google Sheets.
 	 */
-async function syncDatabaseToSheet() {
-  if (!isSignedIn || !isAdmin || !isOnline) return;
-  
+async function syncDatabaseToSheet() { // Keep original name
+  if (!isAdmin || !isOnline || !isSignedIn) {
+    console.warn("syncDatabaseToSheet aborted: Preconditions not met.", {isAdmin, isOnline, isSignedIn});
+     // showImprovedNotification('info', 'Sync Skipped', 'Cannot sync database. Ensure you are online and signed in as admin.');
+    return;
+  }
+
+  console.log(`Syncing ${Object.keys(uidToNameMap).length} database entries to backend...`);
+  isSyncing = true; // Use the global isSyncing flag
+  setSyncButtonState(true); // Show visual syncing state
+
   try {
-    const response = await fetch(`${BACKEND_URL}?action=updateDatabase`, {
+      const idToken = getIdToken_();
+      if (!idToken && isAdmin) { // If backend requires token
+         throw new Error("Admin authentication token not found for database sync.");
+     }
+
+    const payload = {
+      action: 'syncDatabase',
+      databaseData: uidToNameMap, // Send the current local map
+      idToken: idToken
+    };
+
+    const response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        database: uidToNameMap
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      mode: 'cors'
     });
-    
-    if (!response.ok) throw new Error('Failed to sync database');
-    
-    const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
+
+    if (!response.ok) {
+        let errorData = { message: `Server responded with status: ${response.status}` };
+        try { errorData = await response.json(); } catch (e) {}
+        throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+     if (result.error) {
+        throw new Error(result.error.message || 'Backend returned an error during database sync.');
+    }
+
+    console.log('Database sync response:', result);
+    // Let the calling function (e.g., syncData or direct calls) handle notifications
+    // showImprovedNotification('success', 'Database Synced', result.message || 'Database synced successfully.');
+
   } catch (error) {
-    console.error('Error syncing database:', error);
-    throw error;
+    console.error('Error syncing database via backend:', error);
+    // Let the calling function handle notifications
+    // showImprovedNotification('error', 'Sync Error', `Failed to sync database: ${error.message}`);
+    throw error; // Re-throw for syncData or other callers
+  } finally {
+      // Let the calling function handle isSyncing and button state
+      // isSyncing = false;
+      // setSyncButtonState(false);
   }
 }
-
- 
+     
 /**
  * Append a single log to Google Sheet (for immediate sync).
  */
-async function appendLogToSheet(log) {
-  if (!currentCourse || !isOnline || !isSignedIn) return;
-  
+async function appendLogToSheet(log) { // Keep original name
+  // Ensure online, signed in, and course selected
+  if (!isOnline || !isSignedIn || !currentCourse) {
+    console.warn("appendLogToSheet aborted: Preconditions not met.", {isOnline, isSignedIn, currentCourse});
+    return;
+  }
+
+   // Decide if only admins can trigger this, or any user scanning.
+   // If any user, remove isAdmin check. Backend should validate if needed.
+
+   if (!isAdmin) {
+       console.warn("appendLogToSheet aborted: User is not admin.");
+       return;
+   }
+
+
+  console.log(`Appending log for UID ${log.uid} for course ${currentCourse} via backend...`);
+
   try {
-    const response = await fetch(`${BACKEND_URL}?action=addLog`, {
+    const idToken = getIdToken_(); // Get token if needed for backend auth
+
+    const payload = {
+      action: 'addLog',
+      logData: log,
+      course: currentCourse,
+      idToken: idToken // Send token if backend needs to verify user/admin status
+    };
+
+    // No 'await' needed here - let it run in the background during scanning
+    fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        course: currentCourse,
-        log: log
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      mode: 'cors'
+    })
+    .then(response => {
+        if (!response.ok) {
+            // Attempt to get error message from response body for logging
+             response.json().then(errorData => {
+                 console.error(`HTTP error ${response.status} appending log: ${errorData.error?.message || 'Unknown backend error'}`);
+                 if (!isInitializing) showImprovedNotification('warning', 'Sync Warning', `Failed to save log online immediately: ${errorData.error?.message || response.statusText}. Saved locally.`);
+             }).catch(() => {
+                 console.error(`HTTP error ${response.status} appending log: ${response.statusText}`);
+                  if (!isInitializing) showImprovedNotification('warning', 'Sync Warning', `Failed to save log online immediately: ${response.statusText}. Saved locally.`);
+             });
+        } else {
+            return response.json();
+        }
+    })
+    .then(result => {
+        if (result && !result.error) {
+            console.log('Log append response:', result.message);
+             // Optional: show a *very* subtle success indicator? Maybe change sync status icon briefly?
+        } else if (result && result.error) {
+            console.error('Backend error appending log:', result.error.message);
+             if (!isInitializing) showImprovedNotification('warning', 'Sync Warning', `Failed to save log online: ${result.error.message}. Saved locally.`);
+        }
+    })
+    .catch(error => {
+        // Network errors or other fetch issues
+        console.error('Error appending log via backend fetch:', error);
+        if (!isInitializing) {
+            showImprovedNotification('warning', 'Sync Warning', `Failed to send log online: ${error.message}. Saved locally.`);
+        }
     });
-    
-    if (!response.ok) throw new Error('Failed to append log');
-    
-    const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
+
   } catch (error) {
-    console.error('Error appending log:', error);
-    throw error;
+      // Catch synchronous errors (e.g., from getIdToken_)
+      console.error('Synchronous error in appendLogToSheet:', error);
+       if (!isInitializing) {
+            showImprovedNotification('warning', 'Sync Warning', `Error preparing log sync: ${error.message}. Saved locally.`);
+       }
   }
 }
 
-	/**
+
+ /**
 	 * Update sort icons in the table headers.
 	 */
 function updateSortIcons() {
@@ -2941,42 +3293,109 @@ if (confirm(`Are you sure you want to delete "${name}" (${uid}) from the databas
  * Fetch course information from COURSE_INFO sheet
  * @returns {Promise} A promise that resolves when course info is fetched
  */
-async function fetchCourseInfo() {
-  if (!isOnline || !isSignedIn) return;
-  
-  try {
-    const response = await fetch(`${BACKEND_URL}?action=getCourseInfo`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
-    });
-    
-    if (!response.ok) throw new Error('Failed to fetch course info');
-    
-    const data = await response.json();
-    if (data.status !== 'success') throw new Error(data.message);
-    
-    window.courseInfoMap = data.courseInfoMap;
-  } catch (error) {
-    console.error('Error fetching course info:', error);
-    throw error;
-  }
+async function fetchCourseInfo() { // Keep original name
+    if (!isOnline || !isSignedIn) {
+        console.log("Not fetching course info: not signed in or offline");
+        // If fetchAvailableCourses is always called first, this might be empty anyway
+        // window.courseInfoMap = {}; // Optionally clear if not signed in/offline
+        return;
+    }
+
+    // Check if already fetched by fetchAvailableCourses
+    if (window.courseInfoMap && Object.keys(window.courseInfoMap).length > 0) {
+        console.log("Course info likely already fetched by fetchAvailableCourses. Skipping separate fetchCourseInfo call.");
+        return;
+    }
+
+    console.log("Fetching course info from backend...");
+    try {
+        // Use the getCourses endpoint as it now returns the info map
+        const response = await fetch(`${APPS_SCRIPT_URL}?action=getCourses`, {
+            method: 'GET'
+        });
+
+        if (!response.ok) {
+             let errorData = { message: `Server responded with status: ${response.status}` };
+             try { errorData = await response.json(); } catch (e) {}
+             throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+         if (data.error) {
+             throw new Error(data.error.message || 'Backend returned an error fetching course info.');
+         }
+
+        // Update the global map from the response
+        window.courseInfoMap = data.courseInfoMap || {};
+        console.log("Course info loaded successfully via backend:", window.courseInfoMap);
+
+    } catch (error) {
+        console.error("Error fetching course info from backend:", error);
+         if (!isInitializing) {
+            showImprovedNotification('error', 'Course Info Error', `Failed to load course details: ${error.message}`);
+         }
+        // window.courseInfoMap = {}; // Optionally clear on error
+    }
 }
-	/**
+
+    /**
 	 * Clear the entire database.
 	 */
-function clearDatabase() {
-if (!isAdmin) return;
+async function clearDatabase() { // Keep original name
+    if (!isAdmin) {
+        showImprovedNotification('error', 'Action Denied', 'Only admins can clear the database.');
+        return;
+    }
+    if (!confirm('Are you sure you want to clear the ENTIRE UID database? This will remove all name mappings and cannot be undone.')) return;
 
-if (confirm('Are you sure you want to clear the entire database? This will remove all UID-name mappings.')) {
-	uidToNameMap = {};
-	
-	// Sync to sheet if online
-	if (isOnline && isSignedIn) {
-		syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-	}
-	
-	updateUI();
-	showImprovedNotification('success', 'Database Cleared', 'All database entries have been removed.');
-}
+     // Clear locally first
+     uidToNameMap = {};
+     updateUI(); // Update UI immediately
+     showImprovedNotification('info', 'Clearing Database', 'Attempting to clear the database online...');
+
+     if (isOnline && isSignedIn) {
+         setAdminActionButtonsState(true); // Disable buttons
+
+        try {
+            const idToken = getIdToken_();
+            if (!idToken && isAdmin) throw new Error("Admin authentication token not found."); // If token needed
+
+            const payload = {
+                action: 'clearDatabase',
+                idToken: idToken // Send token if backend verifies
+            };
+
+             const response = await fetch(APPS_CRIPT_URL, { // Corrected variable name typo
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                mode: 'cors'
+            });
+
+             if (!response.ok) {
+                let errorData = { message: `Server responded with status: ${response.status}` };
+                try { errorData = await response.json(); } catch (e) {}
+                throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+             }
+             const result = await response.json();
+             if (result.error) {
+                 throw new Error(result.error.message || 'Backend returned an error clearing database.');
+             }
+
+            showImprovedNotification('success', 'Database Cleared', 'The UID database has been cleared online.');
+            // Ensure local state remains cleared
+             uidToNameMap = {};
+             updateUI();
+
+        } catch (error) {
+            console.error('Error clearing database via backend:', error);
+            showImprovedNotification('error', 'Clear Error', `Failed to clear database online: ${error.message}. Database remains cleared locally.`);
+        } finally {
+             setAdminActionButtonsState(false); // Re-enable buttons
+        }
+     } else {
+         showImprovedNotification('warning', 'Offline', 'Database cleared locally but cannot clear online while offline.');
+         setAdminActionButtonsState(false); // Ensure buttons re-enabled if offline
+     }
 }
 
 	/**
@@ -3310,36 +3729,67 @@ if (confirm(`Are you sure you want to delete all log entries for ${group.name} o
 }
 }
 
-function clearLogs() {
-if (!isAdmin) return;
-if (!confirm('Are you sure you want to delete ALL logs?')) return;
+async function clearLogs() { // Keep original name
+    if (!isAdmin || !currentCourse) {
+         showImprovedNotification('error', 'Action Denied', 'Only admins can clear logs for a selected course.');
+        return;
+    }
+    if (!confirm(`Are you sure you want to delete ALL logs for ${currentCourse}? This cannot be undone.`)) return;
 
-// First clear logs locally
-logs = [];
-saveLogsToLocalStorage();
-updateUI();
+    // Clear locally first for immediate UI feedback
+    logs = [];
+    saveLogsToLocalStorage();
+    updateUI();
+    showImprovedNotification('info', 'Clearing Logs', `Attempting to clear logs for ${currentCourse} online...`);
 
-if (isOnline && isSignedIn) {
-	// Disable buttons during sync
-	clearBtn.disabled = true;
-	exportBtn.disabled = true;
-	
-	syncLogsWithSheet()
-		.then(() => {
-			showImprovedNotification('success', 'Logs Cleared', 'All logs have been removed from the spreadsheet.');
-		})
-		.catch(err => {
-			console.error('Error clearing logs:', err);
-			showImprovedNotification('error', 'Clear Error', 'Failed to remove logs from the spreadsheet.');
-		})
-		.finally(() => {
-			// Force UI update again to ensure logs stay cleared
-			logs = [];
-			updateUI();
-		});
+     if (isOnline && isSignedIn) {
+        // Disable buttons during action
+        setAdminActionButtonsState(true);
+
+        try {
+            const idToken = getIdToken_();
+            if (!idToken && isAdmin) throw new Error("Admin authentication token not found."); // If token needed
+
+            const payload = {
+                action: 'clearLogs',
+                course: currentCourse,
+                idToken: idToken // Send token if backend verifies
+            };
+
+            const response = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                mode: 'cors'
+            });
+
+             if (!response.ok) {
+                let errorData = { message: `Server responded with status: ${response.status}` };
+                try { errorData = await response.json(); } catch (e) {}
+                throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+             }
+             const result = await response.json();
+             if (result.error) {
+                 throw new Error(result.error.message || 'Backend returned an error clearing logs.');
+             }
+
+             showImprovedNotification('success', 'Logs Cleared', `All logs for ${currentCourse} have been removed online.`);
+             // Local state is already cleared, update UI just in case
+             logs = [];
+             updateUI();
+
+        } catch (error) {
+            console.error('Error clearing logs via backend:', error);
+            showImprovedNotification('error', 'Clear Error', `Failed to clear logs online: ${error.message}. Logs remain cleared locally.`);
+            // Local state is already cleared, UI should reflect this.
+        } finally {
+            setAdminActionButtonsState(false); // Re-enable buttons
+        }
+    } else {
+         showImprovedNotification('warning', 'Offline', 'Logs cleared locally but cannot clear online while offline.');
+          setAdminActionButtonsState(false); // Ensure buttons re-enabled if offline
+    }
 }
-}
-
 // Deletes a single log by its ID and then syncs the changes.
 function deleteLogEntry(logId) {
 if (!isAdmin) return; // Only admins can delete.
@@ -4538,6 +4988,5 @@ setTimeout(() => {
 setTimeout(addDirectEisExportButton, 2000);
 });
 </script>
-
 </body>
 </html>
