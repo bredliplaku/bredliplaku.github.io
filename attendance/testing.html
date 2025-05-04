@@ -1217,9 +1217,6 @@ function processPendingNotifications() {
 function init() {
     isInitializing = true;
     
-    // Start with nfcSupported as false
-    nfcSupported = false;
-    
     // Update current year in footer
     updateYear();
     
@@ -1228,26 +1225,16 @@ function init() {
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
     
-    // Check if NFC is supported - ONLY in Chrome on Android
+    // Check if NFC is supported
     const isAndroid = /Android/i.test(navigator.userAgent);
     const isChrome = /Chrome/i.test(navigator.userAgent);
     
     if (isAndroid && isChrome && 'NDEFReader' in window) {
-        console.log('NFC support detected (Android + Chrome + NDEFReader)');
+        console.log('NFC support detected');
         nfcSupported = true;
     } else {
         console.log('NFC not supported on this device/browser');
         nfcSupported = false;
-        
-        // Only show notification on mobile devices where NFC might be expected
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        if (isMobile) {
-            pendingNotifications.push({
-                type: 'warning',
-                title: 'NFC Unsupported',
-                message: 'NFC scanning is only supported in Chrome on Android.'
-            });
-        }
     }
     
     updateScanButtons();
@@ -1255,10 +1242,10 @@ function init() {
     // Set up event listeners
     setupEventListeners();
     
-    // Initialize auth
-    initAuth();
+    // Check for stored authentication
+    checkStoredAuth();
     
-    // Show content after a reasonable timeout even if auth fails
+    // Show content after a reasonable timeout
     setTimeout(() => {
         showMainContent();
         isInitializing = false;
@@ -1490,40 +1477,35 @@ function updateAuthUI() {
 /**
  * Handle auth button click to sign in.
  */
-function handleAuthClick(e) {
-    if (e) e.preventDefault();
-    
-    // Show notification that we're redirecting
+function handleAuthClick() {
+    // Show notification
     showImprovedNotification('info', 'Signing In', 'Redirecting to Google auth...');
     
-    // Redirect to Google's auth page with your script URL as the service
-    const scriptAuthUrl = `${SCRIPT_URL}?action=getUserInfo`;
+    // Get the current URL for redirect
+    const currentUrl = window.location.href;
     
-    // Open the script URL in a new window
-    // Google will automatically handle authentication redirection
-    window.location.href = scriptAuthUrl;
+    // Redirect to auth endpoint
+    window.location.href = `${SCRIPT_URL}?action=auth&redirect=${encodeURIComponent(currentUrl)}`;
 }
 
 /**
  * Handle sign out
  */
 function handleSignoutClick() {
-    // Clear local session
-    localStorage.removeItem('attendance_session');
+    // Clear local storage
+    localStorage.removeItem('attendance_user');
+    
+    // Reset state
     isSignedIn = false;
     isAdmin = false;
     currentUser = null;
     
-    // Redirect to the script to sign out
-    if (isOnline) {
-        fetch(`${SCRIPT_URL}?action=signOut`).catch(err => console.error('Error signing out:', err));
-    }
-    
-    // Update UI immediately
+    // Update UI
     updateAuthUI();
     logs = [];
     uidToNameMap = {};
     updateUI();
+    
     showImprovedNotification('info', 'Signed Out', 'You have been successfully signed out');
 }
 
@@ -2663,6 +2645,37 @@ function deleteDatabaseEntry(uid) {
         updateUI();
         showImprovedNotification('success', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
     }
+}
+
+function checkStoredAuth() {
+    const storedUser = localStorage.getItem('attendance_user');
+    
+    if (storedUser) {
+        try {
+            // Parse stored user info
+            currentUser = JSON.parse(storedUser);
+            isSignedIn = true;
+            isAdmin = currentUser.isAdmin;
+            
+            console.log('Restored user session:', currentUser);
+            
+            // Update UI with user info
+            updateAuthUI();
+            
+            // Fetch initial data
+            if (isOnline) {
+                fetchAvailableCourses().catch(err => console.error('Error fetching courses:', err));
+                fetchDatabaseFromScript().catch(err => console.error('Error fetching database:', err));
+            }
+            
+            return true;
+        } catch (e) {
+            console.error('Error parsing stored user info:', e);
+            localStorage.removeItem('attendance_user');
+        }
+    }
+    
+    return false;
 }
 
 /**
