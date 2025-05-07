@@ -79,59 +79,6 @@
             margin-bottom: 20px;
         }
 
-        /* Auto-sync toggle styles */
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 60px;
-            height: 24px;
-            vertical-align: middle;
-        }
-
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 16px;
-            width: 16px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-
-        input:checked+.toggle-slider {
-            background-color: #2196F3;
-        }
-
-        input:checked+.toggle-slider:before {
-            transform: translateX(26px);
-        }
-
-        .toggle-label {
-            margin-left: 65px;
-            white-space: nowrap;
-            font-size: 0.9em;
-        }
-
         /* Sync status styles */
         .sync-status {
             display: flex;
@@ -1068,6 +1015,35 @@
             color: var(--warning-color);
         }
 
+        /* Add this CSS for the combined sync button */
+        .auto-sync-enabled {
+            background-color: #4caf50 !important;
+            /* Green color for auto-sync enabled */
+        }
+
+        .sync-btn-text {
+            margin-left: 5px;
+        }
+
+        /* Add a subtle pulse animation when auto-sync is enabled */
+        @keyframes subtle-pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 6px rgba(76, 175, 80, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+            }
+        }
+
+        .auto-sync-enabled {
+            animation: subtle-pulse 2s infinite;
+        }
+
         .course-select {
             min-width: 100px;
             padding: 5px 10px;
@@ -1148,12 +1124,6 @@
                 <button id="sync-btn" class="btn-blue admin-only" style="display: none;">
                     <i class="fas fa-sync-alt"></i> Sync
                 </button>
-                <!-- Auto-sync toggle -->
-                <label id="auto-sync-toggle" class="toggle-switch admin-only" style="display: none; margin-left: 10px;">
-                    <input type="checkbox" id="auto-sync-checkbox" checked>
-                    <span class="toggle-slider"></span>
-                    <span class="toggle-label">Auto</span>
-                </label>
             </div>
             <!-- Right: Auth container -->
             <div class="auth-container">
@@ -1577,6 +1547,125 @@
             }
         }
 
+        // New function to update sync button appearance and behavior
+        function updateSyncButton() {
+            const syncBtn = document.getElementById('sync-btn');
+            if (!syncBtn) return;
+
+            // Update button text to show auto-sync status
+            if (autoSyncEnabled) {
+                syncBtn.innerHTML = '<i class="fas fa-sync-alt"></i> <span class="sync-btn-text">Auto</span>';
+                syncBtn.title = 'Auto-sync enabled (click to sync now)';
+                syncBtn.classList.add('auto-sync-enabled');
+            } else {
+                syncBtn.innerHTML = '<i class="fas fa-sync-alt"></i> <span class="sync-btn-text">Sync</span>';
+                syncBtn.title = 'Manual sync mode';
+                syncBtn.classList.remove('auto-sync-enabled');
+            }
+        }
+
+        // New function to setup the enhanced sync button
+        function setupEnhancedSyncButton() {
+            const syncBtn = document.getElementById('sync-btn');
+            if (!syncBtn) return;
+
+            // Restore auto-sync preference from localStorage
+            const savedPref = localStorage.getItem('auto_sync_enabled');
+            if (savedPref !== null) {
+                autoSyncEnabled = savedPref === 'true';
+            }
+
+            // Update button appearance
+            updateSyncButton();
+
+            // Clear any existing event listeners (optional, but helps prevent duplicates)
+            const newSyncBtn = syncBtn.cloneNode(true);
+            syncBtn.parentNode.replaceChild(newSyncBtn, syncBtn);
+
+            // Add long-press functionality to toggle auto-sync
+            let pressTimer;
+            let isLongPress = false;
+
+            newSyncBtn.addEventListener('mousedown', function (e) {
+                isLongPress = false;
+                pressTimer = setTimeout(function () {
+                    isLongPress = true;
+
+                    // Toggle auto-sync on long press
+                    autoSyncEnabled = !autoSyncEnabled;
+                    localStorage.setItem('auto_sync_enabled', autoSyncEnabled.toString());
+
+                    // Show notification
+                    if (autoSyncEnabled) {
+                        showImprovedNotification('info', 'Auto-Sync Enabled',
+                            'Changes will sync automatically when online');
+
+                        // Try to sync immediately if we have pending changes
+                        if (pendingChanges && isOnline && isSignedIn) {
+                            setTimeout(autoSyncData, 1000);
+                        }
+                    } else {
+                        showImprovedNotification('info', 'Auto-Sync Disabled',
+                            'You will need to manually sync changes');
+                    }
+
+                    // Update the button appearance
+                    updateSyncButton();
+                }, 800); // Long press duration - 800ms
+            });
+
+            // Clear timer on mouse up
+            newSyncBtn.addEventListener('mouseup', function () {
+                clearTimeout(pressTimer);
+
+                // Only trigger sync on short press
+                if (!isLongPress) {
+                    syncData();
+                }
+            });
+
+            // Clear timer when mouse leaves the button
+            newSyncBtn.addEventListener('mouseleave', function () {
+                clearTimeout(pressTimer);
+            });
+
+            // Handle touch events for mobile
+            newSyncBtn.addEventListener('touchstart', function (e) {
+                isLongPress = false;
+                pressTimer = setTimeout(function () {
+                    isLongPress = true;
+
+                    // Toggle auto-sync on long press
+                    autoSyncEnabled = !autoSyncEnabled;
+                    localStorage.setItem('auto_sync_enabled', autoSyncEnabled.toString());
+
+                    // Show notification
+                    if (autoSyncEnabled) {
+                        showImprovedNotification('info', 'Auto-Sync Enabled',
+                            'Changes will sync automatically when online');
+                    } else {
+                        showImprovedNotification('info', 'Auto-Sync Disabled',
+                            'You will need to manually sync changes');
+                    }
+
+                    // Update the button appearance
+                    updateSyncButton();
+                }, 800);
+            });
+
+            newSyncBtn.addEventListener('touchend', function (e) {
+                clearTimeout(pressTimer);
+
+                // Only trigger sync on short touch
+                if (!isLongPress) {
+                    syncData();
+                }
+
+                // Prevent additional click events
+                e.preventDefault();
+            });
+        }
+
         // Add this function to implement auto-save and auto-sync
         function setupAutoSync() {
             // Always save changes to localStorage immediately when logs change
@@ -1614,48 +1703,9 @@
             });
         }
 
-        // Setup the auto-sync toggle
-        function setupAutoSyncToggle() {
-            const autoSyncCheckbox = document.getElementById('auto-sync-checkbox');
-            const autoSyncToggle = document.getElementById('auto-sync-toggle');
-
-            if (autoSyncToggle && isAdmin) {
-                autoSyncToggle.style.display = 'inline-block';
-            }
-
-            if (autoSyncCheckbox) {
-                autoSyncCheckbox.checked = autoSyncEnabled;
-
-                autoSyncCheckbox.addEventListener('change', function () {
-                    autoSyncEnabled = this.checked;
-                    localStorage.setItem('auto_sync_enabled', autoSyncEnabled.toString());
-
-                    if (autoSyncEnabled) {
-                        showImprovedNotification('info', 'Auto-Sync Enabled',
-                            'Changes will sync automatically when online');
-
-                        // Try to sync immediately if we have pending changes
-                        if (pendingChanges && isOnline && isSignedIn) {
-                            setTimeout(autoSyncData, 1000);
-                        }
-                    } else {
-                        showImprovedNotification('info', 'Auto-Sync Disabled',
-                            'You will need to manually sync changes');
-                    }
-                });
-
-                // Restore preference from localStorage
-                const savedPref = localStorage.getItem('auto_sync_enabled');
-                if (savedPref !== null) {
-                    autoSyncEnabled = savedPref === 'true';
-                    autoSyncCheckbox.checked = autoSyncEnabled;
-                }
-            }
-        }
-
         // Auto-sync function with retry logic
         async function autoSyncData() {
-            if (!isOnline || !isSignedIn || isSyncing) return;
+            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing) return;
 
             try {
                 isSyncing = true;
@@ -2208,9 +2258,9 @@
         }
 
         /**
-         * Initialize the application.
-         * Sets up event listeners, checks NFC support, and prepares the UI.
-         */
+        * Initialize the application.
+        * Sets up event listeners, checks NFC support, and prepares the UI.
+        */
         function init() {
             isInitializing = true;
 
@@ -2252,10 +2302,22 @@
             // Set up event listeners
             setupEventListeners();
 
-            // Set up auto-sync and session monitoring
+            // Set up auto-sync with the new combined button approach
             setupAutoSync();
+            setupEnhancedSyncButton();
             setupAuthStateTracking();
-            setupAutoSyncToggle();
+
+            // Restore from localStorage
+            // First try to restore the last active course
+            const lastActiveCourse = localStorage.getItem('last_active_course');
+            if (lastActiveCourse) {
+                console.log(`Restoring last active course: ${lastActiveCourse}`);
+                currentCourse = lastActiveCourse;
+
+                // Also restore the logs immediately from localStorage
+                logs = restoreLogsFromLocalStorage(currentCourse);
+                console.log(`Restored ${logs.length} logs from localStorage for ${currentCourse}`);
+            }
 
             // Handle auth redirect
             checkAuthRedirect();
@@ -2301,47 +2363,48 @@
                     titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
                 }
 
-                // When offline or waiting for auth, prioritize local storage
-                if (!isOnline || !isSignedIn) {
-                    logs = restoreLogsFromLocalStorage();
-                    logs.sort((a, b) => b.timestamp - a.timestamp);
-                    updatePageTitle();
-                    updateUI();
-                    return;
+                // ALWAYS load from localStorage first to avoid data loss
+                const localLogs = restoreLogsFromLocalStorage();
+                if (localLogs && localLogs.length > 0) {
+                    logs = localLogs;
+                    console.log(`Loaded ${logs.length} logs from localStorage for ${currentCourse}`);
                 }
 
-                // When signed in and online, fetch logs from the spreadsheet
-                if (isOnline) {
+                // Update UI with local data immediately
+                updateUI();
+
+                // Then, if we're online and signed in, try to fetch from server and merge
+                if (isOnline && isSignedIn) {
                     fetchLogsFromSheet()
-                        .then(() => {
+                        .then((fetchedLogs) => {
+                            if (fetchedLogs && fetchedLogs.length > 0) {
+                                // Don't replace local logs - merge them
+                                const mergedLogs = mergeLogs(logs, fetchedLogs);
+                                if (mergedLogs.length !== logs.length) {
+                                    logs = mergedLogs;
+                                    saveLogsToLocalStorage(); // Save the merged logs back to localStorage
+                                    updateUI();
+                                }
+                            }
                             updatePageTitle();
-                            updateUI();
                         })
                         .catch(error => {
                             console.error('Error fetching logs:', error);
 
-                            // On error, reset title back to default
+                            // On error, just keep using the local logs - don't clear them!
                             const titleElement = document.querySelector('h1');
                             if (titleElement) {
-                                titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+                                const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> ${courseName} Attendance`;
                             }
 
-                            // Only show error if we're past initialization
                             if (!isInitializing) {
-                                showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                                showImprovedNotification('warning', 'Sync Error',
+                                    `Could not sync with server, using local data`);
                             }
-
-                            // Fallback to local storage
-                            logs = restoreLogsFromLocalStorage();
-                            logs.sort((a, b) => b.timestamp - a.timestamp);
-                            updateUI();
                         });
                 } else {
-                    // Offline: fallback to local storage
-                    logs = restoreLogsFromLocalStorage();
-                    logs.sort((a, b) => b.timestamp - a.timestamp);
                     updatePageTitle();
-                    updateUI();
                 }
             };
 
@@ -2367,6 +2430,9 @@
                 isInitializing = false;
                 criticalErrorsOnly = false;
                 processPendingNotifications();
+
+                // Add the EIS export button
+                setTimeout(addDirectEisExportButton, 500);
             }, 3000);
         }
 
@@ -3049,105 +3115,67 @@
                 titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
             }
 
-            if (!isSignedIn) {
-                // Load logs from local storage for the course
-                const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-                if (storedLogs) {
-                    try {
-                        logs = JSON.parse(storedLogs);
-                        logs.sort((a, b) => b.timestamp - a.timestamp);
-                    } catch (e) {
-                        console.error('Error parsing stored logs:', e);
-                        logs = [];
-                    }
-                }
-
-                // Update the title when a course is selected
-                updatePageTitle();
-                updateUI();
-                return;
+            // ALWAYS load from localStorage first to avoid data loss
+            const localLogs = restoreLogsFromLocalStorage();
+            if (localLogs && localLogs.length > 0) {
+                logs = localLogs;
+                console.log(`Loaded ${logs.length} logs from localStorage`);
             }
 
-            // When signed in, fetch logs from the spreadsheet
-            if (isOnline) {
+            // Update UI with local data immediately
+            updateUI();
+
+            // Then, if we're online and signed in, try to fetch from server and merge
+            if (isOnline && isSignedIn) {
                 fetchLogsFromSheet()
-                    .then(() => {
+                    .then((fetchedLogs) => {
+                        if (fetchedLogs && fetchedLogs.length > 0) {
+                            // Don't replace local logs - merge them
+                            const mergedLogs = mergeLogs(logs, fetchedLogs);
+                            if (mergedLogs.length !== logs.length) {
+                                logs = mergedLogs;
+                                saveLogsToLocalStorage(); // Save the merged logs back to localStorage
+                                updateUI();
+                            }
+                        }
                         updatePageTitle();
-                        updateUI();
                     })
                     .catch(error => {
                         console.error('Error fetching logs:', error);
 
-                        // On error, reset title back to default
-                        const titleElement = document.querySelector('h1');
-                        if (titleElement) {
-                            titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
-                        }
-
-                        // Only show error if we're past initialization
+                        // On error, just keep using the local logs - don't clear them!
                         if (!isInitializing) {
-                            showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                            showImprovedNotification('warning', 'Sync Error',
+                                `Could not sync with server, using local data`);
                         }
-
-                        // Fallback to local storage
-                        const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-                        if (storedLogs) {
-                            try {
-                                logs = JSON.parse(storedLogs);
-                                logs.sort((a, b) => b.timestamp - a.timestamp);
-                            } catch (e) {
-                                console.error('Error parsing stored logs:', e);
-                            }
-                        }
-                        updateUI();
                     });
             } else {
-                // Offline: fallback to local storage
-                const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-                if (storedLogs) {
-                    try {
-                        logs = JSON.parse(storedLogs);
-                        logs.sort((a, b) => b.timestamp - a.timestamp);
-                    } catch (e) {
-                        console.error('Error parsing stored logs:', e);
-                    }
-                }
                 updatePageTitle();
-                updateUI();
             }
         }
 
 
         // Add this helper function to save logs to localStorage
-        function saveLogsToLocalStorage() {
-            if (!currentCourse) return;
+        function restoreLogsFromLocalStorage(courseName) {
+            const course = courseName || currentCourse;
+            if (!course) return [];
 
             try {
-                // First save to local storage
-                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
+                const storedLogsKey = `${LOGS_STORAGE_KEY}_${course}`;
+                const storedLogs = localStorage.getItem(storedLogsKey);
 
-                // Also save timestamp of most recent changes
-                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`, Date.now().toString());
+                console.log(`Attempting to restore logs for ${course} from key ${storedLogsKey}`);
 
-                // Mark that we have pending changes to sync
-                markChangesPending();
-
-            } catch (e) {
-                console.error('Error saving logs to localStorage:', e);
-
-                // Try saving with fewer logs if storage quota exceeded
-                if (e.name === 'QuotaExceededError' && logs.length > 100) {
-                    try {
-                        // Try with only the last 100 logs
-                        const recentLogs = logs.slice(0, 100);
-                        localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(recentLogs));
-                        showImprovedNotification('warning', 'Storage Limited',
-                            'Only most recent logs saved locally due to browser storage limits');
-                    } catch (innerError) {
-                        console.error('Failed to save even reduced logs:', innerError);
-                    }
+                if (storedLogs) {
+                    const parsedLogs = JSON.parse(storedLogs);
+                    console.log(`Restored ${parsedLogs.length} logs from localStorage for course ${course}`);
+                    return parsedLogs;
                 }
+            } catch (e) {
+                console.error('Error restoring logs from localStorage:', e);
             }
+
+            return [];
         }
 
         function restoreLogsFromLocalStorage() {
@@ -3608,11 +3636,11 @@
          */
         async function fetchLogsFromSheet() {
             if (!currentCourse) {
-                return;
+                return [];
             }
 
             try {
-                // Get the actual sheet name to use (might be different from display name)
+                // Get the actual sheet name to use
                 const sheetName = getSheetNameForCourse(currentCourse);
 
                 // Format the sheet name for the API request
@@ -3642,45 +3670,37 @@
                     }
                 });
 
-                // Sort logs by timestamp (newest first)
-                sheetLogs.sort((a, b) => b.timestamp - a.timestamp);
-                logs = sheetLogs;
-
-                // Also save to localStorage as backup
-                saveLogsToLocalStorage();
-
-                console.log(`Loaded ${logs.length} logs from ${currentCourse} sheet`);
-                return true;
+                // Return the logs instead of assigning directly to the global logs variable
+                return sheetLogs;
             } catch (error) {
                 console.error('Error fetching logs:', error);
-
-                // Reset title back to default on error
-                const titleElement = document.querySelector('h1');
-                if (titleElement) {
-                    titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
-                }
-
-                if (!isInitializing) {
-                    showImprovedNotification('error', 'Logs Error', 'Failed to fetch logs from Google Sheets');
-                }
                 throw error;
             }
         }
 
-        function mergeLogs(localLogs, remoteLogs) {
-            const merged = {};
-            // Add remote logs first.
-            remoteLogs.forEach(log => {
-                merged[log.id] = log;
-            });
-            // For local logs, update only if local has a newer timestamp.
+
+
+        function mergeLogs(localLogs, serverLogs) {
+            // Create a map of logs by ID for faster lookup
+            const logMap = {};
+
+            // Add all local logs to the map
             localLogs.forEach(log => {
-                if (!merged[log.id] || log.timestamp > merged[log.id].timestamp) {
-                    merged[log.id] = log;
+                logMap[log.id] = log;
+            });
+
+            // Add or update server logs, preferring newer timestamps
+            serverLogs.forEach(serverLog => {
+                const existingLog = logMap[serverLog.id];
+
+                // If log doesn't exist locally or server has newer version, use server version
+                if (!existingLog || serverLog.timestamp > existingLog.timestamp) {
+                    logMap[serverLog.id] = serverLog;
                 }
             });
-            // Return sorted logs (newest first)
-            return Object.values(merged).sort((a, b) => b.timestamp - a.timestamp);
+
+            // Convert map back to array and sort by timestamp (newest first)
+            return Object.values(logMap).sort((a, b) => b.timestamp - a.timestamp);
         }
 
 
@@ -5315,7 +5335,7 @@
             // Add to logs
             logs.unshift(newLog);
 
-            // Save to localStorage
+            // IMMEDIATELY save to localStorage
             saveLogsToLocalStorage();
 
             // Update UI
@@ -5382,7 +5402,7 @@
                     console.log('Log synced successfully');
                 } catch (err) {
                     console.error('Error appending log:', err);
-                    showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately');
+                    showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately, but log saved locally');
                 }
             }
         }
