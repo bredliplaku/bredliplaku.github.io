@@ -1684,9 +1684,9 @@
             autoSyncInterval = setInterval(() => {
                 if (!autoSyncEnabled) return;
 
-                // Only sync if online, signed in, and we have pending changes or it's been 5+ minutes
+                // Only sync if online, signed in, and we have pending changes or it's been 3+ minutes
                 const timeSinceLastSync = Date.now() - lastSyncTime;
-                if (isOnline && isSignedIn && (pendingChanges || timeSinceLastSync > 300000)) {
+                if (isOnline && isSignedIn && (pendingChanges || timeSinceLastSync > 180000)) {
                     autoSyncData();
                 }
             }, SYNC_INTERVAL);
@@ -1705,48 +1705,48 @@
 
         // Auto-sync function with retry logic
         async function autoSyncData() {
-            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing) return;
+    if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing) return;
 
-            try {
-                isSyncing = true;
-                updateSyncStatus("Syncing...", "syncing");
+    try {
+        isSyncing = true;
+        updateSyncStatus("Syncing...", "syncing");
 
-                await syncLogsWithSheet();
+        await syncLogsWithSheet();
 
-                // Reset state after successful sync
-                pendingChanges = false;
-                lastSyncTime = Date.now();
-                syncAttempts = 0;
-                updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
+        // Reset state after successful sync
+        pendingChanges = false;
+        lastSyncTime = Date.now();
+        syncAttempts = 0;
+        updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
 
-                // Hide success indication after a few seconds
-                setTimeout(() => {
-                    if (!pendingChanges) {
-                        updateSyncStatus("Online", "online");
-                    }
-                }, 3000);
-            } catch (error) {
-                console.error('Auto-sync error:', error);
-                syncAttempts++;
-
-                // Update UI to show sync failed
-                updateSyncStatus("Sync failed", "error");
-
-                if (syncAttempts < MAX_SYNC_ATTEMPTS) {
-                    // Schedule retry with exponential backoff
-                    const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
-                    updateSyncStatus(`Retrying in ${Math.round(retryDelay / 1000)}s`, "waiting");
-
-                    setTimeout(() => {
-                        if (isOnline && isSignedIn) {
-                            autoSyncData();
-                        }
-                    }, retryDelay);
-                }
-            } finally {
-                isSyncing = false;
+        // Hide success indication after a few seconds
+        setTimeout(() => {
+            if (!pendingChanges) {
+                updateSyncStatus("Online", "online");
             }
+        }, 3000);
+    } catch (error) {
+        console.error('Auto-sync error:', error);
+        syncAttempts++;
+
+        // Update UI to show sync failed
+        updateSyncStatus("Sync failed", "error");
+
+        if (syncAttempts < MAX_SYNC_ATTEMPTS) {
+            // Schedule retry with exponential backoff
+            const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
+            updateSyncStatus(`Retrying in ${Math.round(retryDelay/1000)}s`, "waiting");
+
+            setTimeout(() => {
+                if (isOnline && isSignedIn) {
+                    autoSyncData();
+                }
+            }, retryDelay);
         }
+    } finally {
+        isSyncing = false;
+    }
+}
 
 
 
@@ -2907,26 +2907,41 @@
 
         // Update sync status indicator
         function updateSyncStatus(message, status) {
-            const syncText = document.getElementById('sync-text');
-            const syncStatus = document.getElementById('sync-status');
+    const syncText = document.getElementById('sync-text');
+    const syncStatus = document.getElementById('sync-status');
 
-            if (syncText) syncText.textContent = message;
+    if (syncText) syncText.textContent = message;
 
-            if (syncStatus) {
-                syncStatus.className = 'sync-status';
-                syncStatus.classList.add(status || 'offline');
-            }
-
-            // Show indicator if we have pending changes
-            if (pendingChanges) {
-                const pendingBadge = document.getElementById('pending-changes-badge') ||
-                    createPendingBadge();
-                pendingBadge.style.display = 'inline-block';
-            } else {
-                const pendingBadge = document.getElementById('pending-changes-badge');
-                if (pendingBadge) pendingBadge.style.display = 'none';
-            }
+    if (syncStatus) {
+        // Clear all old status classes
+        syncStatus.className = 'sync-status';
+        
+        // Add appropriate status class based on current state
+        if (status === "offline") {
+            syncStatus.classList.add("offline");
+            // Make the offline status red
+            const statusIcon = syncStatus.querySelector("i");
+            if (statusIcon) statusIcon.style.color = "#f44336"; // Red color
+        } else {
+            syncStatus.classList.add(status || 'offline');
         }
+        
+        // Handle pending changes by changing the sync text color rather than adding a dot
+        if (pendingChanges) {
+            syncText.style.color = "#fb8c00"; // Orange color for pending changes text
+            syncText.style.fontWeight = "bold";
+        } else {
+            syncText.style.color = ""; // Reset to default
+            syncText.style.fontWeight = "";
+        }
+    }
+    
+    // Remove the previous implementation of the pending changes badge
+    const pendingBadge = document.getElementById('pending-changes-badge');
+    if (pendingBadge && pendingBadge.parentNode) {
+        pendingBadge.parentNode.removeChild(pendingBadge);
+    }
+}
 
         // Create a visual indicator for pending changes
         function createPendingBadge() {
@@ -3391,99 +3406,113 @@
         /**
          * Update online/offline status indicator.
          */
-        function updateOnlineStatus() {
-            isOnline = navigator.onLine;
-            console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
+         function updateOnlineStatus() {
+    isOnline = navigator.onLine;
+    console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
 
-            if (isOnline) {
-                syncStatus.className = 'sync-status online';
-                syncText.textContent = 'Online';
-                // Only disable if not signed in or syncing in progress
-                syncBtn.disabled = !isSignedIn || isSyncing;
-            } else {
-                syncStatus.className = 'sync-status offline';
-                syncText.textContent = 'Offline';
-                syncBtn.disabled = true;
-            }
+    if (isOnline) {
+        syncStatus.className = 'sync-status online';
+        syncText.textContent = 'Online';
+        syncText.style.color = ""; // Reset to default
+        // Only disable if not signed in or syncing in progress
+        syncBtn.disabled = !isSignedIn || isSyncing;
+    } else {
+        syncStatus.className = 'sync-status offline';
+        syncText.textContent = 'Offline';
+        syncText.style.color = "#f44336"; // Use red color for offline text
+        syncBtn.disabled = true;
+    }
 
-            // Ensure we show the button for admins regardless
-            syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    // Ensure the status icon color matches
+    const statusIcon = syncStatus.querySelector("i");
+    if (statusIcon) {
+        statusIcon.style.color = isOnline ? "#43a047" : "#f44336"; // Green if online, red if offline
+    }
 
-            // Debug output to help diagnose the issue
-            console.log('Sync button state:', {
-                isOnline,
-                isSignedIn,
-                isAdmin,
-                isSyncing,
-                disabled: syncBtn.disabled,
-                display: syncBtn.style.display
-            });
-        }
+    // Ensure we show the button for admins regardless
+    syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+}
 
         /**
          * Sync data with Google Sheets.
          * Fetches and updates both database and logs.
          */
-        async function syncData() {
-            if (!isOnline || !isSignedIn || isSyncing) {
-                return;
-            }
+         async function syncData() {
+    if (!isOnline || !isSignedIn || isSyncing) {
+        return;
+    }
 
-            isSyncing = true;
+    isSyncing = true;
 
-            // Show syncing indicator
-            const syncIcon = syncBtn.querySelector('i');
-            if (syncIcon) {
-                syncIcon.classList.add('fa-spin');
-            }
-            syncBtn.disabled = true;
+    // Show syncing indicator
+    const syncIcon = syncBtn.querySelector('i');
+    if (syncIcon) {
+        syncIcon.classList.add('fa-spin');
+    }
+    syncBtn.disabled = true;
 
-            showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
+    showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
 
-            try {
-                // First sync database to get up-to-date UID-name mappings
-                try {
-                    await fetchDatabaseFromSheet();
-                } catch (dbError) {
-                    console.error('Database sync error:', dbError);
-                    // Continue with logs sync even if database sync fails
-                }
-
-                // Fetch course info data
-                try {
-                    await fetchCourseInfo();
-                } catch (infoError) {
-                    console.error('Course info sync error:', infoError);
-                    // Continue with logs sync even if course info sync fails
-                }
-
-                // Then sync logs if a course is selected
-                if (currentCourse) {
-                    await syncLogsWithSheet();
-                } else if (availableCourses.length > 0) {
-                    // If no course selected but courses are available, select the first one
-                    currentCourse = availableCourses[0];
-                    courseSelect.value = currentCourse;
-                    await fetchLogsFromSheet();
-                }
-
-                showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
-            } catch (error) {
-                console.error('Sync error:', error);
-                showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
-            } finally {
-                isSyncing = false;
-
-                if (syncIcon) {
-                    syncIcon.classList.remove('fa-spin');
-                }
-
-                syncBtn.disabled = !isSignedIn || !isOnline;
-                updateUI();
-            }
+    try {
+        // First sync database to get up-to-date UID-name mappings
+        try {
+            await fetchDatabaseFromSheet();
+        } catch (dbError) {
+            console.error('Database sync error:', dbError);
+            // Continue with logs sync even if database sync fails
         }
 
-        /**
+        // Fetch course info data
+        try {
+            await fetchCourseInfo();
+        } catch (infoError) {
+            console.error('Course info sync error:', infoError);
+            // Continue with logs sync even if course info sync fails
+        }
+
+        // Then sync logs if a course is selected
+        if (currentCourse) {
+            await syncLogsWithSheet();
+        } else if (availableCourses.length > 0) {
+            // If no course selected but courses are available, select the first one
+            currentCourse = availableCourses[0];
+            courseSelect.value = currentCourse;
+            await fetchLogsFromSheet();
+        }
+
+        // Clear the pending changes flag after successful sync
+        pendingChanges = false;
+        lastSyncTime = Date.now();
+        
+        // Update the sync status to show success
+        updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
+        
+        // Hide success indication after a few seconds
+        setTimeout(() => {
+            if (!pendingChanges) {
+                updateSyncStatus(isOnline ? "Online" : "Offline", isOnline ? "online" : "offline");
+            }
+        }, 3000);
+
+        showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
+    } catch (error) {
+        console.error('Sync error:', error);
+        updateSyncStatus("Sync failed", "error");
+        showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+    } finally {
+        isSyncing = false;
+
+        if (syncIcon) {
+            syncIcon.classList.remove('fa-spin');
+        }
+
+        syncBtn.disabled = !isSignedIn || !isOnline;
+        updateUI();
+    }
+}
+ 
+ 
+         /**
          * Fetch database entries from Google Sheet.
          * Updates uidToNameMap with the latest data.
          */
