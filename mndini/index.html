@@ -2576,6 +2576,46 @@
                 });
             });
         }
+
+        /**
+         * Save logs to localStorage to prevent data loss
+         */
+        function saveLogsToLocalStorage() {
+            if (!currentCourse) return;
+
+            try {
+                // Save logs array
+                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
+
+                // Also save the current course so we can restore it on refresh
+                localStorage.setItem('last_active_course', currentCourse);
+
+                // Save timestamp of when we saved
+                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`, Date.now().toString());
+
+                // Mark that we have pending changes to sync
+                pendingChanges = true;
+                updateSyncStatus("Changes pending", "waiting");
+
+                console.log(`Saved ${logs.length} logs to localStorage for course ${currentCourse}`);
+            } catch (e) {
+                console.error('Error saving logs to localStorage:', e);
+
+                // Try saving with fewer logs if storage quota exceeded
+                if (e.name === 'QuotaExceededError' && logs.length > 100) {
+                    try {
+                        // Try with only the last 100 logs
+                        const recentLogs = logs.slice(0, 100);
+                        localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(recentLogs));
+                        showImprovedNotification('warning', 'Storage Limited',
+                            'Only most recent logs saved locally due to browser storage limits');
+                    } catch (innerError) {
+                        console.error('Failed to save even reduced logs:', innerError);
+                    }
+                }
+            }
+        }
+
         /**
          * Handle token response from Google OAuth.
          * @param {Object} resp - The token response object.
