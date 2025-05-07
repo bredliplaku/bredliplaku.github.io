@@ -79,6 +79,95 @@
             margin-bottom: 20px;
         }
 
+        /* Auto-sync toggle styles */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 24px;
+            vertical-align: middle;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.toggle-slider {
+            background-color: #2196F3;
+        }
+
+        input:checked+.toggle-slider:before {
+            transform: translateX(26px);
+        }
+
+        .toggle-label {
+            margin-left: 65px;
+            white-space: nowrap;
+            font-size: 0.9em;
+        }
+
+        /* Sync status styles */
+        .sync-status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.9em;
+            padding: 5px 10px;
+            border-radius: 15px;
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        .sync-status.online i {
+            color: var(--success-color);
+        }
+
+        .sync-status.offline i {
+            color: var(--warning-color);
+        }
+
+        .sync-status.syncing i {
+            color: var(--info-color);
+            animation: spin 1s linear infinite;
+        }
+
+        .sync-status.error i {
+            color: var(--danger-color);
+        }
+
+        .sync-status.waiting i {
+            color: var(--secondary-color);
+        }
+
+        .sync-status.success i {
+            color: var(--success-color);
+        }
+
         @keyframes spin {
             0% {
                 transform: rotate(0deg);
@@ -1059,6 +1148,12 @@
                 <button id="sync-btn" class="btn-blue admin-only" style="display: none;">
                     <i class="fas fa-sync-alt"></i> Sync
                 </button>
+                <!-- Auto-sync toggle -->
+                <label id="auto-sync-toggle" class="toggle-switch admin-only" style="display: none; margin-left: 10px;">
+                    <input type="checkbox" id="auto-sync-checkbox" checked>
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-label">Auto</span>
+                </label>
             </div>
             <!-- Right: Auth container -->
             <div class="auth-container">
@@ -1280,6 +1375,16 @@
         let courseIDMap = {}; // Object to store course information - name to ID mapping
         let sheetNameMap = {}; // Maps display names to actual sheet names
 
+        // Auto syncing
+        let autoSyncInterval = null;
+        let autoSyncEnabled = true;
+        let lastSyncTime = 0;
+        let pendingChanges = false;
+        let syncAttempts = 0;
+        const MAX_SYNC_ATTEMPTS = 5;
+        const SYNC_INTERVAL = 60000; // Auto-sync every 60 seconds
+        const SYNC_RETRY_INTERVAL = 15000; // Retry failed syncs after 15 seconds
+
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
         const tabContents = document.querySelectorAll('.tab-content');
@@ -1471,6 +1576,129 @@
                 console.error('Could not find logs-actions container for Direct EIS button');
             }
         }
+
+        // Add this function to implement auto-save and auto-sync
+        function setupAutoSync() {
+            // Always save changes to localStorage immediately when logs change
+            const originalAddLog = handleNfcReading;
+            handleNfcReading = async function (event) {
+                await originalAddLog.call(this, event);
+                pendingChanges = true;
+                saveLogsToLocalStorage(); // Save immediately after any change
+            };
+
+            // Setup auto-sync interval
+            if (autoSyncInterval) {
+                clearInterval(autoSyncInterval);
+            }
+
+            autoSyncInterval = setInterval(() => {
+                if (!autoSyncEnabled) return;
+
+                // Only sync if online, signed in, and we have pending changes or it's been 5+ minutes
+                const timeSinceLastSync = Date.now() - lastSyncTime;
+                if (isOnline && isSignedIn && (pendingChanges || timeSinceLastSync > 300000)) {
+                    autoSyncData();
+                }
+            }, SYNC_INTERVAL);
+
+            // Also sync whenever we detect coming back online
+            window.addEventListener('online', () => {
+                updateOnlineStatus();
+                // Wait a moment for connection to stabilize
+                setTimeout(() => {
+                    if (pendingChanges && isOnline && isSignedIn) {
+                        autoSyncData();
+                    }
+                }, 2000);
+            });
+        }
+
+        // Setup the auto-sync toggle
+        function setupAutoSyncToggle() {
+            const autoSyncCheckbox = document.getElementById('auto-sync-checkbox');
+            const autoSyncToggle = document.getElementById('auto-sync-toggle');
+
+            if (autoSyncToggle && isAdmin) {
+                autoSyncToggle.style.display = 'inline-block';
+            }
+
+            if (autoSyncCheckbox) {
+                autoSyncCheckbox.checked = autoSyncEnabled;
+
+                autoSyncCheckbox.addEventListener('change', function () {
+                    autoSyncEnabled = this.checked;
+                    localStorage.setItem('auto_sync_enabled', autoSyncEnabled.toString());
+
+                    if (autoSyncEnabled) {
+                        showImprovedNotification('info', 'Auto-Sync Enabled',
+                            'Changes will sync automatically when online');
+
+                        // Try to sync immediately if we have pending changes
+                        if (pendingChanges && isOnline && isSignedIn) {
+                            setTimeout(autoSyncData, 1000);
+                        }
+                    } else {
+                        showImprovedNotification('info', 'Auto-Sync Disabled',
+                            'You will need to manually sync changes');
+                    }
+                });
+
+                // Restore preference from localStorage
+                const savedPref = localStorage.getItem('auto_sync_enabled');
+                if (savedPref !== null) {
+                    autoSyncEnabled = savedPref === 'true';
+                    autoSyncCheckbox.checked = autoSyncEnabled;
+                }
+            }
+        }
+
+        // Auto-sync function with retry logic
+        async function autoSyncData() {
+            if (!isOnline || !isSignedIn || isSyncing) return;
+
+            try {
+                isSyncing = true;
+                updateSyncStatus("Syncing...", "syncing");
+
+                await syncLogsWithSheet();
+
+                // Reset state after successful sync
+                pendingChanges = false;
+                lastSyncTime = Date.now();
+                syncAttempts = 0;
+                updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
+
+                // Hide success indication after a few seconds
+                setTimeout(() => {
+                    if (!pendingChanges) {
+                        updateSyncStatus("Online", "online");
+                    }
+                }, 3000);
+            } catch (error) {
+                console.error('Auto-sync error:', error);
+                syncAttempts++;
+
+                // Update UI to show sync failed
+                updateSyncStatus("Sync failed", "error");
+
+                if (syncAttempts < MAX_SYNC_ATTEMPTS) {
+                    // Schedule retry with exponential backoff
+                    const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
+                    updateSyncStatus(`Retrying in ${Math.round(retryDelay / 1000)}s`, "waiting");
+
+                    setTimeout(() => {
+                        if (isOnline && isSignedIn) {
+                            autoSyncData();
+                        }
+                    }, retryDelay);
+                }
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+
 
         /**
          * Direct EIS Export function using clipboard - FIXED version that ensures course metadata is loaded
@@ -1986,7 +2214,7 @@
         function init() {
             isInitializing = true;
 
-            //Start with nfcSupported as false
+            // Start with nfcSupported as false
             nfcSupported = false;
 
             // Update current year in footer
@@ -2024,6 +2252,11 @@
             // Set up event listeners
             setupEventListeners();
 
+            // Set up auto-sync and session monitoring
+            setupAutoSync();
+            setupAuthStateTracking();
+            setupAutoSyncToggle();
+
             // Handle auth redirect
             checkAuthRedirect();
 
@@ -2050,6 +2283,83 @@
                     }, 1000);
                 }
             }, 1000);
+
+            // Override handleCourseChange to use improved local storage
+            const originalHandleCourseChange = handleCourseChange;
+            handleCourseChange = function () {
+                logs = []; // Clear current logs before loading new ones
+
+                if (!currentCourse) {
+                    updateUI();
+                    emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
+                    return;
+                }
+
+                const titleElement = document.querySelector('h1');
+                if (titleElement) {
+                    const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
+                }
+
+                // When offline or waiting for auth, prioritize local storage
+                if (!isOnline || !isSignedIn) {
+                    logs = restoreLogsFromLocalStorage();
+                    logs.sort((a, b) => b.timestamp - a.timestamp);
+                    updatePageTitle();
+                    updateUI();
+                    return;
+                }
+
+                // When signed in and online, fetch logs from the spreadsheet
+                if (isOnline) {
+                    fetchLogsFromSheet()
+                        .then(() => {
+                            updatePageTitle();
+                            updateUI();
+                        })
+                        .catch(error => {
+                            console.error('Error fetching logs:', error);
+
+                            // On error, reset title back to default
+                            const titleElement = document.querySelector('h1');
+                            if (titleElement) {
+                                titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+                            }
+
+                            // Only show error if we're past initialization
+                            if (!isInitializing) {
+                                showImprovedNotification('error', 'Data Error', `Failed to load logs for ${currentCourse}`);
+                            }
+
+                            // Fallback to local storage
+                            logs = restoreLogsFromLocalStorage();
+                            logs.sort((a, b) => b.timestamp - a.timestamp);
+                            updateUI();
+                        });
+                } else {
+                    // Offline: fallback to local storage
+                    logs = restoreLogsFromLocalStorage();
+                    logs.sort((a, b) => b.timestamp - a.timestamp);
+                    updatePageTitle();
+                    updateUI();
+                }
+            };
+
+            // Override syncLogsWithSheet to track sync status
+            const originalSyncLogs = syncLogsWithSheet;
+            syncLogsWithSheet = async function () {
+                try {
+                    await originalSyncLogs.call(this);
+
+                    // On successful sync, update the last sync time in localStorage
+                    localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`, Date.now().toString());
+                    pendingChanges = false;
+
+                    return true;
+                } catch (error) {
+                    throw error;
+                }
+            };
 
             // Show content after a reasonable timeout even if auth fails
             setTimeout(() => {
@@ -2489,6 +2799,56 @@
             }
         }
 
+        // Update sync status indicator
+        function updateSyncStatus(message, status) {
+            const syncText = document.getElementById('sync-text');
+            const syncStatus = document.getElementById('sync-status');
+
+            if (syncText) syncText.textContent = message;
+
+            if (syncStatus) {
+                syncStatus.className = 'sync-status';
+                syncStatus.classList.add(status || 'offline');
+            }
+
+            // Show indicator if we have pending changes
+            if (pendingChanges) {
+                const pendingBadge = document.getElementById('pending-changes-badge') ||
+                    createPendingBadge();
+                pendingBadge.style.display = 'inline-block';
+            } else {
+                const pendingBadge = document.getElementById('pending-changes-badge');
+                if (pendingBadge) pendingBadge.style.display = 'none';
+            }
+        }
+
+        // Create a visual indicator for pending changes
+        function createPendingBadge() {
+            const syncContainer = document.querySelector('.sync-container');
+            const badge = document.createElement('div');
+            badge.id = 'pending-changes-badge';
+            badge.style.display = 'inline-block';
+            badge.style.backgroundColor = '#fb8c00';
+            badge.style.color = 'white';
+            badge.style.borderRadius = '50%';
+            badge.style.width = '10px';
+            badge.style.height = '10px';
+            badge.style.marginLeft = '5px';
+            badge.title = 'Pending changes to sync';
+
+            if (syncContainer) {
+                syncContainer.appendChild(badge);
+            }
+
+            return badge;
+        }
+
+        // Mark changes as pending whenever we add/edit logs
+        function markChangesPending() {
+            pendingChanges = true;
+            updateSyncStatus("Changes pending", "waiting");
+        }
+
         function updateAuthUI() {
             console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
 
@@ -2760,15 +3120,171 @@
 
         // Add this helper function to save logs to localStorage
         function saveLogsToLocalStorage() {
-            if (currentCourse) {
-                try {
-                    localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
-                } catch (e) {
-                    console.error('Error saving logs to localStorage:', e);
+            if (!currentCourse) return;
+
+            try {
+                // First save to local storage
+                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
+
+                // Also save timestamp of most recent changes
+                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`, Date.now().toString());
+
+                // Mark that we have pending changes to sync
+                markChangesPending();
+
+            } catch (e) {
+                console.error('Error saving logs to localStorage:', e);
+
+                // Try saving with fewer logs if storage quota exceeded
+                if (e.name === 'QuotaExceededError' && logs.length > 100) {
+                    try {
+                        // Try with only the last 100 logs
+                        const recentLogs = logs.slice(0, 100);
+                        localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(recentLogs));
+                        showImprovedNotification('warning', 'Storage Limited',
+                            'Only most recent logs saved locally due to browser storage limits');
+                    } catch (innerError) {
+                        console.error('Failed to save even reduced logs:', innerError);
+                    }
                 }
             }
         }
 
+        function restoreLogsFromLocalStorage() {
+            if (!currentCourse) return [];
+
+            try {
+                const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+                if (storedLogs) {
+                    const parsedLogs = JSON.parse(storedLogs);
+
+                    // Verify the integrity of restored logs
+                    const validLogs = parsedLogs.filter(log => {
+                        return log && log.uid && log.timestamp && log.id;
+                    });
+
+                    if (validLogs.length < parsedLogs.length) {
+                        console.warn(`Filtered out ${parsedLogs.length - validLogs.length} invalid logs`);
+                    }
+
+                    // Get last sync timestamp
+                    const lastSyncStr = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`);
+                    const lastChangeStr = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`);
+
+                    // If we have changes that haven't been synced, mark as pending
+                    if (lastChangeStr && lastSyncStr && parseInt(lastChangeStr) > parseInt(lastSyncStr)) {
+                        pendingChanges = true;
+                        updateSyncStatus("Changes pending", "waiting");
+                    }
+
+                    return validLogs;
+                }
+            } catch (e) {
+                console.error('Error restoring logs from localStorage:', e);
+                showImprovedNotification('error', 'Restore Error',
+                    'Could not restore local logs. See console for details.');
+            }
+
+            return [];
+        }
+
+        // Add this to track authentication state better
+        function setupAuthStateTracking() {
+            // Store the timestamp of the last successful authentication
+            let lastAuthCheck = Date.now();
+            const AUTH_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+            // Periodically check if token is still valid
+            setInterval(async () => {
+                if (!isSignedIn) return;
+
+                // Only check if we've been idle for a while
+                if (Date.now() - lastAuthCheck > AUTH_CHECK_INTERVAL) {
+                    try {
+                        // Simple API call to check token validity
+                        await gapi.client.sheets.spreadsheets.get({
+                            spreadsheetId: LOGS_SPREADSHEET_ID,
+                            fields: 'spreadsheetId'
+                        });
+
+                        // If successful, update last check time
+                        lastAuthCheck = Date.now();
+                    } catch (error) {
+                        // Check if this is an auth error
+                        if (error.status === 401 ||
+                            (error.result && error.result.error &&
+                                (error.result.error.status === 'UNAUTHENTICATED' ||
+                                    error.result.error.status === 'PERMISSION_DENIED'))) {
+
+                            console.warn('Authentication token expired, attempting silent refresh');
+                            attemptSilentAuth();
+                        }
+                    }
+                }
+            }, 60000); // Check every minute
+
+            // Update last activity time when user interacts
+            document.addEventListener('click', () => { lastAuthCheck = Date.now(); });
+            document.addEventListener('keydown', () => { lastAuthCheck = Date.now(); });
+        }
+
+        // Try to silently refresh the token
+        async function attemptSilentAuth() {
+            try {
+                // Try to refresh the token silently (no UI)
+                tokenClient.requestAccessToken({ prompt: 'none' });
+                return true;
+            } catch (error) {
+                console.error('Silent auth refresh failed:', error);
+
+                // If silent refresh fails, show notification to user
+                showImprovedNotification('warning', 'Session Expiring',
+                    'Your login session may be expiring. Consider saving your work and refreshing the page.');
+
+                // Update UI to show auth warning
+                updateAuthWarningUI(true);
+                return false;
+            }
+        }
+
+        // Show a warning in the UI about authentication issues
+        function updateAuthWarningUI(show) {
+            const userContainer = document.getElementById('user-container');
+
+            if (show && userContainer) {
+                // Add warning indicator
+                if (!document.getElementById('auth-warning')) {
+                    const warning = document.createElement('div');
+                    warning.id = 'auth-warning';
+                    warning.style.backgroundColor = '#fb8c00';
+                    warning.style.color = 'white';
+                    warning.style.padding = '2px 8px';
+                    warning.style.borderRadius = '4px';
+                    warning.style.fontSize = '0.7em';
+                    warning.style.marginLeft = '5px';
+                    warning.style.animation = 'pulse 2s infinite';
+                    warning.textContent = 'Session Expiring';
+                    warning.title = 'Your login session may be expiring soon';
+
+                    // Add animation
+                    const style = document.createElement('style');
+                    style.textContent = `
+                @keyframes pulse {
+                    0% { opacity: 0.6; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.6; }
+                }
+            `;
+                    document.head.appendChild(style);
+
+                    userContainer.appendChild(warning);
+                }
+            } else {
+                // Remove warning if present
+                const warning = document.getElementById('auth-warning');
+                if (warning) warning.remove();
+            }
+        }
 
         /**
          * Populate course dropdown with available courses.
