@@ -1515,6 +1515,10 @@
          * Add the Direct EIS Export button to the UI
          */
         function addDirectEisExportButton() {
+            // Check if button already exists to prevent duplicates
+            if (document.getElementById('direct-eis-export-btn')) {
+                return; // Button already exists, don't create another one
+            }
             // Find a good place to add the button (next to existing actions)
             const actionsContainer = document.querySelector('.logs-actions');
 
@@ -1705,48 +1709,48 @@
 
         // Auto-sync function with retry logic
         async function autoSyncData() {
-    if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing) return;
+            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing) return;
 
-    try {
-        isSyncing = true;
-        updateSyncStatus("Syncing...", "syncing");
+            try {
+                isSyncing = true;
+                updateSyncStatus("Syncing...", "syncing");
 
-        await syncLogsWithSheet();
+                await syncLogsWithSheet();
 
-        // Reset state after successful sync
-        pendingChanges = false;
-        lastSyncTime = Date.now();
-        syncAttempts = 0;
-        updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
+                // Reset state after successful sync
+                pendingChanges = false;
+                lastSyncTime = Date.now();
+                syncAttempts = 0;
+                updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
 
-        // Hide success indication after a few seconds
-        setTimeout(() => {
-            if (!pendingChanges) {
-                updateSyncStatus("Online", "online");
-            }
-        }, 3000);
-    } catch (error) {
-        console.error('Auto-sync error:', error);
-        syncAttempts++;
+                // Hide success indication after a few seconds
+                setTimeout(() => {
+                    if (!pendingChanges) {
+                        updateSyncStatus("Online", "online");
+                    }
+                }, 3000);
+            } catch (error) {
+                console.error('Auto-sync error:', error);
+                syncAttempts++;
 
-        // Update UI to show sync failed
-        updateSyncStatus("Sync failed", "error");
+                // Update UI to show sync failed
+                updateSyncStatus("Sync failed", "error");
 
-        if (syncAttempts < MAX_SYNC_ATTEMPTS) {
-            // Schedule retry with exponential backoff
-            const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
-            updateSyncStatus(`Retrying in ${Math.round(retryDelay/1000)}s`, "waiting");
+                if (syncAttempts < MAX_SYNC_ATTEMPTS) {
+                    // Schedule retry with exponential backoff
+                    const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
+                    updateSyncStatus(`Retrying in ${Math.round(retryDelay / 1000)}s`, "waiting");
 
-            setTimeout(() => {
-                if (isOnline && isSignedIn) {
-                    autoSyncData();
+                    setTimeout(() => {
+                        if (isOnline && isSignedIn) {
+                            autoSyncData();
+                        }
+                    }, retryDelay);
                 }
-            }, retryDelay);
+            } finally {
+                isSyncing = false;
+            }
         }
-    } finally {
-        isSyncing = false;
-    }
-}
 
 
 
@@ -2581,38 +2585,34 @@
          * Save logs to localStorage to prevent data loss
          */
         function saveLogsToLocalStorage() {
-            if (!currentCourse) return;
+            if (!currentCourse) {
+                console.warn('Cannot save logs: No current course selected');
+                return;
+            }
 
             try {
-                // Save logs array
-                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
+                // Use a temporary variable to avoid race conditions
+                const courseToSave = currentCourse;
 
-                // Also save the current course so we can restore it on refresh
-                localStorage.setItem('last_active_course', currentCourse);
+                // Save logs array with course-specific key
+                const storageKey = `${LOGS_STORAGE_KEY}_${courseToSave}`;
+                localStorage.setItem(storageKey, JSON.stringify(logs));
+
+                // Also save the current course 
+                localStorage.setItem('last_active_course', courseToSave);
 
                 // Save timestamp of when we saved
-                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`, Date.now().toString());
+                localStorage.setItem(`${storageKey}_timestamp`, Date.now().toString());
 
-                // Mark that we have pending changes to sync
+                // Mark changes as pending for syncing
                 pendingChanges = true;
                 updateSyncStatus("Changes pending", "waiting");
 
-                console.log(`Saved ${logs.length} logs to localStorage for course ${currentCourse}`);
+                console.log(`Saved ${logs.length} logs to localStorage for course ${courseToSave}`);
             } catch (e) {
                 console.error('Error saving logs to localStorage:', e);
-
-                // Try saving with fewer logs if storage quota exceeded
-                if (e.name === 'QuotaExceededError' && logs.length > 100) {
-                    try {
-                        // Try with only the last 100 logs
-                        const recentLogs = logs.slice(0, 100);
-                        localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(recentLogs));
-                        showImprovedNotification('warning', 'Storage Limited',
-                            'Only most recent logs saved locally due to browser storage limits');
-                    } catch (innerError) {
-                        console.error('Failed to save even reduced logs:', innerError);
-                    }
-                }
+                showImprovedNotification('error', 'Storage Error',
+                    'Failed to save data locally. Try clearing some browser data.');
             }
         }
 
@@ -2907,41 +2907,41 @@
 
         // Update sync status indicator
         function updateSyncStatus(message, status) {
-    const syncText = document.getElementById('sync-text');
-    const syncStatus = document.getElementById('sync-status');
+            const syncText = document.getElementById('sync-text');
+            const syncStatus = document.getElementById('sync-status');
 
-    if (syncText) syncText.textContent = message;
+            if (syncText) syncText.textContent = message;
 
-    if (syncStatus) {
-        // Clear all old status classes
-        syncStatus.className = 'sync-status';
-        
-        // Add appropriate status class based on current state
-        if (status === "offline") {
-            syncStatus.classList.add("offline");
-            // Make the offline status red
-            const statusIcon = syncStatus.querySelector("i");
-            if (statusIcon) statusIcon.style.color = "#f44336"; // Red color
-        } else {
-            syncStatus.classList.add(status || 'offline');
+            if (syncStatus) {
+                // Clear all old status classes
+                syncStatus.className = 'sync-status';
+
+                // Add appropriate status class based on current state
+                if (status === "offline") {
+                    syncStatus.classList.add("offline");
+                    // Make the offline status red
+                    const statusIcon = syncStatus.querySelector("i");
+                    if (statusIcon) statusIcon.style.color = "#f44336"; // Red color
+                } else {
+                    syncStatus.classList.add(status || 'offline');
+                }
+
+                // Handle pending changes by changing the sync text color rather than adding a dot
+                if (pendingChanges) {
+                    syncText.style.color = "#fb8c00"; // Orange color for pending changes text
+                    syncText.style.fontWeight = "bold";
+                } else {
+                    syncText.style.color = ""; // Reset to default
+                    syncText.style.fontWeight = "";
+                }
+            }
+
+            // Remove the previous implementation of the pending changes badge
+            const pendingBadge = document.getElementById('pending-changes-badge');
+            if (pendingBadge && pendingBadge.parentNode) {
+                pendingBadge.parentNode.removeChild(pendingBadge);
+            }
         }
-        
-        // Handle pending changes by changing the sync text color rather than adding a dot
-        if (pendingChanges) {
-            syncText.style.color = "#fb8c00"; // Orange color for pending changes text
-            syncText.style.fontWeight = "bold";
-        } else {
-            syncText.style.color = ""; // Reset to default
-            syncText.style.fontWeight = "";
-        }
-    }
-    
-    // Remove the previous implementation of the pending changes badge
-    const pendingBadge = document.getElementById('pending-changes-badge');
-    if (pendingBadge && pendingBadge.parentNode) {
-        pendingBadge.parentNode.removeChild(pendingBadge);
-    }
-}
 
         // Create a visual indicator for pending changes
         function createPendingBadge() {
@@ -3170,11 +3170,19 @@
                 titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
             }
 
-            // ALWAYS load from localStorage first to avoid data loss
-            const localLogs = restoreLogsFromLocalStorage();
-            if (localLogs && localLogs.length > 0) {
-                logs = localLogs;
-                console.log(`Loaded ${logs.length} logs from localStorage`);
+            // ALWAYS load from localStorage first - use a course-specific key
+            const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse}`;
+            const storedLogs = localStorage.getItem(storageKey);
+
+            if (storedLogs) {
+                try {
+                    // Parse logs from localStorage for THIS course only
+                    logs = JSON.parse(storedLogs);
+                    console.log(`Loaded ${logs.length} logs from localStorage for ${currentCourse}`);
+                } catch (e) {
+                    console.error(`Error parsing stored logs for ${currentCourse}:`, e);
+                    logs = [];
+                }
             }
 
             // Update UI with local data immediately
@@ -3189,7 +3197,8 @@
                             const mergedLogs = mergeLogs(logs, fetchedLogs);
                             if (mergedLogs.length !== logs.length) {
                                 logs = mergedLogs;
-                                saveLogsToLocalStorage(); // Save the merged logs back to localStorage
+                                // Save merged logs back to localStorage
+                                saveLogsToLocalStorage();
                                 updateUI();
                             }
                         }
@@ -3198,7 +3207,6 @@
                     .catch(error => {
                         console.error('Error fetching logs:', error);
 
-                        // On error, just keep using the local logs - don't clear them!
                         if (!isInitializing) {
                             showImprovedNotification('warning', 'Sync Error',
                                 `Could not sync with server, using local data`);
@@ -3406,116 +3414,116 @@
         /**
          * Update online/offline status indicator.
          */
-         function updateOnlineStatus() {
-    isOnline = navigator.onLine;
-    console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            console.log('Connection status updated: ' + (isOnline ? 'Online' : 'Offline'));
 
-    if (isOnline) {
-        syncStatus.className = 'sync-status online';
-        syncText.textContent = 'Online';
-        syncText.style.color = ""; // Reset to default
-        // Only disable if not signed in or syncing in progress
-        syncBtn.disabled = !isSignedIn || isSyncing;
-    } else {
-        syncStatus.className = 'sync-status offline';
-        syncText.textContent = 'Offline';
-        syncText.style.color = "#f44336"; // Use red color for offline text
-        syncBtn.disabled = true;
-    }
+            if (isOnline) {
+                syncStatus.className = 'sync-status online';
+                syncText.textContent = 'Online';
+                syncText.style.color = ""; // Reset to default
+                // Only disable if not signed in or syncing in progress
+                syncBtn.disabled = !isSignedIn || isSyncing;
+            } else {
+                syncStatus.className = 'sync-status offline';
+                syncText.textContent = 'Offline';
+                syncText.style.color = "#f44336"; // Use red color for offline text
+                syncBtn.disabled = true;
+            }
 
-    // Ensure the status icon color matches
-    const statusIcon = syncStatus.querySelector("i");
-    if (statusIcon) {
-        statusIcon.style.color = isOnline ? "#43a047" : "#f44336"; // Green if online, red if offline
-    }
+            // Ensure the status icon color matches
+            const statusIcon = syncStatus.querySelector("i");
+            if (statusIcon) {
+                statusIcon.style.color = isOnline ? "#43a047" : "#f44336"; // Green if online, red if offline
+            }
 
-    // Ensure we show the button for admins regardless
-    syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
-}
+            // Ensure we show the button for admins regardless
+            syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+        }
 
         /**
          * Sync data with Google Sheets.
          * Fetches and updates both database and logs.
          */
-         async function syncData() {
-    if (!isOnline || !isSignedIn || isSyncing) {
-        return;
-    }
-
-    isSyncing = true;
-
-    // Show syncing indicator
-    const syncIcon = syncBtn.querySelector('i');
-    if (syncIcon) {
-        syncIcon.classList.add('fa-spin');
-    }
-    syncBtn.disabled = true;
-
-    showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
-
-    try {
-        // First sync database to get up-to-date UID-name mappings
-        try {
-            await fetchDatabaseFromSheet();
-        } catch (dbError) {
-            console.error('Database sync error:', dbError);
-            // Continue with logs sync even if database sync fails
-        }
-
-        // Fetch course info data
-        try {
-            await fetchCourseInfo();
-        } catch (infoError) {
-            console.error('Course info sync error:', infoError);
-            // Continue with logs sync even if course info sync fails
-        }
-
-        // Then sync logs if a course is selected
-        if (currentCourse) {
-            await syncLogsWithSheet();
-        } else if (availableCourses.length > 0) {
-            // If no course selected but courses are available, select the first one
-            currentCourse = availableCourses[0];
-            courseSelect.value = currentCourse;
-            await fetchLogsFromSheet();
-        }
-
-        // Clear the pending changes flag after successful sync
-        pendingChanges = false;
-        lastSyncTime = Date.now();
-        
-        // Update the sync status to show success
-        updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
-        
-        // Hide success indication after a few seconds
-        setTimeout(() => {
-            if (!pendingChanges) {
-                updateSyncStatus(isOnline ? "Online" : "Offline", isOnline ? "online" : "offline");
+        async function syncData() {
+            if (!isOnline || !isSignedIn || isSyncing) {
+                return;
             }
-        }, 3000);
 
-        showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
-    } catch (error) {
-        console.error('Sync error:', error);
-        updateSyncStatus("Sync failed", "error");
-        showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
-    } finally {
-        isSyncing = false;
+            isSyncing = true;
 
-        if (syncIcon) {
-            syncIcon.classList.remove('fa-spin');
+            // Show syncing indicator
+            const syncIcon = syncBtn.querySelector('i');
+            if (syncIcon) {
+                syncIcon.classList.add('fa-spin');
+            }
+            syncBtn.disabled = true;
+
+            showImprovedNotification('info', 'Syncing', 'Syncing data with Google Sheets...');
+
+            try {
+                // First sync database to get up-to-date UID-name mappings
+                try {
+                    await fetchDatabaseFromSheet();
+                } catch (dbError) {
+                    console.error('Database sync error:', dbError);
+                    // Continue with logs sync even if database sync fails
+                }
+
+                // Fetch course info data
+                try {
+                    await fetchCourseInfo();
+                } catch (infoError) {
+                    console.error('Course info sync error:', infoError);
+                    // Continue with logs sync even if course info sync fails
+                }
+
+                // Then sync logs if a course is selected
+                if (currentCourse) {
+                    await syncLogsWithSheet();
+                } else if (availableCourses.length > 0) {
+                    // If no course selected but courses are available, select the first one
+                    currentCourse = availableCourses[0];
+                    courseSelect.value = currentCourse;
+                    await fetchLogsFromSheet();
+                }
+
+                // Clear the pending changes flag after successful sync
+                pendingChanges = false;
+                lastSyncTime = Date.now();
+
+                // Update the sync status to show success
+                updateSyncStatus("Synced " + new Date().toLocaleTimeString(), "success");
+
+                // Hide success indication after a few seconds
+                setTimeout(() => {
+                    if (!pendingChanges) {
+                        updateSyncStatus(isOnline ? "Online" : "Offline", isOnline ? "online" : "offline");
+                    }
+                }, 3000);
+
+                showImprovedNotification('success', 'Sync Complete', 'Data has been synced with Google Sheets');
+            } catch (error) {
+                console.error('Sync error:', error);
+                updateSyncStatus("Sync failed", "error");
+                showImprovedNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+            } finally {
+                isSyncing = false;
+
+                if (syncIcon) {
+                    syncIcon.classList.remove('fa-spin');
+                }
+
+                syncBtn.disabled = !isSignedIn || !isOnline;
+                updateUI();
+            }
         }
 
-        syncBtn.disabled = !isSignedIn || !isOnline;
-        updateUI();
-    }
-}
- 
- 
-         /**
-         * Fetch database entries from Google Sheet.
-         * Updates uidToNameMap with the latest data.
-         */
+
+        /**
+        * Fetch database entries from Google Sheet.
+        * Updates uidToNameMap with the latest data.
+        */
         async function fetchDatabaseFromSheet() {
             try {
                 const response = await gapi.client.sheets.spreadsheets.values.get({
@@ -4430,7 +4438,7 @@
                         syncLogsWithSheet()
                     ]).catch(err => console.error('Error syncing after edit:', err));
                 }
-
+                saveLogsToLocalStorage();
                 updateUI();
 
                 showImprovedNotification('success', 'Log Updated', 'Log entry has been updated successfully.');
