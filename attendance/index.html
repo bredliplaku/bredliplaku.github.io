@@ -1354,6 +1354,8 @@
         const MAX_SYNC_ATTEMPTS = 5;
         const SYNC_INTERVAL = 60000; // Auto-sync every 60 seconds
         const SYNC_RETRY_INTERVAL = 15000; // Retry failed syncs after 15 seconds
+        let activeRequests = new Map(); // Track active requests per course
+        let currentRequestId = 0; // Global request counter
 
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -2591,30 +2593,73 @@
             }
 
             try {
-                // Use a temporary variable to avoid race conditions
-                const courseToSave = currentCourse;
+                // Cancel any pending requests for other courses to prevent conflicts
+                activeRequests.forEach((request, course) => {
+                    if (course !== currentCourse) {
+                        request.cancelled = true;
+                    }
+                });
 
-                // Save logs array with course-specific key
-                const storageKey = `${LOGS_STORAGE_KEY}_${courseToSave}`;
+                // Save with course-specific key
+                const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse}`;
                 localStorage.setItem(storageKey, JSON.stringify(logs));
-
-                // Also save the current course 
-                localStorage.setItem('last_active_course', courseToSave);
-
-                // Save timestamp of when we saved
+                localStorage.setItem('last_active_course', currentCourse);
                 localStorage.setItem(`${storageKey}_timestamp`, Date.now().toString());
 
                 // Mark changes as pending for syncing
                 pendingChanges = true;
                 updateSyncStatus("Changes pending", "waiting");
 
-                console.log(`Saved ${logs.length} logs to localStorage for course ${courseToSave}`);
+                console.log(`Saved ${logs.length} logs to localStorage for course ${currentCourse}`);
+
             } catch (e) {
                 console.error('Error saving logs to localStorage:', e);
-                showImprovedNotification('error', 'Storage Error',
-                    'Failed to save data locally. Try clearing some browser data.');
+                if (e.name === 'QuotaExceededError') {
+                    // Try to clean up old data
+                    cleanupOldLocalStorage();
+
+                    // Try again
+                    try {
+                        const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse}`;
+                        localStorage.setItem(storageKey, JSON.stringify(logs));
+                    } catch (e2) {
+                        showImprovedNotification('error', 'Storage Full',
+                            'Browser storage is full. Some data may not be saved locally.');
+                    }
+                }
             }
         }
+
+        // Helper function to clean up old localStorage data
+        function cleanupOldLocalStorage() {
+            const keysToCheck = [];
+            const now = Date.now();
+            const ONE_MONTH = 30 * 24 * 60 * 60 * 1000;
+
+            // Find all attendance log keys
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(LOGS_STORAGE_KEY)) {
+                    keysToCheck.push(key);
+                }
+            }
+
+            // Remove old data
+            keysToCheck.forEach(key => {
+                const timestampKey = `${key}_timestamp`;
+                const timestamp = localStorage.getItem(timestampKey);
+
+                if (timestamp) {
+                    const age = now - parseInt(timestamp);
+                    if (age > ONE_MONTH) {
+                        console.log(`Removing old data for key: ${key} (${Math.floor(age / (24 * 60 * 60 * 1000))} days old)`);
+                        localStorage.removeItem(key);
+                        localStorage.removeItem(timestampKey);
+                    }
+                }
+            });
+        }
+
 
         /**
          * Handle token response from Google OAuth.
@@ -3156,67 +3201,169 @@
         }
 
         function handleCourseChange() {
-            logs = []; // Clear current logs before loading new ones
+            // Cancel any pending requests for the previous course
+            if (activeRequests.size > 0) {
+                activeRequests.forEach((request, course) => {
+                    console.log(`Cancelling pending request for course: ${course}`);
+                    request.cancelled = true;
+                });
+                activeRequests.clear();
+            }
 
-            if (!currentCourse) {
+            // Clear logs immediately
+            logs = [];
+
+            const targetCourse = currentCourse;
+            if (!targetCourse) {
                 updateUI();
                 emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
                 return;
             }
 
+            // Create a new request object for this course change
+            const requestId = ++currentRequestId;
+            const request = {
+                id: requestId,
+                course: targetCourse,
+                cancelled: false,
+                timestamp: Date.now()
+            };
+
+            activeRequests.set(targetCourse, request);
+
+            console.log(`Starting course change to: ${targetCourse} (request #${requestId})`);
+
+            // Update UI to show loading
             const titleElement = document.querySelector('h1');
             if (titleElement) {
-                const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                const courseName = targetCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                 titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
             }
 
-            // ALWAYS load from localStorage first - use a course-specific key
-            const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse}`;
-            const storedLogs = localStorage.getItem(storageKey);
+            // Save the current course immediately
+            localStorage.setItem('last_active_course', targetCourse);
 
-            if (storedLogs) {
-                try {
-                    // Parse logs from localStorage for THIS course only
-                    logs = JSON.parse(storedLogs);
-                    console.log(`Loaded ${logs.length} logs from localStorage for ${currentCourse}`);
-                } catch (e) {
-                    console.error(`Error parsing stored logs for ${currentCourse}:`, e);
-                    logs = [];
+            // Load from localStorage for THIS specific course
+            const storageKey = `${LOGS_STORAGE_KEY}_${targetCourse}`;
+            let localLogs = [];
+
+            try {
+                const storedLogs = localStorage.getItem(storageKey);
+                if (storedLogs) {
+                    localLogs = JSON.parse(storedLogs);
+
+                    // Verify we're still on the same course
+                    if (!request.cancelled && currentCourse === targetCourse) {
+                        logs = localLogs;
+                        console.log(`Loaded ${logs.length} logs from localStorage for ${targetCourse}`);
+                        updateUI();
+                    } else {
+                        console.log(`Course changed while loading localStorage, discarding data for ${targetCourse}`);
+                        return;
+                    }
                 }
+            } catch (e) {
+                console.error(`Error parsing stored logs for ${targetCourse}:`, e);
             }
 
-            // Update UI with local data immediately
-            updateUI();
-
-            // Then, if we're online and signed in, try to fetch from server and merge
+            // Fetch from server if online
             if (isOnline && isSignedIn) {
-                fetchLogsFromSheet()
-                    .then((fetchedLogs) => {
-                        if (fetchedLogs && fetchedLogs.length > 0) {
-                            // Don't replace local logs - merge them
-                            const mergedLogs = mergeLogs(logs, fetchedLogs);
-                            if (mergedLogs.length !== logs.length) {
-                                logs = mergedLogs;
-                                // Save merged logs back to localStorage
-                                saveLogsToLocalStorage();
-                                updateUI();
-                            }
+                fetchLogsWithRequestTracking(targetCourse, request)
+                    .then((success) => {
+                        if (success) {
+                            updatePageTitle();
                         }
-                        updatePageTitle();
                     })
-                    .catch(error => {
-                        console.error('Error fetching logs:', error);
-
-                        if (!isInitializing) {
-                            showImprovedNotification('warning', 'Sync Error',
-                                `Could not sync with server, using local data`);
+                    .finally(() => {
+                        // Clean up the request
+                        if (activeRequests.get(targetCourse)?.id === requestId) {
+                            activeRequests.delete(targetCourse);
                         }
                     });
             } else {
                 updatePageTitle();
+                activeRequests.delete(targetCourse);
             }
         }
 
+        // Fetch logs with request tracking
+        async function fetchLogsWithRequestTracking(courseName, request) {
+            try {
+                // Check if request is still valid before making API call
+                if (request.cancelled || currentCourse !== courseName) {
+                    console.log(`Request cancelled before API call for ${courseName}`);
+                    return false;
+                }
+
+                const sheetName = getSheetNameForCourse(courseName);
+                const formattedSheetName = formatSheetName(sheetName);
+                const range = `${formattedSheetName}!A2:D`;
+
+                console.log(`Fetching logs for ${courseName} (request #${request.id})`);
+
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: range,
+                });
+
+                // Check again if request is still valid after API response
+                if (request.cancelled || currentCourse !== courseName) {
+                    console.log(`Request cancelled after API response for ${courseName}`);
+                    return false;
+                }
+
+                const rows = response.result.values || [];
+                const sheetLogs = [];
+
+                rows.forEach(row => {
+                    if (row.length >= 3) {
+                        const uid = String(row[0]);
+                        const timestamp = new Date(row[1]).getTime();
+                        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
+                        const manual = row.length >= 4 ? row[3] === 'true' : false;
+
+                        if (uid && !isNaN(timestamp)) {
+                            sheetLogs.push({ uid, timestamp, id, manual });
+                        }
+                    }
+                });
+
+                // Final check before updating logs
+                if (request.cancelled || currentCourse !== courseName) {
+                    console.log(`Request cancelled before updating logs for ${courseName}`);
+                    return false;
+                }
+
+                // Merge with existing logs
+                if (sheetLogs.length > 0) {
+                    const mergedLogs = mergeLogs(logs, sheetLogs);
+                    if (mergedLogs.length !== logs.length) {
+                        logs = mergedLogs;
+
+                        // Save to localStorage with the specific course key
+                        const storageKey = `${LOGS_STORAGE_KEY}_${courseName}`;
+                        localStorage.setItem(storageKey, JSON.stringify(logs));
+                        localStorage.setItem(`${storageKey}_timestamp`, Date.now().toString());
+
+                        console.log(`Merged and saved ${logs.length} logs for ${courseName}`);
+                        updateUI();
+                    }
+                }
+
+                return true;
+
+            } catch (error) {
+                console.error(`Error fetching logs for ${courseName}:`, error);
+
+                // Only show error if this request is still current
+                if (!request.cancelled && currentCourse === courseName && !isInitializing) {
+                    showImprovedNotification('warning', 'Sync Error',
+                        `Could not sync ${courseName} with server, using local data`);
+                }
+
+                return false;
+            }
+        }
 
         // Add this helper function to save logs to localStorage
         function restoreLogsFromLocalStorage(courseName) {
@@ -3519,29 +3666,139 @@
             }
         }
 
+        /**
+         * Detect the format of the database sheet and migrate if needed
+         */
+        async function detectAndMigrateDatabaseFormat() {
+            try {
+                // First, check the headers to understand the format
+                const headerResponse = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: DATABASE_SPREADSHEET_ID,
+                    range: 'Database!A1:E1' // Check up to 5 columns to be safe
+                });
+
+                const headers = headerResponse.result.values ? headerResponse.result.values[0] : [];
+                console.log('Database headers detected:', headers);
+
+                // Determine format based on headers
+                let format = 'unknown';
+                let needsMigration = false;
+
+                if (headers.length === 0) {
+                    // No headers - need to add them
+                    format = 'empty';
+                    needsMigration = true;
+                } else if (headers.length === 2 &&
+                    (headers[0].toLowerCase().includes('name') || headers[0].toLowerCase().includes('uid'))) {
+                    // Old 2-column format: [Name, UID] or [UID, Name]
+                    format = 'legacy-2col';
+                    needsMigration = true;
+                } else if (headers.length === 3 &&
+                    headers[0].toLowerCase().includes('index') &&
+                    headers[1].toLowerCase().includes('name') &&
+                    headers[2].toLowerCase().includes('uid')) {
+                    // Correct format: [Index, Name, UID]
+                    format = 'correct';
+                } else {
+                    // Unknown format
+                    console.warn('Unknown database format:', headers);
+                    needsMigration = true;
+                }
+
+                return { format, headers, needsMigration };
+            } catch (error) {
+                console.error('Error detecting database format:', error);
+                throw error;
+            }
+        }
 
         /**
-        * Fetch database entries from Google Sheet.
-        * Updates uidToNameMap with the latest data.
+        * Fetch database entries from Google Sheet with format detection
         */
         async function fetchDatabaseFromSheet() {
             try {
+                // First detect the format
+                const formatInfo = await detectAndMigrateDatabaseFormat();
+                console.log('Database format info:', formatInfo);
+
+                // Get all data
                 const response = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:C'
+                    range: 'Database!A2:E' // Get extra columns in case of weird format
                 });
 
                 const rows = response.result.values || [];
                 const sheetMappings = {};
+                let detectedFormat = null;
 
-                // Expecting each row as [Index, Name, UID]
-                rows.forEach(row => {
-                    if (row.length >= 3) {
-                        const name = row[1];
-                        const uid = row[2];
-                        if (name && uid) {
-                            sheetMappings[uid] = name;
+                // Process rows based on detected or inferred format
+                rows.forEach((row, index) => {
+                    if (row.length === 0) return; // Skip empty rows
+
+                    let name, uid;
+
+                    // Auto-detect format from data if headers were ambiguous
+                    if (!detectedFormat && row.length >= 2) {
+                        // Check if first column looks like an index (number)
+                        if (!isNaN(parseInt(row[0])) && row.length >= 3) {
+                            detectedFormat = 'index-name-uid';
+                        } else if (row[0].length > 20 && row[1].length <= 20) {
+                            // First column is long (likely name), second is short (likely UID)
+                            detectedFormat = 'name-uid';
+                        } else if (row[1].length > 20 && row[0].length <= 20) {
+                            // First column is short (likely UID), second is long (likely name)
+                            detectedFormat = 'uid-name';
+                        } else {
+                            // Default assumption
+                            detectedFormat = 'name-uid';
                         }
+                        console.log(`Auto-detected format from row ${index + 2}: ${detectedFormat}`);
+                    }
+
+                    // Parse based on detected format
+                    switch (detectedFormat) {
+                        case 'index-name-uid':
+                            if (row.length >= 3) {
+                                name = row[1];
+                                uid = row[2];
+                            }
+                            break;
+                        case 'name-uid':
+                            if (row.length >= 2) {
+                                name = row[0];
+                                uid = row[1];
+                            }
+                            break;
+                        case 'uid-name':
+                            if (row.length >= 2) {
+                                uid = row[0];
+                                name = row[1];
+                            }
+                            break;
+                        default:
+                            // Try standard format first
+                            if (row.length >= 3 && !isNaN(parseInt(row[0]))) {
+                                name = row[1];
+                                uid = row[2];
+                            } else if (row.length >= 2) {
+                                name = row[0];
+                                uid = row[1];
+                            }
+                    }
+
+                    // Clean and validate
+                    if (name && uid) {
+                        name = String(name).trim();
+                        uid = String(uid).trim();
+
+                        // Basic validation
+                        if (name.length > 0 && uid.length > 0) {
+                            sheetMappings[uid] = name;
+                        } else {
+                            console.warn(`Invalid data at row ${index + 2}: name="${name}", uid="${uid}"`);
+                        }
+                    } else {
+                        console.warn(`Could not parse row ${index + 2}:`, row);
                     }
                 });
 
@@ -3549,9 +3806,15 @@
                 updateDatabaseStatus();
                 updateDatabaseList();
                 console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
+
+                // If format needs migration and user is admin, offer to fix it
+                if (formatInfo.needsMigration && isAdmin && Object.keys(sheetMappings).length > 0) {
+                    showImprovedNotification('warning', 'Database Format Issue',
+                        'The database sheet format is non-standard. Click Sync to fix it.');
+                }
+
             } catch (error) {
                 console.error('Error fetching database:', error);
-                // Only show error for admin users
                 if (!isInitializing && isAdmin) {
                     showImprovedNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
                 }
@@ -3858,10 +4121,9 @@
 
 
         /**
-         * Sync database (UID-name map) to Google Sheets.
-         */
+      * Sync database to Google Sheets with format standardization
+      */
         async function syncDatabaseToSheet() {
-            // Only allow sync if the user is signed in as admin.
             if (!isSignedIn || !isAdmin || !isOnline) {
                 console.warn('Database sync aborted: Not signed in as admin or not online.');
                 return;
@@ -3869,20 +4131,32 @@
 
             try {
                 const entries = Object.entries(uidToNameMap);
-                // Format data as [Index, Name, UID]
+
+                // Sort by name for consistency
+                entries.sort((a, b) => a[1].localeCompare(b[1]));
+
+                // ALWAYS format data as [Index, Name, UID]
                 const sheetData = entries.map(([uid, name], index) => [
-                    index + 1,
-                    name,
-                    uid
+                    index + 1,  // Index
+                    name,       // Name  
+                    uid         // UID
                 ]);
 
-                // Clear existing data in the range
+                // Clear the entire sheet first to remove any extra columns
                 await gapi.client.sheets.spreadsheets.values.clear({
                     spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:C'
+                    range: 'Database!A:Z' // Clear all columns
                 });
 
-                // Write new data if there are entries
+                // Write standardized headers
+                await gapi.client.sheets.spreadsheets.values.update({
+                    spreadsheetId: DATABASE_SPREADSHEET_ID,
+                    range: 'Database!A1:C1',
+                    valueInputOption: 'RAW',
+                    resource: { values: [['Index', 'Name', 'UID']] }
+                });
+
+                // Write data if there are entries
                 if (sheetData.length > 0) {
                     await gapi.client.sheets.spreadsheets.values.update({
                         spreadsheetId: DATABASE_SPREADSHEET_ID,
@@ -3892,7 +4166,45 @@
                     });
                 }
 
-                console.log(`Synced ${entries.length} database entries to sheet`);
+                // Format the sheet for better readability
+                const requests = [
+                    {
+                        repeatCell: {
+                            range: {
+                                sheetId: 0, // Assuming Database is the first sheet
+                                startRowIndex: 0,
+                                endRowIndex: 1
+                            },
+                            cell: {
+                                userEnteredFormat: {
+                                    backgroundColor: { red: 0.93, green: 0.93, blue: 0.93 },
+                                    textFormat: { bold: true }
+                                }
+                            },
+                            fields: "userEnteredFormat(backgroundColor,textFormat)"
+                        }
+                    },
+                    {
+                        autoResizeDimensions: {
+                            dimensions: {
+                                sheetId: 0,
+                                dimension: "COLUMNS",
+                                startIndex: 0,
+                                endIndex: 3
+                            }
+                        }
+                    }
+                ];
+
+                await gapi.client.sheets.spreadsheets.batchUpdate({
+                    spreadsheetId: DATABASE_SPREADSHEET_ID,
+                    resource: { requests }
+                });
+
+                console.log(`Successfully synced ${entries.length} database entries to sheet with standardized format`);
+                showImprovedNotification('success', 'Database Synced',
+                    `${entries.length} entries synced with standardized format`);
+
             } catch (error) {
                 console.error('Error syncing database:', error);
                 showImprovedNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
@@ -5677,6 +5989,13 @@
         }
 
         function selectCourseButton(course) {
+            // Check if we're already loading this course
+            const existingRequest = activeRequests.get(course);
+            if (existingRequest && !existingRequest.cancelled && currentCourse === course) {
+                console.log(`Already loading course: ${course}`);
+                return;
+            }
+
             currentCourse = course;
 
             // Update active button visually
@@ -5690,10 +6009,10 @@
                 }
             });
 
-            // Update page title
+            // Update page title immediately
             updatePageTitle();
 
-            // Load course data
+            // Load course data with request tracking
             handleCourseChange();
         }
 
