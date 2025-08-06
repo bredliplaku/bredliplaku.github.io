@@ -38,6 +38,10 @@
                 background-color 0.3s ease;
         }
 
+        html {
+            scroll-behavior: smooth;
+        }
+
         body,
         html {
             margin: 0;
@@ -813,11 +817,12 @@
             max-height: 0;
             overflow: hidden;
             transition: max-height 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            /* NEW: Added margin for spacing */
             margin-bottom: 20px;
         }
 
         .grade-distribution-content {
-            padding: 0px 5px 5px;
+            padding: 20px 5px 5px;
         }
 
         .module.active .grade-distribution-container {
@@ -885,6 +890,41 @@
             letter-spacing: 1.5px;
             white-space: nowrap;
             font-family: 'Space Mono', monospace;
+        }
+
+        /* QUICK NAVIGATION STYLES */
+        .quick-nav-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 25px;
+            padding: 15px;
+            background: var(--light-color);
+            border: var(--border-width) solid var(--dark-color);
+            transform: rotate(0.5deg);
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--secondary-color);
+        }
+
+        .quick-nav-item {
+            background: var(--light-color);
+            border: 3px solid var(--dark-color);
+            color: var(--dark-color);
+            padding: 10px 15px;
+            font-size: 1.2em;
+            cursor: pointer;
+            box-shadow: 4px 4px 0 var(--gray-color);
+            transform: rotate(-1deg);
+        }
+
+        .quick-nav-item:hover {
+            background: var(--secondary-color);
+            transform: translate(-2px, -2px) rotate(-2deg);
+        }
+
+        .module-highlight {
+            box-shadow: 0 0 15px 5px var(--accent-color) !important;
+            transform: scale(1.01) rotate(0deg) !important;
         }
 
         /* ==========================================================================
@@ -1188,6 +1228,9 @@
         </div>
 
         <div id="notification-area" class="in-page-notifications"></div>
+
+        <!-- NEW QUICK NAVIGATION CONTAINER -->
+        <div id="quick-nav-container" class="quick-nav-container" style="display: none;"></div>
 
         <div id="course-content">
             <!-- Course content will be loaded here -->
@@ -2147,23 +2190,37 @@
          * Generate the HTML for course modules and materials.
          */
         function generateCourseContentHtml(modules) {
+            const quickNavContainer = document.getElementById('quick-nav-container');
+            quickNavContainer.innerHTML = ''; // Clear previous nav items
+
             if (!modules || modules.length === 0) {
+                quickNavContainer.style.display = 'none';
                 return '<div class="empty-content"><i class="fas fa-folder-open"></i><br>No content available for this course.</div>';
             }
 
+            quickNavContainer.style.display = 'flex';
             let html = '';
 
             modules.forEach(module => {
                 const moduleLabel = module.moduleNumber || '';
+                const moduleId = `module-${module.id}`;
+
+                // Add quick nav item
+                const navItem = document.createElement('div');
+                navItem.className = 'quick-nav-item';
+                navItem.innerHTML = `<i class="${module.icon}"></i>`;
+                navItem.title = module.title; // Tooltip for accessibility
+                navItem.onclick = () => scrollToModule(moduleId);
+                quickNavContainer.appendChild(navItem);
 
                 html += `
-        <div class="module${module.isActive ? ' active' : ''}">
-            <div class="module-header">
-                <span class="module-title"><i class="${module.icon}"></i>&nbsp;&nbsp;${module.title}</span>
-                <span class="module-chapter">${moduleLabel}&nbsp;&nbsp;<i class="fas fa-chevron-down"></i></span>
-            </div>
-            <div class="module-content">
-        `;
+                <div class="module" id="${moduleId}">
+                    <div class="module-header">
+                        <span class="module-title"><i class="${module.icon}"></i>&nbsp;&nbsp;${module.title}</span>
+                        <span class="module-chapter">${moduleLabel}&nbsp;&nbsp;<i class="fas fa-chevron-down"></i></span>
+                    </div>
+                    <div class="module-content">
+                `;
 
                 // Add materials
                 module.materials.forEach(material => {
@@ -2204,9 +2261,9 @@
                 });
 
                 html += `
-            </div>
-        </div>
-        `;
+                    </div>
+                </div>
+                `;
             });
 
             return html;
@@ -2217,7 +2274,39 @@
          */
         function toggleModule(element) {
             element.classList.toggle('active');
+            // Remove highlight when manually interacting
+            element.classList.remove('module-highlight');
         }
+
+        /**
+         * Scroll to a specific module and highlight it.
+         */
+        function scrollToModule(moduleId) {
+            const moduleElement = document.getElementById(moduleId);
+            if (moduleElement) {
+                // Remove highlight from any other module
+                document.querySelectorAll('.module-highlight').forEach(el => {
+                    el.classList.remove('module-highlight');
+                });
+
+                // Scroll to the module
+                moduleElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                // Add highlight class
+                moduleElement.classList.add('module-highlight');
+
+                // Open the module if it's closed
+                if (!moduleElement.classList.contains('active')) {
+                    moduleElement.classList.add('active');
+                }
+
+                // Remove the highlight after a delay
+                setTimeout(() => {
+                    moduleElement.classList.remove('module-highlight');
+                }, 1500); // Highlight lasts for 1.5 seconds
+            }
+        }
+
 
         /**
          * Calculate the current week of the course.
