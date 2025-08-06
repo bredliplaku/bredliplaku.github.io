@@ -50,11 +50,23 @@
             color: var(--dark-color);
             position: relative;
             overflow-x: hidden;
-            /* REVISED: Persistent background from loading screen */
             background-color: var(--light-color);
+        }
+
+        /* REVISED: Background is now a fixed pseudo-element */
+        body::before {
+            content: '';
+            position: fixed;
+            /* Changed to fixed */
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
             background-image:
                 repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(255, 0, 110, 0.03) 35px, rgba(255, 0, 110, 0.03) 70px),
                 repeating-linear-gradient(-45deg, transparent, transparent 35px, rgba(255, 190, 11, 0.03) 35px, rgba(255, 190, 11, 0.03) 70px);
+            pointer-events: none;
+            z-index: -1;
         }
 
         body.no-scroll {
@@ -208,23 +220,23 @@
             transition: all 0.3s ease;
         }
 
-        /* NEW: Glow effect when jumping from bookmark */
-        @keyframes glow {
+        /* REVISED: Restored original glow effect */
+        @keyframes glow-pulse {
             0% {
-                box-shadow: 0 0 0 0px var(--secondary-color);
+                box-shadow: 0 0 0 0 rgba(255, 190, 11, 0.7);
             }
 
-            50% {
-                box-shadow: 0 0 25px 5px var(--secondary-color);
+            70% {
+                box-shadow: 0 0 10px 20px rgba(255, 190, 11, 0);
             }
 
             100% {
-                box-shadow: 0 0 0 0px var(--secondary-color);
+                box-shadow: 0 0 0 0 rgba(255, 190, 11, 0);
             }
         }
 
-        .module:target {
-            animation: glow 1.5s cubic-bezier(0.165, 0.84, 0.44, 1);
+        .module.glow-effect {
+            animation: glow-pulse 1.5s ease-out;
         }
 
         .module-header {
@@ -235,7 +247,6 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            cursor: pointer;
             -webkit-user-select: none;
             -khtml-user-select: none;
             flex-wrap: wrap;
@@ -244,6 +255,8 @@
             border: var(--border-width) solid var(--dark-color);
             box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
             transform: rotate(-0.5deg);
+            z-index: 2;
+            /* Header on top */
         }
 
         .module-header::before {
@@ -282,55 +295,40 @@
 
         .module-content {
             padding: 25px;
-            max-height: 5000px;
-            /* All modules open by default */
-            overflow: hidden;
             background: var(--light-color);
             border: var(--border-width) solid var(--dark-color);
-            border-top: none;
-            /* Remove top border to merge with header */
             box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--secondary-color);
             transform: rotate(0.5deg);
             margin-top: -10px;
-            /* Pull content up to overlap slightly */
+            position: relative;
+            z-index: 1;
+            /* Content below header */
         }
 
         .materials-grid {
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
         }
 
-        .module.active .module-header {
-            background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
-        }
-
         /* ==========================================================================
-           NEW CREATIVE MATERIAL CARD DESIGN
+           REVISED MATERIAL CARD DESIGN
            ========================================================================== */
         .material-card {
-            background: var(--light-color);
-            border: 3px solid var(--dark-color);
-            box-shadow: 6px 6px 0 var(--gray-color);
+            background: transparent;
+            /* No background color */
+            border: 3px dashed var(--gray-color);
             padding: 20px;
             display: flex;
             flex-direction: column;
-            flex-grow: 1;
-            flex-basis: 100%;
-            min-width: 280px;
             position: relative;
             transition: all 0.2s ease;
         }
 
-        @media (min-width: 768px) {
-            .material-card {
-                flex-basis: 45%;
-            }
-        }
-
         .material-card:hover {
-            transform: translate(-4px, -4px);
-            box-shadow: 10px 10px 0 var(--secondary-color);
+            border-color: var(--accent-color);
+            border-style: solid;
+            background: rgba(255, 190, 11, 0.05);
         }
 
         .material-card-header {
@@ -352,7 +350,6 @@
             justify-content: center;
             border: 3px solid var(--dark-color);
             transform: rotate(-5deg);
-            box-shadow: none;
         }
 
         .material-card .material-info {
@@ -920,7 +917,8 @@
             top: 50%;
             transform: translateY(-50%);
             left: 20px;
-            width: 220px;
+            width: 240px;
+            /* Increased width to prevent cutoff */
             z-index: 1000;
             display: flex;
             flex-direction: column;
@@ -961,6 +959,8 @@
             transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
             cursor: pointer;
             flex-shrink: 0;
+            width: calc(100% - 20px);
+            /* Ensure it fits within the container */
         }
 
         .side-nav-item i {
@@ -1777,9 +1777,7 @@
                     document.title = data.metadata.code ? `${formatCourseCode(data.metadata.code)} ${data.metadata.title || 'Course'}` : 'Course Materials';
                     updateCourseMetadata(data.metadata);
                     document.getElementById('course-content').innerHTML = generateCourseContentHtml(data.modules);
-                    document.querySelectorAll('.module-header').forEach(header => {
-                        header.onclick = () => toggleModule(header.parentNode);
-                    });
+                    // No need to add click listeners for toggling anymore
                     showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
                 } else {
                     document.getElementById('course-content').innerHTML = `<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>No materials found for this course.<br>Please select another course.</div>`;
@@ -1934,10 +1932,10 @@
                     mobileMenu.appendChild(mobileNavItem);
                 }
                 html += `
-                <div class="module active" id="${moduleId}">
-                    <div class="module-header" onclick="toggleModule(this.parentNode)">
+                <div class="module" id="${moduleId}">
+                    <div class="module-header">
                         <span class="module-title"><i class="${module.icon}"></i>&nbsp;&nbsp;${module.title}</span>
-                        <span class="module-chapter">${module.moduleNumber || ''}&nbsp;&nbsp;<i class="fas fa-chevron-down"></i></span>
+                        <span class="module-chapter">${module.moduleNumber || ''}</span>
                     </div>
                     <div class="module-content">
                         <div class="materials-grid">`;
@@ -1967,11 +1965,6 @@
             return html;
         }
 
-        function toggleModule(element) {
-            // This function is now optional as modules start open, but can be used for toggling if needed.
-            // For now, let's keep it simple and not toggle. If you want toggling back, we can re-add:
-            // element.classList.toggle('active');
-        }
 
         function updateActiveNavLink() {
             let activeModuleId = '';
@@ -1986,6 +1979,18 @@
             });
             navLinks.forEach(link => {
                 link.classList.toggle('active', link.getAttribute('href') === `#${activeModuleId}`);
+            });
+
+            // REVISED: Add glow effect via JS
+            const currentHash = `#${activeModuleId}`;
+            document.querySelectorAll('.module').forEach(module => {
+                if (`#${module.id}` === currentHash) {
+                    module.classList.add('glow-effect');
+                    // Remove the class after the animation completes
+                    setTimeout(() => {
+                        module.classList.remove('glow-effect');
+                    }, 1500);
+                }
             });
         }
 
