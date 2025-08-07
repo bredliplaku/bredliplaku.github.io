@@ -712,23 +712,34 @@
         }
 
         .search-container {
-            position: relative;
-            margin-bottom: 30px;
+            display: flex;
+            /* This will align the search bar and button */
+            align-items: center;
+            gap: 15px;
         }
 
         #search-bar {
-            width: 100%;
-            padding: 15px 20px 15px 55px;
-            /* Add padding for the icon */
+            flex-grow: 1;
+        }
+
+        .sort-button {
+            flex-shrink: 0;
+            padding: 15px 20px;
             font-family: 'Space Mono', monospace;
             font-size: 1.1em;
             font-weight: 700;
             color: var(--dark-color);
-            background: var(--light-color);
+            background-color: var(--light-color);
             border: var(--border-width) solid var(--dark-color);
-            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--secondary-color);
-            -webkit-appearance: none;
-            /* Removes default search field styling */
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sort-button:hover {
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--accent-color);
         }
 
         #search-bar:focus {
@@ -1798,6 +1809,10 @@
             <div class="search-container">
                 <i class="fas fa-search search-icon"></i>
                 <input type="search" id="search-bar" placeholder="Search modules and materials...">
+                <button id="sort-button" class="sort-button" title="Sort Modules">
+                    <i class="fas fa-sort-amount-down"></i>
+                    <span>Sort</span>
+                </button>
             </div>
 
             <div class="course-schedule" id="timetable-container">
@@ -2389,24 +2404,91 @@
                     populateActionButtons(data.actionButtons, data.metadata);
                     applyColorTheme(data.metadata);
 
-                    document.getElementById('course-content').innerHTML = generateCourseContentHtml(data.modules);
-                    document.querySelectorAll('.module-header').forEach(header => {
-                        header.onclick = () => {
-                            toggleModule(header.parentNode);
-                            saveModuleStates();
-                        };
-                    });
-                    applyModuleStates();
-                    setupSearchFilter();
+                    setupSortAndRender(); // This now handles sorting and rendering
+
                     showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
-                } else {
-                    document.getElementById('course-content').innerHTML = `<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>No materials found for this course.<br>Please select another course.</div>`;
-                }
-            }).catch(error => {
-                document.getElementById('course-content').innerHTML = `<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>Error loading course materials.<br>Please try again later.</div>`;
-                showImprovedNotification('error', 'Load Error', `Failed to load course materials`);
-            });
+                });
         }
+
+        function setupSortAndRender() {
+            const sortButton = document.getElementById('sort-button');
+            if (!sortButton) return;
+
+            // Helper function to extract a value we can sort by
+            const getSortableValue = (module) => {
+                if (module.type === 'project' && module.dueDate) {
+                    const date = new Date(module.dueDate);
+                    return isNaN(date) ? Infinity : date.getTime();
+                }
+                if (module.type === 'standard' && module.moduleNumber) {
+                    const num = parseInt(module.moduleNumber.replace(/\D/g, ''), 10);
+                    return isNaN(num) ? Infinity : num;
+                }
+                return Infinity; // Put modules without a number or date last
+            };
+
+            const sortModules = (order) => {
+                courseData.modules.sort((a, b) => {
+                    const valA = getSortableValue(a);
+                    const valB = getSortableValue(b);
+                    if (order === 'asc') {
+                        return valA - valB;
+                    } else {
+                        return valB - valA;
+                    }
+                });
+            };
+
+            const renderContent = () => {
+                const contentDiv = document.getElementById('course-content');
+                contentDiv.innerHTML = generateCourseContentHtml(courseData.modules);
+                // Re-attach event listeners and apply states after re-rendering
+                document.querySelectorAll('.module-header').forEach(header => {
+                    header.onclick = () => {
+                        toggleModule(header.parentNode);
+                        saveModuleStates();
+                    };
+                });
+                applyModuleStates();
+                setupSearchFilter(); // Re-initialize search on the new content
+            };
+
+            const updateButtonState = (order) => {
+                const icon = sortButton.querySelector('i');
+                if (order === 'asc') {
+                    icon.className = 'fas fa-sort-amount-up';
+                    sortButton.title = 'Sort Descending';
+                } else {
+                    icon.className = 'fas fa-sort-amount-down';
+                    sortButton.title = 'Sort Ascending';
+                }
+                sortButton.dataset.order = order;
+            };
+
+            // Main logic starts here
+            let sortOrders = JSON.parse(localStorage.getItem('courseSortOrders')) || {};
+            let currentOrder = sortOrders[currentCourse] || 'asc'; // Default to ascending
+
+            // Initial sort and render
+            sortModules(currentOrder);
+            updateButtonState(currentOrder);
+            renderContent(); // Initial render with sorted data
+
+            sortButton.onclick = () => {
+                const newOrder = sortButton.dataset.order === 'asc' ? 'desc' : 'asc';
+
+                // Save the new preference for this specific course
+                sortOrders[currentCourse] = newOrder;
+                localStorage.setItem('courseSortOrders', JSON.stringify(sortOrders));
+
+                // Sort and re-render the content
+                sortModules(newOrder);
+                updateButtonState(newOrder);
+                renderContent();
+            };
+        }
+
+
 
         async function fetchCourseData(sheetName) {
             try {
