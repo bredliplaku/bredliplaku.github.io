@@ -963,6 +963,7 @@
         let isSyncing = false;
         let pendingChanges = false;
         let sheetNameMap = {};
+        let isInitializing = true;
 
         function showImprovedNotification(type, title, message, duration = 5000) {
             const notificationArea = document.getElementById('in-page-notification-area');
@@ -1033,7 +1034,7 @@
             document.querySelector('.tabs').style.display = isAdmin ? 'flex' : 'none';
             document.getElementById('course-buttons-container').style.display = isSignedIn ? 'flex' : 'none';
 
-            if (isSignedIn) {
+            if (isSignedIn && currentUser) {
                 document.getElementById('user-name').textContent = currentUser.name;
                 document.getElementById('user-avatar').src = currentUser.picture;
             }
@@ -1114,8 +1115,10 @@
 
         function stopScanning() {
             if (nfcReader) {
-                nfcReader.removeEventListener("reading", handleNfcReading);
-                nfcReader.removeEventListener("error", handleNfcError);
+                try {
+                    nfcReader.removeEventListener("reading", handleNfcReading);
+                    nfcReader.removeEventListener("error", handleNfcError);
+                } catch (e) { console.warn("Error removing NFC listeners, might already be gone.", e); }
                 nfcReader = null;
             }
             isScanning = false;
@@ -1125,19 +1128,25 @@
 
         function saveLogsToLocalStorage() {
             if (!currentCourse) return;
-            localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
-            pendingChanges = true;
+            try {
+                localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}`, JSON.stringify(logs));
+                pendingChanges = true;
+            } catch (e) {
+                console.error("Error saving to local storage", e);
+                showImprovedNotification('error', 'Storage Error', 'Could not save data locally.');
+            }
         }
 
         function restoreLogsFromLocalStorage() {
             if (!currentCourse) return [];
             const storedLogs = localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-            return storedLogs ? JSON.parse(storedLogs) : [];
+            try {
+                return storedLogs ? JSON.parse(storedLogs) : [];
+            } catch (e) {
+                console.error("Error parsing logs from local storage", e);
+                return [];
+            }
         }
-
-        // ... All other Javascript functions from index.html would go here ...
-        // For brevity, I am including only the essential UI functions.
-        // The full script from index.html should be adapted and included.
 
         function updateLogsList() {
             const tbody = document.getElementById('logs-tbody');
@@ -1152,22 +1161,37 @@
             document.getElementById('filtered-count').textContent = filtered.length;
             emptyMsg.style.display = filtered.length > 0 ? 'none' : 'block';
 
-            // Simplified rendering logic
-            filtered.forEach(log => {
-                const row = tbody.insertRow();
-                const name = uidToNameMap[log.uid] || 'Unknown';
-                const date = new Date(log.timestamp);
+            // Group by date for display
+            const groupedByDate = filtered.reduce((acc, log) => {
+                const date = new Date(log.timestamp).toLocaleDateString();
+                if (!acc[date]) {
+                    acc[date] = [];
+                }
+                acc[date].push(log);
+                return acc;
+            }, {});
 
-                row.innerHTML = `
-                    <td class="name-cell">${name}</td>
-                    <td class="uid-cell admin-only">${log.uid}</td>
-                    <td class="date-cell">${date.toLocaleDateString()}</td>
-                    <td><span class="time-tag">${date.toLocaleTimeString()}</span></td>
-                    <td class="actions-cell admin-only">
-                        <i class="fas fa-edit action-icon edit-icon" title="Edit"></i>
-                        <i class="fas fa-trash-alt action-icon delete-icon" title="Delete"></i>
-                    </td>
-                `;
+            Object.keys(groupedByDate).sort().reverse().forEach(date => {
+                const separatorRow = tbody.insertRow();
+                separatorRow.className = 'day-separator';
+                separatorRow.innerHTML = `<td colspan="5">${date}</td>`;
+
+                groupedByDate[date].forEach(log => {
+                    const row = tbody.insertRow();
+                    const name = uidToNameMap[log.uid] || 'Unknown';
+                    const time = new Date(log.timestamp);
+
+                    row.innerHTML = `
+                        <td class="name-cell">${name}</td>
+                        <td class="uid-cell admin-only">${log.uid}</td>
+                        <td class="date-cell">${time.toLocaleDateString()}</td>
+                        <td><span class="time-tag">${time.toLocaleTimeString()}</span></td>
+                        <td class="actions-cell admin-only">
+                            <i class="fas fa-edit action-icon edit-icon" title="Edit"></i>
+                            <i class="fas fa-trash-alt action-icon delete-icon" title="Delete"></i>
+                        </td>
+                    `;
+                });
             });
         }
 
@@ -1181,7 +1205,7 @@
             document.getElementById('db-entry-count').textContent = entries.length;
             emptyMsg.style.display = entries.length > 0 ? 'none' : 'block';
 
-            entries.forEach(([uid, name]) => {
+            entries.sort((a, b) => a[1].localeCompare(b[1])).forEach(([uid, name]) => {
                 const row = tbody.insertRow();
                 row.innerHTML = `
                     <td class="name-cell">${name}</td>
@@ -1199,16 +1223,17 @@
             document.getElementById('database-status').textContent = count > 0 ? `${count} entries` : 'Not loaded';
         }
 
-        function selectCourse(courseName) {
+        async function selectCourse(courseName) {
             currentCourse = courseName;
             localStorage.setItem('last_active_course', courseName);
             logs = restoreLogsFromLocalStorage();
             document.querySelectorAll('.course-button').forEach(btn => {
-                btn.classList.toggle('active', btn.textContent.trim().includes(courseName.replace('_', ' ')));
+                btn.classList.toggle('active', btn.textContent.trim().replace(/\s/g, '_') === courseName);
             });
             updateUI();
             if (isOnline && isSignedIn) {
-                fetchLogsFromSheet(); // This function needs to be defined
+                await fetchLogsFromSheet();
+                updateUI();
             }
         }
 
@@ -1224,7 +1249,7 @@
             });
             if (currentCourse) {
                 document.querySelectorAll('.course-button').forEach(btn => {
-                    if (btn.textContent.trim() === currentCourse.replace(/_/g, ' ')) {
+                    if (btn.textContent.trim().replace(/\s/g, '_') === currentCourse) {
                         btn.classList.add('active');
                     }
                 });
@@ -1232,6 +1257,7 @@
         }
 
         async function fetchAvailableCourses() {
+            if (!isSignedIn) return;
             try {
                 const response = await gapi.client.sheets.spreadsheets.get({
                     spreadsheetId: LOGS_SPREADSHEET_ID
@@ -1248,39 +1274,104 @@
         }
 
         async function fetchLogsFromSheet() {
-            // Placeholder for the original function
+            if (!currentCourse || !isSignedIn) return;
+            try {
+                const sheetName = currentCourse;
+                const range = `${sheetName}!A2:D`;
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: range,
+                });
+                const rows = response.result.values || [];
+                const sheetLogs = rows.map(row => ({
+                    uid: row[0],
+                    timestamp: new Date(row[1]).getTime(),
+                    id: row[2],
+                    manual: row[3] === 'true'
+                })).filter(log => log.uid && !isNaN(log.timestamp));
+
+                // Merge logic
+                const localLogIds = new Set(logs.map(l => l.id));
+                const newLogs = sheetLogs.filter(sl => !localLogIds.has(sl.id));
+                logs = [...logs, ...newLogs].sort((a, b) => b.timestamp - a.timestamp);
+                saveLogsToLocalStorage();
+
+            } catch (error) {
+                console.error("Error fetching logs from sheet:", error);
+                showImprovedNotification('warning', 'Sync Warning', 'Could not fetch latest logs.');
+            }
+        }
+
+        async function fetchDatabaseFromSheet() {
+            if (!isSignedIn) return;
+            try {
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: DATABASE_SPREADSHEET_ID,
+                    range: 'Database!A2:B',
+                });
+                const rows = response.result.values || [];
+                uidToNameMap = rows.reduce((map, row) => {
+                    if (row[0] && row[1]) {
+                        map[row[1]] = row[0]; // Assuming Name, UID
+                    }
+                    return map;
+                }, {});
+                updateDatabaseList();
+                updateDatabaseStatus();
+            } catch (e) {
+                console.error("Error fetching database", e);
+            }
         }
 
         async function appendLogToSheet(log) {
-            // Placeholder
+            if (!currentCourse || !isOnline || !isSignedIn || !isAdmin) return;
+            try {
+                const range = `${currentCourse}!A:D`;
+                await gapi.client.sheets.spreadsheets.values.append({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: range,
+                    valueInputOption: 'USER_ENTERED',
+                    resource: {
+                        values: [[log.uid, new Date(log.timestamp).toISOString(), log.id, log.manual]]
+                    }
+                });
+            } catch (e) {
+                console.error("Failed to append log", e);
+                pendingChanges = true;
+            }
         }
 
         function initGoogleApi() {
             gapi.load('client', async () => {
-                await gapi.client.init({
-                    apiKey: API_KEY,
-                    discoveryDocs: DISCOVERY_DOCS,
-                });
-                tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
-                    scope: SCOPES,
-                    callback: async (tokenResponse) => {
-                        if (tokenResponse && tokenResponse.access_token) {
-                            isSignedIn = true;
-                            const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                                headers: { 'Authorization': `Bearer ${tokenResponse.access_token}` }
-                            });
-                            currentUser = await response.json();
-                            isAdmin = ADMIN_EMAILS.includes(currentUser.email);
-                            updateAuthUI();
-                            await fetchAvailableCourses();
-                            // other fetch calls
-                        }
-                    },
-                });
+                try {
+                    await gapi.client.init({
+                        apiKey: API_KEY,
+                        discoveryDocs: DISCOVERY_DOCS,
+                    });
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: SCOPES,
+                        callback: async (tokenResponse) => {
+                            if (tokenResponse && tokenResponse.access_token) {
+                                isSignedIn = true;
+                                gapi.client.setToken(tokenResponse);
+                                const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                                    headers: { 'Authorization': `Bearer ${tokenResponse.access_token}` }
+                                });
+                                currentUser = await response.json();
+                                isAdmin = ADMIN_EMAILS.includes(currentUser.email);
+                                updateAuthUI();
+                                await fetchDatabaseFromSheet();
+                                await fetchAvailableCourses();
+                            }
+                        },
+                    });
+                } catch (e) {
+                    console.error("GAPI init error", e);
+                    showImprovedNotification('error', 'API Error', 'Could not initialize Google services.');
+                }
             });
         }
-
 
         window.addEventListener('load', () => {
             document.getElementById('app-loading').style.display = 'none';
@@ -1297,7 +1388,13 @@
             });
             document.getElementById('filter-input').addEventListener('input', (e) => { filter = e.target.value.toLowerCase(); updateLogsList(); });
             document.getElementById('db-filter-input').addEventListener('input', (e) => { dbFilter = e.target.value.toLowerCase(); updateDatabaseList(); });
-            document.getElementById('login-btn').addEventListener('click', () => tokenClient.requestAccessToken());
+            document.getElementById('login-btn').addEventListener('click', () => {
+                if (tokenClient) {
+                    tokenClient.requestAccessToken();
+                } else {
+                    showImprovedNotification('error', 'Auth Error', 'Authentication is not ready yet.');
+                }
+            });
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.addEventListener('click', () => {
                     if (tab.classList.contains('admin-only') && !isAdmin) return;
@@ -1317,7 +1414,7 @@
             logs = restoreLogsFromLocalStorage();
             initGoogleApi();
             updateAuthUI();
-
+            isInitializing = false;
         });
     </script>
 </body>
