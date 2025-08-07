@@ -1752,13 +1752,6 @@
             </div>
 
             <div class="course-actions" id="course-action-buttons">
-                <button id="announcements-btn" style="display: none;" class="btn-purple"><i class="fas fa-bullhorn"></i>
-                    Announcements</button>
-                <button id="attendance-btn" style="display: none;" class="btn-orange"><i
-                        class="fa-solid fa-list-check"></i>
-                    Attendance</button>
-                <button id="timetable-btn" style="display:none;" onclick="toggleTimetable()"><i
-                        class="fas fa-calendar-alt"></i> Timetable</button>
             </div>
 
             <div class="course-schedule" id="timetable-container">
@@ -2293,8 +2286,11 @@
                 if (data) {
                     Object.assign(courseData, data);
                     document.title = data.metadata.code ? `${formatCourseCode(data.metadata.code)} ${data.metadata.title || 'Course'}` : 'Course Materials';
+
                     updateCourseMetadata(data.metadata);
+                    populateActionButtons(data.actionButtons, data.metadata);
                     applyColorTheme(data.metadata);
+
                     document.getElementById('course-content').innerHTML = generateCourseContentHtml(data.modules);
                     document.querySelectorAll('.module-header').forEach(header => {
                         header.onclick = () => {
@@ -2324,7 +2320,7 @@
         }
 
         function processCourseData(rows) {
-            const data = { metadata: {}, modules: [] };
+            const data = { metadata: {}, modules: [], actionButtons: [] }; // Added actionButtons array
             let currentModule = null;
 
             rows.forEach(row => {
@@ -2334,6 +2330,14 @@
                 if (type === 'metadata') {
                     const key = row[1]?.toLowerCase().replace(/\s+/g, '_');
                     if (key) data.metadata[key] = row[2] || '';
+                } else if (type === 'button') {
+                    // New logic to process custom buttons
+                    data.actionButtons.push({
+                        name: row[1] || 'Button',
+                        icon: row[2] || 'fas fa-external-link-alt',
+                        link: row[3] || '#',
+                        colorClass: row[4] || 'btn-primary'
+                    });
                 } else if (type === 'module') {
                     currentModule = {
                         type: 'standard',
@@ -2366,19 +2370,15 @@
                     });
                 } else if (type === 'project_group' && currentModule && currentModule.type === 'project') {
                     const group = {
-                        topic: row[1] || 'Untitled Topic',
-                        description: row[2] || '', // Added description field
-                        students: [],
-                        files: [] // Added files array for group-specific files
+                        topic: row[1], description: row[2], students: [], files: []
                     };
-                    for (let i = 3; i < row.length; i++) { // Student names now start from column D
+                    for (let i = 3; i < row.length; i++) {
                         if (row[i]) group.students.push(row[i]);
                     }
                     if (group.students.length > 0) {
                         currentModule.groups.push(group);
                     }
                 } else if (type === 'group_file' && currentModule && currentModule.type === 'project' && currentModule.groups.length > 0) {
-                    // This is the new logic for group-specific files
                     const lastGroup = currentModule.groups[currentModule.groups.length - 1];
                     lastGroup.files.push({
                         icon: row[1], title: row[2], description: row[3],
@@ -2389,6 +2389,36 @@
                 }
             });
             return data;
+        }
+
+        function populateActionButtons(buttons, metadata) {
+            const container = document.getElementById('course-action-buttons');
+            if (!container) return;
+            container.innerHTML = ''; // Clear any previous buttons
+
+            // Create dynamic buttons from the sheet
+            buttons.forEach(buttonData => {
+                const button = document.createElement('button');
+                button.className = buttonData.colorClass;
+                button.innerHTML = `<i class="${buttonData.icon}"></i> ${buttonData.name}`;
+                button.onclick = () => window.open(buttonData.link, '_blank', 'noopener,noreferrer');
+                container.appendChild(button);
+            });
+
+            // As requested, we create the special Timetable button if it's enabled
+            const isTimetableEnabled = String(metadata.timetable_enabled || '').toLowerCase() === 'true' || String(metadata.timetable_enabled || '') === '1';
+            const timetableContainer = document.getElementById('timetable-container');
+
+            if (isTimetableEnabled) {
+                const timetableBtn = document.createElement('button');
+                timetableBtn.id = 'timetable-btn';
+                timetableBtn.innerHTML = `<i class="fas fa-calendar-alt"></i> Timetable`;
+                timetableBtn.onclick = toggleTimetable;
+                container.appendChild(timetableBtn);
+                if (timetableContainer) timetableContainer.style.display = ''; // Ensure container is available
+            } else {
+                if (timetableContainer) timetableContainer.style.display = 'none';
+            }
         }
 
         // Generate Project Module
