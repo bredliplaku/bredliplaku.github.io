@@ -383,7 +383,7 @@
         .professor-link {
             color: inherit;
             text-decoration: none;
-            display: inline-flex;
+            display: contents;
             align-items: center;
             cursor: default;
         }
@@ -709,6 +709,46 @@
             padding: 5px 10px;
             font-size: 0.8em;
             margin-left: 5px;
+        }
+
+        .search-container {
+            position: relative;
+            margin-bottom: 30px;
+        }
+
+        #search-bar {
+            width: 100%;
+            padding: 15px 20px 15px 55px;
+            /* Add padding for the icon */
+            font-family: 'Space Mono', monospace;
+            font-size: 1.1em;
+            font-weight: 700;
+            color: var(--dark-color);
+            background: var(--light-color);
+            border: var(--border-width) solid var(--dark-color);
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--secondary-color);
+            -webkit-appearance: none;
+            /* Removes default search field styling */
+        }
+
+        #search-bar:focus {
+            outline: none;
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--accent-color);
+        }
+
+        .search-icon {
+            position: absolute;
+            top: 50%;
+            left: 20px;
+            transform: translateY(-50%);
+            font-size: 1.3em;
+            color: var(--dark-color);
+            opacity: 0.5;
+            z-index: 2;
+        }
+
+        .module.hidden {
+            display: none;
         }
 
         @media (max-width: 1000px) {
@@ -1663,7 +1703,8 @@
 
             .course-button,
             .course-actions button {
-                padding: 14px 20px;
+                padding: 10px 16px;
+                font-size: 0.85em;
                 box-shadow: 4px 4px 0 var(--dark-color);
             }
 
@@ -1752,6 +1793,11 @@
             </div>
 
             <div class="course-actions" id="course-action-buttons">
+            </div>
+
+            <div class="search-container">
+                <i class="fas fa-search search-icon"></i>
+                <input type="search" id="search-bar" placeholder="Search modules and materials...">
             </div>
 
             <div class="course-schedule" id="timetable-container">
@@ -2268,6 +2314,60 @@
             }
         }
 
+        function setupSearchFilter() {
+            const searchBar = document.getElementById('search-bar');
+            if (!searchBar) return;
+
+            searchBar.addEventListener('input', () => {
+                const query = searchBar.value.toLowerCase().trim();
+                const modules = document.querySelectorAll('.module');
+
+                let visibleModules = 0;
+                modules.forEach(module => {
+                    const moduleTitle = module.querySelector('.module-title')?.textContent.toLowerCase() || '';
+                    const materialCards = module.querySelectorAll('.material-card');
+                    let hasMatch = moduleTitle.includes(query);
+
+                    materialCards.forEach(card => {
+                        const materialTitle = card.querySelector('.material-title')?.textContent.toLowerCase() || '';
+                        const materialDesc = card.querySelector('.material-description')?.textContent.toLowerCase() || '';
+                        if (materialTitle.includes(query) || materialDesc.includes(query)) {
+                            hasMatch = true;
+                        }
+                    });
+
+                    // Also check project groups
+                    const projectGroupCards = module.querySelectorAll('.project-group-card');
+                    projectGroupCards.forEach(card => {
+                        const topic = card.querySelector('.project-group-title')?.textContent.toLowerCase() || '';
+                        const description = card.querySelector('.project-group-description')?.textContent.toLowerCase() || '';
+                        if (topic.includes(query) || description.includes(query)) {
+                            hasMatch = true;
+                        }
+                    });
+
+                    if (hasMatch) {
+                        module.classList.remove('hidden');
+                        visibleModules++;
+                    } else {
+                        module.classList.add('hidden');
+                    }
+                });
+
+                // Optional: Show a message if no results are found
+                let noResultsEl = document.getElementById('no-search-results');
+                if (visibleModules === 0 && !noResultsEl) {
+                    noResultsEl = document.createElement('div');
+                    noResultsEl.id = 'no-search-results';
+                    noResultsEl.className = 'empty-content';
+                    noResultsEl.innerHTML = '<i class="fas fa-search"></i><br>No modules match your search.';
+                    document.getElementById('course-content').appendChild(noResultsEl);
+                } else if (visibleModules > 0 && noResultsEl) {
+                    noResultsEl.remove();
+                }
+            });
+        }
+
         function selectCourse(sheetName) {
             localStorage.setItem('lastSelectedCourse', sheetName);
             currentCourse = sheetName;
@@ -2297,6 +2397,7 @@
                         };
                     });
                     applyModuleStates();
+                    setupSearchFilter();
                     showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
                 } else {
                     document.getElementById('course-content').innerHTML = `<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>No materials found for this course.<br>Please select another course.</div>`;
