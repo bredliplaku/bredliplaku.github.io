@@ -2437,6 +2437,46 @@
         .progress-bar::before {
             animation: stripes-move 30s linear infinite !important;
         }
+
+
+        /* === Professor avatars: photo preferred, icon fallback === */
+        .professor-item .prof-avatar {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            vertical-align: middle;
+        }
+
+        .professor-item .prof-avatar .avatar-img {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            object-fit: cover;
+            display: inline-block;
+            border: 2px solid var(--dark-color);
+        }
+
+        .professor-item .prof-avatar .avatar-icon {
+            display: none;
+            font-size: 1.1em;
+            color: var(--primary-color);
+        }
+
+        .professor-item.no-photo .prof-avatar .avatar-img {
+            display: none !important;
+        }
+
+        .professor-item.no-photo .prof-avatar .avatar-icon {
+            display: inline-block !important;
+        }
+
+        @media (max-width:768px) {
+            .professor-item .prof-avatar .avatar-img {
+                width: 24px;
+                height: 24px;
+                border-width: 2px;
+            }
+        }
     </style>
 
 
@@ -3516,13 +3556,14 @@
                         item.className = 'info-item professor-item';
 
                         let content = '';
+
                         if (prof.photo) {
-                            content = `<img src="${prof.photo}" alt="${prof.name}" class="professor-photo" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block';">`;
-                            content += `<i class="fas fa-user-circle" style="display:none;"></i>`;
+                            content = `<span class="prof-avatar"><img class="avatar-img" src="${prof.photo}" alt="${prof.name}"><i class="fas fa-user-circle avatar-icon" aria-hidden="true"></i></span>`;
                         } else {
-                            content = '<i class="fas fa-user-circle"></i>';
+                            content = `<span class="prof-avatar"><i class="fas fa-user-circle avatar-icon" aria-hidden="true"></i></span>`;
                         }
                         content += ` ${prof.name}`;
+
 
                         if (prof.link) {
                             item.innerHTML = `<a href="${prof.link}" target="_blank" rel="noopener noreferrer" class="professor-link">${content}</a>`;
@@ -3533,6 +3574,8 @@
                         profContainer.appendChild(item);
                     });
                 } else {
+                    setupProfessorAvatars();
+
                     const item = document.createElement('span');
                     item.className = 'info-item';
                     item.innerHTML = '<i class="fas fa-user-circle"></i> Instructor';
@@ -4008,6 +4051,44 @@
             });
         })();
     </script>
+    <script>
+        /* === Setup professor avatars (hide icon if photo loads; show icon if missing/error) === */
+        function setupProfessorAvatars() {
+            const container = document.getElementById('professors-container');
+            if (!container) return;
+            const items = container.querySelectorAll('.professor-item');
+            items.forEach(item => {
+                // Support link wrappers
+                const scope = item.querySelector('.prof-avatar') || item;
+                let img = scope.querySelector('img.avatar-img');
+                let icon = scope.querySelector('i.avatar-icon');
+                if (!img && !icon) {
+                    // Try find via generic selectors in legacy markup
+                    img = scope.querySelector('img');
+                    icon = scope.querySelector('i.fa-user-circle');
+                    if (img) img.classList.add('avatar-img');
+                    if (icon) icon.classList.add('avatar-icon');
+                }
+                const setNoPhoto = (flag) => {
+                    item.classList.toggle('no-photo', !!flag);
+                    if (icon) icon.style.display = flag ? 'inline-block' : 'none';
+                    if (img) img.style.display = flag ? 'none' : 'inline-block';
+                };
+                if (img && img.complete && img.naturalWidth > 0) {
+                    setNoPhoto(false);
+                } else if (img) {
+                    img.addEventListener('load', () => setNoPhoto(false), { once: true });
+                    img.addEventListener('error', () => setNoPhoto(true), { once: true });
+                    // while loading, hide icon to prevent double-visibility
+                    if (icon) icon.style.display = 'none';
+                } else {
+                    setNoPhoto(true);
+                }
+            });
+        }
+
+    </script>
+    <script>document.addEventListener('DOMContentLoaded', setupProfessorAvatars);</script>
 </body>
 
 </html>
