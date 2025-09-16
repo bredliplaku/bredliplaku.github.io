@@ -465,8 +465,8 @@
         }
 
         .module-content {
-            transition: height .28s cubic-bezier(.2, .8, .2, 1), padding .28s cubic-bezier(.2, .8, .2, 1);
-            height: 0;
+            transition: max-height 300ms ease, padding 300ms ease;
+            max-height: 0;
             padding: 0 25px;
 
             overflow: hidden;
@@ -2352,13 +2352,7 @@
     <div id="mobile-fab-menu" class="mobile-fab-menu">
     </div>
 
-
-
-
-
-
     <script>
-        /* === Consolidated inline scripts (auto-merged) === */
         // Configuration
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
@@ -2379,102 +2373,97 @@
         let criticalErrorsOnly = true;
         const courseData = { metadata: {}, modules: [] };
 
-        function setupMobileFab() {
-            const fab = document.getElementById('mobile-fab');
-            const overlay = document.getElementById('fab-overlay');
-            const menu = document.getElementById('mobile-fab-menu');
+        // Add debug logging
+        console.log('Script loaded, initializing...');
 
-            const mq = window.matchMedia('(max-width: 1024px), (pointer: coarse)');
-            const applyFabVisibility = () => {
-                if (!fab) return;
-                if (mq.matches) fab.classList.add(...['is-ready'].flat().filter(Boolean));
-                else fab.classList.remove('is-ready');
-            };
-            mq.addEventListener?.('change', applyFabVisibility);
-            applyFabVisibility();
-            if (!fab || !overlay || !menu) return;
-            const toggleMenu = () => {
-                fab.classList.toggle('active');
-                overlay.classList.toggle('active');
-                menu.classList.toggle('active');
-                document.body.classList.toggle('no-scroll');
-            };
-            fab.addEventListener('click', toggleMenu);
-            overlay.addEventListener('click', toggleMenu);
-            menu.addEventListener('click', (e) => {
-                if (e.target.closest('.mobile-fab-menu-item')) {
-                    setTimeout(toggleMenu, 100);
-                }
-            });
-        }
-
-        // Ensure theme toggle stays in footer; no header move.
-        (function () {
-            try {
-                const footer = document.querySelector('.footer');
-                const btn = document.getElementById('theme-toggle');
-                if (footer && btn) { if (!footer.contains(btn)) footer.appendChild(btn); }
-            } catch (e) { console.warn('Theme toggle placement guard:', e); }
-        })();
+        // Main initialization function
         function init() {
-            updateYear();
-            initContainers();
-            setupMobileFab();
-            setupSectionTabs();
-            setTimeout(setupSectionTabs, 1500);
-            checkUrlForCourse();
-            loadModuleStates();
-            const styleElement = document.createElement('style');
-            styleElement.textContent = `
+            console.log('Init function called');
+            try {
+                updateYear();
+                initContainers();
+                setupMobileFab();
+                setupTheme();
+                checkUrlForCourse();
+                loadModuleStates();
+
+                const styleElement = document.createElement('style');
+                styleElement.textContent = `
                 .iframe-container.visible { height: 310px; opacity: 1; pointer-events: auto; }
                 .iframe-container.visible iframe { display: block; }
             `;
-            document.head.appendChild(styleElement);
-            document.getElementById('app-loading').style.display = 'flex';
-            checkAuthRedirect();
-            setTimeout(() => {
-                if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-                    initGoogleApi();
-                } else {
-                    console.warn('Google API objects not available yet, waiting longer...');
-                    setTimeout(() => {
-                        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-                            initGoogleApi();
-                        } else {
-                            console.error('Google API objects still not available after extended wait');
-                            showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Check your internet connection or try using a different browser.');
-                            document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>Failed to load course materials.<br>Please try refreshing the page.</div>';
-                            showMainContent();
-                        }
-                    }, 3000);
-                }
-            }, 1000);
-            window.addEventListener('scroll', updateActiveNavLink);
-            setTimeout(() => {
+                document.head.appendChild(styleElement);
+
+                document.getElementById('app-loading').style.display = 'flex';
+                checkAuthRedirect();
+
+                waitForGoogleApi();
+
+                window.addEventListener('scroll', updateActiveNavLink);
+
+                setTimeout(() => {
+                    if (document.getElementById('app-loading').style.display !== 'none') {
+                        console.warn('Loading timeout - showing content anyway');
+                        showMainContent();
+                        showImprovedNotification('warning', 'Loading Issue', 'Some features may not be available');
+                    }
+                }, 10000);
+
+            } catch (error) {
+                console.error('Error in init:', error);
                 showMainContent();
-                isInitializing = false;
-                criticalErrorsOnly = false;
-                processPendingNotifications();
-            }, 5000);
+                showImprovedNotification('error', 'Initialization Error', 'Failed to initialize application');
+            }
         }
 
-        /* ===== Theme selector logic ===== */
-        (function () {
-            const KEY = 'theme-preference';          // 'auto' | 'light' | 'dark'
+        // Wait for Google API to be available
+        function waitForGoogleApi() {
+            console.log('Waiting for Google API...');
+            let attempts = 0;
+            const maxAttempts = 30;
+
+            const checkApi = setInterval(() => {
+                attempts++;
+
+                if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+                    console.log('Google API detected, initializing...');
+                    clearInterval(checkApi);
+                    initGoogleApi();
+                } else if (attempts >= maxAttempts) {
+                    console.error('Google API failed to load after maximum attempts');
+                    clearInterval(checkApi);
+                    showImprovedNotification('error', 'API Error', 'Google API libraries not loaded. Check your internet connection.');
+                    document.getElementById('course-content').innerHTML = '<div class="empty-content"><i class="fas fa-exclamation-triangle"></i><br>Failed to load course materials.<br>Please try refreshing the page.</div>';
+                    showMainContent();
+                } else {
+                    console.log(`Attempt ${attempts}/${maxAttempts}: Google API not ready yet...`);
+                }
+            }, 500);
+        }
+
+        // Theme management
+        function setupTheme() {
+            const KEY = 'theme-preference';
             const ICON = document.getElementById('theme-toggle-icon');
             const BTN = document.getElementById('theme-toggle');
 
             const order = ['auto', 'light', 'dark'];
             const icons = { auto: 'fas fa-adjust', light: 'far fa-sun', dark: 'far fa-moon' };
 
-            function getSaved() { return localStorage.getItem(KEY) || 'auto'; }
+            function getSaved() {
+                return localStorage.getItem(KEY) || 'auto';
+            }
 
             function applyTheme(pref) {
                 const html = document.documentElement;
-                if (pref === 'auto') html.removeAttribute('data-theme'); else html.setAttribute('data-theme', pref);
+                if (pref === 'auto') {
+                    html.removeAttribute('data-theme');
+                } else {
+                    html.setAttribute('data-theme', pref);
+                }
                 localStorage.setItem(KEY, pref);
                 updateUI(pref);
-                updateThemeColorMeta(); // keep browser chrome readable
+                updateThemeColorMeta();
             }
 
             function updateUI(pref) {
@@ -2505,95 +2494,56 @@
                 meta.setAttribute('content', currentIsDark() ? DARK : LIGHT);
             }
 
-            function nextPref(p) { return order[(order.indexOf(p) + 1) % order.length]; }
-
-            function init() {
-                const start = getSaved();
-                applyTheme(start);
-                // Click to cycle Auto → Light → Dark
-                if (BTN) BTN.addEventListener('click', () => applyTheme(nextPref(getSaved())));
-                // If Auto, follow OS changes
-                if (window.matchMedia) {
-                    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-                        if (getSaved() === 'auto') applyTheme('auto');
-                    });
-                }
+            function nextPref(p) {
+                return order[(order.indexOf(p) + 1) % order.length];
             }
 
-            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-            else init();
-        })();
+            const start = getSaved();
+            applyTheme(start);
 
-        // Save and load module states
-        function saveModuleStates() {
-            const modules = document.querySelectorAll('.module');
-            const states = {};
-            modules.forEach(module => {
-                states[module.id] = module.classList.contains('active');
-            });
-            localStorage.setItem(`moduleStates_${currentCourse}`, JSON.stringify(states));
-        }
+            if (BTN) {
+                BTN.addEventListener('click', () => applyTheme(nextPref(getSaved())));
+            }
 
-        function loadModuleStates() {
-            // Will be called after modules are rendered
-        }
-
-        function applyModuleStates() {
-            const savedStates = localStorage.getItem(`moduleStates_${currentCourse}`);
-            if (savedStates) {
-                const states = JSON.parse(savedStates);
-                Object.keys(states).forEach(moduleId => {
-                    const module = document.getElementById(moduleId);
-                    if (module) {
-                        if (states[moduleId]) {
-                            module.classList.add(...['active'].flat().filter(Boolean));
-                        } else {
-                            module.classList.remove('active');
-                        }
-                    }
+            if (window.matchMedia) {
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+                    if (getSaved() === 'auto') applyTheme('auto');
                 });
             }
         }
 
-        // Check URL for course hash
-        function checkUrlForCourse() {
-            const hash = window.location.hash.substring(1);
-            if (hash && hash !== 'module-') {
-                localStorage.setItem('urlSelectedCourse', hash);
-            }
-        }
+        function setupMobileFab() {
+            const fab = document.getElementById('mobile-fab');
+            const overlay = document.getElementById('fab-overlay');
+            const menu = document.getElementById('mobile-fab-menu');
 
-        // Apply color theme and decoration from metadata
-        function applyColorTheme(metadata) {
-            // Theme colour tokens (optional)
-            if (metadata && metadata.theme_colours) {
-                const colors = metadata.theme_colours.split(',').map(c => c.trim());
-                if (colors.length >= 5) {
-                    document.body.setAttribute('data-theme-color', 'custom');
-                    document.documentElement.style.setProperty('--theme-primary', colors[0]);
-                    document.documentElement.style.setProperty('--theme-secondary', colors[1]);
-                    document.documentElement.style.setProperty('--theme-tertiary', colors[2]);
-                    document.documentElement.style.setProperty('--theme-accent', colors[3]);
-                    document.documentElement.style.setProperty('--theme-success', colors[4]);
+            const mq = window.matchMedia('(max-width: 1024px)');
+            const applyFabVisibility = () => {
+                if (!fab) return;
+                if (mq.matches) {
+                    fab.classList.add('is-ready');
+                } else {
+                    fab.classList.remove('is-ready');
                 }
-            } else {
-                document.body.removeAttribute('data-theme-color');
-            }
+            };
+            mq.addEventListener('change', applyFabVisibility);
+            applyFabVisibility();
 
-            // Header decoration: use updateHeaderDecoration(meta)
-            try { updateHeaderDecoration(metadata || {}); } catch (e) { console.warn('header decoration update failed', e); }
-        }
+            if (!fab || !overlay || !menu) return;
 
-        function showMainContent() {
-            const loadingIndicator = document.getElementById('app-loading');
-            const mainContainer = document.getElementById('main-container');
-            if (loadingIndicator) {
-                loadingIndicator.style.opacity = '0';
-                setTimeout(() => { loadingIndicator.style.display = 'none'; }, 500);
-            }
-            if (mainContainer) {
-                mainContainer.classList.remove('content-hidden');
-            }
+            const toggleMenu = () => {
+                fab.classList.toggle('active');
+                overlay.classList.toggle('active');
+                menu.classList.toggle('active');
+                document.body.classList.toggle('no-scroll');
+            };
+            fab.addEventListener('click', toggleMenu);
+            overlay.addEventListener('click', toggleMenu);
+            menu.addEventListener('click', (e) => {
+                if (e.target.closest('.mobile-fab-menu-item')) {
+                    setTimeout(toggleMenu, 100);
+                }
+            });
         }
 
         function initContainers() {
@@ -2644,6 +2594,7 @@
         }
 
         function initGoogleApi() {
+            console.log('Initializing Google API...');
             if (typeof gapi === 'undefined') {
                 showImprovedNotification('error', 'API Error', 'Google API client not loaded.');
                 showMainContent();
@@ -2660,19 +2611,24 @@
                     scope: SCOPES,
                     callback: handleTokenResponse
                 });
+                console.log('Token client initialized');
             } catch (error) {
                 console.error('Failed to initialize token client:', error);
                 showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
             }
             gapi.load('client', () => {
+                console.log('GAPI client loaded');
                 gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS }).then(() => {
+                    console.log('GAPI client initialized');
                     tryPublicAccess().then(success => {
                         if (success) {
+                            console.log('Public access successful');
                             if (document.getElementById('sign-in-btn')) {
                                 document.getElementById('sign-in-btn').style.display = 'none';
                             }
                             showMainContent();
                         } else {
+                            console.log('Public access failed, checking saved token');
                             const savedToken = localStorage.getItem('gapi_token');
                             if (savedToken) {
                                 try {
@@ -2862,7 +2818,12 @@
             try {
                 const promises = availableCourses.map(async (sheetName) => {
                     try {
-                        let rows = isSignedIn ? (await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID, range: `${sheetName}!A2:C10` })).result.values || [] : await fetchPublicSheetData(sheetName, 'A2:C10');
+                        let rows = isSignedIn ?
+                            (await gapi.client.sheets.spreadsheets.values.get({
+                                spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                                range: `${sheetName}!A2:C10`
+                            })).result.values || [] :
+                            await fetchPublicSheetData(sheetName, 'A2:C10');
                         for (const row of rows) {
                             if (row[0]?.toLowerCase() === 'metadata' && row[1]?.toLowerCase() === 'code') {
                                 courseMap[sheetName] = row[2] || sheetName;
@@ -2902,7 +2863,6 @@
                         }
                     });
 
-                    // Also check project groups
                     const projectGroupCards = module.querySelectorAll('.project-group-card');
                     projectGroupCards.forEach(card => {
                         const topic = card.querySelector('.project-group-title')?.textContent.toLowerCase() || '';
@@ -2916,11 +2876,10 @@
                         module.classList.remove('hidden');
                         visibleModules++;
                     } else {
-                        module.classList.add(...['hidden'].flat().filter(Boolean));
+                        module.classList.add('hidden');
                     }
                 });
 
-                // Optional: Show a message if no results are found
                 let noResultsEl = document.getElementById('no-search-results');
                 if (visibleModules === 0 && !noResultsEl) {
                     noResultsEl = document.createElement('div');
@@ -2937,10 +2896,7 @@
         function selectCourse(sheetName) {
             localStorage.setItem('lastSelectedCourse', sheetName);
             currentCourse = sheetName;
-
-            // Update URL hash with selected course
             window.location.hash = sheetName;
-
             resetUIElements();
             document.querySelectorAll('.course-button').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.sheet === sheetName);
@@ -2951,13 +2907,10 @@
                 if (data) {
                     Object.assign(courseData, data);
                     document.title = data.metadata.code ? `${formatCourseCode(data.metadata.code)} ${data.metadata.title || 'Course'}` : 'Course Materials';
-
                     updateCourseMetadata(data.metadata);
                     populateActionButtons(data.actionButtons, data.metadata);
                     applyColorTheme(data.metadata);
-
-                    setupSortAndRender(); // This now handles sorting and rendering
-
+                    setupSortAndRender();
                     showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
                 }
             });
@@ -2967,18 +2920,16 @@
             const sortButton = document.getElementById('sort-button');
             if (!sortButton) return;
 
-            // Helper function to extract a value we can sort by
             const getSortableValue = (module) => {
                 if (module.type === 'project' && module.dueDate) {
                     const date = new Date(module.dueDate);
                     return isNaN(date) ? Infinity : date.getTime();
                 }
-                // This is the corrected part: it now uses module.id
                 if (module.type === 'standard' && module.id) {
                     const num = parseInt(module.id, 10);
                     return isNaN(num) ? Infinity : num;
                 }
-                return Infinity; // Put modules without a number or date last
+                return Infinity;
             };
 
             const sortModules = (order) => {
@@ -2996,7 +2947,6 @@
             const renderContent = () => {
                 const contentDiv = document.getElementById('course-content');
                 contentDiv.innerHTML = generateCourseContentHtml(courseData.modules);
-                // Re-attach event listeners and apply states after re-rendering
                 document.querySelectorAll('.module-header').forEach(header => {
                     header.onclick = () => {
                         toggleModule(header.parentNode);
@@ -3004,7 +2954,7 @@
                     };
                 });
                 applyModuleStates();
-                setupSearchFilter(); // Re-initialize search on the new content
+                setupSearchFilter();
             };
 
             const updateButtonState = (order) => {
@@ -3019,23 +2969,17 @@
                 sortButton.dataset.order = order;
             };
 
-            // Main logic starts here
             let sortOrders = JSON.parse(localStorage.getItem('courseSortOrders')) || {};
-            let currentOrder = sortOrders[currentCourse] || 'asc'; // Default to ascending
+            let currentOrder = sortOrders[currentCourse] || 'asc';
 
-            // Initial sort and render
             sortModules(currentOrder);
             updateButtonState(currentOrder);
-            renderContent(); // Initial render with sorted data
+            renderContent();
 
             sortButton.onclick = () => {
                 const newOrder = sortButton.dataset.order === 'asc' ? 'desc' : 'asc';
-
-                // Save the new preference for this specific course
                 sortOrders[currentCourse] = newOrder;
                 localStorage.setItem('courseSortOrders', JSON.stringify(sortOrders));
-
-                // Sort and re-render the content
                 sortModules(newOrder);
                 updateButtonState(newOrder);
                 renderContent();
@@ -3044,7 +2988,12 @@
 
         async function fetchCourseData(sheetName) {
             try {
-                let rows = isSignedIn ? (await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID, range: `${sheetName}!A2:J` })).result.values || [] : await fetchPublicSheetData(sheetName, 'A2:J');
+                let rows = isSignedIn ?
+                    (await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                        range: `${sheetName}!A2:J`
+                    })).result.values || [] :
+                    await fetchPublicSheetData(sheetName, 'A2:J');
                 return rows.length === 0 ? null : processCourseData(rows);
             } catch (error) {
                 showImprovedNotification('error', 'Data Error', 'Failed to fetch course data');
@@ -3053,7 +3002,7 @@
         }
 
         function processCourseData(rows) {
-            const data = { metadata: {}, modules: [], actionButtons: [] }; // Added actionButtons array
+            const data = { metadata: {}, modules: [], actionButtons: [] };
             let currentModule = null;
 
             rows.forEach(row => {
@@ -3064,7 +3013,6 @@
                     const key = row[1]?.toLowerCase().replace(/\s+/g, '_');
                     if (key) data.metadata[key] = row[2] || '';
                 } else if (type === 'button') {
-                    // New logic to process custom buttons
                     data.actionButtons.push({
                         name: row[1] || 'Button',
                         icon: row[2] || 'fas fa-external-link-alt',
@@ -3127,9 +3075,8 @@
         function populateActionButtons(buttons, metadata) {
             const container = document.getElementById('course-action-buttons');
             if (!container) return;
-            container.innerHTML = ''; // Clear any previous buttons
+            container.innerHTML = '';
 
-            // Create dynamic buttons from the sheet
             buttons.forEach(buttonData => {
                 const button = document.createElement('button');
                 button.className = buttonData.colorClass;
@@ -3138,7 +3085,6 @@
                 container.appendChild(button);
             });
 
-            // As requested, we create the special Timetable button if it's enabled
             const isTimetableEnabled = String(metadata.timetable_enabled || '').toLowerCase() === 'true' || String(metadata.timetable_enabled || '') === '1';
             const timetableContainer = document.getElementById('timetable-container');
 
@@ -3148,18 +3094,16 @@
                 timetableBtn.innerHTML = `<i class="fas fa-calendar-alt"></i> Timetable`;
                 timetableBtn.onclick = toggleTimetable;
                 container.appendChild(timetableBtn);
-                if (timetableContainer) timetableContainer.style.display = ''; // Ensure container is available
+                if (timetableContainer) timetableContainer.style.display = '';
             } else {
                 if (timetableContainer) timetableContainer.style.display = 'none';
             }
         }
 
-        // Generate Project Module
         function generateProjectModuleHtml(module) {
             const moduleId = `module-${module.id}`;
             let filesHtml = '';
 
-            // Generate HTML for any general project files
             if (module.materials.length > 0) {
                 const materialCount = module.materials.length;
                 let gridClass = 'materials-grid';
@@ -3169,25 +3113,24 @@
                 filesHtml += `<div class="${gridClass}">`;
                 module.materials.forEach(material => {
                     filesHtml += `
-            <div class="material-card">
-                <div class="material-card-header">
-                    <i class="${material.icon || 'far fa-file-alt'} material-icon"></i>
-                    <div class="material-info">
-                        <div class="material-title">${material.title}</div>
-                        <div class="material-description">${material.description}</div>
-                    </div>
+        <div class="material-card">
+            <div class="material-card-header">
+                <i class="${material.icon || 'far fa-file-alt'} material-icon"></i>
+                <div class="material-info">
+                    <div class="material-title">${material.title}</div>
+                    <div class="material-description">${material.description}</div>
                 </div>
-                <div class="material-card-actions">
-                    ${material.viewLink ? `<button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i> View</button>` : ''}
-                    ${material.downloadLink ? `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><i class="far fa-save"></i> Download</button>` : ''}
-                    ${material.openLink ? `<button onclick="window.open('${material.openLink}', '_blank', 'noopener,noreferrer')" class="btn-orange"><i class="fas fa-external-link-alt"></i> Open</button>` : ''}
-                </div>
-            </div>`;
+            </div>
+            <div class="material-card-actions">
+                ${material.viewLink ? `<button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i> View</button>` : ''}
+                ${material.downloadLink ? `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><i class="far fa-save"></i> Download</button>` : ''}
+                ${material.openLink ? `<button onclick="window.open('${material.openLink}', '_blank', 'noopener,noreferrer')" class="btn-orange"><i class="fas fa-external-link-alt"></i> Open</button>` : ''}
+            </div>
+        </div>`;
                 });
                 filesHtml += `</div>`;
             }
 
-            // Generate HTML for the project groups
             let groupsHtml = '';
             if (module.groups.length > 0) {
                 groupsHtml += `<div class="project-groups-grid">`;
@@ -3204,39 +3147,37 @@
                         groupFilesHtml += '<div class="group-files-container">';
                         group.files.forEach(file => {
                             groupFilesHtml += `
-                    <div class="group-material-card">
-                        <i class="${file.icon || 'far fa-file-alt'} material-icon"></i>
-                        <div class="material-info">
-                            <div class="material-title">${file.title}</div>
-                            <div class="material-description">${file.description}</div>
-                        </div>
-                        <div class="material-card-actions">
-                             ${file.viewLink ? `<button onclick="window.open('${file.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i></button>` : ''}
-                             ${file.downloadLink ? `<button onclick="window.open('${file.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><i class="far fa-save"></i></button>` : ''}
-                        </div>
-                    </div>`;
+                <div class="group-material-card">
+                    <i class="${file.icon || 'far fa-file-alt'} material-icon"></i>
+                    <div class="material-info">
+                        <div class="material-title">${file.title}</div>
+                        <div class="material-description">${file.description}</div>
+                    </div>
+                    <div class="material-card-actions">
+                         ${file.viewLink ? `<button onclick="window.open('${file.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i></button>` : ''}
+                         ${file.downloadLink ? `<button onclick="window.open('${file.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><i class="far fa-save"></i></button>` : ''}
+                    </div>
+                </div>`;
                         });
                         groupFilesHtml += '</div>';
                     }
 
                     groupsHtml += `
-            <div class="project-group-card">
-                <div class="project-group-title">${group.topic}</div>
-                ${group.description ? `<div class="project-group-description">${group.description}</div>` : ''}
-                ${studentsList}
-                ${groupFilesHtml}
-            </div>`;
+        <div class="project-group-card">
+            <div class="project-group-title">${group.topic}</div>
+            ${group.description ? `<div class="project-group-description">${group.description}</div>` : ''}
+            ${studentsList}
+            ${groupFilesHtml}
+        </div>`;
                 });
                 groupsHtml += `</div>`;
             }
 
-            // Generate HTML for fun facts
             let funFactsHtml = '';
             module.funFacts.forEach(funFact => {
                 funFactsHtml += `<div class="fun-fact">${funFact.text}</div>`;
             });
 
-            // Assemble the final module HTML
             return `
     <div class="module module-project" id="${moduleId}">
         <div class="module-header">
@@ -3261,13 +3202,11 @@
         function updateCourseMetadata(metadata) {
             document.getElementById('course-code').textContent = metadata.code ? formatCourseCode(metadata.code) : 'Course Code';
 
-            // Handle professors with photos and links
             const profContainer = document.getElementById('professors-container');
             if (profContainer) {
                 profContainer.innerHTML = '';
                 let professors = [];
 
-                // Collect all professor data
                 for (let i = 1; i <= 5; i++) {
                     if (metadata[`professor${i}`]) {
                         professors.push({
@@ -3317,11 +3256,12 @@
             document.getElementById('course-type').textContent = courseType;
             const typeContainer = document.getElementById('course-type-container');
             if (typeContainer) {
-                typeContainer.innerHTML = courseType.toLowerCase() === 'elective' ? '<i class="far fa-circle"></i> <span id="course-type">Elective</span>' : '<i class="fas fa-exclamation-circle"></i> <span id="course-type">Compulsory</span>';
+                typeContainer.innerHTML = courseType.toLowerCase() === 'elective' ?
+                    '<i class="far fa-circle"></i> <span id="course-type">Elective</span>' :
+                    '<i class="fas fa-exclamation-circle"></i> <span id="course-type">Compulsory</span>';
             }
             updateWeekProgress(metadata.startdate, metadata.enddate, metadata.holidayweeks);
 
-            // Always show evaluation if data exists
             const evaluationDisplay = document.getElementById('evaluation-display');
             if (hasEvaluationData(metadata)) {
                 evaluationDisplay.style.display = 'block';
@@ -3351,7 +3291,6 @@
             let html = '';
             modules.forEach(module => {
                 const moduleId = `module-${module.id}`;
-                // Create nav items for all module types
                 const navItem = document.createElement('a');
                 navItem.className = 'side-nav-item';
                 navItem.href = `#${moduleId}`;
@@ -3366,40 +3305,38 @@
                     mobileMenu.appendChild(mobileNavItem);
                 }
 
-                // Check the module type and use the correct generator
                 if (module.type === 'project') {
                     html += generateProjectModuleHtml(module);
                 } else {
-                    // This is the existing logic for standard modules
                     const materialCount = module.materials.length;
                     let gridClass = 'materials-grid';
                     if (materialCount === 1) gridClass += ' materials-1';
                     else if (materialCount === 2) gridClass += ' materials-2';
 
                     html += `
-            <div class="module active" id="${moduleId}">
-                <div class="module-header">
-                    ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
-                    <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
-                </div>
-                <div class="module-content">
-                    <div class="${gridClass}">`;
+        <div class="module active" id="${moduleId}">
+            <div class="module-header">
+                ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
+                <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
+            </div>
+            <div class="module-content">
+                <div class="${gridClass}">`;
                     module.materials.forEach(material => {
                         html += `
-                    <div class="material-card">
-                        <div class="material-card-header">
-                            <i class="${material.icon} material-icon"></i>
-                            <div class="material-info">
-                                <div class="material-title">${material.title}</div>
-                                <div class="material-description">${material.description}</div>
-                            </div>
+                <div class="material-card">
+                    <div class="material-card-header">
+                        <i class="${material.icon} material-icon"></i>
+                        <div class="material-info">
+                            <div class="material-title">${material.title}</div>
+                            <div class="material-description">${material.description}</div>
                         </div>
-                        <div class="material-card-actions">
-                            ${material.viewLink ? `<button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i> View</button>` : ''}
-                            ${material.downloadLink ? `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><i class="far fa-save"></i> Download</button>` : ''}
-                            ${material.openLink ? `<button onclick="window.open('${material.openLink}', '_blank', 'noopener,noreferrer')" class="btn-orange"><i class="fas fa-external-link-alt"></i> Open</button>` : ''}
-                        </div>
-                    </div>`;
+                    </div>
+                    <div class="material-card-actions">
+                        ${material.viewLink ? `<button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><i class="far fa-eye"></i> View</button>` : ''}
+                        ${material.downloadLink ? `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><i class="far fa-save"></i> Download</button>` : ''}
+                        ${material.openLink ? `<button onclick="window.open('${material.openLink}', '_blank', 'noopener,noreferrer')" class="btn-orange"><i class="fas fa-external-link-alt"></i> Open</button>` : ''}
+                    </div>
+                </div>`;
                     });
                     html += `</div>`;
                     module.funFacts.forEach(funFact => {
@@ -3416,31 +3353,25 @@
             if (!content) return;
 
             const isOpen = element.classList.contains('active');
-            content.style.overflow = 'hidden'; // ensure smooth collapse
+            content.style.overflow = 'hidden';
 
             if (!isOpen) {
-                // Opening
                 element.classList.add('active');
                 content.style.maxHeight = '0px';
                 content.style.padding = '0 25px';
-                // force reflow
                 void content.offsetHeight;
                 content.style.maxHeight = content.scrollHeight + 'px';
                 content.style.padding = '25px';
 
                 const onOpenEnd = (e) => {
                     if (e.propertyName !== 'max-height') return;
-                    // allow future growth without reflow jank
                     content.style.maxHeight = 'none';
                     content.removeEventListener('transitionend', onOpenEnd);
                 };
                 content.addEventListener('transitionend', onOpenEnd);
             } else {
-                // Closing
-                // set current height to enable reverse animation
                 content.style.maxHeight = content.scrollHeight + 'px';
                 content.style.padding = '25px';
-                // force reflow
                 void content.offsetHeight;
                 content.style.maxHeight = '0px';
                 content.style.padding = '0 25px';
@@ -3448,7 +3379,6 @@
                 const onCloseEnd = (e) => {
                     if (e.propertyName !== 'max-height') return;
                     element.classList.remove('active');
-                    // keep collapsed state tidy
                     content.style.maxHeight = '0px';
                     content.style.padding = '0 25px';
                     content.removeEventListener('transitionend', onCloseEnd);
@@ -3456,7 +3386,6 @@
                 content.addEventListener('transitionend', onCloseEnd);
             }
         }
-
 
         function updateActiveNavLink() {
             let activeModuleId = '';
@@ -3476,7 +3405,7 @@
             if (window.location.hash) {
                 const targetModule = document.querySelector(window.location.hash);
                 if (targetModule && !targetModule.classList.contains('glow-effect')) {
-                    targetModule.classList.add(...['glow-effect'].flat().filter(Boolean));
+                    targetModule.classList.add('glow-effect');
                     setTimeout(() => {
                         targetModule.classList.remove('glow-effect');
                     }, 1500);
@@ -3512,7 +3441,7 @@
             const iframe = document.getElementById('timetable-iframe');
             if (!iframeContainer.classList.contains('visible')) {
                 document.getElementById("timetable-container").style.display = '';
-                iframe.onload = () => iframeContainer.classList.add(...['visible'].flat().filter(Boolean));
+                iframe.onload = () => iframeContainer.classList.add('visible');
                 document.getElementById('timetable-form').submit();
                 button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Timetable';
             } else {
@@ -3539,7 +3468,15 @@
             bar.innerHTML = '';
             legend.innerHTML = '';
             let cumulativeWidth = 0;
-            const assessments = [{ name: 'Homework', colors: ['#06FFB4', '#00E5A0', '#00CC8C', '#00B378'], items: [{ key: 'hw1_percentage' }, { key: 'hw2_percentage' }, { key: 'hw3_percentage' }, { key: 'hw4_percentage' }] }, { name: 'Quizzes', colors: ['#3A86FF', '#2E78E8', '#226AD1', '#165CBA'], items: [{ key: 'quiz1_percentage' }, { key: 'quiz2_percentage' }, { key: 'quiz3_percentage' }, { key: 'quiz4_percentage' }] }, { name: 'Term Project', colors: ['#8338EC'], items: [{ key: 'term_project_percentage' }] }, { name: 'Projects', colors: ['#C77DFF', '#B265FF'], items: [{ key: 'project1_percentage' }, { key: 'project2_percentage' }] }, { name: 'Attendance', colors: ['#7209B7'], items: [{ key: 'attendance_percentage' }] }, { name: 'Midterm', colors: ['#FFBE0B'], items: [{ key: 'midterm_percentage' }] }, { name: 'Final', colors: ['#FF006E'], items: [{ key: 'final_percentage' }] }];
+            const assessments = [
+                { name: 'Homework', colors: ['#06FFB4', '#00E5A0', '#00CC8C', '#00B378'], items: [{ key: 'hw1_percentage' }, { key: 'hw2_percentage' }, { key: 'hw3_percentage' }, { key: 'hw4_percentage' }] },
+                { name: 'Quizzes', colors: ['#3A86FF', '#2E78E8', '#226AD1', '#165CBA'], items: [{ key: 'quiz1_percentage' }, { key: 'quiz2_percentage' }, { key: 'quiz3_percentage' }, { key: 'quiz4_percentage' }] },
+                { name: 'Term Project', colors: ['#8338EC'], items: [{ key: 'term_project_percentage' }] },
+                { name: 'Projects', colors: ['#C77DFF', '#B265FF'], items: [{ key: 'project1_percentage' }, { key: 'project2_percentage' }] },
+                { name: 'Attendance', colors: ['#7209B7'], items: [{ key: 'attendance_percentage' }] },
+                { name: 'Midterm', colors: ['#FFBE0B'], items: [{ key: 'midterm_percentage' }] },
+                { name: 'Final', colors: ['#FF006E'], items: [{ key: 'final_percentage' }] }
+            ];
             assessments.forEach(assessment => {
                 let totalPercentage = 0;
                 let colorIndex = 0;
@@ -3588,13 +3525,13 @@
             const area = document.getElementById('notification-area');
             if (!area) return;
             area.querySelectorAll(`.in-page-notification-${type}`).forEach(n => {
-                n.classList.add(...['removing'].flat().filter(Boolean));
+                n.classList.add('removing');
                 setTimeout(() => safeRemove(n), 300);
             });
             const allNotifs = area.querySelectorAll('.in-page-notification');
             if (allNotifs.length >= 2) {
                 const oldest = allNotifs[0];
-                oldest.classList.add(...['removing'].flat().filter(Boolean));
+                oldest.classList.add('removing');
                 setTimeout(() => safeRemove(oldest), 300);
             }
             const notification = document.createElement('div');
@@ -3608,12 +3545,12 @@
             notification.querySelector('.notification-close').onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                notification.classList.add(...['removing'].flat().filter(Boolean));
+                notification.classList.add('removing');
                 setTimeout(() => safeRemove(notification), 300);
             };
             if (type !== 'error') {
                 setTimeout(() => {
-                    notification.classList.add(...['removing'].flat().filter(Boolean));
+                    notification.classList.add('removing');
                     setTimeout(() => safeRemove(notification), 300);
                 }, duration || 5000);
             }
@@ -3629,89 +3566,54 @@
                 pendingNotifications = [];
             }
         }
-        (function () {
-            const LIGHT = '#FFFCF2';   // matches your light surface
-            const DARK = '#121212';   // calm dark surface
 
-            function ensureDynamicMeta() {
-                let meta = document.querySelector('meta[name="theme-color"][data-dynamic]');
-                if (!meta) {
-                    meta = document.createElement('meta');
-                    meta.name = 'theme-color';
-                    meta.setAttribute('data-dynamic', '');
-                    document.head.appendChild(meta);
-                }
-                return meta;
+        function showMainContent() {
+            console.log('Showing main content');
+            const loadingIndicator = document.getElementById('app-loading');
+            const mainContainer = document.getElementById('main-container');
+            if (loadingIndicator) {
+                loadingIndicator.style.opacity = '0';
+                setTimeout(() => { loadingIndicator.style.display = 'none'; }, 500);
             }
-
-            function isDarkNow() {
-                const forced = document.documentElement.getAttribute('data-theme'); // 'light' | 'dark' | null
-                if (forced === 'dark') return true;
-                if (forced === 'light') return false;
-                return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (mainContainer) {
+                mainContainer.classList.remove('content-hidden');
             }
-
-            function updateThemeColorMeta() {
-                ensureDynamicMeta().setAttribute('content', isDarkNow() ? DARK : LIGHT);
-            }
-
-            // React to manual toggle (data-theme attribute changes)
-            new MutationObserver(updateThemeColorMeta)
-                .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-
-            // React to OS switches when Auto is active
-            if (window.matchMedia) {
-                window.matchMedia('(prefers-color-scheme: dark)')
-                    .addEventListener('change', updateThemeColorMeta);
-            }
-
-            // Initial paint
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', updateThemeColorMeta, { once: true });
-            } else {
-                updateThemeColorMeta();
-            }
-        })();
-
-        ;
-
-        /* === Section tabs (mobile) === */
-        function setupSectionTabs() {
-            try {
-                if (document.getElementById('section-tabs')) return; // already inserted
-                const navLinks = Array.from(document.querySelectorAll('.side-nav-item'));
-                if (!navLinks.length) return;
-                const tabs = document.createElement('div');
-                tabs.id = 'section-tabs';
-                tabs.className = 'section-tabs';
-                navLinks.forEach(link => {
-                    const btn = document.createElement('button');
-                    btn.className = 'section-tab';
-                    btn.textContent = link.textContent.trim();
-                    btn.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        const href = link.getAttribute('href');
-                        if (!href) return;
-                        const target = document.querySelector(href);
-                        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    });
-                    tabs.appendChild(btn);
-                });
-                const info = document.getElementById('course-info');
-                if (info && info.parentNode) {
-                    info.insertAdjacentElement('afterend', tabs);
-                }
-            } catch (e) { console.warn('setupSectionTabs error', e); }
+            isInitializing = false;
+            criticalErrorsOnly = false;
+            processPendingNotifications();
         }
 
+        function checkUrlForCourse() {
+            const hash = window.location.hash.substring(1);
+            if (hash && hash !== 'module-') {
+                localStorage.setItem('urlSelectedCourse', hash);
+            }
+        }
 
-        ;
+        function applyColorTheme(metadata) {
+            if (metadata && metadata.theme_colours) {
+                const colors = metadata.theme_colours.split(',').map(c => c.trim());
+                if (colors.length >= 5) {
+                    document.body.setAttribute('data-theme-color', 'custom');
+                    document.documentElement.style.setProperty('--theme-primary', colors[0]);
+                    document.documentElement.style.setProperty('--theme-secondary', colors[1]);
+                    document.documentElement.style.setProperty('--theme-tertiary', colors[2]);
+                    document.documentElement.style.setProperty('--theme-accent', colors[3]);
+                    document.documentElement.style.setProperty('--theme-success', colors[4]);
+                }
+            } else {
+                document.body.removeAttribute('data-theme-color');
+            }
+            try { updateHeaderDecoration(metadata || {}); } catch (e) { console.warn('header decoration update failed', e); }
+        }
 
         function updateHeaderDecoration(meta) {
-            const deco = document.getElementById('header-decoration'); if (!deco) return;
+            const deco = document.getElementById('header-decoration');
+            if (!deco) return;
             let shape, icon;
             if (meta && meta.header_decoration && typeof meta.header_decoration === 'object') {
-                shape = meta.header_decoration.shape; icon = meta.header_decoration.icon;
+                shape = meta.header_decoration.shape;
+                icon = meta.header_decoration.icon;
             }
             if (!shape) shape = meta && (meta.header_decoration_shape || meta.header_shape || meta['shape type'] || meta.shape);
             if (!icon) icon = meta && (meta.header_decoration_icon || meta['fa-icon'] || meta.icon);
@@ -3719,29 +3621,71 @@
                 const s = (meta && (meta.metadata || meta.meta || meta.notes || '')) + '';
                 const parts = s.split('|').map(x => x.trim());
                 const idx = parts.findIndex(v => /^header[_\s-]?decoration$/i.test(v));
-                if (idx > -1) { const sh = parts[idx + 1]; const ic = parts[idx + 2]; if (sh) shape = sh.toLowerCase(); if (ic) icon = ic; }
+                if (idx > -1) {
+                    const sh = parts[idx + 1];
+                    const ic = parts[idx + 2];
+                    if (sh) shape = sh.toLowerCase();
+                    if (ic) icon = ic;
+                }
             }
             shape = ['none', 'square', 'circle', 'pill'].includes((shape || '').toLowerCase()) ? shape.toLowerCase() : 'square';
             icon = icon || 'fa-solid fa-graduation-cap';
             deco.className = 'shape-' + shape;
-            let i = deco.querySelector('i.fa'); if (!i) { i = document.createElement('i'); deco.innerHTML = ''; deco.appendChild(i); }
+            let i = deco.querySelector('i.fa');
+            if (!i) {
+                i = document.createElement('i');
+                deco.innerHTML = '';
+                deco.appendChild(i);
+            }
             i.className = icon + ' fa';
         }
 
-        ;
+        function saveModuleStates() {
+            const modules = document.querySelectorAll('.module');
+            const states = {};
+            modules.forEach(module => {
+                states[module.id] = module.classList.contains('active');
+            });
+            localStorage.setItem(`moduleStates_${currentCourse}`, JSON.stringify(states));
+        }
 
-        (function () {
-            const KEY = 'themeMode'; const mm = window.matchMedia('(prefers-color-scheme: dark)');
-            function mode() { return localStorage.getItem(KEY) || 'auto'; }
-            function set(m) { localStorage.setItem(KEY, m); apply(m); }
-            function label(m) { if (m === 'auto') return mm.matches ? 'Theme: Auto (System Dark)' : 'Theme: Auto (System Light)'; if (m === 'dark') return 'Theme: Dark (Manual)'; return 'Theme: Light (Manual)'; }
-            function apply(m) { const html = document.documentElement; if (m === 'auto') html.removeAttribute('data-theme'); else html.setAttribute('data-theme', m); let meta = document.querySelector('meta[name="theme-color"][data-dynamic]'); if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; meta.setAttribute('data-dynamic', ''); document.head.appendChild(meta); } meta.content = (m === 'dark' || (m === 'auto' && mm.matches)) ? '#121212' : '#FFFCF2'; const btn = document.getElementById('theme-toggle'); const icon = document.getElementById('theme-toggle-icon'); if (btn && icon) { btn.title = label(m); btn.setAttribute('aria-label', btn.title); icon.className = m === 'auto' ? 'fas fa-adjust' : (m === 'dark' ? 'fas fa-moon' : 'fas fa-sun'); } }
-            function toggle() { const m = mode(), sysDark = mm.matches; if (m === 'auto') set(sysDark ? 'light' : 'dark'); else set('auto'); }
-            function ensureButton() { const footer = document.querySelector('.footer'); if (!footer) return; let tools = footer.querySelector('.footer-tools'); if (!tools) { tools = document.createElement('div'); tools.className = 'footer-tools'; footer.appendChild(tools); } let btn = document.getElementById('theme-toggle'); if (!btn) { btn = document.createElement('button'); btn.id = 'theme-toggle'; btn.className = 'theme-toggle'; btn.innerHTML = '<i id="theme-toggle-icon" class="fas fa-adjust" aria-hidden="true"></i>'; tools.appendChild(btn); btn.addEventListener('click', toggle); } }
-            function init() { ensureButton(); apply(mode()); }
-            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-            mm.addEventListener?.('change', () => { if (mode() === 'auto') apply('auto'); });
-        })();
+        function loadModuleStates() {
+            // Will be called after modules are rendered
+        }
+
+        function applyModuleStates() {
+            const savedStates = localStorage.getItem(`moduleStates_${currentCourse}`);
+            if (savedStates) {
+                const states = JSON.parse(savedStates);
+                Object.keys(states).forEach(moduleId => {
+                    const module = document.getElementById(moduleId);
+                    if (module) {
+                        if (states[moduleId]) {
+                            module.classList.add('active');
+                        } else {
+                            module.classList.remove('active');
+                        }
+                    }
+                });
+            }
+        }
+
+        // CRITICAL: Start the application when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            // DOM is already loaded
+            init();
+        }
+
+        // Additional fallback
+        window.addEventListener('load', () => {
+            console.log('Window load event fired');
+            if (!window.initStarted) {
+                window.initStarted = true;
+                init();
+            }
+        });
     </script>
 </body>
 
