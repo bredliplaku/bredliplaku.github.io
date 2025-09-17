@@ -42,20 +42,26 @@
         @media (prefers-color-scheme: dark) {
             :root:not([data-theme]) {
                 --dark-bg: #000000;
-                --dark-surface: #121212;
-                --dark-surface-light: #1E1E1E;
+                /* Pure black for AMOLED backgrounds */
+                --dark-surface: #181818;
+                /* A very dark grey for cards/surfaces */
+                --dark-surface-light: #282828;
+                /* Lighter grey for hovers */
                 --dark-text: #E0E0E0;
-                --dark-text-muted: #9E9E9E;
-                --dark-border: #333333;
+                /* Slightly off-white for less eye strain */
+                --dark-text-muted: #A0A0A0;
+                /* Muted grey for descriptions */
+                --dark-border: #383838;
+                /* A clearer border color */
             }
 
             html[data-theme="dark"] {
                 --dark-bg: #000000;
-                --dark-surface: #121212;
-                --dark-surface-light: #1E1E1E;
+                --dark-surface: #181818;
+                --dark-surface-light: #282828;
                 --dark-text: #E0E0E0;
-                --dark-text-muted: #9E9E9E;
-                --dark-border: #333333;
+                --dark-text-muted: #A0A0A0;
+                --dark-border: #383838;
             }
 
             html:not([data-theme]) body {
@@ -571,17 +577,6 @@
             background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
         }
 
-        /* Materials grid */
-        .materials-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-
-        .materials-grid .material-card {
-            max-width: 100%;
-            /* Allows card to fill the grid column */
-        }
 
         /* Project module */
         .module-project .module-header {
@@ -1451,7 +1446,7 @@
             padding: 12px 20px;
             box-shadow: 4px 4px 0 var(--dark-color);
             border-radius: 8px;
-            transition: all .3s cubic-bezier(.68, -.55, .265, 1.55);
+            transition: transform 0.25s ease-out, background-color 0.2s ease, color 0.2s ease, box-shadow 0.25s ease-out;
             cursor: pointer;
             flex-shrink: 0;
             width: 100%;
@@ -1484,6 +1479,18 @@
         .side-nav-item.active i {
             color: var(--light-color);
             transform: scale(1.1);
+        }
+
+        @media (min-width: 1401px) {
+            .side-nav-container {
+                width: 240px;
+                /* Slightly more compact width */
+            }
+
+            .main-content-wrapper {
+                /* Add padding on the left to make space for the nav */
+                padding-left: 240px;
+            }
         }
 
         /* Main layout toggles */
@@ -1681,6 +1688,18 @@
             h2 {
                 font-size: .9em !important;
                 margin-bottom: 5px;
+            }
+
+            /* Materials grid */
+            .materials-grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 15px;
+            }
+
+            .materials-grid .material-card {
+                max-width: 100%;
+                /* Allows card to fill the grid column */
             }
 
             #header-decoration {
@@ -2319,43 +2338,32 @@
             const content = moduleEl.querySelector('.module-content');
             if (!content) return;
 
-            const isOpen = moduleEl.classList.contains('active');
-            const prefersReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            // Clear any inline styles to ensure scrollHeight is accurate
+            content.style.maxHeight = '';
 
-            if (prefersReduce) {
-                moduleEl.classList.toggle('active');
-                content.style.maxHeight = isOpen ? '0px' : content.scrollHeight + 'px';
-                content.style.padding = isOpen ? '0px 25px' : '25px';
-                return;
-            }
-
-            if (!isOpen) {
-                // Opening animation
-                content.style.maxHeight = '0px';
-                content.style.padding = '0px 25px';
-                void content.offsetHeight; // Force reflow
-                moduleEl.classList.add('active');
+            if (moduleEl.classList.contains('active')) {
+                // --- Start Closing ---
+                // Set max-height to its current height, then transition to 0
                 content.style.maxHeight = content.scrollHeight + 'px';
-                content.style.padding = '25px';
-
-                const onOpenEnd = () => {
-                    content.style.maxHeight = '5000px';
-                    content.removeEventListener('transitionend', onOpenEnd);
-                };
-                content.addEventListener('transitionend', onOpenEnd);
-            } else {
-                // Closing animation
-                content.style.maxHeight = content.scrollHeight + 'px';
-                content.style.padding = '25px';
-                void content.offsetHeight; // Force reflow
-                content.style.maxHeight = '0px';
-                content.style.padding = '0px 25px';
-
-                const onCloseEnd = () => {
+                requestAnimationFrame(() => {
+                    content.style.maxHeight = '0px';
                     moduleEl.classList.remove('active');
-                    content.removeEventListener('transitionend', onCloseEnd);
+                });
+            } else {
+                // --- Start Opening ---
+                moduleEl.classList.add('active');
+                // Set max-height to its full scrollable height
+                content.style.maxHeight = content.scrollHeight + 'px';
+
+                // After the transition ends, set max-height to 'none' 
+                // This allows content inside to resize without being cropped
+                const handleTransitionEnd = () => {
+                    if (moduleEl.classList.contains('active')) {
+                        content.style.maxHeight = 'none';
+                    }
+                    content.removeEventListener('transitionend', handleTransitionEnd);
                 };
-                content.addEventListener('transitionend', onCloseEnd);
+                content.addEventListener('transitionend', handleTransitionEnd);
             }
         }
 
@@ -3153,20 +3161,47 @@
             sideNav.style.display = 'flex';
             if (mobileFab) mobileFab.style.display = 'flex';
 
+            const handleNavClick = (e) => {
+                e.preventDefault(); // Prevent the default jump-scroll
+                const targetId = e.currentTarget.getAttribute('href');
+                const targetElement = document.querySelector(targetId);
+                if (targetElement) {
+                    targetElement.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center' // This is the key to centering it
+                    });
+                    // Optional: Update the URL hash without causing a jump
+                    if (history.pushState) {
+                        history.pushState(null, null, targetId);
+                    } else {
+                        location.hash = targetId;
+                    }
+                }
+            };
+
             let html = '';
             modules.forEach(module => {
-                const moduleId = `module-${module.id}`;
+                const moduleId = `#module-${module.id}`; // href should include the #
+
+                // --- Desktop Side Nav ---
                 const navItem = document.createElement('a');
                 navItem.className = 'side-nav-item';
-                navItem.href = `#${moduleId}`;
+                navItem.href = moduleId;
                 navItem.innerHTML = `<i class="${module.icon}"></i> ${module.title}`;
+                navItem.addEventListener('click', handleNavClick); // Add the click listener
                 sideNav.appendChild(navItem);
 
+                // --- Mobile FAB Menu ---
                 if (mobileMenu) {
                     const mobileNavItem = document.createElement('a');
                     mobileNavItem.className = 'mobile-fab-menu-item';
-                    mobileNavItem.href = `#${moduleId}`;
+                    mobileNavItem.href = moduleId;
                     mobileNavItem.innerHTML = `${module.title} <i class="${module.icon}"></i>`;
+                    mobileNavItem.addEventListener('click', (e) => {
+                        handleNavClick(e);
+                        // Also close the FAB menu
+                        document.getElementById('mobile-fab')?.click();
+                    });
                     mobileMenu.appendChild(mobileNavItem);
                 }
 
@@ -3179,7 +3214,7 @@
                     else if (materialCount === 2) gridClass += ' materials-2';
 
                     html += `
-            <div class="module active" id="${moduleId}">
+            <div class="module active" id="module-${module.id}">
                 <div class="module-header">
                     ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
                     <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
