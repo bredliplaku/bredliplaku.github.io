@@ -2339,7 +2339,6 @@
         function getFileTypeClass(iconClass) {
             if (!iconClass) return '';
             const icon = iconClass.toLowerCase();
-            // This logic is now more flexible and checks for keywords
             if (icon.includes('pdf')) return 'ft-pdf';
             if (icon.includes('word')) return 'ft-word';
             if (icon.includes('excel')) return 'ft-excel';
@@ -2368,20 +2367,29 @@
         }
 
         function applyModuleStates() {
-            const savedStates = localStorage.getItem(`moduleStates_${currentCourse}`);
-            if (savedStates) {
-                const states = JSON.parse(savedStates);
-                Object.keys(states).forEach(moduleId => {
-                    const module = document.getElementById(moduleId);
-                    if (module) {
-                        if (states[moduleId]) {
-                            module.classList.add('active');
-                        } else {
-                            module.classList.remove('active');
-                        }
+            const savedStatesJSON = localStorage.getItem(`moduleStates_${currentCourse}`);
+            const savedStates = savedStatesJSON ? JSON.parse(savedStatesJSON) : null;
+
+            document.querySelectorAll('.module').forEach(module => {
+                const moduleId = module.id;
+
+                // 1. Check for a user's saved state in the cache first
+                if (savedStates && savedStates[moduleId] !== undefined) {
+                    if (savedStates[moduleId]) {
+                        module.classList.add('active');
+                    } else {
+                        module.classList.remove('active');
                     }
-                });
-            }
+                } else {
+                    // 2. If no saved state, use the default from the Google Sheet
+                    const isInitiallyCollapsed = module.dataset.initiallyCollapsed === 'true';
+                    if (isInitiallyCollapsed) {
+                        module.classList.remove('active');
+                    } else {
+                        module.classList.add('active');
+                    }
+                }
+            });
         }
 
         // Toggle module with proper animation
@@ -2953,7 +2961,7 @@
             const getMaterialObject = (r) => ({
                 icon: r[1], title: r[2], description: r[3],
                 viewLink: r[4], downloadLink: r[5], openLink: r[6],
-                fileTypeClass: getFileTypeClass(r[1]) // Pass the icon class now
+                fileTypeClass: getFileTypeClass(r[1])
             });
 
             rows.forEach(row => {
@@ -2973,13 +2981,18 @@
                 } else if (type === 'module') {
                     currentModule = {
                         type: 'standard', id: row[1] || Date.now().toString(), title: row[2] || 'Untitled Module',
-                        icon: row[3] || 'fas fa-folder', moduleNumber: row[4] || '', materials: [], funFacts: []
+                        icon: row[3] || 'fas fa-folder', moduleNumber: row[4] || '',
+                        // Check column F (index 5) for the default collapsed state
+                        isInitiallyCollapsed: row[5]?.toLowerCase() === 'false',
+                        materials: [], funFacts: []
                     };
                     data.modules.push(currentModule);
                 } else if (type === 'project') {
                     currentModule = {
                         type: 'project', id: row[1] || Date.now().toString(), title: row[2] || 'Untitled Project',
-                        icon: row[3] || 'fas fa-flask', dueDate: row[4] || '', materials: [], groups: [], funFacts: []
+                        icon: row[3] || 'fas fa-flask', dueDate: row[4] || '',
+                        isInitiallyCollapsed: row[5]?.toLowerCase() === 'false',
+                        materials: [], groups: [], funFacts: []
                     };
                     data.modules.push(currentModule);
                 } else if (type === 'material' && currentModule && currentModule.type === 'standard') {
