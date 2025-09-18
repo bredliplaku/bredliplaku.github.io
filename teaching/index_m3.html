@@ -1128,7 +1128,8 @@
         }
 
         .course-button:hover {
-            transform: translate(-2px, -2px) rotate(-1.20deg);
+            transform: translateX(10px) rotate(-1.20deg);
+            /* Changed to match the side-nav */
             box-shadow: 6px 6px 0 var(--dark-color);
         }
 
@@ -2191,6 +2192,7 @@
         let isInitializing = true;
         let criticalErrorsOnly = true;
         const courseData = { metadata: {}, modules: [] };
+        let isProgrammaticScroll = false;
 
         function setupMobileFab() {
             const fab = document.getElementById('mobile-fab');
@@ -3208,13 +3210,25 @@
 
             const handleNavClick = (e) => {
                 e.preventDefault();
+                isProgrammaticScroll = true; // Disable scroll listener
+
+                // Immediately set the correct active link
+                sideNav.querySelectorAll('.side-nav-item').forEach(link => link.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+
                 const targetId = e.currentTarget.getAttribute('href');
                 const targetElement = document.querySelector(targetId);
+
                 if (targetElement) {
                     targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     if (history.pushState) { history.pushState(null, null, targetId); }
                     else { location.hash = targetId; }
                 }
+
+                // Re-enable scroll listener after animation finishes
+                setTimeout(() => {
+                    isProgrammaticScroll = false;
+                }, 1000); // 1 second delay
             };
 
             let html = '';
@@ -3224,7 +3238,7 @@
                 const navItem = document.createElement('a');
                 navItem.className = 'side-nav-item';
                 navItem.href = moduleId;
-                navItem.innerHTML = `<i class="${module.icon}"></i> <span>${module.title}</span>`; // Text wrapped in span
+                navItem.innerHTML = `<i class="${module.icon}"></i> <span>${module.title}</span>`;
                 navItem.addEventListener('click', handleNavClick);
                 sideNav.appendChild(navItem);
 
@@ -3235,7 +3249,7 @@
                     mobileNavItem.innerHTML = `${module.title} <i class="${module.icon}"></i>`;
                     mobileNavItem.addEventListener('click', (e) => {
                         handleNavClick(e);
-                        document.getElementById('mobile-fab')?.click(); // Auto-close FAB menu
+                        document.getElementById('mobile-fab')?.click();
                     });
                     mobileMenu.appendChild(mobileNavItem);
                 }
@@ -3243,6 +3257,7 @@
                 if (module.type === 'project') {
                     html += generateProjectModuleHtml(module);
                 } else {
+                    // ... (rest of the function is the same)
                     const materialCount = module.materials.length;
                     let gridClass = 'materials-grid';
                     if (materialCount === 1) gridClass += ' materials-1';
@@ -3284,10 +3299,12 @@
         }
 
         function updateActiveNavLink() {
+            if (isProgrammaticScroll) return; // This is the new line that prevents flickering
+
             let activeModuleId = '';
             const modules = document.querySelectorAll('.module');
             const navLinks = document.querySelectorAll('.side-nav-item');
-            const offset = window.innerHeight * 0.3;
+            const offset = window.innerHeight / 2; // Corrected offset
             modules.forEach(module => {
                 const rect = module.getBoundingClientRect();
                 if (rect.top <= offset && rect.bottom >= offset) {
@@ -3297,16 +3314,6 @@
             navLinks.forEach(link => {
                 link.classList.toggle('active', link.getAttribute('href') === `#${activeModuleId}`);
             });
-
-            if (window.location.hash) {
-                const targetModule = document.querySelector(window.location.hash);
-                if (targetModule && !targetModule.classList.contains('glow-effect')) {
-                    targetModule.classList.add('glow-effect');
-                    setTimeout(() => {
-                        targetModule.classList.remove('glow-effect');
-                    }, 1500);
-                }
-            }
         }
 
         function calculateWeek(startDate, endDate, holidayWeeks = 0) {
