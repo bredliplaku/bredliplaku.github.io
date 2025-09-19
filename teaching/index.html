@@ -2393,6 +2393,8 @@
             loadModuleStates();
             setupSideNavToggle();
             applySideNavState();
+            setupSideNavSwipe();
+            setupCourseSwipe();
 
             document.getElementById('app-loading').style.display = 'flex';
             checkAuthRedirect();
@@ -2533,6 +2535,101 @@
             if (icon.includes('code')) return 'ft-code';
             if (icon.includes('zip') || icon.includes('archive')) return 'ft-zip';
             return '';
+        }
+
+        function setupSideNavSwipe() {
+            const sideNav = document.getElementById('side-nav-container');
+            if (!sideNav) return;
+
+            // Only run on devices that are likely to have touch screens
+            if (!('ontouchstart' in window)) return;
+
+            // Check if the side nav is hidden by CSS (for mobile view)
+            if (window.getComputedStyle(sideNav).display === 'none') return;
+
+            let touchstartX = 0;
+            let touchendX = 0;
+
+            sideNav.addEventListener('touchstart', e => {
+                touchstartX = e.changedTouches[0].screenX;
+            }, { passive: true });
+
+            sideNav.addEventListener('touchend', e => {
+                touchendX = e.changedTouches[0].screenX;
+                handleSideNavSwipe();
+            }, { passive: true });
+
+            function handleSideNavSwipe() {
+                // Check for a swipe to the left of at least 50px
+                if (touchstartX - touchendX > 50) {
+                    if (!sideNav.classList.contains('collapsed')) {
+                        sideNav.classList.add('collapsed');
+                        localStorage.setItem('sideNavState', 'collapsed');
+                    }
+                }
+            }
+        }
+
+
+        function setupCourseSwipe() {
+            const swipeArea = document.body;
+            // Exit if there aren't enough courses to swipe between
+            if (!swipeArea || availableCourses.length < 2) return;
+
+            // Only run on devices that are likely to have touch screens
+            if (!('ontouchstart' in window)) return;
+
+            let touchstartX = 0;
+            let touchendX = 0;
+            let touchstartY = 0;
+            let touchendY = 0;
+            // New flag to track if we are inside a scrollable area
+            let isInsideScrollable = false;
+
+            swipeArea.addEventListener('touchstart', e => {
+                // New logic: Check if the touch starts inside a scrollable element
+                const scrollableSelectors = '.materials-grid, .course-info, .course-actions, .iframe-container';
+                if (e.target.closest(scrollableSelectors)) {
+                    isInsideScrollable = true; // If so, set the flag and do nothing else
+                    return;
+                }
+
+                // If not in a scrollable area, proceed as normal
+                isInsideScrollable = false;
+                touchstartX = e.changedTouches[0].screenX;
+                touchstartY = e.changedTouches[0].screenY;
+            }, { passive: true });
+
+            swipeArea.addEventListener('touchend', e => {
+                // Only handle the end of a swipe if it didn't start in a scrollable area
+                if (isInsideScrollable) return;
+
+                touchendX = e.changedTouches[0].screenX;
+                touchendY = e.changedTouches[0].screenY;
+                handleCourseSwipe();
+            }, { passive: true });
+
+            function handleCourseSwipe() {
+                const distX = touchendX - touchstartX;
+                const distY = touchendY - touchstartY;
+
+                // Check if it's a valid horizontal swipe and not a vertical scroll
+                if (Math.abs(distX) > 75 && Math.abs(distX) > Math.abs(distY)) {
+                    const currentIndex = availableCourses.indexOf(currentCourse);
+                    let newIndex;
+
+                    if (distX < 0) { // Swiped Left (for next course)
+                        newIndex = (currentIndex + 1) % availableCourses.length;
+                    } else { // Swiped Right (for previous course)
+                        newIndex = (currentIndex - 1 + availableCourses.length) % availableCourses.length;
+                    }
+
+                    const newCourse = availableCourses[newIndex];
+                    if (newCourse !== currentCourse) {
+                        selectCourse(newCourse);
+                    }
+                }
+            }
         }
 
         // Save and load module states
