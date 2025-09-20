@@ -2204,50 +2204,18 @@
         function initGoogleApi() {
             console.log('Initializing Google API...');
 
-            // Handle auth redirect token at the very start
-            if (window.location.hash.includes('access_token=')) {
-                const hash = window.location.hash.substring(1);
-                const params = new URLSearchParams(hash);
-                const token = params.get('access_token');
-
-                if (token) {
-                    console.log('Found token in URL, processing...');
-                    localStorage.setItem('gapi_token', JSON.stringify({ access_token: token }));
-                    isSignedIn = true;
-
-                    // Clean URL
-                    history.replaceState(null, null, window.location.pathname);
-                }
-            }
-
-            // Set default courses
-            availableCourses = [];
-            // populateCourseDropdown(); // This line is now removed
-
             // Check if APIs are loaded
-            if (typeof gapi === 'undefined') {
-                console.error('gapi object is undefined');
-                showImprovedNotification('error', 'API Error', 'Google API client not loaded.');
-                updateAuthUI();
+            if (typeof gapi === 'undefined' || typeof google === 'undefined' || typeof google.accounts === 'undefined') {
+                showImprovedNotification('error', 'API Error', 'Google libraries failed to load. Please refresh.');
+                showMainContent(); // Ensure loader hides even on critical failure
                 return;
             }
 
-            if (typeof google === 'undefined' || typeof google.accounts === 'undefined') {
-                console.error('google.accounts object is undefined');
-                showImprovedNotification('error', 'API Error', 'Google Identity Services not loaded.');
-                updateAuthUI();
-                return;
-            }
-
-            // Initialize with basic scopes first
             try {
-                console.log('Setting up token client first...');
                 tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: CLIENT_ID,
                     scope: currentScopes,
-                    callback: function (resp) {
-                        console.log('Token response received:', resp);
-                        // Only process if we have an access token
+                    callback: (resp) => {
                         if (resp && resp.access_token) {
                             handleTokenResponse(resp);
                         } else if (resp.error) {
@@ -2256,35 +2224,34 @@
                         }
                     }
                 });
-                console.log('Token client initialized successfully');
             } catch (error) {
                 console.error('Failed to initialize token client:', error);
                 showImprovedNotification('error', 'Auth Error', 'Failed to initialize authentication.');
+                showMainContent(); // Ensure loader hides
+                return;
             }
 
-            // Load the GAPI client
             gapi.load('client', () => {
                 gapi.client.init({
                     apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS
                 }).then(() => {
                     console.log('GAPI client initialized successfully');
-
-                    // Try to restore saved session
                     const savedToken = localStorage.getItem('gapi_token');
                     if (savedToken) {
                         try {
-                            const tokenObj = JSON.parse(savedToken);
-                            gapi.client.setToken(tokenObj);
+                            gapi.client.setToken(JSON.parse(savedToken));
                             isSignedIn = true;
-
                             fetchUserInfo()
                                 .then(() => {
                                     isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
                                     updateAuthUI();
                                     if (isOnline) {
-                                        fetchAvailableCourses().catch(err => console.error('Error:', err));
-                                        fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
+                                        fetchDatabaseFromSheet().catch(err => console.error('DB fetch error:', err));
+                                        // We fetch courses LAST and then show content
+                                        fetchAvailableCourses().finally(showMainContent);
+                                    } else {
+                                        showMainContent();
                                     }
                                 })
                                 .catch(e => {
@@ -2294,24 +2261,27 @@
                                     localStorage.removeItem('gapi_token');
                                     gapi.client.setToken('');
                                     updateAuthUI();
+                                    showMainContent(); // Hide loader on user info error
                                 });
                         } catch (e) {
-                            console.error('Error restoring token:', e);
-                            isSignedIn = false;
                             localStorage.removeItem('gapi_token');
                             updateAuthUI();
+                            showMainContent(); // Hide loader on token parse error
                         }
                     } else {
                         updateAuthUI();
                         if (isOnline) {
-                            fetchAvailableCourses();
+                            // Fetch courses and THEN show content, regardless of success
+                            fetchAvailableCourses().finally(showMainContent);
+                        } else {
+                            showMainContent();
                         }
                     }
-
                 }).catch(error => {
                     console.error('Error initializing GAPI client:', error);
                     showImprovedNotification('error', 'API Error', 'Failed to initialize Google API.');
                     updateAuthUI();
+                    showMainContent(); // Hide loader on GAPI init error
                 });
             });
         }
