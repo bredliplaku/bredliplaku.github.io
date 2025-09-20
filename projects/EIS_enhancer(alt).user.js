@@ -17,7 +17,7 @@
     // ************************************************************************
     // Font Awesome Stylesheet Injection
     // ************************************************************************
-    const fontAwesomeURL = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.1/css/all.min.css";
+    const fontAwesomeURL = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css";
     if (!document.querySelector(`link[href="${fontAwesomeURL}"]`)) {
         const faLink = document.createElement("link");
         faLink.rel = "stylesheet";
