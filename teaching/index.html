@@ -85,6 +85,24 @@
             overflow-x: hidden;
         }
 
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .main-content-wrapper {
+            flex-grow: 1;
+        }
+
+        #main-container {
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        #main-container.content-faded {
+            opacity: 0;
+        }
+
         /* Light background pattern */
         body::before {
             content: '';
@@ -3189,39 +3207,44 @@
             currentCourse = sheetName;
             window.location.hash = sheetName;
 
-            // Reset theme state for new course
-            document.body.classList.remove('theme-ready');
-
-            resetUIElements();
-            document.querySelectorAll('.course-button').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.sheet === sheetName);
-            });
-
             const container = document.getElementById('main-container');
-            container.classList.add('is-loading'); // Show skeleton for new course
-            container.classList.remove('content-hidden'); // Make sure it's visible
 
-            fetchCourseData(sheetName).then(data => {
-                if (data) {
-                    Object.assign(courseData, data);
-                    document.title = data.metadata.code ? `${formatCourseCode(data.metadata.code)} ${data.metadata.title || 'Course'}` : 'Course Materials';
+            // 1. Fade out the current content
+            container.classList.add('content-faded');
 
-                    updateCourseMetadata(data.metadata);
-                    populateActionButtons(data.actionButtons, data.metadata);
-                    applyColorTheme(data.metadata); // This now adds 'theme-ready'
-                    setupSortAndRender();
+            // 2. After fading out, show the skeleton and start fetching
+            setTimeout(() => {
+                resetUIElements();
+                document.querySelectorAll('.course-button').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.sheet === sheetName);
+                });
 
-                    // Remove skeleton after a short delay to allow theme to apply
-                    setTimeout(() => {
+                container.classList.add('is-loading');
+
+                // 3. Un-fade the container to show the skeleton
+                container.classList.remove('content-faded');
+
+                fetchCourseData(sheetName).then(data => {
+                    if (data) {
+                        Object.assign(courseData, data);
+                        document.title = data.metadata.code ? `${formatCourseCode(data.metadata.code)} ${data.metadata.title || 'Course'}` : 'Course Materials';
+
+                        updateCourseMetadata(data.metadata);
+                        populateActionButtons(data.actionButtons, data.metadata);
+                        applyColorTheme(data.metadata);
+                        setupSortAndRender();
+
+                        // 4. Remove skeleton to reveal the new content (which fades in automatically)
+                        setTimeout(() => {
+                            container.classList.remove('is-loading');
+                        }, 100);
+
+                        showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
+                    } else {
                         container.classList.remove('is-loading');
-                    }, 100);
-
-                    showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
-                } else {
-                    // Handle case where course data fails to load
-                    container.classList.remove('is-loading');
-                }
-            });
+                    }
+                });
+            }, 300); // This duration should match the transition time
         }
 
         function setupSortAndRender() {
