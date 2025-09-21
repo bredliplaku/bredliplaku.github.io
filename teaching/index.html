@@ -118,6 +118,7 @@
             z-index: -1;
         }
 
+        html.no-scroll,
         body.no-scroll {
             overflow: hidden;
         }
@@ -1533,7 +1534,6 @@
             display: none;
         }
 
-        /* This rule prevents all interaction with the background when the FAB menu is open */
         /* This rule freezes all background content when the FAB menu is open */
         body.no-scroll>*:not(#mobile-fab):not(#fab-overlay):not(#mobile-fab-menu) {
             pointer-events: none;
@@ -1919,15 +1919,23 @@
                 box-shadow: 4px 4px 0 var(--dark-color);
             }
 
-            /* --- Gradient Fade for Horizontal Scroll --- */
-            .course-buttons-container,
-            .course-info,
-            .course-actions,
-            .materials-grid,
-            .project-groups-grid {
-                /* This applies a mask that fades out the content at the edges */
+            /* --- Smart Gradient Fade for Horizontal Scroll --- */
+            .is-scrollable {
+                /* Both fades are visible when scrolling in the middle */
+                -webkit-mask-image: linear-gradient(to right, transparent, black 20px, black 95%, transparent);
+                mask-image: linear-gradient(to right, transparent, black 20px, black 95%, transparent);
+            }
+
+            .is-scrollable.at-start {
+                /* Only the right fade is visible at the start */
                 -webkit-mask-image: linear-gradient(to right, black 95%, transparent);
                 mask-image: linear-gradient(to right, black 95%, transparent);
+            }
+
+            .is-scrollable.at-end {
+                /* Only the left fade is visible at the end */
+                -webkit-mask-image: linear-gradient(to right, transparent, black 20px, black 100%);
+                mask-image: linear-gradient(to right, transparent, black 20px, black 100%);
             }
         }
 
@@ -2866,9 +2874,11 @@
                 fab.classList.toggle('active');
                 overlay.classList.toggle('active');
                 menu.classList.toggle('active');
+
+                // THIS IS THE FIX: Apply the 'no-scroll' class to BOTH the <html> and <body> tags.
+                document.documentElement.classList.toggle('no-scroll');
                 document.body.classList.toggle('no-scroll');
 
-                // THIS IS THE FIX: Remove swipe listeners when menu is open, add them back when closed.
                 if (!isActive) {
                     removeSwipeListeners();
                 } else {
@@ -2890,6 +2900,7 @@
             setupSideNavToggle();
             applySideNavState();
             setupCourseSwipe();
+            initializeScrollFaders();
 
             if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
                 initGoogleApi();
@@ -3110,6 +3121,30 @@
                         module.classList.add('active');
                     }
                 }
+            });
+        }
+
+        function updateScrollFaders(el) {
+            const scrollable = el.scrollWidth > el.clientWidth;
+            el.classList.toggle('is-scrollable', scrollable);
+
+            if (scrollable) {
+                const atStart = el.scrollLeft < 5;
+                const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 5;
+                el.classList.toggle('at-start', atStart);
+                el.classList.toggle('at-end', atEnd);
+            } else {
+                el.classList.remove('at-start', 'at-end');
+            }
+        }
+
+        function initializeScrollFaders() {
+            const scrollContainers = document.querySelectorAll('.course-buttons-container, .course-info, .course-actions, .materials-grid, .project-groups-grid');
+            scrollContainers.forEach(el => {
+                // Check state on load
+                updateScrollFaders(el);
+                // Add listener to check again on scroll
+                el.addEventListener('scroll', () => updateScrollFaders(el), { passive: true });
             });
         }
 
