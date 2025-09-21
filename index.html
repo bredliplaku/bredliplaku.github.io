@@ -245,6 +245,41 @@
             box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--primary-color);
         }
 
+        /* --- Theme Toggle in Footer --- */
+        .footer-tools {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .theme-toggle {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--light-color);
+            color: var(--dark-color);
+            box-shadow: 3px 3px 0 rgba(0, 0, 0, .4);
+            transition: transform .15s ease, box-shadow .15s ease, background-color .2s ease, color .2s ease, border-color .2s ease;
+        }
+
+        .theme-toggle:hover {
+            transform: scale(1.1);
+            box-shadow: 4px 4px 0 rgba(0, 0, 0, .4);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            html:not([data-theme="light"]) .theme-toggle {
+                background: var(--dark-surface);
+                color: var(--dark-text);
+                border-color: var(--dark-border);
+            }
+        }
+
         .social-links {
             margin-bottom: 20px;
         }
@@ -308,6 +343,19 @@
                 background: var(--dark-surface);
                 border-color: var(--dark-border);
             }
+
+            /* Fix for Dark Mode Background and Overscroll */
+            html:not([data-theme="light"]) {
+                background-color: var(--dark-bg);
+                /* Fixes the white overscroll issue */
+            }
+
+            html:not([data-a-theme="light"]) body::before {
+                /* Adds the pattern in dark mode */
+                background-image:
+                    repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(255, 255, 255, .03) 35px, rgba(255, 255, 255, .03) 70px),
+                    repeating-linear-gradient(-45deg, transparent, transparent 35px, rgba(255, 255, 255, .03) 35px, rgba(255, 255, 255, .03) 70px);
+            }
         }
 
         @media (max-width: 768px) {
@@ -340,9 +388,10 @@
 
         #cat-companion {
             position: fixed;
-            bottom: 5px;
-            bottom: calc(5px + env(safe-area-inset-bottom));
-            right: 40px;
+            bottom: 0;
+            right: 20px;
+            bottom: env(safe-area-inset-bottom, 0);
+            /* Mobile safe area */
             z-index: 1000;
             cursor: pointer;
         }
@@ -353,10 +402,6 @@
             animation: cat-idle 2.5s ease-in-out infinite;
             filter: drop-shadow(4px 4px 0 var(--dark-color));
             transition: transform 0.2s ease;
-        }
-
-        #cat-companion:hover #cat-image {
-            transform: scale(1.1);
         }
 
         #cat-speech-bubble {
@@ -432,6 +477,57 @@
             }
         }
 
+        function setupThemeToggle() {
+            const KEY = 'theme-preference';
+            const BTN = document.getElementById('theme-toggle');
+            const ICON = document.getElementById('theme-toggle-icon');
+            if (!BTN || !ICON) return;
+
+            const icons = { auto: 'fas fa-adjust', light: 'far fa-sun', dark: 'far fa-moon' };
+
+            const getSaved = () => localStorage.getItem(KEY) || 'auto';
+
+            const applyTheme = (pref) => {
+                const html = document.documentElement;
+                html.setAttribute('data-theme', pref); // Use data-theme to handle 'auto'
+                localStorage.setItem(KEY, pref);
+                updateUI(pref);
+            };
+
+            const updateUI = (pref) => {
+                ICON.className = icons[pref] || icons.auto;
+                const label = pref.charAt(0).toUpperCase() + pref.slice(1);
+                BTN.setAttribute('aria-label', `Theme: ${label}`);
+                BTN.title = `Theme: ${label}`;
+            };
+
+            BTN.addEventListener('click', () => {
+                const currentPref = getSaved();
+                const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                let newPref = 'auto'; // Default to auto
+
+                if (currentPref === 'auto') {
+                    newPref = isSystemDark ? 'light' : 'dark';
+                } else if (currentPref === 'light') {
+                    newPref = 'dark';
+                } else { // currentPref is 'dark'
+                    newPref = 'light';
+                }
+                applyTheme(newPref);
+            });
+
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+                // Only update if the user has selected 'auto'
+                if (getSaved() === 'auto') {
+                    // Re-apply auto to refresh the UI based on new system preference
+                    applyTheme('auto');
+                }
+            });
+
+            // Set initial state
+            applyTheme(getSaved());
+        }
+
         // --- Interactive Cat Companion Logic ---
         const catMessages = [
             // --- Mischief & Observations ---
@@ -493,16 +589,23 @@
                 // Stop the click from bubbling up to the document and immediately closing the bubble
                 event.stopPropagation();
 
-                clearTimeout(bubbleTimeout);
-                const randomIndex = Math.floor(Math.random() * catMessages.length);
-                bubble.textContent = catMessages[randomIndex];
-                bubble.classList.add('visible');
+                // THIS IS THE NEW PART: The 1 in 100 chance
+                if (Math.random() < 0.01) { // This is a 1% chance
+                    window.open('https://www.youtube.com/watch?v=dQw4w9WgXcQ', '_blank', 'noopener,noreferrer');
+                } else {
+                    // This is the normal (99% of the time) behavior
+                    clearTimeout(bubbleTimeout);
+                    const randomIndex = Math.floor(Math.random() * catMessages.length);
+                    bubble.textContent = catMessages[randomIndex];
+                    bubble.classList.add('visible');
 
-                bubbleTimeout = setTimeout(() => {
-                    bubble.classList.remove('visible');
-                }, 4000);
+                    bubbleTimeout = setTimeout(() => {
+                        bubble.classList.remove('visible');
+                    }, 6000);
+                }
             });
 
+            // This part hides the bubble when you click anywhere else
             document.addEventListener('click', (event) => {
                 if (bubble.classList.contains('visible')) {
                     bubble.classList.remove('visible');
@@ -512,6 +615,7 @@
         window.onload = function () {
             updateYear();
             setupCatCompanion();
+            setupThemeToggle();
         };
     </script>
 </head>
@@ -571,6 +675,11 @@
     </div>
 
     <footer class="footer">
+        <div class="footer-tools">
+            <button id="theme-toggle" class="theme-toggle" aria-label="Theme: Auto" title="Theme: Auto">
+                <i id="theme-toggle-icon" class="fas fa-adjust" aria-hidden="true"></i>
+            </button>
+        </div>
         <div class="social-links">
             <a href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank" rel="noopener noreferrer" title="CV"><i
                     class="far fa-id-card"></i></a>
@@ -583,7 +692,7 @@
 
     <div id="cat-companion">
         <div id="cat-speech-bubble"></div>
-        <img id="cat-image" src="https://i.pinimg.com/originals/80/7b/5c/807b5c4b02e765bb4930b7c66662ef4b.gif"
+        <img id="cat-image" src="https://leunghoicheng.com/assets/hero-section-animation.gif"
             alt="A friendly cat companion">
     </div>
 </body>
