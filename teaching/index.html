@@ -1919,89 +1919,15 @@
                 box-shadow: 4px 4px 0 var(--dark-color);
             }
 
-            /* --- Smart Gradient Fade for Horizontal Scroll --- */
-            /* 1. Prepare the containers */
+            /* --- Gradient Fade for Horizontal Scroll --- */
             .course-buttons-container,
             .course-info,
             .course-actions,
             .materials-grid,
             .project-groups-grid {
-                position: relative;
-            }
-
-            /* 2. Create the left and right fade effects */
-            .course-buttons-container::before,
-            .course-buttons-container::after,
-            .course-info::before,
-            .course-info::after,
-            .course-actions::before,
-            .course-actions::after,
-            .materials-grid::before,
-            .materials-grid::after,
-            .project-groups-grid::before,
-            .project-groups-grid::after {
-                content: '';
-                position: sticky;
-                z-index: 2;
-                pointer-events: none;
-                width: 25px;
-                height: 100%;
-            }
-
-            /* 3. Style the left-side fade */
-            .course-buttons-container::before,
-            .course-info::before,
-            .course-actions::before,
-            .materials-grid::before,
-            .project-groups-grid::before {
-                left: 0;
-                background: linear-gradient(to right, var(--light-color), transparent);
-            }
-
-            /* 4. Style the right-side fade */
-            .course-buttons-container::after,
-            .course-info::after,
-            .course-actions::after,
-            .materials-grid::after,
-            .project-groups-grid::after {
-                right: 0;
-                background: linear-gradient(to left, var(--light-color), transparent);
-            }
-
-            /* 5. Dark Mode Adjustments */
-            @media (prefers-color-scheme: dark) {
-
-                html:not([data-theme="light"]) .course-buttons-container::before,
-                html:not([data-theme="light"]) .course-info::before,
-                html:not([data-theme="light"]) .course-actions::before,
-                html:not([data-theme="light"]) .materials-grid::before,
-                html:not([data-theme="light"]) .project-groups-grid::before {
-                    background: linear-gradient(to right, var(--dark-bg), transparent);
-                }
-
-                html:not([data-theme="light"]) .course-buttons-container::after,
-                html:not([data-theme="light"]) .course-info::after,
-                html:not([data-theme="light"]) .course-actions::after,
-                html:not([data-theme="light"]) .materials-grid::after,
-                html:not([data-theme="light"]) .project-groups-grid::after {
-                    background: linear-gradient(to left, var(--dark-bg), transparent);
-                }
-            }
-
-            html[data-theme="dark"] .course-buttons-container::before,
-            html[data-theme="dark"] .course-info::before,
-            html[data-theme="dark"] .course-actions::before,
-            html[data-theme="dark"] .materials-grid::before,
-            html[data-theme="dark"] .project-groups-grid::before {
-                background: linear-gradient(to right, var(--dark-bg), transparent);
-            }
-
-            html[data-theme="dark"] .course-buttons-container::after,
-            html[data-theme="dark"] .course-info::after,
-            html[data-theme="dark"] .course-actions::after,
-            html[data-theme="dark"] .materials-grid::after,
-            html[data-theme="dark"] .project-groups-grid::after {
-                background: linear-gradient(to left, var(--dark-bg), transparent);
+                /* This applies a mask that fades out the content at the edges */
+                -webkit-mask-image: linear-gradient(to right, black 95%, transparent);
+                mask-image: linear-gradient(to right, black 95%, transparent);
             }
         }
 
@@ -2886,6 +2812,9 @@
         let criticalErrorsOnly = true;
         const courseData = { metadata: {}, modules: [] };
         let isProgrammaticScroll = false;
+        const swipeArea = document.body;
+        let touchstartX = 0, touchendX = 0, touchstartY = 0, touchendY = 0;
+        let isInsideIgnoredArea = false;
 
         // --- Random Spinner GIF Logic ---
         const spinnerGifs = [
@@ -2929,12 +2858,22 @@
             };
             mq.addEventListener?.('change', applyFabVisibility);
             applyFabVisibility();
+
             if (!fab || !overlay || !menu) return;
+
             const toggleMenu = () => {
+                const isActive = fab.classList.contains('active');
                 fab.classList.toggle('active');
                 overlay.classList.toggle('active');
                 menu.classList.toggle('active');
                 document.body.classList.toggle('no-scroll');
+
+                // THIS IS THE FIX: Remove swipe listeners when menu is open, add them back when closed.
+                if (!isActive) {
+                    removeSwipeListeners();
+                } else {
+                    addSwipeListeners();
+                }
             };
             fab.addEventListener('click', toggleMenu);
             overlay.addEventListener('click', toggleMenu);
@@ -3082,70 +3021,56 @@
             return '';
         }
 
-
-        function setupCourseSwipe() {
-            const swipeArea = document.body;
-            if (!swipeArea || availableCourses.length < 2) return;
-
-            let touchstartX = 0, touchendX = 0, touchstartY = 0, touchendY = 0;
-            let isInsideIgnoredArea = false;
-
-            function handleDragStart(e) {
-                // Ignore any input that is not a touch (i.e., from a mouse or pen).
-                if (e.pointerType && e.pointerType !== 'touch') {
-                    return;
-                }
-
-                // Added '.course-buttons-container' to the list of ignored areas.
-                const ignoredSelectors = '.project-groups-grid, #side-nav-container, .materials-grid, .course-info, .course-actions, .iframe-container, .course-buttons-container';
-
-                if (e.target.closest(ignoredSelectors)) {
-                    isInsideIgnoredArea = true;
-                    return;
-                }
-
-                isInsideIgnoredArea = false;
-                touchstartX = e.changedTouches ? e.changedTouches[0].screenX : e.screenX;
-                touchstartY = e.changedTouches ? e.changedTouches[0].screenY : e.screenY;
+        function handleDragStart(e) {
+            if (e.pointerType && e.pointerType !== 'touch') return;
+            const ignoredSelectors = '.project-groups-grid, #side-nav-container, .materials-grid, .course-info, .course-actions, .iframe-container, .course-buttons-container';
+            if (e.target.closest(ignoredSelectors)) {
+                isInsideIgnoredArea = true;
+                return;
             }
+            isInsideIgnoredArea = false;
+            touchstartX = e.changedTouches ? e.changedTouches[0].screenX : e.screenX;
+            touchstartY = e.changedTouches ? e.changedTouches[0].screenY : e.screenY;
+        }
 
-            function handleDragEnd(e) {
-                if (e.pointerType && e.pointerType !== 'touch') {
-                    return;
-                }
+        function handleDragEnd(e) {
+            if (e.pointerType && e.pointerType !== 'touch') return;
+            if (isInsideIgnoredArea) return;
+            touchendX = e.changedTouches ? e.changedTouches[0].screenX : e.screenX;
+            touchendY = e.changedTouches ? e.changedTouches[0].screenY : e.screenY;
+            handleCourseSwipe();
+        }
 
-                if (isInsideIgnoredArea) return;
-                touchendX = e.changedTouches ? e.changedTouches[0].screenX : e.screenX;
-                touchendY = e.changedTouches ? e.changedTouches[0].screenY : e.screenY;
-                handleCourseSwipe();
+        function handleCourseSwipe() {
+            const distX = touchendX - touchstartX;
+            const distY = touchendY - touchstartY;
+            if (Math.abs(distX) > 75 && Math.abs(distX) > Math.abs(distY)) {
+                const currentIndex = availableCourses.indexOf(currentCourse);
+                let newIndex = currentIndex;
+                if (distX < 0) { newIndex = (currentIndex + 1) % availableCourses.length; }
+                else { newIndex = (currentIndex - 1 + availableCourses.length) % availableCourses.length; }
+                const newCourse = availableCourses[newIndex];
+                if (newCourse !== currentCourse) selectCourse(newCourse);
             }
+        }
 
-            function handleCourseSwipe() {
-                const distX = touchendX - touchstartX;
-                const distY = touchendY - touchstartY;
-
-                if (Math.abs(distX) > 75 && Math.abs(distX) > Math.abs(distY)) {
-                    const currentIndex = availableCourses.indexOf(currentCourse);
-                    let newIndex = currentIndex;
-
-                    if (distX < 0) { // Swiped Left
-                        newIndex = (currentIndex + 1) % availableCourses.length;
-                    } else { // Swiped Right
-                        newIndex = (currentIndex - 1 + availableCourses.length) % availableCourses.length;
-                    }
-
-                    const newCourse = availableCourses[newIndex];
-                    if (newCourse !== currentCourse) {
-                        selectCourse(newCourse);
-                    }
-                }
-            }
-
-            // Listen for both event types for maximum compatibility
+        function addSwipeListeners() {
             swipeArea.addEventListener('touchstart', handleDragStart, { passive: true });
             swipeArea.addEventListener('touchend', handleDragEnd, { passive: true });
             swipeArea.addEventListener('pointerdown', handleDragStart, { passive: true });
             swipeArea.addEventListener('pointerup', handleDragEnd, { passive: true });
+        }
+
+        function removeSwipeListeners() {
+            swipeArea.removeEventListener('touchstart', handleDragStart);
+            swipeArea.removeEventListener('touchend', handleDragEnd);
+            swipeArea.removeEventListener('pointerdown', handleDragStart);
+            swipeArea.removeEventListener('pointerup', handleDragEnd);
+        }
+
+        function setupCourseSwipe() {
+            if (availableCourses.length < 2) return;
+            addSwipeListeners();
         }
 
         // Save and load module states
