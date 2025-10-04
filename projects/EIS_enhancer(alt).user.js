@@ -8,7 +8,7 @@
 // @downloadURL  https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer(alt).user.js
 // @match        https://eis.epoka.edu.al/*
 // @grant        none
-// @run-at       document-end
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
