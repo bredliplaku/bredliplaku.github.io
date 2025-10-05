@@ -8,7 +8,7 @@
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Timetable</title>
-    <link rel="icon" type="image/png" href="https://bredliplaku.github.io/favicon.png">
+    <link rel="icon" type="image/png" href="../favicon.png">
     <link
         href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap"
         rel="stylesheet">
@@ -651,7 +651,7 @@
     <div class="main-content-wrapper">
 
         <div id="skeleton-loader">
-            <img src="https://leunghoicheng.com/assets/hero-section-animation.gif" alt="Loading Cat" id="spinner-image">
+            <img src="" alt="Loading..." id="spinner-image">
             <div id="loading-text">Fetching your daily dose of deadlines...</div>
         </div>
 
@@ -670,7 +670,7 @@
                 <div class="course-info">
                     <span class="info-item"><i class="far fa-clock fa-spin"></i><span
                             id="week-counter">Loading...</span></span>
-                    <span class="info-item"><i class="fas fa-calendar-check"></i> Spring Semester</span>
+                    <span class="info-item"><i class="fas fa-calendar-check"></i> Fall Semester</span>
                 </div>
                 <div class="progress-bar">
                     <div class="progress"></div>
@@ -741,8 +741,16 @@
 
     <script>
         // --- Configuration & State ---
-        const API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your actual API key
+        const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE'; // Restored Original API Key
         const COURSE_MATERIALS_SPREADSHEET_ID = '1TFkw_hQWw_pvViy3i38VvzCwp4z5RL2SNZNgUVcjnNo';
+        const SPINNER_GIFS = [
+            '../gifs/loading.webp',
+            '../gifs/loading_2.gif',
+            '../gifs/loading_3.gif',
+            '../gifs/loading_4.gif',
+            '../gifs/loading_5.webp',
+            '../gifs/loading_6.webp'
+        ];
         const LOADING_TEXTS = ["Fetching deadlines...", "Aligning lecture halls...", "Polishing the timetable...", "Requesting more chalk...", "Waking up lecturers..."];
         let semesterInfo = { startDate: "2025-02-24", endDate: "2025-06-14", holidayWeeks: 0 };
         let currentTimetableId = null, currentClassId = null, currentLecturerKey = null;
@@ -756,7 +764,7 @@
             setupCategoryButtons();
             initializeScrollFaders();
             setupSwipeGestures();
-            startLoadingTextAnimation();
+            startLoadingAnimation();
 
             if (typeof gapi !== 'undefined') initGoogleApi();
             else window.addEventListener('google-api-ready', initGoogleApi);
@@ -811,32 +819,38 @@
         }
 
         // --- UI Rendering & Updates ---
-        function renderTimetableButtons(undergrad, grad, lecturers) {
-            const createBtn = (item, type) => {
+        function renderTimetableButtons(undergradData, gradData, lecturerData) {
+            const undergradContainer = document.getElementById('undergraduate-buttons');
+            undergradContainer.innerHTML = '';
+            (undergradData || []).filter(row => row && row[0]).forEach(item => {
                 const button = document.createElement('div');
                 button.className = 'timetable-button';
                 button.textContent = item[0];
-                button.onclick = e => {
-                    e.stopPropagation();
-                    if (type === 'lecturer') {
-                        if (currentLecturerKey === item[1]) { hideAllIframes(); return; }
-                        loadIframeWithID(item[1], button);
-                    } else {
-                        if (currentTimetableId === item[1] && currentClassId === item[2]) { hideAllIframes(); return; }
-                        loadTimetable(item[1], item[2], button);
-                    }
-                };
-                return button;
-            };
-            const populate = (containerId, data, type) => {
-                const container = document.getElementById(containerId);
-                container.innerHTML = '';
-                data.filter(r => r[0]).forEach(item => container.appendChild(createBtn(item, type)));
-            };
-            populate('undergraduate-buttons', undergrad, 'undergrad');
-            populate('graduate-buttons', grad, 'grad');
-            populate('lecturer-buttons', lecturers, 'lecturer');
-            initializeScrollFaders(); // Re-initialize for new timetable buttons
+                button.onclick = (e) => { e.stopPropagation(); loadTimetable(item[1], item[2], button); };
+                undergradContainer.appendChild(button);
+            });
+
+            const gradContainer = document.getElementById('graduate-buttons');
+            gradContainer.innerHTML = '';
+            (gradData || []).filter(row => row && row[0]).forEach(item => {
+                const button = document.createElement('div');
+                button.className = 'timetable-button';
+                button.textContent = item[0];
+                button.onclick = (e) => { e.stopPropagation(); loadTimetable(item[1], item[2], button); };
+                gradContainer.appendChild(button);
+            });
+
+            const lecturerContainer = document.getElementById('lecturer-buttons');
+            lecturerContainer.innerHTML = '';
+            (lecturerData || []).filter(row => row && row[0]).forEach(item => {
+                const button = document.createElement('div');
+                button.className = 'timetable-button';
+                button.textContent = item[0];
+                button.onclick = (e) => { e.stopPropagation(); loadIframeWithID(item[1], button); };
+                lecturerContainer.appendChild(button);
+            });
+
+            initializeScrollFaders();
         }
 
         const calculateWeek = (start, end, holidays) => Math.min(Math.max(Math.ceil((new Date() - new Date(start)) / (7 * 24 * 60 * 60 * 1000)) - holidays, 1), Math.ceil((new Date(end) - new Date(start)) / (7 * 24 * 60 * 60 * 1000)));
@@ -846,10 +860,13 @@
             document.querySelector('.progress').style.width = `${progress}%`;
         }
         function updateYear() { document.getElementById('currentYear').textContent = new Date().getFullYear(); }
-        function startLoadingTextAnimation() {
-            const el = document.getElementById('loading-text');
+        function startLoadingAnimation() {
+            const spinner = document.getElementById('spinner-image');
+            spinner.src = SPINNER_GIFS[Math.floor(Math.random() * SPINNER_GIFS.length)];
+
+            const textEl = document.getElementById('loading-text');
             let i = 0;
-            textInterval = setInterval(() => { i = (i + 1) % LOADING_TEXTS.length; el.textContent = LOADING_TEXTS[i]; }, 2000);
+            textInterval = setInterval(() => { i = (i + 1) % LOADING_TEXTS.length; textEl.textContent = LOADING_TEXTS[i]; }, 2000);
         }
 
         // --- UI Interactions ---
@@ -879,6 +896,7 @@
         }
 
         function loadTimetable(timetableVal, classVal, btn) {
+            if (currentTimetableId === timetableVal && currentClassId === classVal) { hideAllIframes(); return; }
             document.getElementById('lecturer-container').classList.remove('active');
             document.getElementById('timetable-container').classList.add('active');
             document.getElementById('timetable-select').value = timetableVal;
@@ -890,6 +908,7 @@
 
         function loadIframeWithID(id, btn) {
             if (id === "#") return;
+            if (currentLecturerKey === id) { hideAllIframes(); return; }
             document.getElementById('timetable-container').classList.remove('active');
             document.getElementById('lecturer-iframe').src = `https://eis.epoka.edu.al/publictimetable/live/${id}`;
             document.getElementById('lecturer-container').classList.add('active');
@@ -911,7 +930,7 @@
                 }
             }, { passive: true });
             swipeArea.addEventListener('touchend', e => {
-                if (isScrolling) return; // Ignore swipe if it started on a scrollable element
+                if (isScrolling) return;
                 const touchEndX = e.changedTouches[0].screenX;
                 if (touchEndX < touchStartX - 50) navigate(1); // Swipe left
                 if (touchEndX > touchStartX + 50) navigate(-1); // Swipe right
@@ -969,18 +988,13 @@
             const cat = document.getElementById('cat-companion'), bubble = document.getElementById('cat-speech-bubble');
             let timeout;
             const messages = [
-                // Timetable Messages
                 "Checking your timetable? Don't forget to pencil me in for head scratches.",
                 "That's a lot of lectures back-to-back. Remember to schedule time for a nap. It's important.",
                 "Professor, your timetable seems... full. Might I suggest delegating a lecture to me? I'm an expert on the thermodynamics of sunbeams.",
-                "Is it 8 AM already? Your 'Programming' lecture is calling... or maybe just hit snooze.",
-
-                // Material Request Messages
+                "Is it 8:40 already? Your mechanics lecture is calling... or maybe just hit snooze.",
                 "A material request? Let me guess, you need more... catnip? No? Just chalk? Boring.",
                 "I've reviewed your material request. Approved. On the condition of extra biscuits.",
                 "The human is processing requests. I am processing the structural integrity of this cardboard box. We are both very busy.",
-
-                // General Messages
                 "Psst. I helped build this page... mostly by sitting on the keyboard.",
                 "I'm not sleeping, I'm compiling. It's a very complex process.",
                 "My human thinks they're in charge. It's quite adorable, isn't it?",
