@@ -623,9 +623,10 @@
                 font-size: 2.2em !important;
             }
 
-            .category-buttons-container,
             .course-actions,
-            .timetable-buttons {
+            .category-buttons-container,
+            .timetable-buttons,
+            .course-info {
                 flex-wrap: nowrap;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
@@ -633,23 +634,37 @@
                 scrollbar-width: none;
             }
 
-            .category-buttons-container::-webkit-scrollbar,
             .course-actions::-webkit-scrollbar,
-            .timetable-buttons::-webkit-scrollbar {
+            .category-buttons-container::-webkit-scrollbar,
+            .timetable-buttons::-webkit-scrollbar,
+            .course-info::-webkit-scrollbar {
                 display: none;
             }
 
-            .category-button,
             .course-actions button,
-            .timetable-button {
+            .category-button,
+            .timetable-button,
+            .info-item {
                 flex-shrink: 0;
             }
 
-            .timetable-buttons {
+            .course-actions button {
+                padding: 8px 12px;
+                font-size: .8em;
+            }
+
+            .category-button {
+                padding: 10px 16px;
+                font-size: .85em;
+            }
+
+            .timetable-buttons,
+            .course-info {
                 gap: 8px;
             }
 
-            .timetable-button {
+            .timetable-button,
+            .info-item {
                 padding: 8px 12px;
                 font-size: 0.8em;
             }
@@ -839,7 +854,7 @@
                     spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID, range: 'Settings!A1:C2'
                 });
                 const rows = response.result.values;
-                if (rows && rows.length > 1) {
+                if (rows && rows.length > 1 && rows[1][0] && rows[1][1]) {
                     semesterInfo = { startDate: rows[1][0], endDate: rows[1][1], holidayWeeks: parseInt(rows[1][2]) || 0 };
                 }
             } catch (error) { console.error("Error fetching semester info:", error); }
@@ -868,11 +883,10 @@
                     button.textContent = item[0];
                     button.onclick = (e) => {
                         e.stopPropagation();
-                        const id1 = item[1], id2 = item[2];
                         if (type === 'lecturer') {
-                            loadIframeWithID(id1, button);
+                            loadIframeWithID(item[1], button);
                         } else {
-                            loadTimetable(id1, id2, button);
+                            loadTimetable(item[1], item[2], button);
                         }
                     };
                     container.appendChild(button);
@@ -897,11 +911,14 @@
         }
 
         const calculateWeek = (start, end, holidays) => Math.min(Math.max(Math.ceil((new Date() - new Date(start)) / (7 * 24 * 60 * 60 * 1000)) - holidays, 1), Math.ceil((new Date(end) - new Date(start)) / (7 * 24 * 60 * 60 * 1000)));
+
         function updateWeekCounter() { document.getElementById('week-counter').textContent = `Week ${calculateWeek(semesterInfo.startDate, semesterInfo.endDate, semesterInfo.holidayWeeks)}`; }
+
         function updateProgress() {
             const progress = Math.min(Math.max((new Date() - new Date(semesterInfo.startDate)) / (new Date(semesterInfo.endDate) - new Date(semesterInfo.startDate)) * 100, 0), 100);
             document.querySelector('.progress').style.width = `${progress}%`;
         }
+
         function updateYear() { document.getElementById('currentYear').textContent = new Date().getFullYear(); }
 
         // --- UI Interactions ---
@@ -951,7 +968,6 @@
             highlightActiveButton(btn);
         }
 
-        // --- Swipe Gestures ---
         function setupSwipeGestures() {
             let touchStartX = 0, isScrolling = false;
             const swipeArea = document.body;
@@ -982,22 +998,30 @@
             };
         }
 
-        // --- Theme & Style Helpers ---
         function setupThemeToggle() {
             const BTN = document.getElementById('theme-toggle'), ICON = document.getElementById('theme-toggle-icon');
             if (!BTN) return;
+
             const getSaved = () => localStorage.getItem('theme-preference') || 'auto';
+
             const applyTheme = (pref) => {
-                document.documentElement.dataset.theme = pref;
+                if (pref === 'auto') {
+                    document.documentElement.removeAttribute('data-theme');
+                } else {
+                    document.documentElement.setAttribute('data-theme', pref);
+                }
                 localStorage.setItem('theme-preference', pref);
                 ICON.className = { auto: 'fas fa-adjust', light: 'far fa-sun', dark: 'far fa-moon' }[pref];
                 BTN.title = `Theme: ${pref.charAt(0).toUpperCase() + pref.slice(1)}`;
             };
+
             BTN.addEventListener('click', () => {
                 const current = getSaved();
                 const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                applyTheme(current === 'auto' ? (isSystemDark ? 'light' : 'dark') : 'auto');
+                const newPref = current === 'auto' ? (isSystemDark ? 'light' : 'dark') : 'auto';
+                applyTheme(newPref);
             });
+
             applyTheme(getSaved());
         }
 
@@ -1013,7 +1037,7 @@
         }
 
         function initializeScrollFaders() {
-            const containers = document.querySelectorAll('.category-buttons-container, .course-actions, .timetable-buttons');
+            const containers = document.querySelectorAll('.category-buttons-container, .course-actions, .timetable-buttons, .course-info');
             containers.forEach(el => {
                 updateScrollFaders(el);
                 el.addEventListener('scroll', () => updateScrollFaders(el), { passive: true });
@@ -1021,9 +1045,9 @@
             });
         }
 
-        // --- Cat Companion ---
         function setupCatCompanion() {
             const cat = document.getElementById('cat-companion'), bubble = document.getElementById('cat-speech-bubble');
+            if (!cat || !bubble) return;
             let timeout;
             const messages = [
                 "Checking your timetable? Don't forget to pencil me in for head scratches.",
@@ -1049,7 +1073,6 @@
             document.addEventListener('click', () => bubble.classList.remove('visible'));
         }
 
-        // --- Run on Load ---
         window.addEventListener('load', init);
     </script>
 </body>
