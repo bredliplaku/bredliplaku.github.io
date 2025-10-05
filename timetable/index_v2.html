@@ -852,8 +852,9 @@
             updateYear();
             setupThemeToggle();
             setupCatCompanion();
-            setupCategoryButtons();
-            initializeScrollFaders();
+            // These are now called *after* content is dynamically created
+            // setupCategoryButtons(); 
+            // initializeScrollFaders();
             setupSwipeGestures();
             startLoadingAnimation();
 
@@ -880,19 +881,207 @@
 
         async function loadAllData() {
             try {
-                const spreadsheet = await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID
-                });
-                const sheets = spreadsheet.result.sheets.map(s => s.properties.title);
+                // 1. Fetch all settings data first
+                const settings = await parseSettings();
 
-                await loadSettingsData(); // Fetches week counter, info items, actions
-                await loadDynamicCategories(sheets); // Builds buttons and fetches timetables
+                // 2. Use settings to render the UI
+                renderSemesterInfo(settings);
+                renderCourseInfo(settings.info_items);
+                renderActionButtons(settings.action_buttons);
+
+                // 3. Use the category map from settings to build the timetable section
+                await renderDynamicCategories(settings.category_map);
 
                 document.body.classList.remove('is-loading');
                 clearInterval(textInterval);
             } catch (error) {
                 handleApiError(error);
             }
+        }
+
+        // Renders week counter and progress bar
+        function renderSemesterInfo(settings) {
+            const startDate = settings.semester_start;
+            const endDate = settings.semester_end;
+            const holidayWeeks = parseInt(settings.holiday_weeks) || 0;
+
+            if (startDate && endDate) {
+                semesterInfo = { startDate, endDate, holidayWeeks };
+                updateWeekCounter();
+                updateProgress();
+            }
+        }
+
+        // Renders dynamic info items
+        function renderCourseInfo(infoItems) {
+            const container = document.querySelector('.course-info');
+            if (!container) return;
+            infoItems.forEach(item => {
+                const infoSpan = document.createElement('span');
+                infoSpan.className = 'info-item';
+                infoSpan.innerHTML = `<i class="${item.icon}"></i> ${item.text}`;
+                container.appendChild(infoSpan);
+            });
+        }
+
+        // Renders dynamic action buttons
+        function renderActionButtons(actionButtons) {
+            const container = document.getElementById('dynamic-course-actions');
+            if (!container) return;
+            container.innerHTML = ''; // Clear hard-coded buttons
+            actionButtons.forEach(item => {
+                const button = document.createElement('button');
+                if (item.cssClass) button.className = item.cssClass;
+                button.innerHTML = `<i class="${item.icon}"></i> ${item.action}`;
+                button.onclick = () => window.open(item.url, '_self', 'noopener,noreferrer');
+                container.appendChild(button);
+            });
+        }
+
+        // Builds category buttons and fetches timetable data based on the map
+        async function renderDynamicCategories(categoryMap) {
+            const mainContainer = document.getElementById('main-container');
+            const sheetNames = Object.keys(categoryMap);
+            if (!sheetNames.length || !mainContainer) return;
+
+            const buttonsContainer = document.createElement('div');
+            buttonsContainer.className = 'category-buttons-container';
+
+            const contentsWrapper = document.createElement('div');
+            let isFirst = true;
+
+            sheetNames.forEach(sheetName => {
+                const categoryId = `${sheetName.toLowerCase().replace(/\s+/g, '-')}-content`;
+                const icon = categoryMap[sheetName];
+
+                const button = document.createElement('button');
+                button.className = 'category-button';
+                button.dataset.category = categoryId;
+                button.innerHTML = `<i class="${icon}"></i> ${sheetName}`;
+                if (isFirst) button.classList.add('active');
+                buttonsContainer.appendChild(button);
+
+                const contentDiv = document.createElement('div');
+                contentDiv.id = categoryId;
+                contentDiv.className = 'category-content';
+                if (isFirst) contentDiv.classList.add('active');
+                contentDiv.innerHTML = `<div class="timetable-buttons" id="${sheetName}-buttons"></div>`;
+                contentsWrapper.appendChild(contentDiv);
+
+                isFirst = false;
+            });
+
+            const form = document.getElementById('timetable-form');
+            if (form) {
+                mainContainer.insertBefore(buttonsContainer, form);
+                mainContainer.insertBefore(contentsWrapper, form);
+            }
+
+            // Fetch data for all visible categories
+            const ranges = sheetNames.map(name => name === 'Lecturers' ? `${name}!A2:B50` : `${name}!A2:C50`);
+            const response = await gapi.client.sheets.spreadsheets.values.batchGet({
+                spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                ranges: ranges
+            });
+
+            response.result.valueRanges.forEach((rangeResult, index) => {
+                const sheetName = sheetNames[index];
+                const data = rangeResult.values || [];
+                const type = sheetName === 'Lecturers' ? 'lecturer' : 'timetable';
+                populateTimetableButtons(`${sheetName}-buttons`, data, type);
+            });
+
+            // Initialize UI elements now that they exist in the DOM
+            setupCategoryButtons();
+            initializeScrollFaders();
+        }
+
+        async function parseSettings() {
+            const settings = {
+                info_items: [],
+                action_buttons: [],
+                category_map: {}
+            };
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                range: 'Settings!A:E'
+            });
+            const rows = response.result.values || [];
+            rows.forEach(row => {
+                const key = row[0];
+                if (!key) return;
+
+                switch (key) {
+                    case 'semester_start':
+                    case 'semester_end':
+                    case 'holiday_weeks':
+                        settings[key] = row[1];
+                        break;
+                    case 'info_item':
+                        // Value 1: Label, Value 2: Icon, Value 3: Text
+                        if (row[1] && row[2] && row[3]) {
+                            settings.info_items.push({ label: row[1], icon: row[2], text: row[3] });
+                        }
+                        break;
+                    case 'action_button':
+                        // Value 1: Action, Value 2: Icon, Value 3: URL, Value 4: CSS Class
+                        if (row[1] && row[2] && row[3]) {
+                            settings.action_buttons.push({ action: row[1], icon: row[2], url: row[3], cssClass: row[4] || '' });
+                        }
+                        break;
+                    case 'category_map':
+                        // Value 1: Worksheet Name, Value 2: Icon
+                        if (row[1] && row[2]) {
+                            settings.category_map[row[1]] = row[2];
+                        }
+                        break;
+                }
+            });
+            return settings;
+        }
+
+        async function parseSettings() {
+            const settings = {
+                info_items: [],
+                action_buttons: [],
+                category_map: {}
+            };
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                range: 'Settings!A:E'
+            });
+            const rows = response.result.values || [];
+            rows.forEach(row => {
+                const key = row[0];
+                if (!key) return;
+
+                switch (key) {
+                    case 'semester_start':
+                    case 'semester_end':
+                    case 'holiday_weeks':
+                        settings[key] = row[1];
+                        break;
+                    case 'info_item':
+                        // Value 1: Label, Value 2: Icon, Value 3: Text
+                        if (row[1] && row[2] && row[3]) {
+                            settings.info_items.push({ label: row[1], icon: row[2], text: row[3] });
+                        }
+                        break;
+                    case 'action_button':
+                        // Value 1: Action, Value 2: Icon, Value 3: URL, Value 4: CSS Class
+                        if (row[1] && row[2] && row[3]) {
+                            settings.action_buttons.push({ action: row[1], icon: row[2], url: row[3], cssClass: row[4] || '' });
+                        }
+                        break;
+                    case 'category_map':
+                        // Value 1: Worksheet Name, Value 2: Icon
+                        if (row[1] && row[2]) {
+                            settings.category_map[row[1]] = row[2];
+                        }
+                        break;
+                }
+            });
+            return settings;
         }
 
         // Fetches all data from the 'Settings' worksheet at once
@@ -1028,8 +1217,7 @@
         function populateTimetableButtons(containerId, data, type) {
             const container = document.getElementById(containerId);
             if (!container) return;
-
-            container.innerHTML = ''; // Clear previous
+            container.innerHTML = '';
 
             (data || []).filter(row => row && row[0]).forEach(item => {
                 const button = document.createElement('div');
@@ -1040,7 +1228,7 @@
                     e.stopPropagation();
                     if (type === 'lecturer') {
                         loadIframeWithID(item[1], button);
-                    } else { // 'timetable'
+                    } else {
                         loadTimetable(item[1], item[2], button);
                     }
                 };
