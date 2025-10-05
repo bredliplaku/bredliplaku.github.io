@@ -98,6 +98,18 @@
             z-index: 2;
         }
 
+        .course-header,
+        .info-item,
+        .progress-bar,
+        button,
+        .footer,
+        .category-button,
+        .timetable-button,
+        .iframe-container,
+        #cat-speech-bubble {
+            border-radius: 8px;
+        }
+
         .course-header {
             background: var(--light-color);
             border: var(--default-border);
@@ -656,13 +668,28 @@
                 padding: 10px;
             }
 
-            .course-header,
+            .course-header {
+                padding: 25px 20px;
+                transform: none !important;
+            }
+
             .footer {
                 transform: none !important;
             }
 
             h1 {
                 font-size: 2.2em !important;
+                margin-bottom: 10px;
+                /* Add this line */
+            }
+
+            h2 {
+                font-size: 1.1em;
+                margin-bottom: 8px;
+            }
+
+            .course-info {
+                margin-top: 15px;
             }
 
             .course-actions,
@@ -672,8 +699,11 @@
                 flex-wrap: nowrap;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
-                padding-bottom: 10px;
+                padding-bottom: 15px;
+                /* Increased for better touch scrolling */
                 scrollbar-width: none;
+                min-width: 0;
+                /* A fix to ensure flex containers respect parent's width */
             }
 
             .course-actions::-webkit-scrollbar,
@@ -757,52 +787,16 @@
         </div>
 
         <div class="container" id="main-container">
-            <div class="course-actions">
-                <button onclick="window.open('https://ce.epoka.edu.al/', '_blank', 'noopener,noreferrer')"><i
-                        class="fas fa-home"></i> Home</button>
-                <div style="flex-grow: 1;"></div>
-                <button onclick="window.open('https://eis.epoka.edu.al/', '_blank', 'noopener,noreferrer')"><i
-                        class="far fa-user-circle"></i> EIS</button>
-            </div>
-
             <div class="course-header">
                 <h2>Civil Engineering Department</h2>
                 <h1>Class Timetable</h1>
                 <div class="course-info">
                     <span class="info-item"><i class="far fa-clock fa-spin"></i><span
                             id="week-counter">Loading...</span></span>
-                    <span class="info-item"><i class="fas fa-calendar-check"></i> Fall Semester</span>
                 </div>
                 <div class="progress-bar">
                     <div class="progress"></div>
                 </div>
-            </div>
-
-            <div class="course-actions">
-                <button onclick="window.open('https://epoka.edu.al/transport', '_self', 'noopener,noreferrer')"
-                    class="btn-blue"><i class="fas fa-bus"></i> Transport</button>
-                <button
-                    onclick="window.open('https://script.google.com/a/epoka.edu.al/macros/s/AKfycbw2mj6iztuxrb6fHmZ1h4XS_R0xgvJZPfwA-kJjzkg/dev', '_blank', 'noopener,noreferrer')"
-                    class="btn-orange"><i class="fas fa-align-left"></i> Material Request</button>
-            </div>
-
-            <div class="category-buttons-container">
-                <button id="undergrad-btn" class="category-button active" data-category="undergrad-content"><i
-                        class="fas fa-user-graduate"></i> Undergraduate</button>
-                <button id="grad-btn" class="category-button" data-category="grad-content"><i
-                        class="fas fa-user-tie"></i> Graduate</button>
-                <button id="lecturer-btn" class="category-button" data-category="lecturer-content"><i
-                        class="fas fa-chalkboard-teacher"></i> Lecturers</button>
-            </div>
-
-            <div id="undergrad-content" class="category-content active">
-                <div class="timetable-buttons" id="undergraduate-buttons"></div>
-            </div>
-            <div id="grad-content" class="category-content">
-                <div class="timetable-buttons" id="graduate-buttons"></div>
-            </div>
-            <div id="lecturer-content" class="category-content">
-                <div class="timetable-buttons" id="lecturer-buttons"></div>
             </div>
 
             <form id="timetable-form" action="https://eis.epoka.edu.al/publictimetable" method="POST"
@@ -886,64 +880,172 @@
 
         async function loadAllData() {
             try {
-                await loadSemesterInfo();
-                updateWeekCounter();
-                updateProgress();
-                await loadTimetableData();
+                const spreadsheet = await gapi.client.sheets.spreadsheets.get({
+                    spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID
+                });
+                const sheets = spreadsheet.result.sheets.map(s => s.properties.title);
+
+                await loadSettingsData(); // Fetches week counter, info items, actions
+                await loadDynamicCategories(sheets); // Builds buttons and fetches timetables
+
                 document.body.classList.remove('is-loading');
                 clearInterval(textInterval);
-            } catch (error) { handleApiError(error); }
+            } catch (error) {
+                handleApiError(error);
+            }
         }
 
-        // --- Data Fetching ---
-        async function loadSemesterInfo() {
+        // Fetches all data from the 'Settings' worksheet at once
+        async function loadSettingsData() {
             try {
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID, range: 'Settings!A1:C2'
-                });
-                const rows = response.result.values;
-                if (rows && rows.length > 1 && rows[1][0] && rows[1][1]) {
-                    semesterInfo = { startDate: rows[1][0], endDate: rows[1][1], holidayWeeks: parseInt(rows[1][2]) || 0 };
-                }
-            } catch (error) { console.error("Error fetching semester info:", error); }
-        }
-
-        async function loadTimetableData() {
-            try {
-                const ranges = ['Undergraduate!A2:C50', 'Graduate!A2:C50', 'Lecturers!A2:B50'];
+                const ranges = ['Settings!A1:C2', 'Settings!E2:G20', 'Settings!I2:L20'];
                 const response = await gapi.client.sheets.spreadsheets.values.batchGet({
-                    spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID, ranges: ranges,
+                    spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                    ranges: ranges,
                 });
-                const [undergrad, grad, lecturers] = response.result.valueRanges.map(range => range.values || []);
-                renderTimetableButtons(undergrad, grad, lecturers);
-            } catch (error) { console.error("Error fetching timetable data:", error); }
+
+                const [semesterValues, infoValues, actionValues] = response.result.valueRanges;
+
+                // 1. Process Semester Info (Week Counter & Progress Bar)
+                const semesterRows = semesterValues.values;
+                if (semesterRows && semesterRows.length > 1 && semesterRows[1][0] && semesterRows[1][1]) {
+                    semesterInfo = { startDate: semesterRows[1][0], endDate: semesterRows[1][1], holidayWeeks: parseInt(semesterRows[1][2]) || 0 };
+                    updateWeekCounter();
+                    updateProgress();
+                }
+
+                // 2. Process and Render Dynamic Info Items
+                const infoRows = infoValues.values || [];
+                const courseInfoContainer = document.querySelector('.course-info');
+                infoRows.filter(row => row[0] && row[1] && row[2]).forEach(row => {
+                    const [label, icon, text] = row;
+                    const infoItem = document.createElement('span');
+                    infoItem.className = 'info-item';
+                    infoItem.innerHTML = `<i class="${icon}"></i> ${text}`;
+                    courseInfoContainer.appendChild(infoItem);
+                });
+
+                // 3. Process and Render Dynamic Course Actions
+                const actionRows = actionValues.values || [];
+                const actionsContainer = document.getElementById('dynamic-course-actions');
+                if (actionsContainer) {
+                    actionsContainer.innerHTML = ''; // Clear existing
+                    actionRows.filter(row => row[0] && row[1] && row[2]).forEach(row => {
+                        const [action, icon, url, cssClass] = row;
+                        const button = document.createElement('button');
+                        if (cssClass) button.className = cssClass;
+                        button.innerHTML = `<i class="${icon}"></i> ${action}`;
+                        button.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
+                        actionsContainer.appendChild(button);
+                    });
+                }
+
+            } catch (error) {
+                console.error("Error fetching settings data:", error);
+            }
         }
 
-        // --- UI Rendering & Updates ---
-        function renderTimetableButtons(undergradData, gradData, lecturerData) {
-            const populate = (containerId, data, type) => {
-                const container = document.getElementById(containerId);
-                if (!container) return;
-                container.innerHTML = '';
-                (data || []).filter(row => row && row[0]).forEach(item => {
-                    const button = document.createElement('div');
-                    button.className = 'timetable-button';
-                    button.textContent = item[0];
-                    button.onclick = (e) => {
-                        e.stopPropagation();
-                        if (type === 'lecturer') {
-                            loadIframeWithID(item[1], button);
-                        } else {
-                            loadTimetable(item[1], item[2], button);
-                        }
-                    };
-                    container.appendChild(button);
+        // Builds the category buttons and timetable sections
+        async function loadDynamicCategories(sheetNames) {
+            const mainContainer = document.getElementById('main-container');
+            if (!mainContainer) return;
+
+            // Filter out sheets we don't want as categories
+            const categorySheets = sheetNames.filter(name => name !== 'Settings');
+            const timetableSheets = categorySheets.filter(name => name !== 'Lecturers');
+
+            // Create HTML containers
+            const buttonsContainer = document.createElement('div');
+            buttonsContainer.className = 'category-buttons-container';
+
+            const contentsWrapper = document.createElement('div');
+
+            let isFirst = true;
+            categorySheets.forEach(sheetName => {
+                const categoryId = `${sheetName.toLowerCase().replace(/\s+/g, '-')}-content`;
+
+                // Create Button
+                const button = document.createElement('button');
+                button.className = 'category-button';
+                button.dataset.category = categoryId;
+                button.innerHTML = sheetName; // Icon can be added here if needed
+                if (isFirst) button.classList.add('active');
+                buttonsContainer.appendChild(button);
+
+                // Create Content Div
+                const contentDiv = document.createElement('div');
+                contentDiv.id = categoryId;
+                contentDiv.className = 'category-content';
+                if (isFirst) contentDiv.classList.add('active');
+                contentDiv.innerHTML = `<div class="timetable-buttons" id="${sheetName}-buttons"></div>`;
+                contentsWrapper.appendChild(contentDiv);
+
+                isFirst = false;
+            });
+
+            // Inject created HTML into the DOM before the form
+            const form = document.getElementById('timetable-form');
+            if (form) {
+                mainContainer.insertBefore(buttonsContainer, form);
+                mainContainer.insertBefore(contentsWrapper, form);
+            }
+
+            // Now that HTML is in the DOM, fetch data for the timetables
+            try {
+                const ranges = [
+                    ...timetableSheets.map(name => `${name}!A2:C50`), // Timetable sheets
+                    'Lecturers!A2:B50' // Special lecturer sheet
+                ];
+
+                const response = await gapi.client.sheets.spreadsheets.values.batchGet({
+                    spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID,
+                    ranges: ranges
                 });
-            };
-            populate('undergraduate-buttons', undergradData, 'undergrad');
-            populate('graduate-buttons', gradData, 'grad');
-            populate('lecturer-buttons', lecturerData, 'lecturer');
-            initializeScrollFaders();
+
+                const valueRanges = response.result.valueRanges;
+
+                // Populate timetables
+                timetableSheets.forEach((sheetName, index) => {
+                    const data = valueRanges[index].values || [];
+                    populateTimetableButtons(`${sheetName}-buttons`, data, 'timetable');
+                });
+
+                // Populate lecturers (last item in ranges)
+                const lecturerData = valueRanges[valueRanges.length - 1].values || [];
+                populateTimetableButtons('Lecturers-buttons', lecturerData, 'lecturer');
+
+                // Re-initialise event listeners and UI elements
+                setupCategoryButtons();
+                initializeScrollFaders();
+
+            } catch (error) {
+                console.error("Error fetching timetable data:", error);
+            }
+        }
+
+
+        // A generic function to create timetable/lecturer buttons
+        function populateTimetableButtons(containerId, data, type) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            container.innerHTML = ''; // Clear previous
+
+            (data || []).filter(row => row && row[0]).forEach(item => {
+                const button = document.createElement('div');
+                button.className = 'timetable-button';
+                button.textContent = item[0];
+
+                button.onclick = (e) => {
+                    e.stopPropagation();
+                    if (type === 'lecturer') {
+                        loadIframeWithID(item[1], button);
+                    } else { // 'timetable'
+                        loadTimetable(item[1], item[2], button);
+                    }
+                };
+                container.appendChild(button);
+            });
         }
 
         function startLoadingAnimation() {
