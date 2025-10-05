@@ -176,6 +176,17 @@
             height: 100%;
             background: repeating-linear-gradient(90deg, transparent, transparent 10px, rgba(0, 0, 0, .1) 10px, rgba(0, 0, 0, .1) 20px);
             z-index: 2;
+            animation: stripes-move 30s linear infinite;
+        }
+
+        @keyframes stripes-move {
+            0% {
+                background-position: 0 0;
+            }
+
+            100% {
+                background-position: 200px 0;
+            }
         }
 
         .progress {
@@ -390,6 +401,7 @@
             left: 50%;
             transform: translate(-50%, -50%);
             z-index: 11;
+            text-align: center;
         }
 
         #spinner-image {
@@ -401,6 +413,12 @@
 
         #spinner-image.loaded {
             opacity: 1;
+        }
+
+        #loading-text {
+            font-family: 'Space Mono', monospace;
+            font-weight: 700;
+            margin-top: 10px;
         }
 
         @keyframes shimmer {
@@ -547,9 +565,9 @@
                 repeating-linear-gradient(-45deg, transparent, transparent 35px, rgba(255, 255, 255, .03) 35px, rgba(255, 255, 255, .03) 70px);
         }
 
-        html[data-theme="dark"] :is(.course-header, .footer, .category-button, .timetable-button, .info-item, .progress-bar, .iframe-container, .theme-toggle, #cat-speech-bubble, .skeleton),
+        html[data-theme="dark"] :is(.course-header, .footer, .category-button, .timetable-button, .info-item, .progress-bar, .iframe-container, .theme-toggle, #cat-speech-bubble, .skeleton, #loading-text),
         @media (prefers-color-scheme: dark) {
-            html:not([data-theme="light"]) :is(.course-header, .footer, .category-button, .timetable-button, .info-item, .progress-bar, .iframe-container, .theme-toggle, #cat-speech-bubble, .skeleton)
+            html:not([data-theme="light"]) :is(.course-header, .footer, .category-button, .timetable-button, .info-item, .progress-bar, .iframe-container, .theme-toggle, #cat-speech-bubble, .skeleton, #loading-text)
         }
 
             {
@@ -694,6 +712,7 @@
         <div id="skeleton-loader">
             <div class="skeleton-spinner-container">
                 <img src="" alt="Loading..." id="spinner-image">
+                <div id="loading-text"></div>
             </div>
             <div class="container">
                 <div class="skeleton-actions">
@@ -804,8 +823,10 @@
             '../gifs/loading.webp', '../gifs/loading_2.gif', '../gifs/loading_3.gif',
             '../gifs/loading_4.gif', '../gifs/loading_5.webp', '../gifs/loading_6.webp'
         ];
+        const LOADING_TEXTS = ["Fetching deadlines...", "Aligning lecture halls...", "Polishing the timetable...", "Requesting more chalk...", "Waking up lecturers..."];
         let semesterInfo = { startDate: "2025-10-01", endDate: "2026-01-20", holidayWeeks: 0 };
         let currentTimetableId = null, currentClassId = null, currentLecturerKey = null;
+        let textInterval;
 
         // --- Core Initialization ---
         function init() {
@@ -815,7 +836,7 @@
             setupCategoryButtons();
             initializeScrollFaders();
             setupSwipeGestures();
-            setRandomSpinnerGif();
+            startLoadingAnimation();
 
             if (typeof gapi !== 'undefined') initGoogleApi();
             else window.addEventListener('google-api-ready', initGoogleApi);
@@ -835,6 +856,7 @@
         function handleApiError(error) {
             console.error('GAPI Error:', error);
             document.body.classList.remove('is-loading');
+            clearInterval(textInterval);
         }
 
         async function loadAllData() {
@@ -844,6 +866,7 @@
                 updateProgress();
                 await loadTimetableData();
                 document.body.classList.remove('is-loading');
+                clearInterval(textInterval);
             } catch (error) { handleApiError(error); }
         }
 
@@ -898,16 +921,24 @@
             initializeScrollFaders();
         }
 
-        function setRandomSpinnerGif() {
-            const spinnerImg = document.getElementById('spinner-image');
-            if (!spinnerImg) return;
+        function startLoadingAnimation() {
+            const spinner = document.getElementById('spinner-image');
             let chosenGif = sessionStorage.getItem('spinnerGifUrl');
             if (!chosenGif) {
                 chosenGif = SPINNER_GIFS[Math.floor(Math.random() * SPINNER_GIFS.length)];
                 sessionStorage.setItem('spinnerGifUrl', chosenGif);
             }
-            spinnerImg.onload = () => spinnerImg.classList.add('loaded');
-            spinnerImg.src = chosenGif;
+            spinner.onload = () => spinner.classList.add('loaded');
+            spinner.src = chosenGif;
+
+            const textEl = document.getElementById('loading-text');
+            if (!textEl) return;
+            let i = 0;
+            textEl.textContent = LOADING_TEXTS[i];
+            textInterval = setInterval(() => {
+                i = (i + 1) % LOADING_TEXTS.length;
+                textEl.textContent = LOADING_TEXTS[i];
+            }, 2000);
         }
 
         const calculateWeek = (start, end, holidays) => Math.min(Math.max(Math.ceil((new Date() - new Date(start)) / (7 * 24 * 60 * 60 * 1000)) - holidays, 1), Math.ceil((new Date(end) - new Date(start)) / (7 * 24 * 60 * 60 * 1000)));
@@ -999,8 +1030,9 @@
         }
 
         function setupThemeToggle() {
-            const BTN = document.getElementById('theme-toggle'), ICON = document.getElementById('theme-toggle-icon');
-            if (!BTN) return;
+            const BTN = document.getElementById('theme-toggle');
+            const ICON = document.getElementById('theme-toggle-icon');
+            if (!BTN || !ICON) return;
 
             const getSaved = () => localStorage.getItem('theme-preference') || 'auto';
 
@@ -1015,7 +1047,8 @@
                 BTN.title = `Theme: ${pref.charAt(0).toUpperCase() + pref.slice(1)}`;
             };
 
-            BTN.addEventListener('click', () => {
+            BTN.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const current = getSaved();
                 const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
                 const newPref = current === 'auto' ? (isSystemDark ? 'light' : 'dark') : 'auto';
@@ -1032,16 +1065,18 @@
                 const atStart = el.scrollLeft < 5;
                 const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 5;
                 el.classList.toggle('at-start', atStart && !atEnd);
-                el.classList.toggle('at-end', atEnd && !atStart);
+                el.classList.toggle('at-end', atEnd && !atEnd);
             }
         }
 
         function initializeScrollFaders() {
             const containers = document.querySelectorAll('.category-buttons-container, .course-actions, .timetable-buttons, .course-info');
             containers.forEach(el => {
-                updateScrollFaders(el);
-                el.addEventListener('scroll', () => updateScrollFaders(el), { passive: true });
-                new ResizeObserver(entries => entries.forEach(e => updateScrollFaders(e.target))).observe(el);
+                if (el) {
+                    updateScrollFaders(el);
+                    el.addEventListener('scroll', () => updateScrollFaders(el), { passive: true });
+                    new ResizeObserver(entries => entries.forEach(e => updateScrollFaders(e.target))).observe(el);
+                }
             });
         }
 
