@@ -645,7 +645,7 @@
             background-color: var(--light-color);
             color: var(--dark-color);
             box-shadow: 4px 4px 0 var(--tertiary-color);
-            padding: 12px 18px;
+            padding: 16px 18px;
             /* Correct height to match search bar */
             border-radius: 8px;
             border: var(--border-width) solid var(--dark-color);
@@ -1278,19 +1278,23 @@
             display: none !important;
         }
 
-        /* Iframe preview */
         .iframe-container {
-            width: 100%;
+            opacity: 0;
+            /* Hidden by default to prevent content flash */
             height: 420px;
+            /* Set to the open height */
+            overflow: hidden;
             position: relative;
             border: var(--border-width) solid var(--dark-color);
             box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
             border-radius: 8px;
+            transition: opacity 0.4s ease-in-out;
+            /* Only transition opacity */
         }
 
-        /* Fades the iframe in only after it has loaded */
-        .iframe-container.loaded {
+        .iframe-container.visible {
             opacity: 1;
+            /* Fades in when visible */
         }
 
         iframe {
@@ -1300,10 +1304,6 @@
             position: absolute;
             top: -335px;
             left: -64px;
-        }
-
-        .iframe-container:not(.visible) {
-            height: 0 !important;
         }
 
         /* Distribution */
@@ -2462,10 +2462,7 @@
         }
 
         #timetable-container {
-            overflow: hidden;
-            max-height: 0;
-            /* Hidden by default, taking up NO space */
-            transition: max-height 0.5s ease-in-out, margin-top 0.5s ease-in-out;
+            margin-top: 20px;
         }
 
         /* When visible, it grows to its full height */
@@ -3573,10 +3570,14 @@
         }
 
         function initContainers() {
-            // This function ensures the timetable is correctly hidden on page load.
+            // This reliably hides the timetable container on page load.
             const timetableContainer = document.getElementById('timetable-container');
             if (timetableContainer) {
-                timetableContainer.classList.remove('visible');
+                timetableContainer.style.display = 'none';
+            }
+            const iframeContainer = document.getElementById('iframe-container');
+            if (iframeContainer) {
+                iframeContainer.classList.remove('visible');
             }
         }
 
@@ -4409,21 +4410,43 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
 
         function toggleTimetable() {
             const timetableContainer = document.getElementById("timetable-container");
+            const iframeContainer = document.getElementById("iframe-container");
             const button = document.getElementById("timetable-btn");
+            const iframe = document.getElementById('timetable-iframe');
 
-            // This function now just toggles a single class on the parent container.
-            // The CSS handles the entire animation.
-            const isVisible = timetableContainer.classList.toggle('visible');
+            const isCurrentlyVisible = timetableContainer.style.display !== 'none';
 
-            if (isVisible) {
+            if (!isCurrentlyVisible) {
                 // --- SHOWING ---
+
+                // 1. Make the parent container appear.
+                timetableContainer.style.display = '';
+
+                // 2. Submit the form to load the iframe content.
                 document.getElementById('timetable-form').submit();
-                button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Timetable';
+
+                // 3. Wait for the iframe to fully load, THEN fade it in. This prevents the flash.
+                iframe.onload = () => {
+                    iframeContainer.classList.add('visible');
+                };
+
+                button.innerHTML = '<i class="fa fa-eye-slash"></i> Timetable';
                 button.classList.add('active');
+
             } else {
                 // --- HIDING ---
+
+                // 1. Start the fade-out animation.
+                iframeContainer.classList.remove('visible');
+
                 button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
                 button.classList.remove('active');
+
+                // 2. Wait for the fade-out (400ms) to finish, THEN hide the parent container.
+                // This completely removes the empty space on mobile.
+                setTimeout(() => {
+                    timetableContainer.style.display = 'none';
+                }, 400); // This duration must match the CSS opacity transition.
             }
         }
 
