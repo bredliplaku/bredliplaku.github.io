@@ -618,54 +618,73 @@
             margin-bottom: 25px;
         }
 
+        /* --- Corrected Sort Button --- */
+
+        /* 1. The Main Button (The part that moves) */
         .sort-button {
+            /* --- Unchanged Styles --- */
             flex-shrink: 0;
             padding: 16px 18px;
             font-family: 'Space Mono', monospace;
             font-size: 1em;
             font-weight: 700;
             color: var(--dark-color);
-            background-color: var(--light-color);
-            border: var(--border-width) solid var(--dark-color);
-            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 10px;
-            position: relative;
-            /* Required for the ::before pseudo-element */
-            overflow: hidden;
-            /* Hides the ::before element when it's outside */
-            transition: all .2s cubic-bezier(.68, -.55, .265, 1.55);
-            /* Smooth animation */
             -webkit-user-select: none;
-            /* Prevents text selection on click */
             -khtml-user-select: none;
+            position: relative;
+            /* Ensures the ::before is positioned relative to this */
+            background-color: transparent;
+            /* The background is now on the pseudo-element */
+            border: none;
+            /* The border is now on the pseudo-element */
+            box-shadow: none;
+            /* The shadow is now on the pseudo-element */
+            transition: transform 0.2s cubic-bezier(.68, -.55, .265, 1.55);
+            /* Only transform is needed here */
+            z-index: 2;
+            /* Keep the button content on top */
         }
 
-        /* --- Hover state: move the button up/left and grow the shadow --- */
-        .sort-button:hover {
-            transform: translate(-2px, -2px);
-            /* We increase the shadow using calc() and use your original accent colour */
+        /* 2. The Pseudo-Element (The background and shadow that stay put) */
+        .sort-button::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            /* Makes it the exact same size as the button */
+            z-index: 1;
+            /* Sits behind the button text/icon */
+            background-color: var(--light-color);
+            border: var(--border-width) solid var(--dark-color);
+            border-radius: 8px;
+            /* Make sure this matches your other buttons */
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
+
+            /* The transition for the shadow's colour and position */
+            transition: box-shadow 0.2s ease, background-color 0.3s ease;
+        }
+
+        /* 3. Update the Hover and Active/Stuck states */
+        .sort-button:hover::before {
+            /* Change the shadow on the pseudo-element */
             box-shadow: calc(var(--shadow-offset) + 2px) calc(var(--shadow-offset) + 2px) 0 var(--accent-color);
         }
 
-        /* --- Active (click) state: move the button down/right for a "pressed" effect --- */
         .sort-button:active,
         .sort-button.is-stuck {
-            transform: translate(2px, 2px);
-            box-shadow: calc(var(--shadow-offset) - 2px) calc(var(--shadow-offset) - 2px) 0 var(--accent-color);
+            /* ONLY move the button, not the pseudo-element */
+            transform: translate(var(--shadow-offset), var(--shadow-offset));
         }
 
-        /* --- Disabled state (good practice) --- */
-        .sort-button:disabled {
-            opacity: .5;
-            cursor: not-allowed;
-            transform: none;
-            /* Reset transform */
-            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
-            /* Reset shadow */
+        .sort-button:active::before,
+        .sort-button.is-stuck::before {
+            /* Make the shadow disappear by moving it behind the button */
+            box-shadow: 0 0 0 var(--accent-color);
         }
+
 
         @keyframes spin-rotate {
             to {
@@ -2991,9 +3010,11 @@
         let touchstartX = 0, touchendX = 0, touchstartY = 0, touchendY = 0;
         let isInsideIgnoredArea = false;
         /**
- * Applies a temporary 'is-stuck' class to elements after a click.
- * @param {string} selector - The CSS selector for the target elements.
- * @param {number} duration - How long the "stuck" state should last in milliseconds.
+/**
+ * Handles clicks on action buttons (View, Download, etc.)
+ * Applies 'stuck' feedback, then opens the link after a short delay to allow rendering.
+ * @param {HTMLElement} button - The button element that was clicked.
+ * @param {string} url - The URL to open.
  */
         function applyClickFeedback(selector, duration = 1500) {
             // Use event delegation on the document for dynamically added buttons
@@ -3010,6 +3031,21 @@
                     }, duration);
                 }
             });
+        }
+
+        function handleActionClick(button, url) {
+            // 1. Immediately apply the "stuck" class
+            button.classList.add('is-stuck');
+
+            // 2. Open the link after a tiny delay (50ms) to let the browser render the effect
+            setTimeout(() => {
+                window.open(url, '_blank', 'noopener,noreferrer');
+            }, 50);
+
+            // 3. Remove the "stuck" class after the full duration
+            setTimeout(() => {
+                button.classList.remove('is-stuck');
+            }, 1500); // The "stuck" duration
         }
 
         // --- Random Spinner GIF Logic ---
@@ -3082,9 +3118,6 @@
             updateYear();
             initContainers();
             setupMobileFab();
-            applyClickFeedback('#course-action-buttons button');
-            applyClickFeedback('.material-card-actions button');
-            applyClickFeedback('.group-material-card .material-card-actions button', 800); // Shorter duration for smaller buttons
             applyClickFeedback('#sort-button');
             setupThemeToggle();
             setupCatCompanion();
@@ -3989,7 +4022,7 @@
                 const button = document.createElement('button');
                 button.className = buttonData.colorClass;
                 button.innerHTML = `<i class="${buttonData.icon}"></i> ${buttonData.name}`;
-                button.onclick = () => window.open(buttonData.link, '_blank', 'noopener,noreferrer');
+                button.onclick = () => handleActionClick(button, buttonData.link);
                 container.appendChild(button);
             });
 
@@ -4062,8 +4095,8 @@
                             <div class="material-description">${file.description}</div>
                         </div>
                         <div class="material-card-actions">
-                             ${file.viewLink ? `<button onclick="window.open('${file.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><span><i class="far fa-eye"></i></span></button>` : ''}
-                             ${file.downloadLink ? `<button onclick="window.open('${file.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><span><i class="far fa-save"></i></span></button>` : ''}
+                             ${file.viewLink ? `<button onclick="handleActionClick(this, '${file.viewLink}')" class="btn-blue"><span><i class="far fa-eye"></i></span></button>` : ''}
+ ${file.downloadLink ? `<button onclick="handleActionClick(this, '${file.downloadLink}')" class="btn-green"><span><i class="far fa-save"></i></span></button>` : ''}
                         </div>
                     </div>`;
                         });
@@ -4274,9 +4307,9 @@
                             </div>
                         </div>
                         <div class="material-card-actions">
-                            ${material.viewLink ? `<button onclick="window.open('${material.viewLink}', '_blank', 'noopener,noreferrer')" class="btn-blue"><span><i class="far fa-eye"></i> View</span></button>` : ''}
-                            ${material.downloadLink ? `<button onclick="window.open('${material.downloadLink}', '_blank', 'noopener,noreferrer')" class="btn-green"><span><i class="far fa-save"></i> Download</span></button>` : ''}
-                            ${material.openLink ? `<button onclick="window.open('${material.openLink}', '_blank', 'noopener,noreferrer')" class="btn-orange"><span><i class="fas fa-external-link-alt"></i> Open</span></button>` : ''}
+                            ${material.viewLink ? `<button onclick="handleActionClick(this, '${material.viewLink}')" class="btn-blue"><span><i class="far fa-eye"></i> View</span></button>` : ''}
+${material.downloadLink ? `<button onclick="handleActionClick(this, '${material.downloadLink}')" class="btn-green"><span><i class="far fa-save"></i> Download</span></button>` : ''}
+${material.openLink ? `<button onclick="handleActionClick(this, '${material.openLink}')" class="btn-orange"><span><i class="fas fa-external-link-alt"></i> Open</span></button>` : ''}
                         </div>
                     </div>`;
                     });
