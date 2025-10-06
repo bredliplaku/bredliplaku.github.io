@@ -641,32 +641,57 @@
 
         }
 
+        /* 1. The Main Button (The top layer with the icon that moves) */
         .sort-button {
-            background-color: var(--light-color);
-            color: var(--dark-color);
-            box-shadow: 4px 4px 0 var(--tertiary-color);
+            position: relative;
+            z-index: 2;
+            flex-shrink: 0;
+
+            /* These styles give the button its size and align the icon */
             padding: 16px 18px;
-            /* Correct height to match search bar */
-            border-radius: 8px;
-            border: var(--border-width) solid var(--dark-color);
             font-family: 'Space Mono', monospace;
             font-size: 1em;
             font-weight: 700;
+            color: var(--dark-color);
+            cursor: pointer;
             display: flex;
             align-items: center;
             gap: 10px;
+
+            /* These make the button itself transparent, so the background can show through */
+            background-color: transparent;
+            border: none;
+            box-shadow: none;
+            transition: transform 0.2s cubic-bezier(.68, -.55, .265, 1.55);
         }
 
-        .sort-button:hover {
-            transform: translate(-2px, -2px);
-            box-shadow: 6px 6px 0 var(--accent-color);
+        /* 2. The Pseudo-Element (The background and shadow layer that stays put) */
+        .sort-button::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+
+            background-color: var(--light-color);
+            border: var(--border-width) solid var(--dark-color);
+            border-radius: 8px;
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
+            transition: box-shadow 0.2s ease, background-color 0.3s ease;
         }
 
-        /* This uses the standard button active/stuck effect */
+        /* 3. The Hover, Active, and "Stuck" States */
+        .sort-button:hover::before {
+            box-shadow: calc(var(--shadow-offset) + 2px) calc(var(--shadow-offset) + 2px) 0 var(--accent-color);
+        }
+
         .sort-button:active,
         .sort-button.is-stuck {
-            transform: translate(2px, 2px);
-            box-shadow: 2px 2px 0 var(--dark-color);
+            transform: translate(var(--shadow-offset), var(--shadow-offset));
+        }
+
+        .sort-button:active::before,
+        .sort-button.is-stuck::before {
+            box-shadow: 0 0 0 var(--accent-color);
         }
 
         .sort-button.disabled-look,
@@ -1284,21 +1309,17 @@
 
         .iframe-container {
             opacity: 0;
-            /* Hidden by default to prevent content flash */
             height: 420px;
-            /* Set to the open height */
             overflow: hidden;
             position: relative;
             border: var(--border-width) solid var(--dark-color);
             box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--tertiary-color);
             border-radius: 8px;
             transition: opacity 0.4s ease-in-out;
-            /* Only transition opacity */
         }
 
         .iframe-container.visible {
             opacity: 1;
-            /* Fades in when visible */
         }
 
         iframe {
@@ -1924,6 +1945,11 @@
                 /* Adds bottom padding for the scrollbar */
                 -webkit-overflow-scrolling: touch;
                 /* Smoother scrolling on iOS */
+            }
+
+            .course-actions.no-bottom-margin {
+                margin-bottom: 0 !important;
+                padding-bottom: 0 !important;
             }
 
             .course-button {
@@ -3574,20 +3600,56 @@
         }
 
         function initContainers() {
-            // This reliably hides the timetable and removes the search margin on page load.
+            // This reliably hides the timetable container on page load.
             const timetableContainer = document.getElementById('timetable-container');
-            const searchContainer = document.querySelector('.search-container');
-
             if (timetableContainer) {
                 timetableContainer.style.display = 'none';
             }
-            const iframeContainer = document.getElementById('iframe-container');
-            if (iframeContainer) {
+        }
+
+        function toggleTimetable() {
+            const timetableContainer = document.getElementById("timetable-container");
+            const iframeContainer = document.getElementById("iframe-container");
+            const button = document.getElementById("timetable-btn");
+            const iframe = document.getElementById('timetable-iframe');
+            const actionsContainer = document.getElementById('course-action-buttons');
+
+            const isCurrentlyVisible = timetableContainer.style.display !== 'none';
+
+            if (!isCurrentlyVisible) {
+                // --- SHOWING THE TIMETABLE ---
+
+                // 1. Make the parent container appear and remove the extra margin class.
+                actionsContainer.classList.remove('no-bottom-margin');
+                timetableContainer.style.display = '';
+
+                // 2. Hide the iframe itself until its content is loaded to prevent a white flash.
+                iframeContainer.style.opacity = '0';
+                document.getElementById('timetable-form').submit();
+
+                // 3. Wait for the iframe to fully load, THEN fade it in.
+                iframe.onload = () => {
+                    iframeContainer.classList.add('visible');
+                };
+
+                button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Timetable';
+                button.classList.add('active');
+
+            } else {
+                // --- HIDING THE TIMETABLE ---
+
+                // 1. Start the fade-out animation.
                 iframeContainer.classList.remove('visible');
-            }
-            // Add the class initially because the timetable is hidden
-            if (searchContainer) {
-                searchContainer.classList.add('no-top-margin');
+
+                button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
+                button.classList.remove('active');
+
+                // 2. Wait for the animation to finish, then hide the parent container completely.
+                setTimeout(() => {
+                    timetableContainer.style.display = 'none';
+                    // Add a class to remove the bottom margin from the container above.
+                    actionsContainer.classList.add('no-bottom-margin');
+                }, 400); // This duration must match your CSS opacity transition.
             }
         }
 
@@ -4414,41 +4476,6 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
             const elapsedDuration = today - start;
             let progressPercentage = Math.min(Math.max((elapsedDuration / totalDuration) * 100, 0), 100);
             document.getElementById('progress-bar').style.width = progressPercentage + '%';
-        }
-
-        function toggleTimetable() {
-            const timetableContainer = document.getElementById("timetable-container");
-            const iframeContainer = document.getElementById("iframe-container");
-            const button = document.getElementById("timetable-btn");
-            const searchContainer = document.querySelector('.search-container'); // Get the search container
-
-            const isCurrentlyVisible = timetableContainer.style.display !== 'none';
-
-            if (!isCurrentlyVisible) {
-                // --- SHOWING ---
-                searchContainer.classList.remove('no-top-margin'); // Restore the margin
-                timetableContainer.style.display = '';
-
-                // Use requestAnimationFrame to ensure the transition triggers correctly
-                requestAnimationFrame(() => {
-                    iframeContainer.classList.add('visible');
-                });
-
-                document.getElementById('timetable-form').submit();
-                button.innerHTML = '<i class="fa fa-eye-slash"></i> Hide Timetable';
-                button.classList.add('active');
-
-            } else {
-                // --- HIDING ---
-                iframeContainer.classList.remove('visible');
-                button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
-                button.classList.remove('active');
-
-                setTimeout(() => {
-                    timetableContainer.style.display = 'none';
-                    searchContainer.classList.add('no-top-margin'); // Remove the margin
-                }, 500); // This duration MUST match your CSS transition time
-            }
         }
 
         function hasEvaluationData(metadata) {
