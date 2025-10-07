@@ -1439,6 +1439,52 @@
 
         let currentScopes = READONLY_SCOPE; // Initial scope (will be updated based on user role)
 
+        /**
+         * Adds a new log entry one hour after the latest existing entry for a group.
+         * @param {Object} group - The log group to add the time to.
+         */
+        function addPlusOneHourLog(group) {
+            if (!isAdmin) return; // Action is for admins only
+
+            // Find the latest timestamp from all logs in the group
+            const latestTimestamp = Math.max(...group.originalLogs.map(log => log.timestamp));
+
+            // Create a new date object from the latest timestamp
+            const newDate = new Date(latestTimestamp);
+
+            // Add exactly one hour
+            newDate.setHours(newDate.getHours() + 1);
+
+            // Create the new log object
+            const newLog = {
+                uid: group.uid,
+                timestamp: newDate.getTime(),
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                manual: true // Mark as a manual addition
+            };
+
+            // Add the new log to the beginning of the main logs array
+            logs.unshift(newLog);
+
+            // Save changes to local storage to prevent data loss
+            saveLogsToLocalStorage();
+
+            // Refresh the user interface to show the new entry
+            updateUI();
+
+            // Notify the user of the successful addition
+            const formattedTime = newDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            showImprovedNotification('success', 'Time Added', `Added a +1 hour log for ${group.name} at ${formattedTime}.`);
+
+            // If online, sync the changes with the Google Sheet
+            if (isOnline && isSignedIn && isAdmin) {
+                syncLogsWithSheet().catch(err => {
+                    console.error('Error syncing after adding +1 hour log:', err);
+                    showImprovedNotification('warning', 'Sync Warning', 'Log saved locally, but failed to sync.');
+                });
+            }
+        }
+
         // Setup all event listeners in one place
         function setupEventListeners() {
             // Set up tab navigation
@@ -5232,7 +5278,6 @@
         /**
          * Update the filtered and sorted logs list in the UI.
          */
-        // Fixed updateLogsList function without the illegal continue statement
         function updateLogsList() {
             // If no course selected, show message
             if (!currentCourse) {
@@ -5486,6 +5531,13 @@
                         const actionsCell = document.createElement('td');
                         actionsCell.className = 'actions-cell';
 
+                        // NEW: Create the "+1 Hour" button
+                        const addTimeIcon = document.createElement('i');
+                        addTimeIcon.className = 'fas fa-plus-circle action-icon'; // Using a plus-circle icon
+                        addTimeIcon.title = 'Add';
+                        addTimeIcon.style.color = '#43a047'; // Green color for "add" action
+                        addTimeIcon.addEventListener('click', () => addPlusOneHourLog(group));
+
                         const editIcon = document.createElement('i');
                         editIcon.className = 'fas fa-edit action-icon edit-icon';
                         editIcon.title = 'Edit';
@@ -5496,6 +5548,8 @@
                         deleteIcon.title = 'Delete';
                         deleteIcon.addEventListener('click', () => confirmDeleteLog(group));
 
+                        // NEW: Add the new button to the actions cell
+                        actionsCell.appendChild(addTimeIcon);
                         actionsCell.appendChild(editIcon);
                         actionsCell.appendChild(deleteIcon);
                         row.appendChild(actionsCell);
@@ -5505,6 +5559,8 @@
                 }
             });
         }
+
+
         /**
          * Update the database list in the UI.
          */
