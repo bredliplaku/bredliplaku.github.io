@@ -660,13 +660,14 @@
         }
 
         .sort-button:hover {
-            box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--accent-color);
+            box-shadow: 10px 10px 0 var(--accent-color);
             transform: translate(-2px, -2px);
             /* Matches standard button hover */
         }
 
         .sort-button.is-stuck:hover {
             transform: translate(2px, 2px);
+            /* Matches standard button active */
             box-shadow: 2px 2px 0 var(--dark-color);
         }
 
@@ -975,6 +976,43 @@
         .course-schedule {
             margin-bottom: 20px;
             margin-top: 20px;
+        }
+
+        .iframe-loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1;
+        }
+
+        .iframe-loader::after {
+            content: '';
+            display: block;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 4px solid var(--gray-color);
+            border-color: var(--gray-color) transparent var(--gray-color) transparent;
+            animation: spin 1.2s linear infinite;
+            /* Reuses your existing spin animation */
+        }
+
+        /* Make iframe transparent initially */
+        .iframe-container iframe {
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
+            background-color: transparent;
+        }
+
+        /* When loaded, fade the iframe in */
+        .iframe-container.is-loaded iframe {
+            opacity: 1;
+        }
+
+        /* When loaded, hide the spinner */
+        .iframe-container.is-loaded .iframe-loader {
+            display: none;
         }
 
         .iframe-container {
@@ -2075,6 +2113,10 @@
             background-color: var(--dark-surface);
         }
 
+        html[data-theme="dark"] .iframe-loader::after {
+            border-color: var(--dark-border) transparent var(--dark-border) transparent;
+        }
+
         html[data-theme="dark"] .sort-button.disabled-look,
         html[data-theme="dark"] .search-container.disabled-look #search-bar {
             background: var(--dark-surface-light) !important;
@@ -2253,6 +2295,10 @@
                 background-image:
                     repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(255, 255, 255, .03) 35px, rgba(255, 255, 255, .03) 70px),
                     repeating-linear-gradient(-45deg, transparent, transparent 35px, rgba(255, 255, 255, .03) 35px, rgba(255, 255, 255, .03) 70px);
+            }
+
+            html:not([data-theme="light"]) .iframe-loader::after {
+                border-color: var(--dark-border) transparent var(--dark-border) transparent;
             }
 
             html:not([data-theme="light"]) .app-loading {
@@ -2780,10 +2826,22 @@
             bottom: 0;
             right: 20px;
             bottom: env(safe-area-inset-bottom, 0);
-            /* Mobile safe area */
             z-index: 1000;
             cursor: pointer;
-            transition: left 0.5s ease-in-out, right 0.5s ease-in-out;
+            opacity: 0;
+            transform: translateY(100%);
+            /* Start below the screen */
+            pointer-events: none;
+            /* Can't be clicked while hidden */
+            transition: opacity 0.5s ease-out, transform 0.5s cubic-bezier(.68, -.55, .265, 1.55);
+        }
+
+        #cat-companion.visible {
+            opacity: 1;
+            transform: translateY(0);
+            /* Move to original position */
+            pointer-events: auto;
+            /* Make it clickable again */
         }
 
         #cat-image {
@@ -2960,7 +3018,7 @@
                 </form>
 
                 <div class="iframe-container" id="iframe-container">
-                    <iframe id="timetable-iframe" name="timetable-iframe"></iframe>
+                    <div class="iframe-loader"></div> <iframe id="timetable-iframe" name="timetable-iframe"></iframe>
                 </div>
             </div>
 
@@ -3602,18 +3660,42 @@
             const button = document.getElementById("timetable-btn");
             const iframe = document.getElementById('timetable-iframe');
 
-            if (!iframeContainer.classList.contains('visible')) {
-                // --- SHOWING ---
-                timetableContainer.style.display = ''; // Make parent visible
-                document.getElementById('timetable-form').submit(); // Start loading the iframe's content
+            const isVisible = iframeContainer.classList.contains('visible');
 
-                // Use a tiny delay to ensure the browser registers the 'display' change before starting the transition
+            if (!isVisible) {
+                // --- SHOWING ---
+                iframeContainer.classList.remove('is-loaded'); // Reset loaded state to show spinner
+                timetableContainer.style.display = ''; // Make parent element visible
+
+                // Only submit the form if the iframe hasn't been loaded before
+                if (!iframe.src || iframe.src === 'about:blank') {
+                    iframe.onload = () => {
+                        iframeContainer.classList.add('is-loaded'); // Hide spinner, fade in iframe
+                    };
+                    document.getElementById('timetable-form').submit();
+                } else {
+                    // If already loaded, just show the content immediately
+                    iframeContainer.classList.add('is-loaded');
+                }
+
+                // A tiny delay allows the 'display' change to render before we start the animation
                 setTimeout(() => {
-                    iframeContainer.classList.add('visible'); // Start animation immediately
+                    iframeContainer.classList.add('visible');
                 }, 10);
 
                 button.innerHTML = '<i class="fa fa-eye-slash"></i> Timetable';
                 button.classList.add('active');
+
+            } else {
+                // --- HIDING ---
+                iframeContainer.classList.remove('visible'); // Start closing animation
+                button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
+                button.classList.remove('active');
+
+                // Hide the parent container AFTER the animation is complete
+                setTimeout(() => {
+                    timetableContainer.style.display = 'none';
+                }, 500); // This must match your CSS transition duration
             }
         }
 
@@ -3907,9 +3989,14 @@
                     // Give the browser a moment to apply the new theme colours, then fade everything in
                     setTimeout(() => {
                         document.body.classList.add('theme-ready');
-                        // This now correctly handles BOTH the initial load and course switching
                         document.body.classList.remove('is-loading');
                         document.body.classList.remove('is-switching');
+
+                        setTimeout(() => {
+                            const cat = document.getElementById('cat-companion');
+                            if (cat) cat.classList.add('visible');
+                        }, 500); // 500ms delay for a smoother entrance
+
                     }, 150);
                     // showImprovedNotification('success', 'Course Loaded', `${data.metadata.code ? formatCourseCode(data.metadata.code) : sheetName} materials loaded successfully`);
                 } else {
