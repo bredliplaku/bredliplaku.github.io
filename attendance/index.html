@@ -500,6 +500,10 @@
             }
         }
 
+        .sort-dropdown {
+            cursor: pointer;
+        }
+
         #admin-welcome-message {
             text-align: center;
             padding: 20px;
@@ -633,36 +637,6 @@
         .in-page-notification-success {
             background-color: #e8f5e9;
             color: #1b5e20;
-        }
-
-        /* Mobile adjustments */
-        @media (max-width: 700px) {
-            .in-page-notifications {
-                bottom: 10px;
-                left: 50%;
-                right: auto;
-                transform: translateX(-50%);
-                width: 90%;
-                max-width: 90%;
-            }
-
-            .in-page-notification.removing {
-                opacity: 0;
-                transform: translateY(100%);
-                transition: opacity 0.3s ease, transform 0.3s ease;
-            }
-
-            @keyframes slide-in {
-                from {
-                    transform: translateY(100%);
-                    opacity: 0;
-                }
-
-                to {
-                    transform: translateY(0);
-                    opacity: 1;
-                }
-            }
         }
 
         .filter-container {
@@ -967,6 +941,15 @@
             margin-top: 20px;
         }
 
+        .unknown-row {
+            background-color: rgba(251, 140, 0, 0.1) !important;
+            border-left: 3px solid var(--warning-color);
+        }
+
+        body.dark-mode .unknown-row {
+            background-color: rgba(251, 140, 0, 0.2) !important;
+        }
+
         .footer {
             max-width: 1000px;
             text-align: center;
@@ -1058,6 +1041,43 @@
 
         .sync-btn-text {
             margin-left: 5px;
+        }
+
+        .stats-summary {
+            display: flex;
+            justify-content: space-around;
+            gap: 15px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: rgba(57, 73, 171, 0.05);
+            border-radius: 15px;
+            text-align: center;
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .stat-item .value {
+            font-size: 1.8em;
+            font-weight: 500;
+            color: var(--primary-color);
+            font-family: 'Google Sans', sans-serif;
+        }
+
+        .stat-item .label {
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        body.dark-mode .stats-summary {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        body.dark-mode .stat-item .label {
+            color: #aaa;
         }
 
         /* Add a subtle pulse animation when auto-sync is enabled */
@@ -1221,6 +1241,33 @@
             .database-actions {
                 justify-content: space-between;
             }
+
+            .in-page-notifications {
+                bottom: 10px;
+                left: 50%;
+                right: auto;
+                transform: translateX(-50%);
+                width: 90%;
+                max-width: 90%;
+            }
+
+            .in-page-notification.removing {
+                opacity: 0;
+                transform: translateY(100%);
+                transition: opacity 0.3s ease, transform 0.3s ease;
+            }
+
+            @keyframes slide-in {
+                from {
+                    transform: translateY(100%);
+                    opacity: 0;
+                }
+
+                to {
+                    transform: translateY(0);
+                    opacity: 1;
+                }
+            }
         }
     </style>
 </head>
@@ -1303,6 +1350,7 @@
 
         <!-- Scanner & History Tab -->
         <div id="scanner-tab" class="tab-content active">
+            <div id="stats-summary" class="stats-summary" style="display: none;"></div>
             <div class="scan-buttons">
                 <button id="start-scan-btn" class="big-scan-button btn-blue scan-button" style="display: none;">
                     <i class="fa-solid fa-wifi"></i><b>&nbsp;&nbsp; START SCANNING</b>
@@ -1420,6 +1468,14 @@
                         manage the database.
                     </div>
                 </div>
+            </div>
+        </div>
+        <div id="scan-announcement-overlay" style="display: none;">
+            <div class="scan-announcement-content">
+                <div class="scan-announcement-icon"><i class="fas fa-check-circle"></i></div>
+                <div class="scan-announcement-title">Welcome</div>
+                <div id="scan-announcement-name" class="scan-announcement-name"></div>
+                <div class="scan-announcement-subtitle">Attendance Recorded</div>
             </div>
         </div>
         <footer class="footer">
@@ -4693,23 +4749,75 @@
                 console.error("Error fetching course info:", error);
             }
         }
+
+        /**
+                 * Displays a custom, non-blocking confirmation dialog.
+                 * @param {object} options - The options for the dialog.
+                 * @param {string} options.title - The title of the dialog.
+                 * @param {string} options.message - The main text/question for the user.
+                 * @param {string} [options.confirmText='Confirm'] - The text for the confirm button.
+                 * @param {string} [options.cancelText='Cancel'] - The text for the cancel button.
+                 * @param {function} options.onConfirm - The callback function to execute if the user confirms.
+                 */
+        function showConfirmationDialog({ title, message, confirmText = 'Confirm', cancelText = 'Cancel', onConfirm }) {
+            // Remove any existing dialog
+            const existingDialog = document.querySelector('.dialog-backdrop');
+            if (existingDialog) existingDialog.remove();
+
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.innerHTML = `
+                <h3 class="dialog-title">${title}</h3>
+                <p>${message}</p>
+                <div class="dialog-actions">
+                    <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
+                    <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
+                </div>
+            `;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const confirmBtn = document.getElementById('dialog-confirm-btn');
+            const cancelBtn = document.getElementById('dialog-cancel-btn');
+
+            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+
+            confirmBtn.addEventListener('click', () => {
+                onConfirm();
+                closeDialog();
+            });
+
+            cancelBtn.addEventListener('click', closeDialog);
+            dialogBackdrop.addEventListener('click', (e) => {
+                if (e.target === dialogBackdrop) {
+                    closeDialog();
+                }
+            });
+        }
+
         /**
          * Clear the entire database.
          */
         function clearDatabase() {
             if (!isAdmin) return;
-
-            if (confirm('Are you sure you want to clear the entire database? This will remove all UID-name mappings.')) {
-                uidToNameMap = {};
-
-                // Sync to sheet if online
-                if (isOnline && isSignedIn) {
-                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+            showConfirmationDialog({
+                title: 'Clear Entire Database?',
+                message: 'This will remove all UID-name mappings permanently. This action cannot be undone.',
+                confirmText: 'Yes, Clear It',
+                onConfirm: () => {
+                    uidToNameMap = {};
+                    // Sync to sheet if online
+                    if (isOnline && isSignedIn) {
+                        syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                    }
+                    updateUI();
+                    showImprovedNotification('success', 'Database Cleared', 'All database entries have been removed.');
                 }
-
-                updateUI();
-                showImprovedNotification('success', 'Database Cleared', 'All database entries have been removed.');
-            }
+            });
         }
 
         /**
@@ -5594,9 +5702,8 @@
                             const separatorRow = document.createElement('tr');
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
-                            separatorCell.colSpan = isAdmin ? 5 : 3; // Different colspan for admin/non-admin
+                            separatorCell.colSpan = isAdmin ? 5 : 3;
 
-                            // MODIFICATION: Use flexbox for layout within the cell
                             separatorCell.style.display = 'flex';
                             separatorCell.style.justifyContent = 'space-between';
                             separatorCell.style.alignItems = 'center';
@@ -5605,7 +5712,6 @@
                             dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
                             separatorCell.appendChild(dateText);
 
-                            // NEW: Add the bulk +1 hour button for admins
                             if (isAdmin) {
                                 const bulkAddBtn = document.createElement('button');
                                 bulkAddBtn.className = 'btn-sm btn-green';
@@ -5613,7 +5719,7 @@
                                 bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
                                 bulkAddBtn.style.fontWeight = '500';
                                 bulkAddBtn.onclick = (e) => {
-                                    e.stopPropagation(); // prevent sort from triggering
+                                    e.stopPropagation();
                                     addPlusOneHourToDay(currentDay);
                                 };
                                 separatorCell.appendChild(bulkAddBtn);
@@ -5627,6 +5733,11 @@
 
                 // Create log entry row
                 const row = document.createElement('tr');
+
+                // NEW: Add highlight class if name is 'Unknown'
+                if (group.name === 'Unknown') {
+                    row.classList.add('unknown-row');
+                }
 
                 if (!isSignedIn) {
                     // For non-signed-in users, we only show UID and Time
@@ -5661,21 +5772,17 @@
                     nameCell.className = 'name-cell name-column';
                     nameCell.textContent = group.name;
                     if (group.originalLogs.some(log => log.manual)) {
-                        // Create the excused icon
                         const excusedIcon = document.createElement('i');
                         excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
-                        // Add click event listener to show a notification
                         excusedIcon.addEventListener('click', function (e) {
-                            e.stopPropagation(); // Prevent event from bubbling up
+                            e.stopPropagation();
                             showImprovedNotification(
                                 'info',
                                 'Excused Absence',
                                 'This attendance record was <b>manually added</b> as an excused absence.'
                             );
                         });
-
-                        // Add the icon to the name cell
-                        nameCell.appendChild(document.createTextNode(' ')); // Add space
+                        nameCell.appendChild(document.createTextNode(' '));
                         nameCell.appendChild(excusedIcon);
                     }
                     row.appendChild(nameCell);
@@ -5687,7 +5794,6 @@
                         uidCell.textContent = group.uid;
                         row.appendChild(uidCell);
 
-                        // Date cell - only for admin
                         const dateCell = document.createElement('td');
                         dateCell.className = 'date-cell date-column';
                         dateCell.textContent = group.date;
@@ -5714,6 +5820,16 @@
                         const actionsCell = document.createElement('td');
                         actionsCell.className = 'actions-cell';
 
+                        // NEW: Add a "Add to DB" button for unknown rows
+                        if (group.name === 'Unknown') {
+                            const addUserIcon = document.createElement('i');
+                            addUserIcon.className = 'fas fa-user-plus action-icon';
+                            addUserIcon.title = 'Add to Database';
+                            addUserIcon.style.color = '#43a047'; // Green
+                            addUserIcon.addEventListener('click', () => showAddEntryFromLog(group.uid));
+                            actionsCell.appendChild(addUserIcon);
+                        }
+
                         const addTimeIcon = document.createElement('i');
                         addTimeIcon.className = 'fas fa-plus-circle action-icon';
                         addTimeIcon.title = 'Add +1 Hour';
@@ -5730,6 +5846,7 @@
                         deleteIcon.title = 'Delete';
                         deleteIcon.addEventListener('click', () => confirmDeleteLog(group));
 
+                        // Add buttons in a logical order
                         actionsCell.appendChild(addTimeIcon);
                         actionsCell.appendChild(editIcon);
                         actionsCell.appendChild(deleteIcon);
@@ -5741,6 +5858,27 @@
             });
         }
 
+        /**
+         * Shows a dialog to add a new database entry, pre-filled with the UID.
+         * @param {string} uid - The UID of the unknown person to add.
+         */
+        function showAddEntryFromLog(uid) {
+            if (!isAdmin) return;
+
+            const name = prompt(`Enter name for new database entry with UID:\n${uid}`);
+            if (name && name.trim()) {
+                const trimmedName = name.trim();
+                uidToNameMap[uid] = trimmedName;
+
+                // Sync to sheet if online
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                }
+
+                updateUI();
+                showImprovedNotification('success', 'Entry Added', `Added ${trimmedName} (${uid}) to the database.`);
+            }
+        }
 
         /**
          * Update the database list in the UI.
@@ -5822,6 +5960,7 @@
          */
         function updateUI() {
             updateLogsList();
+            updateStatsSummary();
             updateDatabaseList();
             updateDatabaseStatus();
             updatePageTitle();
@@ -5853,6 +5992,58 @@
             updateScanButtons();
 
             populateCourseButtons();
+        }
+
+        /**
+         * Calculates and displays a summary of statistics for the most recent day of logs.
+         */
+        function updateStatsSummary() {
+            const summaryContainer = document.getElementById('stats-summary');
+            if (!summaryContainer || logs.length === 0) {
+                if (summaryContainer) summaryContainer.style.display = 'none';
+                return;
+            }
+
+            // Find the most recent date string from logs
+            const mostRecentTimestamp = Math.max(...logs.map(log => log.timestamp));
+            const mostRecentDate = new Date(mostRecentTimestamp);
+            const day = String(mostRecentDate.getDate()).padStart(2, '0');
+            const month = String(mostRecentDate.getMonth() + 1).padStart(2, '0');
+            const year = mostRecentDate.getFullYear();
+            const mostRecentDateStr = `${day}-${month}-${year}`;
+
+            // Filter logs for that day
+            const logsToday = logs.filter(log => {
+                const logDate = new Date(log.timestamp);
+                const logDay = String(logDate.getDate()).padStart(2, '0');
+                const logMonth = String(logDate.getMonth() + 1).padStart(2, '0');
+                const logYear = logDate.getFullYear();
+                return `${logDay}-${logMonth}-${logYear}` === mostRecentDateStr;
+            });
+
+            if (logsToday.length === 0) {
+                summaryContainer.style.display = 'none';
+                return;
+            }
+
+            const uniqueUIDs = [...new Set(logsToday.map(log => log.uid))];
+            const unknownCount = uniqueUIDs.filter(uid => !uidToNameMap[uid]).length;
+
+            summaryContainer.innerHTML = `
+                <div class="stat-item">
+                    <div class="value">${uniqueUIDs.length}</div>
+                    <div class="label">Unique Attendees (${mostRecentDateStr})</div>
+                </div>
+                <div class="stat-item">
+                    <div class="value">${logsToday.length}</div>
+                    <div class="label">Total Scans (${mostRecentDateStr})</div>
+                </div>
+                <div class="stat-item">
+                    <div class="value" style="${unknownCount > 0 ? 'color: var(--warning-color);' : ''}">${unknownCount}</div>
+                    <div class="label">Unknown UIDs</div>
+                </div>
+            `;
+            summaryContainer.style.display = 'flex';
         }
 
         /**
@@ -5964,10 +6155,7 @@
 
             // For non-signed-in users, only show UID without saving anything
             if (!isSignedIn) {
-                // Play success sound
                 playSound(true);
-
-                // Update the welcome message to show the UID
                 let notSignedInMsg = document.getElementById('not-signed-in-message');
                 if (notSignedInMsg) {
                     notSignedInMsg.innerHTML = `
@@ -5978,13 +6166,11 @@
                 return;
             }
 
-            // Standard flow for signed-in users
             if (!currentCourse) {
                 showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
                 return;
             }
 
-            // Create log entry
             const timestamp = new Date();
             const newLog = {
                 uid: serialNumber,
@@ -5992,78 +6178,62 @@
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: false
             };
-
-            // Add to logs
             logs.unshift(newLog);
-
-            // IMMEDIATELY save to localStorage
             saveLogsToLocalStorage();
-
-            // Update UI
             updateUI();
 
-            // Determine name for notification
             const name = uidToNameMap[serialNumber] || 'Unknown';
-
-            // Play success sound
             playSound(true);
 
-            // Create welcome banner for admin users only
-            if (isAdmin) {
-                // Create or get the welcome message element
+            // NEW: Differentiate between mobile and desktop announcements
+            const isMobile = window.innerWidth <= 700;
+
+            if (isMobile) {
+                // Mobile: Show full-screen overlay
+                const overlay = document.getElementById('scan-announcement-overlay');
+                const nameEl = document.getElementById('scan-announcement-name');
+                if (overlay && nameEl) {
+                    nameEl.textContent = name;
+                    overlay.style.display = 'flex';
+                    setTimeout(() => overlay.classList.add('visible'), 10); // Trigger transition
+
+                    const hideOverlay = () => {
+                        overlay.classList.remove('visible');
+                        setTimeout(() => overlay.style.display = 'none', 300);
+                        overlay.removeEventListener('click', hideOverlay);
+                    };
+
+                    setTimeout(hideOverlay, 3000); // Auto-hide after 3 seconds
+                    overlay.addEventListener('click', hideOverlay); // Also hide on click
+                }
+            } else {
+                // Desktop: Show original welcome banner
                 let adminWelcomeMsg = document.getElementById('admin-welcome-message');
                 if (!adminWelcomeMsg) {
                     adminWelcomeMsg = document.createElement('div');
                     adminWelcomeMsg.id = 'admin-welcome-message';
-                    adminWelcomeMsg.className = 'not-signed-in-message'; // Using same style class
-
-                    // Insert after the course buttons container
                     const courseButtonsContainer = document.getElementById('course-buttons-container');
                     if (courseButtonsContainer && courseButtonsContainer.nextSibling) {
                         courseButtonsContainer.parentNode.insertBefore(adminWelcomeMsg, courseButtonsContainer.nextSibling);
-                    } else {
-                        // Fallback - after header
-                        const appHeader = document.querySelector('.app-header');
-                        if (appHeader) {
-                            appHeader.parentNode.insertBefore(adminWelcomeMsg, appHeader.nextSibling);
-                        }
                     }
                 }
-
-                // Update the admin welcome message with the name
-                adminWelcomeMsg.innerHTML = `
-            <h3><i class="fas fa-check-circle"></i> Welcome<br></h3>
-			<h2 style="margin-top: 10px; font-weight: bold;"> ${name}!</h2>
-            <h3>Your attendance has been recorded.</h3>
-        `;
-
-                // Add CSS to make message appear with animation
+                adminWelcomeMsg.innerHTML = `<h3><i class="fas fa-check-circle"></i> Welcome, <strong>${name}</strong>!</h3><p>Your attendance has been recorded.</p>`;
                 adminWelcomeMsg.style.animation = 'none';
-                adminWelcomeMsg.offsetHeight; // Trigger reflow
+                void adminWelcomeMsg.offsetHeight; // Reflow
                 adminWelcomeMsg.style.animation = 'fadeIn 0.5s ease-in-out';
-
-                // Auto-hide the message after some time
                 setTimeout(() => {
                     adminWelcomeMsg.style.animation = 'fadeOut 0.5s ease-in-out forwards';
-                    setTimeout(() => {
-                        if (adminWelcomeMsg.parentNode) {
-                            adminWelcomeMsg.parentNode.removeChild(adminWelcomeMsg);
-                        }
-                    }, 500);
-                }, 10000); // Display for 10 seconds
+                    setTimeout(() => { if (adminWelcomeMsg) adminWelcomeMsg.remove(); }, 500);
+                }, 5000);
             }
 
-            // Show success notification
             showImprovedNotification('success', 'Tag scanned', `Name: ${name}<br>UID: ${serialNumber}`);
 
-            // If online and signed in as admin, append log to sheet
             if (isOnline && isSignedIn && isAdmin) {
                 try {
                     await appendLogToSheet(newLog);
-                    console.log('Log synced successfully');
                 } catch (err) {
                     console.error('Error appending log:', err);
-                    showImprovedNotification('warning', 'Sync Warning', 'Failed to sync immediately, but log saved locally');
                 }
             }
         }
