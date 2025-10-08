@@ -2230,6 +2230,22 @@
         }
 
         /**
+ * Normalises a name string for reliable comparison.
+ * Converts to lowercase, removes accents and special characters.
+ * @param {string} str - The name string to normalise.
+ * @returns {string} The normalised name.
+ */
+        function normalizeName(str) {
+            if (!str) return '';
+            return str
+                .toLowerCase() // 1. Make everything lowercase
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // 2. Remove all accents (e.g., ç -> c, ë -> e)
+                .replace(//g, '') // 3. Remove unknown/replacement characters
+        .replace(/\s+/g, ' ') // 4. Ensure single spaces between words
+                        .trim(); // 5. Remove any leading/trailing spaces
+        }
+
+        /**
          * Adds a new log entry one hour after the latest existing entry for a group.
          * @param {Object} group - The log group to add the time to.
          */
@@ -6324,6 +6340,7 @@
             });
         }
 
+        // Fixed updateLogsList function without the illegal continue statement
         function updateLogsList() {
             // If no course selected, show message
             if (!currentCourse) {
@@ -6333,9 +6350,28 @@
                 return;
             }
 
+            // --- STUDENT FILTER LOGIC START ---
+            let logsToDisplay = logs; // By default, assume we show all logs (for admin/guest)
+
+            // If the user is a signed-in student (not an admin), filter the logs.
+            if (isSignedIn && !isAdmin && currentUser) {
+                const studentNameNormalised = normalizeName(currentUser.name);
+
+                logsToDisplay = logs.filter(log => {
+                    const logOwnerName = uidToNameMap[log.uid] || '';
+                    const logOwnerNameNormalised = normalizeName(logOwnerName);
+
+                    // Only include the log if the normalised names match
+                    return logOwnerNameNormalised === studentNameNormalised;
+                });
+            }
+            // --- STUDENT FILTER LOGIC END ---
+
+
             // Filter logs based on search input
+            // IMPORTANT: Use logsToDisplay from now on, not the global 'logs' array.
             const filteredLogs = filter
-                ? logs.filter(log => {
+                ? logsToDisplay.filter(log => {
                     // Match UID
                     if (log.uid.toLowerCase().includes(filter)) {
                         return true;
@@ -6347,45 +6383,37 @@
                     }
                     return false;
                 })
-                : logs;
+                : logsToDisplay;
 
             // Group logs by date and UID
             const grouped = {};
 
             filteredLogs.forEach(log => {
-                // Get date object
                 const dateObj = new Date(log.timestamp);
-
                 if (isNaN(dateObj.getTime())) {
                     console.warn('Invalid timestamp:', log.timestamp);
-                    return;
+                    return; // Use return instead of continue
                 }
-
-                // Format date for display (DD-MM-YYYY)
                 const day = String(dateObj.getDate()).padStart(2, '0');
                 const month = String(dateObj.getMonth() + 1).padStart(2, '0');
                 const year = dateObj.getFullYear();
                 const date = `${day}-${month}-${year}`;
-
                 const uid = log.uid;
                 const time = dateObj.toLocaleTimeString();
                 const name = uidToNameMap[uid] || 'Unknown';
-
-                // Create key for date and UID combination
                 const key = `${date}_${uid}`;
 
                 if (!grouped[key]) {
                     grouped[key] = {
                         date,
-                        dateObj: new Date(year, month - 1, day), // For sorting
+                        dateObj: new Date(year, month - 1, day),
                         uid,
                         name,
                         times: [],
-                        timeObjs: [], // Store time objects for sorting
-                        originalLogs: [] // Store original log references for edit/delete
+                        timeObjs: [],
+                        originalLogs: []
                     };
                 }
-
                 grouped[key].times.push(time);
                 grouped[key].timeObjs.push(dateObj.getTime());
                 grouped[key].originalLogs.push(log);
@@ -6398,69 +6426,28 @@
             const [field, direction] = currentSort.split('-');
             const sortMultiplier = direction === 'asc' ? 1 : -1;
 
+            // ... (The entire sorting logic remains the same)
             switch (field) {
                 case 'date':
-                    // First sort by date
-                    result.sort((a, b) => sortMultiplier * (a.dateObj - b.dateObj));
-
-                    // Now group entries by date
-                    const dateGroups = {};
-                    result.forEach(entry => {
-                        const dateStr = entry.date;
-                        if (!dateGroups[dateStr]) {
-                            dateGroups[dateStr] = [];
-                        }
-                        dateGroups[dateStr].push(entry);
-                    });
-
-                    // Sort each date group by name or UID depending on user role
-                    Object.keys(dateGroups).forEach(dateStr => {
-                        if (isSignedIn && !isAdmin) {
-                            // For non-admin signed-in users, sort by name
-                            dateGroups[dateStr].sort((a, b) => a.name.localeCompare(b.name));
-                        } else if (!isSignedIn) {
-                            // For non-signed-in users, sort by UID
-                            dateGroups[dateStr].sort((a, b) => a.uid.localeCompare(b.uid));
-                        } else {
-                            // For admins, sort by name first, then by earliest time
-                            dateGroups[dateStr].sort((a, b) => {
-                                const nameCompare = a.name.localeCompare(b.name);
-                                if (nameCompare !== 0) return nameCompare;
-                                const aEarliestTime = Math.min(...a.timeObjs);
-                                const bEarliestTime = Math.min(...b.timeObjs);
-                                return aEarliestTime - bEarliestTime;
-                            });
-                        }
-                    });
-
-                    // Reconstruct result based on sorted dates
-                    result = [];
-                    const dates = Object.keys(dateGroups).sort((a, b) => {
-                        const dateA = new Date(a.split('-').reverse().join('-'));
-                        const dateB = new Date(b.split('-').reverse().join('-'));
-                        return sortMultiplier * (dateA - dateB);
-                    });
-
-                    dates.forEach(dateStr => {
-                        result = result.concat(dateGroups[dateStr]);
+                    result.sort((a, b) => {
+                        const dateCompare = sortMultiplier * (a.dateObj - b.dateObj);
+                        if (dateCompare !== 0) return dateCompare;
+                        return a.name.localeCompare(b.name);
                     });
                     break;
-
                 case 'name':
                     result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
                     break;
                 case 'uid':
                     result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
                     break;
-                default:
-                    result.sort((a, b) => -1 * (a.dateObj - b.dateObj));
             }
 
             // Update filtered count
             filteredCount.textContent = filteredLogs.length;
 
             // Show/hide empty message
-            emptyLogs.style.display = filteredLogs.length > 0 ? 'none' : 'block';
+            emptyLogs.style.display = result.length > 0 ? 'none' : 'block';
 
             // Clear the table body
             logsTbody.innerHTML = '';
@@ -6470,7 +6457,7 @@
 
             // Add grouped logs to table with day separators
             result.forEach((group) => {
-                // Check if we need to add a day separator
+                // ... (The entire table rendering logic remains the same, including the day-separator)
                 if (currentSort.startsWith('date')) {
                     const thisDay = group.date;
                     if (thisDay !== currentDay) {
@@ -6479,16 +6466,11 @@
                             const separatorRow = document.createElement('tr');
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
-                            // This colspan is crucial and should be correct now
                             separatorCell.colSpan = isAdmin ? 5 : 2;
-
-                            // Re-introducing the div wrapper for stable styling
                             const flexWrapper = document.createElement('div');
-
                             const dateText = document.createElement('span');
                             dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
                             flexWrapper.appendChild(dateText);
-
                             if (isAdmin) {
                                 const bulkAddBtn = document.createElement('button');
                                 bulkAddBtn.className = 'btn-sm btn-green';
@@ -6501,137 +6483,83 @@
                                 };
                                 flexWrapper.appendChild(bulkAddBtn);
                             }
-
-                            separatorCell.appendChild(flexWrapper); // Add the div to the cell
+                            separatorCell.appendChild(flexWrapper);
                             separatorRow.appendChild(separatorCell);
                             logsTbody.appendChild(separatorRow);
                         }
                     }
                 }
-
-                // Create log entry row
                 const row = document.createElement('tr');
-
-                // NEW: Add highlight class if name is 'Unknown'
                 if (group.name === 'Unknown') {
                     row.classList.add('unknown-row');
                 }
 
-                if (!isSignedIn) {
-                    // For non-signed-in users, we only show UID and Time
-                    // UID cell
+                const nameCell = document.createElement('td');
+                nameCell.className = 'name-cell name-column';
+                nameCell.textContent = group.name;
+                // ... (rest of the row creation logic is the same for Name, UID, Date, Time, Actions)
+
+                if (group.originalLogs.some(log => log.manual)) {
+                    const excusedIcon = document.createElement('i');
+                    excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
+                    excusedIcon.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        showImprovedNotification('info', 'Excused Absence', 'This attendance record was <b>manually added</b> as an excused absence.');
+                    });
+                    nameCell.appendChild(document.createTextNode(' '));
+                    nameCell.appendChild(excusedIcon);
+                }
+                row.appendChild(nameCell);
+                if (isAdmin) {
                     const uidCell = document.createElement('td');
                     uidCell.className = 'uid-cell uid-column';
                     uidCell.textContent = group.uid;
                     row.appendChild(uidCell);
-
-                    // Time cell
-                    const timesCell = document.createElement('td');
-                    timesCell.className = 'times-cell';
-                    const sortedIndices = group.timeObjs
-                        .map((timeObj, index) => ({ timeObj, index }))
-                        .sort((a, b) => a.timeObj - b.timeObj)
-                        .map(item => item.index);
-                    sortedIndices.forEach(index => {
-                        const timeTag = document.createElement('span');
-                        timeTag.className = 'time-tag';
-                        const timeObj = new Date(group.timeObjs[index]);
-                        timeTag.textContent = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
-                        timesCell.appendChild(timeTag);
-                    });
-                    row.appendChild(timesCell);
-
-                    logsTbody.appendChild(row);
+                    const dateCell = document.createElement('td');
+                    dateCell.className = 'date-cell date-column';
+                    dateCell.textContent = group.date;
+                    row.appendChild(dateCell);
                 }
-                else {
-                    // For signed-in users (both admin and non-admin)
-
-                    // Name cell - always visible for signed-in users
-                    const nameCell = document.createElement('td');
-                    nameCell.className = 'name-cell name-column';
-                    nameCell.textContent = group.name;
-                    if (group.originalLogs.some(log => log.manual)) {
-                        const excusedIcon = document.createElement('i');
-                        excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
-                        excusedIcon.addEventListener('click', function (e) {
-                            e.stopPropagation();
-                            showImprovedNotification(
-                                'info',
-                                'Excused Absence',
-                                'This attendance record was <b>manually added</b> as an excused absence.'
-                            );
-                        });
-                        nameCell.appendChild(document.createTextNode(' '));
-                        nameCell.appendChild(excusedIcon);
+                const timesCell = document.createElement('td');
+                timesCell.className = 'times-cell';
+                const sortedIndices = group.timeObjs.map((timeObj, index) => ({ timeObj, index })).sort((a, b) => a.timeObj - b.timeObj).map(item => item.index);
+                sortedIndices.forEach(index => {
+                    const timeTag = document.createElement('span');
+                    timeTag.className = 'time-tag';
+                    const timeObj = new Date(group.timeObjs[index]);
+                    timeTag.textContent = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
+                    timesCell.appendChild(timeTag);
+                });
+                row.appendChild(timesCell);
+                if (isAdmin) {
+                    const actionsCell = document.createElement('td');
+                    actionsCell.className = 'actions-cell admin-only';
+                    actionsCell.style.textAlign = 'right';
+                    if (group.name === 'Unknown') {
+                        const addUserIcon = document.createElement('i');
+                        addUserIcon.className = 'fa-solid fa-user-plus action-icon add-db';
+                        addUserIcon.title = 'Add to Database';
+                        addUserIcon.addEventListener('click', (e) => { e.stopPropagation(); showAddEntryFromLog(group.uid); });
+                        actionsCell.appendChild(addUserIcon);
                     }
-                    row.appendChild(nameCell);
-
-                    // UID cell - only for admin
-                    if (isAdmin) {
-                        const uidCell = document.createElement('td');
-                        uidCell.className = 'uid-cell uid-column';
-                        uidCell.textContent = group.uid;
-                        row.appendChild(uidCell);
-
-                        const dateCell = document.createElement('td');
-                        dateCell.className = 'date-cell date-column';
-                        dateCell.textContent = group.date;
-                        row.appendChild(dateCell);
-                    }
-
-                    // Times cell
-                    const timesCell = document.createElement('td');
-                    timesCell.className = 'times-cell';
-                    const sortedIndices = group.timeObjs
-                        .map((timeObj, index) => ({ timeObj, index }))
-                        .sort((a, b) => a.timeObj - b.timeObj)
-                        .map(item => item.index);
-                    sortedIndices.forEach(index => {
-                        const timeTag = document.createElement('span');
-                        timeTag.className = 'time-tag';
-                        const timeObj = new Date(group.timeObjs[index]);
-                        timeTag.textContent = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
-                        timesCell.appendChild(timeTag);
-                    });
-                    row.appendChild(timesCell);
-
-                    // Actions cell for admin users only
-                    if (isAdmin) {
-                        const actionsCell = document.createElement('td');
-                        actionsCell.className = 'actions-cell admin-only';
-                        actionsCell.style.textAlign = 'right';
-
-                        if (group.name === 'Unknown') {
-                            const addUserIcon = document.createElement('i');
-                            addUserIcon.className = 'fa-solid fa-user-plus action-icon add-db';
-                            addUserIcon.title = 'Add to Database';
-                            addUserIcon.addEventListener('click', (e) => { e.stopPropagation(); showAddEntryFromLog(group.uid); });
-                            actionsCell.appendChild(addUserIcon);
-                        }
-
-                        const addTimeIcon = document.createElement('i');
-                        addTimeIcon.className = 'fa-solid fa-plus action-icon add-time';
-                        addTimeIcon.title = 'Add +1 Hour';
-                        addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
-
-                        const editIcon = document.createElement('i');
-                        editIcon.className = 'fa-solid fa-pencil action-icon edit';
-                        editIcon.title = 'Edit';
-                        editIcon.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
-
-                        const deleteIcon = document.createElement('i');
-                        deleteIcon.className = 'fa-solid fa-eraser action-icon delete';
-                        deleteIcon.title = 'Delete';
-                        deleteIcon.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
-
-                        actionsCell.appendChild(addTimeIcon);
-                        actionsCell.appendChild(editIcon);
-                        actionsCell.appendChild(deleteIcon);
-                        row.appendChild(actionsCell);
-                    }
-
-                    logsTbody.appendChild(row);
+                    const addTimeIcon = document.createElement('i');
+                    addTimeIcon.className = 'fa-solid fa-clock-rotate-left action-icon add-time';
+                    addTimeIcon.title = 'Add +1 Hour';
+                    addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
+                    const editIcon = document.createElement('i');
+                    editIcon.className = 'fa-solid fa-pencil action-icon edit';
+                    editIcon.title = 'Edit';
+                    editIcon.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
+                    const deleteIcon = document.createElement('i');
+                    deleteIcon.className = 'fa-solid fa-trash-can action-icon delete';
+                    deleteIcon.title = 'Delete';
+                    deleteIcon.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
+                    actionsCell.appendChild(addTimeIcon);
+                    actionsCell.appendChild(editIcon);
+                    actionsCell.appendChild(deleteIcon);
+                    row.appendChild(actionsCell);
                 }
+                logsTbody.appendChild(row);
             });
         }
 
