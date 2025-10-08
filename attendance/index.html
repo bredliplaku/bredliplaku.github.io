@@ -292,11 +292,24 @@
         }
 
         .tab-content {
-            display: none;
+            /* Don't use display: none, we'll control visibility with opacity */
+            opacity: 0;
+            visibility: hidden;
+            height: 0;
+            overflow: hidden;
+            transition: opacity 0.3s ease-in-out;
         }
 
         .tab-content.active {
-            display: block;
+            opacity: 1;
+            visibility: visible;
+            height: auto;
+            overflow: visible;
+        }
+
+        .table-container.reloading {
+            opacity: 0.3;
+            transition: opacity 0.2s ease-in-out;
         }
 
         .actions-cell .action-icon {
@@ -1627,12 +1640,6 @@
                 padding: 0;
             }
 
-            .course-button {
-                padding: 12px 18px;
-                font-size: 1em;
-                flex-grow: 1;
-            }
-
             /* Better Table View */
             .logs-table {
                 font-size: 1em;
@@ -1721,18 +1728,6 @@
                 width: 100%;
             }
 
-            .course-buttons-container {
-                display: flex;
-                flex-wrap: nowrap;
-                /* Prevent wrapping */
-                overflow-x: auto;
-                /* Enable horizontal scroll */
-                -webkit-overflow-scrolling: touch;
-                /* Smooth scroll on iOS */
-                padding-bottom: 10px;
-                /* Add space for scrollbar */
-            }
-
             .course-button {
                 flex: 0 0 auto;
                 /* Prevent buttons from shrinking */
@@ -1772,13 +1767,24 @@
             }
         }
 
+        body.is-loading {
+            overflow: hidden;
+        }
+
         /* --- Skeleton Loader Styles --- */
         .skeleton-loader {
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 20px;
+            position: fixed;
+            /* Makes it an overlay */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10000;
+            /* Ensure it's on top of everything */
+            background-color: var(--background-color);
+            /* Match page background */
             opacity: 1;
-            transition: opacity 0.5s ease-out;
+            transition: opacity 0.5s ease-out, visibility 0.5s ease-out;
         }
 
         .skeleton-loader.hidden {
@@ -1874,17 +1880,14 @@
             height: 200px;
         }
 
+        .dark-mode .skeleton-header,
         .dark-mode .skeleton-line,
         .dark-mode .skeleton-info-item,
         .dark-mode .skeleton-course-btn,
         .dark-mode .skeleton-module-header,
         .dark-mode .skeleton-module-content {
-            background: #333;
-            background-image: linear-gradient(to right, #333 0%, #444 50%, #333 100%);
-        }
-
-        .dark-mode .skeleton-header {
-            background-color: #222;
+            background: #2c2c2e;
+            background-image: linear-gradient(to right, #2c2c2e 0%, #3a3a3c 50%, #2c2c2e 100%);
         }
     </style>
 </head>
@@ -2301,17 +2304,31 @@
             // Set up tab navigation
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.addEventListener('click', () => {
-                    // Prevent non-admin users from accessing the database tab
-                    if (tab.getAttribute('data-tab') === 'database-tab' && !isAdmin) {
+                    const tabId = tab.getAttribute('data-tab');
+                    const newTabContent = document.getElementById(tabId);
+                    const oldTabContent = document.querySelector('.tab-content.active');
+
+                    // Do nothing if clicking the already active tab
+                    if (oldTabContent === newTabContent) {
                         return;
                     }
-                    // Remove active class from all tabs and tab contents
+
+                    // Prevent non-admins from accessing the database tab
+                    if (tabId === 'database-tab' && !isAdmin) {
+                        return;
+                    }
+
+                    // Update the active state on the tab buttons
                     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                    // Add active class to clicked tab and corresponding content
                     tab.classList.add('active');
-                    const contentId = tab.getAttribute('data-tab'); // Used for showing the content div
-                    document.getElementById(contentId).classList.add('active');
+
+                    // Transition the content panes
+                    if (oldTabContent) {
+                        oldTabContent.classList.remove('active');
+                    }
+                    if (newTabContent) {
+                        newTabContent.classList.add('active');
+                    }
                 });
             });
 
@@ -2392,16 +2409,24 @@
             const loadingIndicator = document.getElementById('app-loading');
             const mainContainer = document.getElementById('main-container');
 
+            // Start fading out the loader
             if (loadingIndicator) {
                 loadingIndicator.classList.add('hidden');
-                setTimeout(() => {
-                    loadingIndicator.style.display = 'none';
-                }, 500); // Match transition duration
             }
 
-            if (mainContainer) {
-                mainContainer.classList.remove('content-hidden');
-            }
+            // After the fade-out is complete (500ms), hide the loader and show the content.
+            setTimeout(() => {
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
+                if (mainContainer) {
+                    mainContainer.classList.remove('content-hidden');
+                }
+                // Re-enable scrolling
+                document.body.classList.remove('is-loading');
+
+            }, 500); // This MUST match the CSS transition duration
+
             isInitializing = false;
             criticalErrorsOnly = false;
             processPendingNotifications();
@@ -3296,6 +3321,7 @@
         * Sets up event listeners, checks NFC support, and prepares the UI.
         */
         function init() {
+            document.body.classList.add('is-loading');
             isInitializing = true;
 
             setupThemeToggle();
@@ -3357,68 +3383,6 @@
 
             // Handle auth redirect
             checkAuthRedirect();
-
-            // Override handleCourseChange to use improved local storage
-            const originalHandleCourseChange = handleCourseChange;
-            handleCourseChange = function () {
-                logs = []; // Clear current logs before loading new ones
-
-                if (!currentCourse) {
-                    updateUI();
-                    emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
-                    return;
-                }
-
-                const titleElement = document.querySelector('h1');
-                if (titleElement) {
-                    const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                    titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
-                }
-
-                // ALWAYS load from localStorage first to avoid data loss
-                const localLogs = restoreLogsFromLocalStorage();
-                if (localLogs && localLogs.length > 0) {
-                    logs = localLogs;
-                    console.log(`Loaded ${logs.length} logs from localStorage for ${currentCourse}`);
-                }
-
-                // Update UI with local data immediately
-                updateUI();
-
-                // Then, if we're online and signed in, try to fetch from server and merge
-                if (isOnline && isSignedIn) {
-                    fetchLogsFromSheet()
-                        .then((fetchedLogs) => {
-                            if (fetchedLogs && fetchedLogs.length > 0) {
-                                // Don't replace local logs - merge them
-                                const mergedLogs = mergeLogs(logs, fetchedLogs);
-                                if (mergedLogs.length !== logs.length) {
-                                    logs = mergedLogs;
-                                    saveLogsToLocalStorage(); // Save the merged logs back to localStorage
-                                    updateUI();
-                                }
-                            }
-                            updatePageTitle();
-                        })
-                        .catch(error => {
-                            console.error('Error fetching logs:', error);
-
-                            // On error, just keep using the local logs - don't clear them!
-                            const titleElement = document.querySelector('h1');
-                            if (titleElement) {
-                                const courseName = currentCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                                titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> ${courseName} Attendance`;
-                            }
-
-                            if (!isInitializing) {
-                                showImprovedNotification('warning', 'Sync Error',
-                                    `Could not sync with server, using local data`);
-                            }
-                        });
-                } else {
-                    updatePageTitle();
-                }
-            };
 
             // Override syncLogsWithSheet to track sync status
             const originalSyncLogs = syncLogsWithSheet;
@@ -4208,89 +4172,45 @@
             currentSort = 'date-desc';
         }
 
-        function handleCourseChange() {
-            // Cancel any pending requests for the previous course
-            if (activeRequests.size > 0) {
-                activeRequests.forEach((request, course) => {
-                    console.log(`Cancelling pending request for course: ${course}`);
-                    request.cancelled = true;
-                });
-                activeRequests.clear();
-            }
-
-            // Clear logs immediately
-            logs = [];
-
-            const targetCourse = currentCourse;
-            if (!targetCourse) {
-                updateUI();
-                emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course.';
-                return;
-            }
-
-            // Create a new request object for this course change
-            const requestId = ++currentRequestId;
-            const request = {
-                id: requestId,
-                course: targetCourse,
-                cancelled: false,
-                timestamp: Date.now()
-            };
-
-            activeRequests.set(targetCourse, request);
-
-            console.log(`Starting course change to: ${targetCourse} (request #${requestId})`);
-
-            // Update UI to show loading
-            const titleElement = document.querySelector('h1');
-            if (titleElement) {
-                const courseName = targetCourse.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                titleElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Loading ${courseName}...`;
-            }
-
-            // Save the current course immediately
-            localStorage.setItem('last_active_course', targetCourse);
-
-            // Load from localStorage for THIS specific course
-            const storageKey = `${LOGS_STORAGE_KEY}_${targetCourse}`;
-            let localLogs = [];
-
-            try {
-                const storedLogs = localStorage.getItem(storageKey);
-                if (storedLogs) {
-                    localLogs = JSON.parse(storedLogs);
-
-                    // Verify we're still on the same course
-                    if (!request.cancelled && currentCourse === targetCourse) {
-                        logs = localLogs;
-                        console.log(`Loaded ${logs.length} logs from localStorage for ${targetCourse}`);
-                        updateUI();
-                    } else {
-                        console.log(`Course changed while loading localStorage, discarding data for ${targetCourse}`);
-                        return;
-                    }
+        function handleCourseChange(courseName) {
+            // 1. Cancel any other pending requests.
+            activeRequests.forEach((req, course) => {
+                if (course !== courseName) {
+                    console.log(`Cancelling pending request for previous course: ${course}`);
+                    req.cancelled = true;
                 }
-            } catch (e) {
-                console.error(`Error parsing stored logs for ${targetCourse}:`, e);
-            }
+            });
+            activeRequests.clear();
 
-            // Fetch from server if online
+            // 2. Set the new course and update UI to show loading.
+            currentCourse = courseName;
+            localStorage.setItem('last_active_course', currentCourse);
+            updatePageTitle(); // Update title to show loading state
+
+            // 3. Immediately load from local storage for a fast UI response.
+            logs = restoreLogsFromLocalStorage();
+            updateUI(); // Show local data right away
+
+            // 4. Create a new, trackable request for this course.
+            const requestId = ++currentRequestId;
+            const request = { id: requestId, course: currentCourse, cancelled: false };
+            activeRequests.set(currentCourse, request);
+
+            // 5. If online, safely fetch from the network.
             if (isOnline && isSignedIn) {
-                fetchLogsWithRequestTracking(targetCourse, request)
+                console.log(`Starting safe fetch for ${currentCourse} (Request #${requestId})`);
+                fetchLogsWithRequestTracking(currentCourse, request)
                     .then((success) => {
                         if (success) {
-                            updatePageTitle();
+                            console.log(`Successfully completed fetch for ${currentCourse}`);
                         }
                     })
                     .finally(() => {
-                        // Clean up the request
-                        if (activeRequests.get(targetCourse)?.id === requestId) {
-                            activeRequests.delete(targetCourse);
+                        // Clean up the request from our tracker.
+                        if (activeRequests.get(currentCourse)?.id === requestId) {
+                            activeRequests.delete(currentCourse);
                         }
                     });
-            } else {
-                updatePageTitle();
-                activeRequests.delete(targetCourse);
             }
         }
 
@@ -6336,225 +6256,182 @@
 
         // Fixed updateLogsList function without the illegal continue statement
         function updateLogsList() {
-            // If no course selected, show message
-            if (!currentCourse) {
-                emptyLogs.style.display = 'block';
-                filteredCount.textContent = '0';
-                logsTbody.innerHTML = '';
-                return;
-            }
+            const tableContainer = document.querySelector('#scanner-tab .table-container');
 
-            // --- STUDENT FILTER LOGIC START ---
-            let logsToDisplay = logs; // By default, assume we show all logs (for admin/guest)
+            // Start by fading the table out
+            tableContainer.classList.add('reloading');
 
-            // If the user is a signed-in student (not an admin), filter the logs.
-            if (isSignedIn && !isAdmin && currentUser) {
-                const studentNameNormalised = normalizeName(currentUser.name);
+            // Use a short timeout to allow the fade-out animation to start
+            // before the browser freezes to rebuild the table.
+            setTimeout(() => {
 
-                logsToDisplay = logs.filter(log => {
-                    const logOwnerName = uidToNameMap[log.uid] || '';
-                    const logOwnerNameNormalised = normalizeName(logOwnerName);
-
-                    // Only include the log if the normalised names match
-                    return logOwnerNameNormalised === studentNameNormalised;
-                });
-            }
-            // --- STUDENT FILTER LOGIC END ---
-
-
-            // Filter logs based on search input
-            // IMPORTANT: Use logsToDisplay from now on, not the global 'logs' array.
-            const filteredLogs = filter
-                ? logsToDisplay.filter(log => {
-                    // Match UID
-                    if (log.uid.toLowerCase().includes(filter)) {
-                        return true;
-                    }
-                    // Match name if in database
-                    const name = uidToNameMap[log.uid];
-                    if (name && name.toLowerCase().includes(filter)) {
-                        return true;
-                    }
-                    return false;
-                })
-                : logsToDisplay;
-
-            // Group logs by date and UID
-            const grouped = {};
-
-            filteredLogs.forEach(log => {
-                const dateObj = new Date(log.timestamp);
-                if (isNaN(dateObj.getTime())) {
-                    console.warn('Invalid timestamp:', log.timestamp);
-                    return; // Use return instead of continue
+                if (!currentCourse) {
+                    emptyLogs.style.display = 'block';
+                    filteredCount.textContent = '0';
+                    logsTbody.innerHTML = '';
+                    tableContainer.classList.remove('reloading'); // Fade back in
+                    return;
                 }
-                const day = String(dateObj.getDate()).padStart(2, '0');
-                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-                const year = dateObj.getFullYear();
-                const date = `${day}-${month}-${year}`;
-                const uid = log.uid;
-                const time = dateObj.toLocaleTimeString();
-                const name = uidToNameMap[uid] || 'Unknown';
-                const key = `${date}_${uid}`;
 
-                if (!grouped[key]) {
-                    grouped[key] = {
-                        date,
-                        dateObj: new Date(year, month - 1, day),
-                        uid,
-                        name,
-                        times: [],
-                        timeObjs: [],
-                        originalLogs: []
-                    };
-                }
-                grouped[key].times.push(time);
-                grouped[key].timeObjs.push(dateObj.getTime());
-                grouped[key].originalLogs.push(log);
-            });
-
-            // Convert to array
-            let result = Object.values(grouped);
-
-            // Apply sort based on currentSort value
-            const [field, direction] = currentSort.split('-');
-            const sortMultiplier = direction === 'asc' ? 1 : -1;
-
-            // ... (The entire sorting logic remains the same)
-            switch (field) {
-                case 'date':
-                    result.sort((a, b) => {
-                        const dateCompare = sortMultiplier * (a.dateObj - b.dateObj);
-                        if (dateCompare !== 0) return dateCompare;
-                        return a.name.localeCompare(b.name);
+                let logsToDisplay = logs;
+                if (isSignedIn && !isAdmin && currentUser) {
+                    const studentNameNormalised = normalizeName(currentUser.name);
+                    logsToDisplay = logs.filter(log => {
+                        const logOwnerName = uidToNameMap[log.uid] || '';
+                        const logOwnerNameNormalised = normalizeName(logOwnerName);
+                        return logOwnerNameNormalised === studentNameNormalised;
                     });
-                    break;
-                case 'name':
-                    result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
-                    break;
-                case 'uid':
-                    result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
-                    break;
-            }
+                }
 
-            // Update filtered count
-            filteredCount.textContent = filteredLogs.length;
+                const filteredLogs = filter ?
+                    logsToDisplay.filter(log => {
+                        if (log.uid.toLowerCase().includes(filter)) return true;
+                        const name = uidToNameMap[log.uid];
+                        if (name && name.toLowerCase().includes(filter)) return true;
+                        return false;
+                    }) :
+                    logsToDisplay;
 
-            // Show/hide empty message
-            emptyLogs.style.display = result.length > 0 ? 'none' : 'block';
+                const grouped = {};
+                filteredLogs.forEach(log => {
+                    const dateObj = new Date(log.timestamp);
+                    if (isNaN(dateObj.getTime())) { return; }
+                    const day = String(dateObj.getDate()).padStart(2, '0');
+                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const year = dateObj.getFullYear();
+                    const date = `${day}-${month}-${year}`;
+                    const uid = log.uid;
+                    const time = dateObj.toLocaleTimeString();
+                    const name = uidToNameMap[uid] || 'Unknown';
+                    const key = `${date}_${uid}`;
+                    if (!grouped[key]) {
+                        grouped[key] = { date, dateObj: new Date(year, month - 1, day), uid, name, times: [], timeObjs: [], originalLogs: [] };
+                    }
+                    grouped[key].times.push(time);
+                    grouped[key].timeObjs.push(dateObj.getTime());
+                    grouped[key].originalLogs.push(log);
+                });
 
-            // Clear the table body
-            logsTbody.innerHTML = '';
+                let result = Object.values(grouped);
+                const [field, direction] = currentSort.split('-');
+                const sortMultiplier = direction === 'asc' ? 1 : -1;
+                switch (field) {
+                    case 'date':
+                        result.sort((a, b) => {
+                            const dateCompare = sortMultiplier * (a.dateObj - b.dateObj);
+                            if (dateCompare !== 0) return dateCompare;
+                            return a.name.localeCompare(b.name);
+                        });
+                        break;
+                    case 'name':
+                        result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
+                        break;
+                    case 'uid':
+                        result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
+                        break;
+                }
 
-            // Track current day for separators
-            let currentDay = null;
-
-            // Add grouped logs to table with day separators
-            result.forEach((group) => {
-                // ... (The entire table rendering logic remains the same, including the day-separator)
-                if (currentSort.startsWith('date')) {
-                    const thisDay = group.date;
-                    if (thisDay !== currentDay) {
-                        currentDay = thisDay;
-                        if (isSignedIn) {
-                            const separatorRow = document.createElement('tr');
-                            separatorRow.className = 'day-separator';
-                            const separatorCell = document.createElement('td');
-                            separatorCell.colSpan = isAdmin ? 5 : 2;
-                            const flexWrapper = document.createElement('div');
-                            const dateText = document.createElement('span');
-                            dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                            flexWrapper.appendChild(dateText);
-                            if (isAdmin) {
-                                const bulkAddBtn = document.createElement('button');
-                                bulkAddBtn.className = 'btn-sm btn-green';
-                                bulkAddBtn.innerHTML = '<i class="fa-solid fa-calendar-plus"></i>';
-                                bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
-                                bulkAddBtn.style.fontWeight = '500';
-                                bulkAddBtn.onclick = (e) => {
-                                    e.stopPropagation();
-                                    addPlusOneHourToDay(currentDay);
-                                };
-                                flexWrapper.appendChild(bulkAddBtn);
+                filteredCount.textContent = filteredLogs.length;
+                emptyLogs.style.display = result.length > 0 ? 'none' : 'block';
+                logsTbody.innerHTML = '';
+                let currentDay = null;
+                result.forEach((group) => {
+                    if (currentSort.startsWith('date')) {
+                        const thisDay = group.date;
+                        if (thisDay !== currentDay) {
+                            currentDay = thisDay;
+                            if (isSignedIn) {
+                                const separatorRow = document.createElement('tr');
+                                separatorRow.className = 'day-separator';
+                                const separatorCell = document.createElement('td');
+                                separatorCell.colSpan = isAdmin ? 5 : 2;
+                                const flexWrapper = document.createElement('div');
+                                const dateText = document.createElement('span');
+                                dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                                flexWrapper.appendChild(dateText);
+                                if (isAdmin) {
+                                    const bulkAddBtn = document.createElement('button');
+                                    bulkAddBtn.className = 'btn-sm btn-green';
+                                    bulkAddBtn.innerHTML = '<i class="fa-solid fa-calendar-plus"></i>';
+                                    bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
+                                    bulkAddBtn.style.fontWeight = '500';
+                                    bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(currentDay); };
+                                    flexWrapper.appendChild(bulkAddBtn);
+                                }
+                                separatorCell.appendChild(flexWrapper);
+                                separatorRow.appendChild(separatorCell);
+                                logsTbody.appendChild(separatorRow);
                             }
-                            separatorCell.appendChild(flexWrapper);
-                            separatorRow.appendChild(separatorCell);
-                            logsTbody.appendChild(separatorRow);
                         }
                     }
-                }
-                const row = document.createElement('tr');
-                if (group.name === 'Unknown') {
-                    row.classList.add('unknown-row');
-                }
-
-                const nameCell = document.createElement('td');
-                nameCell.className = 'name-cell name-column';
-                nameCell.textContent = group.name;
-                // ... (rest of the row creation logic is the same for Name, UID, Date, Time, Actions)
-
-                if (group.originalLogs.some(log => log.manual)) {
-                    const excusedIcon = document.createElement('i');
-                    excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
-                    excusedIcon.addEventListener('click', function (e) {
-                        e.stopPropagation();
-                        showImprovedNotification('info', 'Excused Absence', 'This attendance record was <b>manually added</b> as an excused absence.');
-                    });
-                    nameCell.appendChild(document.createTextNode(' '));
-                    nameCell.appendChild(excusedIcon);
-                }
-                row.appendChild(nameCell);
-                if (isAdmin) {
-                    const uidCell = document.createElement('td');
-                    uidCell.className = 'uid-cell uid-column';
-                    uidCell.textContent = group.uid;
-                    row.appendChild(uidCell);
-                    const dateCell = document.createElement('td');
-                    dateCell.className = 'date-cell date-column';
-                    dateCell.textContent = group.date;
-                    row.appendChild(dateCell);
-                }
-                const timesCell = document.createElement('td');
-                timesCell.className = 'times-cell';
-                const sortedIndices = group.timeObjs.map((timeObj, index) => ({ timeObj, index })).sort((a, b) => a.timeObj - b.timeObj).map(item => item.index);
-                sortedIndices.forEach(index => {
-                    const timeTag = document.createElement('span');
-                    timeTag.className = 'time-tag';
-                    const timeObj = new Date(group.timeObjs[index]);
-                    timeTag.textContent = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
-                    timesCell.appendChild(timeTag);
-                });
-                row.appendChild(timesCell);
-                if (isAdmin) {
-                    const actionsCell = document.createElement('td');
-                    actionsCell.className = 'actions-cell admin-only';
-                    actionsCell.style.textAlign = 'right';
-                    if (group.name === 'Unknown') {
-                        const addUserIcon = document.createElement('i');
-                        addUserIcon.className = 'fa-solid fa-user-plus action-icon add-db';
-                        addUserIcon.title = 'Add to Database';
-                        addUserIcon.addEventListener('click', (e) => { e.stopPropagation(); showAddEntryFromLog(group.uid); });
-                        actionsCell.appendChild(addUserIcon);
+                    const row = document.createElement('tr');
+                    if (group.name === 'Unknown') { row.classList.add('unknown-row'); }
+                    const nameCell = document.createElement('td');
+                    nameCell.className = 'name-cell name-column';
+                    nameCell.textContent = group.name;
+                    if (group.originalLogs.some(log => log.manual)) {
+                        const excusedIcon = document.createElement('i');
+                        excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
+                        excusedIcon.addEventListener('click', function (e) { e.stopPropagation(); showImprovedNotification('info', 'Excused Absence', 'This attendance record was <b>manually added</b> as an excused absence.'); });
+                        nameCell.appendChild(document.createTextNode(' '));
+                        nameCell.appendChild(excusedIcon);
                     }
-                    const addTimeIcon = document.createElement('i');
-                    addTimeIcon.className = 'fa-solid fa-clock-rotate-left action-icon add-time';
-                    addTimeIcon.title = 'Add +1 Hour';
-                    addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
-                    const editIcon = document.createElement('i');
-                    editIcon.className = 'fa-solid fa-pencil action-icon edit';
-                    editIcon.title = 'Edit';
-                    editIcon.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
-                    const deleteIcon = document.createElement('i');
-                    deleteIcon.className = 'fa-solid fa-trash-can action-icon delete';
-                    deleteIcon.title = 'Delete';
-                    deleteIcon.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
-                    actionsCell.appendChild(addTimeIcon);
-                    actionsCell.appendChild(editIcon);
-                    actionsCell.appendChild(deleteIcon);
-                    row.appendChild(actionsCell);
-                }
-                logsTbody.appendChild(row);
-            });
+                    row.appendChild(nameCell);
+                    if (isAdmin) {
+                        const uidCell = document.createElement('td');
+                        uidCell.className = 'uid-cell uid-column';
+                        uidCell.textContent = group.uid;
+                        row.appendChild(uidCell);
+                        const dateCell = document.createElement('td');
+                        dateCell.className = 'date-cell date-column';
+                        dateCell.textContent = group.date;
+                        row.appendChild(dateCell);
+                    }
+                    const timesCell = document.createElement('td');
+                    timesCell.className = 'times-cell';
+                    const sortedIndices = group.timeObjs.map((timeObj, index) => ({ timeObj, index })).sort((a, b) => a.timeObj - b.timeObj).map(item => item.index);
+                    sortedIndices.forEach(index => {
+                        const timeTag = document.createElement('span');
+                        timeTag.className = 'time-tag';
+                        const timeObj = new Date(group.timeObjs[index]);
+                        timeTag.textContent = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
+                        timesCell.appendChild(timeTag);
+                    });
+                    row.appendChild(timesCell);
+                    if (isAdmin) {
+                        const actionsCell = document.createElement('td');
+                        actionsCell.className = 'actions-cell admin-only';
+                        actionsCell.style.textAlign = 'right';
+                        if (group.name === 'Unknown') {
+                            const addUserIcon = document.createElement('i');
+                            addUserIcon.className = 'fa-solid fa-user-plus action-icon add-db';
+                            addUserIcon.title = 'Add to Database';
+                            addUserIcon.addEventListener('click', (e) => { e.stopPropagation(); showAddEntryFromLog(group.uid); });
+                            actionsCell.appendChild(addUserIcon);
+                        }
+                        const addTimeIcon = document.createElement('i');
+                        addTimeIcon.className = 'fa-solid fa-clock-rotate-left action-icon add-time';
+                        addTimeIcon.title = 'Add +1 Hour';
+                        addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
+                        const editIcon = document.createElement('i');
+                        editIcon.className = 'fa-solid fa-pencil action-icon edit';
+                        editIcon.title = 'Edit';
+                        editIcon.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
+                        const deleteIcon = document.createElement('i');
+                        deleteIcon.className = 'fa-solid fa-trash-can action-icon delete';
+                        deleteIcon.title = 'Delete';
+                        deleteIcon.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
+                        actionsCell.appendChild(addTimeIcon);
+                        actionsCell.appendChild(editIcon);
+                        actionsCell.appendChild(deleteIcon);
+                        row.appendChild(actionsCell);
+                    }
+                    logsTbody.appendChild(row);
+                });
+
+                // After the table has been rebuilt, fade it back in
+                tableContainer.classList.remove('reloading');
+            }, 150); // 150ms delay for the fade-out to be visible
         }
 
         /**
@@ -7105,7 +6982,7 @@
             updatePageTitle();
 
             // Load course data with request tracking
-            handleCourseChange();
+            handleCourseChange(course);
         }
 
         // Initialize the application when window loads
