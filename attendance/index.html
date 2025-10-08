@@ -3546,6 +3546,7 @@
                                 .then(() => {
                                     isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
                                     updateAuthUI();
+                                    // Fetch data now that we know the auth state
                                     if (isOnline) {
                                         fetchAvailableCourses().catch(err => console.error('Error:', err));
                                         fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
@@ -3553,11 +3554,18 @@
                                 })
                                 .catch(e => {
                                     console.error('Error fetching user info:', e);
+                                    // If fetching user info fails, it means token is invalid.
+                                    // Clear state and proceed as signed-out.
                                     isSignedIn = false;
                                     isAdmin = false;
                                     localStorage.removeItem('gapi_token');
                                     gapi.client.setToken('');
                                     updateAuthUI();
+                                    // Still try to fetch public data
+                                    if (isOnline) {
+                                        fetchAvailableCourses().catch(err => console.error('Error:', err));
+                                        fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
+                                    }
                                 });
                         } catch (e) {
                             console.error('Error restoring token:', e);
@@ -3566,9 +3574,12 @@
                             updateAuthUI();
                         }
                     } else {
+                        // This is the flow for a user who is NOT signed in.
                         updateAuthUI();
                         if (isOnline) {
-                            fetchAvailableCourses();
+                            fetchAvailableCourses().catch(err => console.error('Error fetching courses:', err));
+                            // Also fetch the database when signed out.
+                            fetchDatabaseFromSheet().catch(err => console.error('Error fetching database:', err));
                         }
                     }
 
@@ -4695,8 +4706,8 @@
         }
 
         /**
-        * Fetch database entries from Google Sheet with format detection
-        */
+* Fetch database entries from Google Sheet with format detection
+*/
         async function fetchDatabaseFromSheet() {
             try {
                 // First detect the format
@@ -4794,15 +4805,18 @@
                     showImprovedNotification('warning', 'Database Format Issue',
                         'The database sheet format is non-standard. Click Sync to fix it.');
                 }
-                loadingTasks.delete('database');
-                checkLoadingCompletion();
 
             } catch (error) {
                 console.error('Error fetching database:', error);
                 if (!isInitializing && isAdmin) {
                     showImprovedNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
                 }
-                throw error;
+                // This 'catch' block is now resilient and will not freeze the app.
+
+            } finally {
+                // Always mark the database task as complete, whether it succeeded or failed.
+                loadingTasks.delete('database');
+                checkLoadingCompletion();
             }
         }
 
