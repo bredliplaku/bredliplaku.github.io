@@ -807,6 +807,18 @@
             font-style: italic;
         }
 
+        .filter-input:disabled,
+        .sort-dropdown:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background-color: #f0f0f0;
+        }
+
+        body.dark-mode .filter-input:disabled,
+        body.dark-mode .sort-dropdown:disabled {
+            background-color: #2a2a2a;
+        }
+
         .notification {
             padding: 15px;
             border-radius: 10px;
@@ -1094,15 +1106,26 @@
         .theme-toggle {
             background: none;
             border: none;
+            box-shadow: none;
             color: var(--primary-dark);
             font-size: 1.0em;
             cursor: pointer;
             padding: 0 10px;
-            transition: color 0.3s;
+            transition: color 0.3s, transform 0.2s;
+            /* Added transform */
+            display: inline-block;
+            line-height: inherit;
+            /* Align with other icons */
+            vertical-align: middle;
         }
 
         .theme-toggle:hover {
             color: var(--secondary-color);
+            transform: scale(1.1) rotate(15deg);
+            /* Add a little animation */
+            background: none;
+            /* Ensure no background on hover */
+            box-shadow: none;
         }
 
         body.dark-mode {
@@ -1858,6 +1881,9 @@
                     tab.classList.add('active');
                     const tabId = tab.getAttribute('data-tab');
                     document.getElementById(tabId).classList.add('active');
+
+                    const tabId = tab.getAttribute('data-tab').replace('-tab', '');
+                    if (window.location.hash !== `#${tabId}`) window.location.hash = tabId;
                 });
             });
 
@@ -1948,6 +1974,40 @@
 
             if (mainContainer) {
                 mainContainer.classList.remove('content-hidden');
+            }
+        }
+
+        function handleRouting() {
+            const hash = window.location.hash.replace('#', '');
+            if (!hash) {
+                // Default to scanner tab if no hash
+                document.querySelector('.tab[data-tab="scanner-tab"]').click();
+                return;
+            }
+
+            // Check for tab navigation
+            if (hash === 'scanner' || hash === 'database') {
+                const tabId = `${hash}-tab`;
+                const tabElement = document.querySelector(`.tab[data-tab="${tabId}"]`);
+                if (tabElement) {
+                    // Security check for database tab
+                    if (hash === 'database' && !isAdmin) {
+                        showImprovedNotification('error', 'Access Denied', 'You do not have permission to view the database.');
+                        window.location.hash = 'scanner'; // Redirect back
+                        return;
+                    }
+                    tabElement.click();
+                }
+                return;
+            }
+
+            // Check for course navigation
+            if (availableCourses.includes(hash)) {
+                if (currentCourse !== hash) {
+                    selectCourseButton(hash);
+                }
+                // Ensure scanner tab is active for a course view
+                document.querySelector('.tab[data-tab="scanner-tab"]').click();
             }
         }
 
@@ -2090,8 +2150,8 @@
         }
 
         /**
-         * Sets up the theme toggle button and applies the stored/system theme on load.
-         */
+                 * Sets up the theme toggle button and applies the stored/system theme on load.
+                 */
         function setupThemeToggle() {
             const themeToggleBtn = document.getElementById('theme-toggle-btn');
             if (!themeToggleBtn) return;
@@ -2100,20 +2160,27 @@
             applyTheme(currentTheme); // Apply theme on initial load
 
             themeToggleBtn.addEventListener('click', () => {
-                if (currentTheme === 'auto') {
-                    currentTheme = 'light';
-                } else if (currentTheme === 'light') {
-                    currentTheme = 'dark';
-                } else {
-                    currentTheme = 'auto';
+                const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+                // Determine the next theme in the cycle
+                switch (currentTheme) {
+                    case 'auto':
+                        currentTheme = isSystemDark ? 'light' : 'dark';
+                        break;
+                    case 'light':
+                        currentTheme = isSystemDark ? 'auto' : 'dark';
+                        break;
+                    case 'dark':
+                        currentTheme = isSystemDark ? 'light' : 'auto';
+                        break;
                 }
+
                 localStorage.setItem('theme', currentTheme);
                 applyTheme(currentTheme);
             });
 
             // Listen for changes in the system's preferred color scheme
             window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
-                // Only apply the change if the user is in 'auto' mode
                 if (localStorage.getItem('theme') === 'auto' || !localStorage.getItem('theme')) {
                     applyTheme('auto');
                 }
@@ -2992,6 +3059,9 @@
                 // Add the EIS export button
                 setTimeout(addDirectEisExportButton, 500);
             }, 3000);
+
+            handleRouting(); // Handle initial URL
+            window.addEventListener('hashchange', handleRouting); // Handle changes
         }
 
         function processPendingNotifications() {
@@ -4854,40 +4924,43 @@
         function showAddEntryDialog() {
             if (!isAdmin) return;
 
-            // Prompt for UID and name
-            const uid = prompt("Enter UID for new entry:");
-            if (uid === null) return;
+            showPromptDialog({
+                title: 'Add New Database Entry',
+                message: 'Enter the UID for the new entry:',
+                onConfirm: (uid) => {
+                    const trimmedUid = uid ? uid.trim() : '';
+                    if (!trimmedUid) {
+                        showAlertDialog('Invalid Input', 'UID cannot be empty.');
+                        return;
+                    }
+                    if (uidToNameMap[trimmedUid]) {
+                        showAlertDialog('Duplicate Entry', 'This UID already exists in the database.');
+                        return;
+                    }
 
-            const trimmedUid = uid.trim();
-            if (!trimmedUid) {
-                alert("UID cannot be empty.");
-                return;
-            }
+                    showPromptDialog({
+                        title: 'Add New Database Entry',
+                        message: `Enter the name for UID: ${trimmedUid}`,
+                        onConfirm: (name) => {
+                            const trimmedName = name ? name.trim() : '';
+                            if (!trimmedName) {
+                                showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                                return;
+                            }
+                            // Add to database
+                            uidToNameMap[trimmedUid] = trimmedName;
 
-            if (uidToNameMap[trimmedUid]) {
-                alert("This UID already exists in the database.");
-                return;
-            }
+                            // Sync to sheet if online
+                            if (isOnline && isSignedIn) {
+                                syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                            }
 
-            const name = prompt("Enter name for UID " + trimmedUid + ":");
-            if (name === null) return;
-
-            const trimmedName = name.trim();
-            if (!trimmedName) {
-                alert("Name cannot be empty.");
-                return;
-            }
-
-            // Add to database
-            uidToNameMap[trimmedUid] = trimmedName;
-
-            // Sync to sheet if online
-            if (isOnline && isSignedIn) {
-                syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-            }
-
-            updateUI();
-            showImprovedNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
+                            updateUI();
+                            showImprovedNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
+                        }
+                    });
+                }
+            });
         }
 
         /**
@@ -4896,27 +4969,30 @@
          */
         function editDatabaseEntry(uid) {
             if (!isAdmin) return;
-
             const currentName = uidToNameMap[uid] || '';
-            const newName = prompt(`Enter a new name for ${uid}:`, currentName);
 
-            if (newName === null) return;
+            showPromptDialog({
+                title: 'Edit Database Entry',
+                message: `Enter a new name for UID: ${uid}`,
+                initialValue: currentName,
+                onConfirm: (newName) => {
+                    const trimmed = newName ? newName.trim() : '';
+                    if (!trimmed) {
+                        showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                        return;
+                    }
 
-            const trimmed = newName.trim();
-            if (!trimmed) {
-                alert('Name cannot be empty.');
-                return;
-            }
+                    uidToNameMap[uid] = trimmed;
 
-            uidToNameMap[uid] = trimmed;
+                    // Sync to sheet if online
+                    if (isOnline && isSignedIn) {
+                        syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                    }
 
-            // Sync to sheet if online
-            if (isOnline && isSignedIn) {
-                syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-            }
-
-            updateUI();
-            showImprovedNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
+                    updateUI();
+                    showImprovedNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
+                }
+            });
         }
 
         /**
@@ -5015,6 +5091,98 @@
                 console.error("Error fetching course info:", error);
             }
         }
+
+        /**
+         * Displays a custom, non-blocking alert dialog.
+         * @param {string} title - The title of the dialog.
+         * @param {string} message - The main text for the user.
+         */
+        function showAlertDialog(title, message) {
+            const existingDialog = document.querySelector('.dialog-backdrop');
+            if (existingDialog) existingDialog.remove();
+
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.innerHTML = `
+                <h3 class="dialog-title">${title}</h3>
+                <p>${message}</p>
+                <div class="dialog-actions">
+                    <button id="dialog-ok-btn" class="btn-blue">OK</button>
+                </div>
+            `;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+            document.getElementById('dialog-ok-btn').addEventListener('click', closeDialog);
+            dialogBackdrop.addEventListener('click', (e) => {
+                if (e.target === dialogBackdrop) closeDialog();
+            });
+        }
+
+        /**
+         * Displays a custom, non-blocking prompt dialog.
+         * @param {object} options - The options for the dialog.
+         * @param {string} options.title - The title of the dialog.
+         * @param {string} options.message - The main text/question for the user.
+         * @param {string} [options.initialValue=''] - The initial value for the input field.
+         * @param {string} [options.confirmText='Confirm'] - The text for the confirm button.
+         * @param {string} [options.cancelText='Cancel'] - The text for the cancel button.
+         * @param {function} options.onConfirm - The callback function to execute with the input value if the user confirms.
+         */
+        function showPromptDialog({ title, message, initialValue = '', confirmText = 'Confirm', cancelText = 'Cancel', onConfirm }) {
+            const existingDialog = document.querySelector('.dialog-backdrop');
+            if (existingDialog) existingDialog.remove();
+
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.innerHTML = `
+                <h3 class="dialog-title">${title}</h3>
+                <p>${message}</p>
+                <div class="form-group">
+                    <input type="text" id="dialog-prompt-input" class="form-control" value="${initialValue}">
+                </div>
+                <div class="dialog-actions">
+                    <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
+                    <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
+                </div>
+            `;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const confirmBtn = document.getElementById('dialog-confirm-btn');
+            const cancelBtn = document.getElementById('dialog-cancel-btn');
+            const input = document.getElementById('dialog-prompt-input');
+            input.focus();
+            input.select();
+
+            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+
+            const confirmAction = () => {
+                onConfirm(input.value);
+                closeDialog();
+            };
+
+            confirmBtn.addEventListener('click', confirmAction);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') confirmAction();
+            });
+
+            cancelBtn.addEventListener('click', closeDialog);
+            dialogBackdrop.addEventListener('click', (e) => {
+                if (e.target === dialogBackdrop) closeDialog();
+            });
+        }
+
+
 
         /**
                  * Displays a custom, non-blocking confirmation dialog.
@@ -5968,7 +6136,8 @@
                             const separatorRow = document.createElement('tr');
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
-                            separatorCell.colSpan = isAdmin ? 5 : 3;
+                            // Correct colspan: Admin=5, Signed-in non-admin=2, Guest=2
+                            separatorCell.colSpan = isAdmin ? 5 : 2;
 
                             separatorCell.style.display = 'flex';
                             separatorCell.style.justifyContent = 'space-between';
@@ -6261,6 +6430,10 @@
             updateScanButtons();
 
             populateCourseButtons();
+
+            const hasLogs = logs.length > 0;
+            filterInput.disabled = !hasLogs;
+            sortSelect.disabled = !hasLogs;
         }
 
         /**
@@ -6643,6 +6816,7 @@
         }
 
         function selectCourseButton(course) {
+            if (window.location.hash !== `#${course}`) window.location.hash = course;
             // Check if we're already loading this course
             const existingRequest = activeRequests.get(course);
             if (existingRequest && !existingRequest.cancelled && currentCourse === course) {
