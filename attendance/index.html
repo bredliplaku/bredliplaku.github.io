@@ -353,8 +353,7 @@
             display: flex;
             flex-wrap: wrap;
             /* Allow wrapping */
-            justify-content: center;
-            /* Center the buttons */
+            justify-content: flex-start;
             gap: 10px;
             padding-bottom: 10px;
             /* Remove horizontal scroll properties if they exist */
@@ -479,6 +478,11 @@
             background-color: #1a237e;
             box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
             transform: scale(1.05);
+        }
+
+        .big-scan-button:active {
+            transform: scale(0.98);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
         }
 
         button {
@@ -753,8 +757,8 @@
             justify-content: space-between;
             align-items: center;
             flex-wrap: nowrap;
-            /* Keep on one line */
             gap: 15px;
+            margin-bottom: 15px;
         }
 
         .logs-count {
@@ -807,6 +811,7 @@
         .logs-table td {
             padding: 12px 15px;
             border-top: 1px solid #e0e0e0;
+            vertical-align: middle;
         }
 
         .logs-table tr:hover {
@@ -827,7 +832,7 @@
 
         .logs-table tr.day-separator td>div {
             display: flex;
-            justify-content: space-between;
+            justify-content: center;
             align-items: center;
             padding: 8px 15px;
             /* Apply padding here instead */
@@ -945,8 +950,9 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 15px;
-            flex-wrap: wrap;
-            gap: 10px;
+            flex-wrap: nowrap;
+            /* Keep on one line */
+            gap: 15px;
         }
 
         .add-entry-btn {
@@ -956,9 +962,8 @@
         }
 
         .database-actions {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
+            flex-basis: auto;
+            justify-content: flex-end;
         }
 
         .database-table {
@@ -984,8 +989,9 @@
         }
 
         .entry-count {
-            font-size: 1.1em;
-            font-weight: 500;
+            font-size: 0.9em;
+            /* Match logs-count */
+            white-space: nowrap;
         }
 
         .excused-icon {
@@ -1072,6 +1078,11 @@
 
         .dialog-actions {
             margin-top: 24px;
+            display: flex;
+            justify-content: flex-end;
+            /* Aligns buttons to the right */
+            gap: 10px;
+            /* Adds space between buttons */
         }
 
         /* Dark Mode Dialogs */
@@ -1535,6 +1546,14 @@
 
         /* Responsive adjustments */
         @media (max-width: 768px) {
+            #not-signed-in-message p {
+                font-size: 1.1em;
+            }
+
+            #not-signed-in-message h2 {
+                font-size: 1.8em;
+            }
+
             .logs-count {
                 margin-bottom: 10px;
             }
@@ -1546,6 +1565,11 @@
             .logs-table th,
             .logs-table td {
                 padding: 8px 10px;
+            }
+
+            .logs-table tr.day-separator td>div {
+                justify-content: space-between;
+                /* Back to space-between on mobile */
             }
 
             .time-tag {
@@ -1686,6 +1710,13 @@
             .sync-container,
             .auth-container {
                 margin-bottom: 0;
+            }
+
+            .dialog-backdrop {
+                align-items: flex-start;
+                /* Move dialog to the top */
+                padding-top: 5vh;
+                /* Add some space from the top edge */
             }
 
             /* Hide user name on mobile */
@@ -3856,39 +3887,19 @@
 
         // Update sync status indicator
         function updateSyncStatus(message, status) {
+            // When status is good (online/success), clear any previous error/warning messages.
+            if (status === 'online' || status === 'success') {
+                removeNotifications('error');
+                removeNotifications('warning');
+            }
+
             const syncText = document.getElementById('sync-text');
             const syncStatus = document.getElementById('sync-status');
 
             if (syncText) syncText.textContent = message;
 
             if (syncStatus) {
-                // Clear all old status classes
-                syncStatus.className = 'sync-status';
-
-                // Add appropriate status class based on current state
-                if (status === "offline") {
-                    syncStatus.classList.add("offline");
-                    // Make the offline status red
-                    const statusIcon = syncStatus.querySelector("i");
-                    if (statusIcon) statusIcon.style.color = "#f44336"; // Red color
-                } else {
-                    syncStatus.classList.add(status || 'offline');
-                }
-
-                // Handle pending changes by changing the sync text color rather than adding a dot
-                if (pendingChanges) {
-                    syncText.style.color = "#fb8c00"; // Orange color for pending changes text
-                    syncText.style.fontWeight = "bold";
-                } else {
-                    syncText.style.color = ""; // Reset to default
-                    syncText.style.fontWeight = "";
-                }
-            }
-
-            // Remove the previous implementation of the pending changes badge
-            const pendingBadge = document.getElementById('pending-changes-badge');
-            if (pendingBadge && pendingBadge.parentNode) {
-                pendingBadge.parentNode.removeChild(pendingBadge);
+                syncStatus.className = 'sync-status ' + (status || 'offline');
             }
         }
 
@@ -5337,11 +5348,12 @@
         }
 
         /**
-         * Displays a custom, non-blocking alert dialog.
-         * @param {string} title - The title of the dialog.
-         * @param {string} message - The main text for the user.
-         */
+ * Displays a custom, non-blocking alert dialog.
+ * @param {string} title - The title of the dialog.
+ * @param {string} message - The main text for the user.
+ */
         function showAlertDialog(title, message) {
+            document.body.style.overflow = 'hidden'; // Prevent background scroll
             const existingDialog = document.querySelector('.dialog-backdrop');
             if (existingDialog) existingDialog.remove();
 
@@ -5351,17 +5363,20 @@
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.innerHTML = `
-                <h3 class="dialog-title">${title}</h3>
-                <p>${message}</p>
-                <div class="dialog-actions">
-                    <button id="dialog-ok-btn" class="btn-blue">OK</button>
-                </div>
-            `;
+        <h3 class="dialog-title">${title}</h3>
+        <p>${message}</p>
+        <div class="dialog-actions">
+            <button id="dialog-ok-btn" class="btn-blue">OK</button>
+        </div>
+    `;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = ''; // Restore scroll
+            };
             document.getElementById('dialog-ok-btn').addEventListener('click', closeDialog);
             dialogBackdrop.addEventListener('click', (e) => {
                 if (e.target === dialogBackdrop) closeDialog();
@@ -5369,16 +5384,11 @@
         }
 
         /**
-         * Displays a custom, non-blocking prompt dialog.
-         * @param {object} options - The options for the dialog.
-         * @param {string} options.title - The title of the dialog.
-         * @param {string} options.message - The main text/question for the user.
-         * @param {string} [options.initialValue=''] - The initial value for the input field.
-         * @param {string} [options.confirmText='Confirm'] - The text for the confirm button.
-         * @param {string} [options.cancelText='Cancel'] - The text for the cancel button.
-         * @param {function} options.onConfirm - The callback function to execute with the input value if the user confirms.
-         */
+       * Displays a custom, non-blocking prompt dialog.
+       * @param {object} options - The options for the dialog.
+       */
         function showPromptDialog({ title, message, initialValue = '', confirmText = 'Confirm', cancelText = 'Cancel', onConfirm }) {
+            document.body.style.overflow = 'hidden'; // Prevent background scroll
             const existingDialog = document.querySelector('.dialog-backdrop');
             if (existingDialog) existingDialog.remove();
 
@@ -5388,16 +5398,16 @@
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.innerHTML = `
-                <h3 class="dialog-title">${title}</h3>
-                <p>${message}</p>
-                <div class="form-group">
-                    <input type="text" id="dialog-prompt-input" class="form-control" value="${initialValue}">
-                </div>
-                <div class="dialog-actions">
-                    <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
-                    <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
-                </div>
-            `;
+        <h3 class="dialog-title">${title}</h3>
+        <p>${message}</p>
+        <div class="form-group">
+            <input type="text" id="dialog-prompt-input" class="form-control" value="${initialValue}">
+        </div>
+        <div class="dialog-actions">
+            <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
+            <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
+        </div>
+    `;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
@@ -5408,7 +5418,10 @@
             input.focus();
             input.select();
 
-            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = ''; // Restore scroll
+            };
 
             const confirmAction = () => {
                 onConfirm(input.value);
@@ -5427,18 +5440,12 @@
         }
 
 
-
         /**
-                 * Displays a custom, non-blocking confirmation dialog.
-                 * @param {object} options - The options for the dialog.
-                 * @param {string} options.title - The title of the dialog.
-                 * @param {string} options.message - The main text/question for the user.
-                 * @param {string} [options.confirmText='Confirm'] - The text for the confirm button.
-                 * @param {string} [options.cancelText='Cancel'] - The text for the cancel button.
-                 * @param {function} options.onConfirm - The callback function to execute if the user confirms.
-                 */
+        * Displays a custom, non-blocking confirmation dialog.
+        * @param {object} options - The options for the dialog.
+        */
         function showConfirmationDialog({ title, message, confirmText = 'Confirm', cancelText = 'Cancel', onConfirm }) {
-            // Remove any existing dialog
+            document.body.style.overflow = 'hidden'; // Prevent background scroll
             const existingDialog = document.querySelector('.dialog-backdrop');
             if (existingDialog) existingDialog.remove();
 
@@ -5448,13 +5455,13 @@
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.innerHTML = `
-                <h3 class="dialog-title">${title}</h3>
-                <p>${message}</p>
-                <div class="dialog-actions">
-                    <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
-                    <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
-                </div>
-            `;
+        <h3 class="dialog-title">${title}</h3>
+        <p>${message}</p>
+        <div class="dialog-actions">
+            <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
+            <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
+        </div>
+    `;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
@@ -5462,7 +5469,10 @@
             const confirmBtn = document.getElementById('dialog-confirm-btn');
             const cancelBtn = document.getElementById('dialog-cancel-btn');
 
-            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = ''; // Restore scroll
+            };
 
             confirmBtn.addEventListener('click', () => {
                 onConfirm();
@@ -6760,6 +6770,19 @@
             }
         }
 
+        function removeNotifications(type) {
+            const notificationArea = document.getElementById('in-page-notification-area');
+            const notificationsToRemove = notificationArea.querySelectorAll(`[data-notification-type="${type}"]`);
+
+            notificationsToRemove.forEach(notification => {
+                notification.classList.add('removing');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            });
+        }
 
         function showImprovedNotification(type, title, message, duration) {
             // Skip redundant notifications
@@ -6819,6 +6842,7 @@
             // Create the new notification
             const notification = document.createElement('div');
             notification.className = `in-page-notification in-page-notification-${type}`;
+            notification.dataset.notificationType = type;
 
             let icon;
             switch (type) {
