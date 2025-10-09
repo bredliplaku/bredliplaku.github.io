@@ -918,6 +918,7 @@
 
         .date-cell {
             white-space: nowrap;
+            font-size: 0.85em;
         }
 
         .times-cell {
@@ -5320,7 +5321,7 @@
             if (!isAdmin) return;
 
             showPromptDialog({
-                title: 'Add New Database Entry',
+                title: 'Add new Student',
                 message: 'Enter the UID for the new entry:',
                 onConfirm: (uid) => {
                     const trimmedUid = uid ? uid.trim() : '';
@@ -5334,7 +5335,7 @@
                     }
 
                     showPromptDialog({
-                        title: 'Add New Database Entry',
+                        title: 'Add new Student',
                         message: `Enter the name for UID: ${trimmedUid}`,
                         onConfirm: (name) => {
                             const trimmedName = name ? name.trim() : '';
@@ -5367,7 +5368,7 @@
             const currentName = uidToNameMap[uid] || '';
 
             showPromptDialog({
-                title: 'Edit Database Entry',
+                title: 'Edit Student',
                 message: `Enter a new name for UID: ${uid}`,
                 initialValue: currentName,
                 onConfirm: (newName) => {
@@ -5400,9 +5401,10 @@
             if (!name) return;
 
             showConfirmationDialog({
-                title: 'Delete Database Entry?',
+                title: `Delete "${name}" ?`,
                 message: `Are you sure you want to delete "${name}" (${uid}) from the database?`,
                 confirmText: 'Delete',
+                isDestructive: true,
                 onConfirm: () => {
                     delete uidToNameMap[uid];
                     if (isOnline && isSignedIn) {
@@ -5582,25 +5584,33 @@
 
 
         /**
-        * Displays a custom, non-blocking confirmation dialog.
-        * @param {object} options - The options for the dialog.
-        */
-        function showConfirmationDialog({ title, message, confirmText = 'Confirm', cancelText = 'Cancel', onConfirm }) {
-            document.body.style.overflow = 'hidden'; // Prevent background scroll
+ * Displays a custom confirmation dialog with dynamic button colors.
+ * @param {object} options - The options for the dialog.
+ * @param {boolean} [options.isDestructive=false] - If true, the confirm button will be red.
+ */
+        function showConfirmationDialog({ title, message, confirmText = 'Confirm', cancelText = 'Cancel', onConfirm, isDestructive = false }) {
+            document.body.style.overflow = 'hidden';
             const existingDialog = document.querySelector('.dialog-backdrop');
             if (existingDialog) existingDialog.remove();
+
+            // --- NEW LOGIC START ---
+            // Determine button colors based on the action type
+            const confirmBtnClass = isDestructive ? 'btn-red' : 'btn-green';
+            const cancelBtnClass = 'btn-blue'; // Make Cancel a neutral blue
+            // --- NEW LOGIC END ---
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
 
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
+            // Use the new class variables for the buttons
             dialog.innerHTML = `
         <h3 class="dialog-title">${title}</h3>
         <p>${message}</p>
         <div class="dialog-actions">
-            <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
-            <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
+            <button id="dialog-cancel-btn" class="${cancelBtnClass}">${cancelText}</button>
+            <button id="dialog-confirm-btn" class="${confirmBtnClass}">${confirmText}</button>
         </div>
     `;
 
@@ -5612,7 +5622,7 @@
 
             const closeDialog = () => {
                 document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = ''; // Restore scroll
+                document.body.style.overflow = '';
             };
 
             confirmBtn.addEventListener('click', () => {
@@ -5634,9 +5644,10 @@
         function clearDatabase() {
             if (!isAdmin) return;
             showConfirmationDialog({
-                title: 'Clear Entire Database?',
+                title: 'Wipe the ENTIRE Database?',
                 message: 'This will remove all UID-name mappings permanently. This action cannot be undone.',
-                confirmText: 'CLEAR ALL',
+                confirmText: 'Delete',
+                isDestructive: true,
                 onConfirm: () => {
                     uidToNameMap = {};
                     // Sync to sheet if online
@@ -5859,9 +5870,10 @@
 
             document.getElementById('delete-all-logs-btn').addEventListener('click', () => {
                 showConfirmationDialog({
-                    title: 'Delete Entire Entry?',
-                    message: `This will remove all ${group.originalLogs.length} timestamps for ${group.name} on this date.`,
+                    title: 'Delete all logs for this date?',
+                    message: `This will remove all logs for ${group.name} on this date.`,
                     confirmText: 'Delete',
+                    isDestructive: true,
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         logs = logs.filter(log => !idsToRemove.includes(log.id));
@@ -5935,9 +5947,10 @@
             if (!isAdmin) return;
 
             showConfirmationDialog({
-                title: 'Delete ALL Logs?',
+                title: 'Delete logs for this course?',
                 message: 'This will remove all logs for the current course. This action cannot be undone.',
-                confirmText: 'CLEAR ALL',
+                confirmText: 'Delete',
+                isDestructive: true,
                 onConfirm: () => {
                     logs = [];
                     saveLogsToLocalStorage();
@@ -6254,9 +6267,9 @@
             if (!isAdmin) return;
 
             showConfirmationDialog({
-                title: 'Bulk Add +1 Hour?',
-                message: `Are you sure you want to add a +1 hour log for EVERY student with an entry on ${dateStr}?`,
-                confirmText: 'Yes, Add All',
+                title: 'Add another hour?',
+                message: `Are you sure you want to add an extra hour log for EVERY student on ${dateStr}?`,
+                confirmText: 'Add',
                 onConfirm: () => {
                     const logsForDay = logs.filter(log => {
                         const logDate = new Date(log.timestamp);
@@ -6391,13 +6404,20 @@
                             if (isSignedIn) {
                                 const separatorRow = document.createElement('tr');
                                 separatorRow.className = 'day-separator';
-                                const separatorCell = document.createElement('td');
-                                separatorCell.colSpan = isAdmin ? 5 : 2;
-                                const flexWrapper = document.createElement('div');
-                                const dateText = document.createElement('span');
-                                dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                                flexWrapper.appendChild(dateText);
+
                                 if (isAdmin) {
+                                    // For admins, create one wide cell that spans all 5 columns.
+                                    const separatorCell = document.createElement('td');
+                                    separatorCell.colSpan = 5;
+
+                                    const flexWrapper = document.createElement('div');
+                                    // This style pushes the date left and the button right.
+                                    flexWrapper.style.cssText = 'display: flex; justify-content: space-between; align-items: center; width: 100%;';
+
+                                    const dateText = document.createElement('span');
+                                    dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                                    flexWrapper.appendChild(dateText);
+
                                     const bulkAddBtn = document.createElement('button');
                                     bulkAddBtn.className = 'btn-sm btn-green';
                                     bulkAddBtn.innerHTML = '<i class="fa-solid fa-users-rays"></i>';
@@ -6405,9 +6425,20 @@
                                     bulkAddBtn.style.fontWeight = '500';
                                     bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(currentDay); };
                                     flexWrapper.appendChild(bulkAddBtn);
+
+                                    separatorCell.appendChild(flexWrapper);
+                                    separatorRow.appendChild(separatorCell);
+                                } else {
+                                    // For non-admins, create two separate cells to match the columns perfectly.
+                                    const dateCell = document.createElement('td');
+                                    dateCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+
+                                    const emptyCell = document.createElement('td'); // An empty cell for the 'Time' column.
+
+                                    separatorRow.appendChild(dateCell);
+                                    separatorRow.appendChild(emptyCell);
                                 }
-                                separatorCell.appendChild(flexWrapper);
-                                separatorRow.appendChild(separatorCell);
+
                                 logsTbody.appendChild(separatorRow);
                             }
                         }
@@ -6493,7 +6524,7 @@
             if (!isAdmin) return;
 
             showPromptDialog({
-                title: 'Add to Database',
+                title: 'Add to database',
                 message: `Enter name for new database entry with UID:\n${uid}`,
                 onConfirm: (name) => {
                     if (name && name.trim()) {
