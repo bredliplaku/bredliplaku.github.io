@@ -11,7 +11,7 @@
 // @run-at       document-idle
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // Configuration options (default values)
@@ -58,9 +58,9 @@
         });
     }
 
-function applyGlobalStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
+    function applyGlobalStyles() {
+        const style = document.createElement('style');
+        style.textContent = `
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -299,11 +299,11 @@ function applyGlobalStyles() {
             border: 1px solid #ddd !important;
         }
     `;
-    document.head.appendChild(style);
-}
+        document.head.appendChild(style);
+    }
 
     // Run when the page is fully loaded
-    window.addEventListener('load', async function() {
+    window.addEventListener('load', async function () {
         console.log("EIS Attendance Auto-Import starting...");
 
         // First check if we're on the right page
@@ -347,23 +347,23 @@ function applyGlobalStyles() {
                 // Just add the paste button
                 hideLoadingIndicator();
                 addPasteButton();
-				addImportButton();
+                addImportButton();
             }
         }, 1000);
     });
 
-function showLoadingIndicator(message = "Loading attendance data...") {
-    // Remove any existing loading indicator
-    hideLoadingIndicator();
+    function showLoadingIndicator(message = "Loading attendance data...") {
+        // Remove any existing loading indicator
+        hideLoadingIndicator();
 
-    const overlay = document.createElement('div');
-    overlay.id = 'eis-loading-overlay';
-    overlay.className = 'eis-loading-overlay';
+        const overlay = document.createElement('div');
+        overlay.id = 'eis-loading-overlay';
+        overlay.className = 'eis-loading-overlay';
 
-    const content = document.createElement('div');
-    content.className = 'eis-loading-content';
+        const content = document.createElement('div');
+        content.className = 'eis-loading-content';
 
-    content.innerHTML = `
+        content.innerHTML = `
         <img src="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/loading.gif"
              alt="Loading Cat" style="width: 150px; height: 150px; margin-bottom: 10px;">
         <div style="margin-bottom: 15px; font-size: 18px; font-weight: 500; color: ${COLORS.primary};">
@@ -374,9 +374,9 @@ function showLoadingIndicator(message = "Loading attendance data...") {
         </div>
     `;
 
-    overlay.appendChild(content);
-    document.body.appendChild(overlay);
-}
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+    }
 
     function hideLoadingIndicator() {
         const overlay = document.getElementById('eis-loading-overlay');
@@ -438,13 +438,18 @@ function showLoadingIndicator(message = "Loading attendance data...") {
     }
 
     function processAttendanceData(data) {
-        updateLoadingMessage("Setting form parameters...");
+        console.log("Starting EIS data processing...");
+        updateLoadingMessage("Setting form parameters (Step 1/2)...");
 
-        // Set form parameters
+        // --- STEP 1: SET ALL FORM VALUES FIRST ---
+        // This includes the new "Section" field.
+        // Setting these values, especially Section, may cause the student list to reload.
+        setFormValue("didcourseattendance_section", data.parameters.section);
         setFormValue("didcourseattendance_week", data.parameters.week);
         setFormValue("didcourseattendance_topicen", data.parameters.topic);
         setFormValue("didcourseattendance_categoryen", data.parameters.category);
         setFormValue("didcourseattendance_date", data.parameters.date);
+        setFormValue("didcourseattendance_nrhours", data.parameters.hours);
 
         // Update CONFIG with any options from the data
         if (data.options) {
@@ -452,16 +457,17 @@ function showLoadingIndicator(message = "Loading attendance data...") {
             Object.assign(CONFIG, data.options);
         }
 
-        updateLoadingMessage("Setting hours and generating checkboxes...");
+        // --- STEP 2: WAIT, THEN PROCESS ATTENDANCE ---
+        // We wait for a moment to allow the EIS page to filter the student list
+        // based on the new "Section" we just set.
+        console.log("Waiting for EIS to filter student list based on section...");
+        updateLoadingMessage("Waiting for student list to update (Step 2/2)...");
 
-        // Set hours last - this triggers checkbox generation
-        setFormValue("didcourseattendance_nrhours", data.parameters.hours);
-
-        // Wait for form to update and generate checkboxes
         setTimeout(() => {
-            updateLoadingMessage("Processing attendance data...");
+            updateLoadingMessage("Processing attendance checkboxes...");
             processAttendance(data.attendance, data.nameMap, data.parameters.hours);
             hideLoadingIndicator();
+            showImprovedNotification('success', 'Ready to Save', 'All attendance data has been filled. Please review and click "Save Changes".');
 
             // If auto-save is enabled, find and click the save button
             if (CONFIG.autoSave) {
@@ -474,18 +480,18 @@ function showLoadingIndicator(message = "Loading attendance data...") {
                     }
                 }, 1000);
             }
-        }, 2000);
+        }, 2500); // Wait 2.5 seconds - a safe delay for the EIS page to reload the student list.
     }
 
-function updateLoadingMessage(message) {
-    const overlay = document.getElementById('eis-loading-overlay');
-    if (overlay) {
-        const messageElement = overlay.querySelector('.eis-loading-content div:nth-child(2)');
-        if (messageElement) {
-            messageElement.textContent = message;
+    function updateLoadingMessage(message) {
+        const overlay = document.getElementById('eis-loading-overlay');
+        if (overlay) {
+            const messageElement = overlay.querySelector('.eis-loading-content div:nth-child(2)');
+            if (messageElement) {
+                messageElement.textContent = message;
+            }
         }
     }
-}
 
 
 
@@ -879,8 +885,8 @@ Please review and click Save Changes.`;
 
         actionBar.insertBefore(button, actionBar.firstChild);
     }
-	
-	    function addPasteButton() {
+
+    function addPasteButton() {
         // Remove any existing paste button first
         const existingBtn = document.getElementById('eis-paste-btn');
         if (existingBtn) {
@@ -913,7 +919,7 @@ Please review and click Save Changes.`;
         fileInput.style.display = 'none';
         document.body.appendChild(fileInput);
 
-        fileInput.onchange = function(event) {
+        fileInput.onchange = function (event) {
             const file = event.target.files[0];
             if (!file) {
                 document.body.removeChild(fileInput);
@@ -921,7 +927,7 @@ Please review and click Save Changes.`;
             }
 
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = function (e) {
                 try {
                     showLoadingIndicator("Processing imported attendance data...");
 
@@ -970,7 +976,7 @@ Please review and click Save Changes.`;
 
         // Set appropriate icon
         let icon;
-        switch(type) {
+        switch (type) {
             case 'success': icon = 'fas fa-check-circle'; break;
             case 'warning': icon = 'fas fa-exclamation-triangle'; break;
             case 'error': icon = 'fas fa-times-circle'; break;
@@ -995,7 +1001,7 @@ Please review and click Save Changes.`;
         const closeBtn = document.createElement('button');
         closeBtn.className = 'eis-notification-close';
         closeBtn.innerHTML = '&times;';
-        closeBtn.onclick = function(e) {
+        closeBtn.onclick = function (e) {
             e.preventDefault();
             e.stopPropagation();
             notification.classList.add('removing');
