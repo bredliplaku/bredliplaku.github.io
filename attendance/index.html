@@ -348,6 +348,60 @@
             background-color: rgba(255, 255, 255, 0.1);
         }
 
+        .searchable-select-container {
+            position: relative;
+            flex-grow: 1;
+        }
+
+        .searchable-select-input {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .searchable-select-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            background-color: var(--card-background);
+            z-index: 1001;
+            display: none;
+            /* Hidden by default */
+        }
+
+        .searchable-select-dropdown div {
+            padding: 10px;
+            cursor: pointer;
+        }
+
+        .searchable-select-dropdown div:hover {
+            background-color: #f0f0f0;
+        }
+
+        .dark-mode .searchable-select-dropdown {
+            border-color: #555;
+        }
+
+        .dark-mode .searchable-select-dropdown div:hover {
+            background-color: #333;
+        }
+
+        /* Style for disabled/uneditable fields */
+        input:disabled,
+        select:disabled {
+            background-color: #e9ecef !important;
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .dark-mode input:disabled,
+        .dark-mode select:disabled {
+            background-color: #3a3a3c !important;
+        }
+
         /* ===== Course button styles ===== */
         .course-buttons-container {
             display: flex;
@@ -462,7 +516,7 @@
             border-radius: 15px;
             text-decoration: none;
             font-size: 1.2em;
-            transition: background-color 0.3s, transform 0.3s;
+            transition: background-color 0.3s, transform 0.2s, box-shadow 0.2s;
             text-align: center;
             justify-content: center;
             align-items: center;
@@ -1494,18 +1548,17 @@
         #scan-announcement-overlay::before {
             content: '';
             position: absolute;
-            top: 0;
-            /* Position at the top */
+            top: 50%;
+            /* Start from vertical center */
             left: 50%;
+            /* Start from horizontal center */
             width: 1px;
-            /* Start small */
             height: 1px;
             border-radius: 50%;
-            /* Gradient from transparent to theme color */
             background: radial-gradient(circle, rgba(92, 107, 192, 0.5) 0%, rgba(92, 107, 192, 0) 70%);
-            transform: translateX(-50%);
-            /* Center horizontally */
-            animation: nfc-pulse 1.5s ease-out infinite;
+            /* transform is now handled by the animation */
+            animation: nfc-pulse 2.5s ease-out infinite;
+            /* Slower animation */
             z-index: 1;
         }
 
@@ -1514,13 +1567,17 @@
                 width: 1px;
                 height: 1px;
                 opacity: 0.8;
+                transform: translate(-50%, -50%);
+                /* Stay centered */
             }
 
             100% {
-                width: 300px;
-                /* Grow to a large circle */
-                height: 300px;
+                width: 500px;
+                /* Grow larger */
+                height: 500px;
                 opacity: 0;
+                transform: translate(-50%, -50%);
+                /* Stay centered */
             }
         }
 
@@ -2212,6 +2269,7 @@
         let courseIDMap = {}; // Object to store course information - name to ID mapping
         let sheetNameMap = {}; // Maps display names to actual sheet names
         let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
+        let cooldownUIDs = new Set();
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -3555,12 +3613,6 @@
                 loadingTasks.delete('database');
                 checkLoadingCompletion();
             }
-            const redirectHash = sessionStorage.getItem('redirect_hash');
-            if (redirectHash) {
-                window.location.hash = redirectHash;
-                sessionStorage.removeItem('redirect_hash');
-                handleRouting(); // Manually trigger routing
-            }
         }
 
         /**
@@ -3719,7 +3771,12 @@
                     initialSignIn = false;
                     updateAuthUI();
                     showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
-
+                    const redirectHash = sessionStorage.getItem('redirect_hash');
+                    if (redirectHash) {
+                        window.location.hash = redirectHash;
+                        sessionStorage.removeItem('redirect_hash');
+                        handleRouting(); // Manually trigger routing now
+                    }
                     // Continue with your existing code to fetch courses, etc.
                     // ...
                 }).catch(error => {
@@ -5551,8 +5608,8 @@
         }
 
         /**
- * Add manual log entry.
- */
+         * Shows a dialog to add a manual log entry with a searchable student list.
+         */
         function showAddLogEntryDialog() {
             if (!isAdmin) return;
             if (!currentCourse) {
@@ -5572,16 +5629,16 @@
             const formattedDate = now.toISOString().split('T')[0];
             const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5);
             const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
-            const nameOptions = sortedEntries.map(([uid, name]) => `<option value="${uid}">${name} (${uid})</option>`).join('');
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Add Manual Log Entry</h3>
         <div class="form-group">
-            <label for="manual-name">Name:</label>
-            <select id="manual-name" class="form-control">
-                <option value="">Select Student</option>
-                ${nameOptions}
-            </select>
+            <label for="manual-name-search">Person:</label>
+            <div class="searchable-select-container">
+                <input type="text" id="manual-name-search" class="form-control searchable-select-input" placeholder="Search by name or UID...">
+                <input type="hidden" id="manual-uid">
+                <div class="searchable-select-dropdown"></div>
+            </div>
         </div>
         <div class="form-group">
             <label for="manual-date">Date:</label>
@@ -5599,18 +5656,57 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
+            const searchInput = dialog.querySelector('#manual-name-search');
+            const uidInput = dialog.querySelector('#manual-uid');
+            const dropdown = dialog.querySelector('.searchable-select-dropdown');
+            let closeDropdownTimeout;
+
+            const populateDropdown = (filter = '') => {
+                dropdown.innerHTML = '';
+                const lowerFilter = filter.toLowerCase();
+                const filteredEntries = sortedEntries.filter(([uid, name]) =>
+                    name.toLowerCase().includes(lowerFilter) ||
+                    uid.toLowerCase().includes(lowerFilter)
+                );
+
+                if (filteredEntries.length === 0) {
+                    dropdown.innerHTML = '<div style="color: #888; padding: 10px;">No results found</div>';
+                }
+
+                filteredEntries.slice(0, 100).forEach(([uid, name]) => { // Limit to 100 results for performance
+                    const item = document.createElement('div');
+                    item.textContent = `${name} (${uid})`;
+                    item.addEventListener('click', () => {
+                        searchInput.value = name;
+                        uidInput.value = uid;
+                        dropdown.style.display = 'none';
+                    });
+                    dropdown.appendChild(item);
+                });
+                dropdown.style.display = 'block';
+            };
+
+            searchInput.addEventListener('focus', () => populateDropdown(searchInput.value));
+            searchInput.addEventListener('input', () => populateDropdown(searchInput.value));
+            searchInput.addEventListener('blur', () => {
+                // Delay hiding the dropdown to allow click events to register
+                closeDropdownTimeout = setTimeout(() => {
+                    dropdown.style.display = 'none';
+                }, 150);
+            });
+
             const closeDialog = () => {
                 document.body.removeChild(dialogBackdrop);
                 document.body.style.overflow = ''; // Restore scroll
             };
 
             document.getElementById('save-manual-log-btn').addEventListener('click', () => {
-                const selectedUid = document.getElementById('manual-name').value;
+                const selectedUid = uidInput.value;
                 const manualDate = document.getElementById('manual-date').value;
                 const manualTime = document.getElementById('manual-time').value;
 
                 if (!selectedUid || !manualDate || !manualTime) {
-                    showAlertDialog('Invalid Input', 'Please fill out all fields.');
+                    showAlertDialog('Invalid Input', 'Please select a person and fill out all fields.');
                     return;
                 }
 
@@ -5687,10 +5783,10 @@
         </div>
         <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
         <div id="timestamp-container">${timestampFields}</div>
-        <div class="dialog-actions">
-            <button id="cancel-edit-log-btn" class="btn-red">Cancel</button>
-            <button id="save-edit-log-btn" class="btn-green">Save Changes</button>
-        </div>`;
+<div class="dialog-actions">
+    <button id="delete-all-logs-btn" class="btn-red">Delete All</button> <button id="cancel-edit-log-btn" class="btn-red">Cancel</button>
+    <button id="save-edit-log-btn" class="btn-green">Save Changes</button>
+</div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
@@ -5716,6 +5812,23 @@
                     timestampGroup.classList.add('deleted');
                     timestampGroup.style.display = 'none'; // Hide it visually
                     showImprovedNotification('info', 'Marked for Deletion', 'Timestamp will be removed upon saving.');
+                });
+            });
+
+            document.getElementById('delete-all-logs-btn').addEventListener('click', () => {
+                showConfirmationDialog({
+                    title: 'Delete Entire Entry?',
+                    message: `This will remove all ${group.originalLogs.length} timestamps for ${group.name} on this date.`,
+                    confirmText: 'Yes, Delete All',
+                    onConfirm: () => {
+                        const idsToRemove = group.originalLogs.map(log => log.id);
+                        logs = logs.filter(log => !idsToRemove.includes(log.id));
+                        saveLogsToLocalStorage();
+                        updateUI();
+                        showImprovedNotification('success', 'Entry Deleted', 'All timestamps for this entry were removed.');
+                        if (isOnline && isSignedIn) syncLogsWithSheet();
+                        closeDialog();
+                    }
                 });
             });
 
@@ -5759,35 +5872,21 @@
             document.getElementById('cancel-edit-log-btn').addEventListener('click', closeDialog);
         }
 
-        /**
-         * Delete a log group.
-         * @param {Object} group - The log group to delete.
-         */
-        function confirmDeleteLog(group) {
+        function confirmDeleteLog(group) { // This function now deletes the LATEST timestamp
             if (!isAdmin) return;
+            if (group.originalLogs.length <= 1) {
+                showAlertDialog('Cannot Delete', 'This is the only timestamp. To remove the entire entry, please use the Edit dialog.');
+                return;
+            }
 
-            showConfirmationDialog({
-                title: 'Delete Log Group?',
-                message: `Are you sure you want to delete all log entries for ${group.name} on ${group.date}?`,
-                confirmText: 'Delete',
-                onConfirm: () => {
-                    const idsToRemove = group.originalLogs.map(log => log.id);
-                    logs = logs.filter(log => !idsToRemove.includes(log.id));
-                    saveLogsToLocalStorage();
-                    updateUI();
+            // Find the latest log in the group
+            const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
 
-                    if (isOnline && isSignedIn && isAdmin) {
-                        syncLogsWithSheet()
-                            .then(() => showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`))
-                            .catch(err => {
-                                console.error('Error syncing after delete:', err);
-                                showImprovedNotification('error', 'Sync Error', 'Changes saved locally but not synced.');
-                            });
-                    } else {
-                        showImprovedNotification('success', 'Logs Deleted', `Removed all logs for ${group.name} on ${group.date}`);
-                    }
-                }
-            });
+            logs = logs.filter(log => log.id !== latestLog.id);
+            saveLogsToLocalStorage();
+            updateUI();
+            showImprovedNotification('success', 'Timestamp Removed', 'The latest timestamp for this entry was removed.');
+            if (isOnline && isSignedIn) syncLogsWithSheet();
         }
 
         function clearLogs() {
@@ -6589,6 +6688,11 @@
          * @param {Object} event - The NFC reading event.
          */
         async function handleNfcReading({ serialNumber }) {
+            // 1. Check if THIS specific UID is on cooldown
+            if (cooldownUIDs.has(serialNumber)) {
+                console.log(`UID ${serialNumber} is on cooldown. Scan ignored.`);
+                return; // Ignore the scan and do nothing
+            }
             lastScannedUID = serialNumber;
 
             // For non-signed-in users, only show UID without saving anything
@@ -6623,7 +6727,12 @@
             const name = uidToNameMap[serialNumber] || 'Unknown';
             playSound(true);
 
-            // NEW: Differentiate between mobile and desktop announcements
+            cooldownUIDs.add(serialNumber);
+            setTimeout(() => {
+                cooldownUIDs.delete(serialNumber); // Remove from cooldown after 1.5 seconds
+            }, 1500);
+
+            // Differentiate between mobile and desktop announcements
             const isMobile = window.innerWidth <= 700;
 
             if (isMobile) {
