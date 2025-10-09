@@ -874,7 +874,7 @@
         .logs-table td {
             padding: 12px 15px;
             border-top: 1px solid #e0e0e0;
-            vertical-align: top;
+            vertical-align: middle;
             /* Force top alignment */
             padding-top: 16px;
             /* Adjust padding to visually center */
@@ -924,6 +924,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 5px;
+            align-items: center;
         }
 
         .time-tag {
@@ -1210,14 +1211,21 @@
         }
 
         .social-links {
-            margin-bottom: 10px;
-            margin-top: 10px;
+            display: flex;
+            /* Treat the container as a flexbox */
+            justify-content: center;
+            /* Keep the icons centered horizontally */
+            align-items: center;
+            /* Vertically align all items to the middle */
+            gap: 20px;
+            /* Replaces margin for consistent spacing */
         }
 
         .social-links a {
             color: var(--primary-dark);
             font-size: 1.0em;
-            margin: 0 10px;
+            margin: 0;
+            /* Remove old margin, gap now handles spacing */
             transition: color 0.3s;
         }
 
@@ -2270,6 +2278,7 @@
         let sheetNameMap = {}; // Maps display names to actual sheet names
         let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
         let cooldownUIDs = new Set();
+        let nfcAbortController = null; // Add this line
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -3561,10 +3570,35 @@
             // This callback handles the response from signing in.
             const tokenCallback = (resp) => {
                 if (resp && resp.access_token) {
+                    // This is the SUCCESS path, where we get a valid token.
                     handleTokenResponse(resp);
                 } else if (resp.error) {
-                    console.error('Token error:', resp.error);
-                    showImprovedNotification('error', 'Auth Error', 'Failed to obtain access token.');
+                    // This is the FAILURE path.
+                    console.error('Token request failed:', resp.error);
+
+                    // Check if this was a silent refresh that failed, which indicates an expired session.
+                    const isSilentRefreshFailure = resp.error.includes('immediate_failed') || resp.error.includes('closed');
+
+                    if (isSilentRefreshFailure) {
+                        console.log("Silent auth failed. Marking session as expired.");
+
+                        // --- This is the crucial logic for handling an expired session ---
+                        isSignedIn = false;
+                        if (autoSyncInterval) {
+                            clearInterval(autoSyncInterval);
+                            console.log("Auto-sync stopped due to expired session.");
+                        }
+                        updateSyncStatus("Session Expired", "error");
+                        syncBtn.disabled = true;
+
+                        // This is the call that makes the "Sign In" button reappear.
+                        updateAuthUI();
+
+                        showImprovedNotification('warning', 'Session Expired', 'Please sign in again to resume syncing.');
+                    } else {
+                        // This was a different kind of error (e.g., a network issue during sign-in).
+                        showImprovedNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
+                    }
                 }
             };
 
@@ -4439,38 +4473,13 @@
         }
 
         // Try to silently refresh the token
-        // Try to silently refresh the token
         async function attemptSilentAuth() {
             try {
-                // Try to refresh the token silently (no UI)
+                // This simply triggers the request. The result is handled by the tokenCallback now.
                 tokenClient.requestAccessToken({ prompt: 'none' });
-                // If this works, the callback `handleTokenResponse` will handle everything.
-                return true;
             } catch (error) {
-                console.error('Silent auth refresh failed, session has expired:', error);
-
-                // --- NEW IMPROVED LOGIC ---
-                // 1. Mark the user as signed out
-                isSignedIn = false;
-
-                // 2. Stop the auto-sync timer to prevent further errors
-                if (autoSyncInterval) {
-                    clearInterval(autoSyncInterval);
-                    console.log("Auto-sync stopped due to expired session.");
-                }
-
-                // 3. Update the sync status to clearly show the session has expired
-                updateSyncStatus("Session Expired", "error");
-                syncBtn.disabled = true;
-
-                // 4. Update the main UI to show the "Sign in" button
-                updateAuthUI();
-
-                // 5. Show one clear notification to the user
-                showImprovedNotification('warning', 'Session Expired',
-                    'Your Google sign-in has expired. Please sign in again to resume syncing.');
-
-                return false;
+                // This catch block is unlikely to be hit, but is kept for safety.
+                console.error('Error initiating silent auth:', error);
             }
         }
 
@@ -6454,7 +6463,7 @@
                         addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
 
                         const deleteIcon = document.createElement('i');
-                        deleteIcon.className = 'fa-solid fa-trash-can action-icon delete';
+                        deleteIcon.className = 'fa-solid fa-minus action-icon delete';
                         deleteIcon.title = 'Delete';
                         deleteIcon.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
 
@@ -6622,38 +6631,45 @@
          */
         async function startScanning() {
             if (!nfcSupported) {
-                // Only show the notification if the user is on a mobile device.
                 if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
                     showImprovedNotification('error', 'NFC Not Supported', 'NFC scanning is only supported in Chrome on Android.');
                 }
                 return;
             }
-
-
             if (!currentCourse) {
                 showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
                 return;
             }
 
             try {
+                // Create a new AbortController for this scanning session.
+                nfcAbortController = new AbortController();
 
-                // Create NFC reader
+                // When the scan is aborted, log it to the console.
+                nfcAbortController.signal.onabort = () => {
+                    console.log("NFC scan aborted by user.");
+                };
+
                 nfcReader = new NDEFReader();
 
-                // Request permission and start scan
-                nfcReader.scan().then(() => {
-                    // Scan started successfully
-                    isScanning = true;
-                    updateScanButtons();
+                // Pass the signal to the scan() method. This allows us to cancel it later.
+                await nfcReader.scan({ signal: nfcAbortController.signal });
 
-                    // Set up event listeners
-                    nfcReader.addEventListener("reading", handleNfcReading);
-                    nfcReader.addEventListener("error", handleNfcError);
-                }).catch(error => {
-                    handleScanningError(error);
-                });
+                console.log("NFC Scan started successfully.");
+                isScanning = true;
+                updateScanButtons();
+
+                nfcReader.addEventListener("reading", handleNfcReading);
+                nfcReader.addEventListener("error", handleNfcError);
+
             } catch (error) {
-                handleScanningError(error);
+                // Check if the error was because we deliberately aborted the scan.
+                if (error.name === 'AbortError') {
+                    // This is expected when the user clicks "Stop". No need to show an error.
+                } else {
+                    // Handle other errors like permission denied.
+                    handleScanningError(error);
+                }
             }
         }
 
@@ -6720,30 +6736,40 @@
 
 
         /**
-         * Handle NFC reading.
+         * Handle NFC reading with a per-UID cooldown to prevent rapid repeat scans.
          * @param {Object} event - The NFC reading event.
          */
         async function handleNfcReading({ serialNumber }) {
-            // 1. Check if THIS specific UID is on cooldown
+            // COOLDOWN LOGIC: Check if this card's UID was just scanned.
             if (cooldownUIDs.has(serialNumber)) {
                 console.log(`UID ${serialNumber} is on cooldown. Scan ignored.`);
-                return; // Ignore the scan and do nothing
+                return; // Stop the function immediately.
             }
-            lastScannedUID = serialNumber;
 
-            // For non-signed-in users, only show UID without saving anything
+            lastScannedUID = serialNumber;
+            playSound(true); // Play the success sound immediately for quick feedback.
+
+            // COOLDOWN LOGIC: Activate the cooldown for this specific card.
+            cooldownUIDs.add(serialNumber);
+            setTimeout(() => {
+                cooldownUIDs.delete(serialNumber); // Remove from cooldown after 1.5 seconds.
+            }, 1500);
+
+
+            // --- Handle different user states ---
+
+            // For non-signed-in users, just show the UID and stop.
             if (!isSignedIn) {
-                playSound(true);
                 let notSignedInMsg = document.getElementById('not-signed-in-message');
                 if (notSignedInMsg) {
                     notSignedInMsg.innerHTML = `
                 <h3><i class="fas fa-id-card"></i> The serial number of your Student ID Card is:</h3>
-                <h2 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h2>
-            `;
+                <h2 style="margin-top: 10px; font-weight: bold;">${lastScannedUID}</h2>`;
                 }
-                return;
+                return; // Stop here for guests.
             }
 
+            // For signed-in users, proceed with logging.
             if (!currentCourse) {
                 showImprovedNotification('warning', 'No Course Selected', 'Please select a course before scanning');
                 return;
@@ -6761,14 +6787,6 @@
             updateUI();
 
             const name = uidToNameMap[serialNumber] || 'Unknown';
-            playSound(true);
-
-            cooldownUIDs.add(serialNumber);
-            setTimeout(() => {
-                cooldownUIDs.delete(serialNumber); // Remove from cooldown after 1.5 seconds
-            }, 1500);
-
-            // Differentiate between mobile and desktop announcements
             const isMobile = window.innerWidth <= 700;
 
             if (isMobile) {
@@ -6777,7 +6795,7 @@
                 const nameEl = document.getElementById('scan-announcement-name');
                 if (overlay && nameEl) {
                     nameEl.textContent = name;
-                    document.body.style.overflow = 'hidden'; // Freeze scrolling
+                    document.body.style.overflow = 'hidden';
                     overlay.style.display = 'flex';
                     setTimeout(() => overlay.classList.add('visible'), 10);
 
@@ -6785,16 +6803,15 @@
                         overlay.classList.remove('visible');
                         setTimeout(() => {
                             overlay.style.display = 'none';
-                            document.body.style.overflow = ''; // Unfreeze scrolling
+                            document.body.style.overflow = '';
                         }, 300);
                         overlay.removeEventListener('click', hideOverlay);
                     };
-
                     setTimeout(hideOverlay, 3000);
                     overlay.addEventListener('click', hideOverlay);
                 }
             } else {
-                // Desktop: Show original welcome banner
+                // Desktop: Show welcome banner
                 let adminWelcomeMsg = document.getElementById('admin-welcome-message');
                 if (!adminWelcomeMsg) {
                     adminWelcomeMsg = document.createElement('div');
@@ -6840,13 +6857,16 @@
          * Stop NFC scanning.
          */
         function stopScanning() {
+            if (nfcAbortController) {
+                nfcAbortController.abort(); // This is the correct way to stop the scan.
+                nfcAbortController = null;
+            }
+
             isScanning = false;
             updateScanButtons();
 
-            // There's no official way to abort scanning, but we can remove the reader
+            // Clean up the old reader object just in case.
             if (nfcReader) {
-                nfcReader.removeEventListener("reading", handleNfcReading);
-                nfcReader.removeEventListener("error", handleNfcError);
                 nfcReader = null;
             }
         }
