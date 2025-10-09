@@ -776,6 +776,14 @@
             justify-content: flex-end;
         }
 
+        .logs-actions,
+        .database-actions {
+            display: flex;
+            flex-wrap: nowrap;
+            /* Forces buttons into a single row */
+            gap: 10px;
+        }
+
         /* Table responsiveness fixes */
         .table-container {
             width: 100%;
@@ -811,7 +819,10 @@
         .logs-table td {
             padding: 12px 15px;
             border-top: 1px solid #e0e0e0;
-            vertical-align: middle;
+            vertical-align: top;
+            /* Force top alignment */
+            padding-top: 16px;
+            /* Adjust padding to visually center */
         }
 
         .logs-table tr:hover {
@@ -832,7 +843,7 @@
 
         .logs-table tr.day-separator td>div {
             display: flex;
-            justify-content: center;
+            justify-content: space-between;
             align-items: center;
             padding: 8px 15px;
             /* Apply padding here instead */
@@ -1043,9 +1054,17 @@
         .dialog-title {
             font-family: 'Google Sans', sans-serif;
             margin-top: 0;
-            margin-bottom: 8px;
+            margin-bottom: 15px;
             font-size: 1.5em;
             color: var(--text-color);
+            border-bottom: 1px solid #e0e0e0;
+            /* Adds a separator line */
+            padding-bottom: 15px;
+
+        }
+
+        .dark-mode .dialog-title {
+            border-bottom-color: #444;
         }
 
         .dialog p {
@@ -1055,9 +1074,21 @@
             opacity: 0.8;
         }
 
+        .dialog .form-group {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
         .dialog .form-group label {
             font-weight: 500;
-            opacity: 0.9;
+            flex-basis: 80px;
+            /* Gives all labels a consistent width */
+            flex-shrink: 0;
+            text-align: right;
+            margin-top: 0;
+            /* Remove top margin */
         }
 
         .dialog .form-control {
@@ -1068,6 +1099,12 @@
             margin-top: 5px;
             color: var(--text-color);
             transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .dialog .form-group .form-control {
+            flex-grow: 1;
+            /* Allows inputs to fill the remaining space */
+            margin-top: 0;
         }
 
         .dialog .form-control:focus {
@@ -1731,10 +1768,10 @@
             }
 
             .course-button {
-                flex: 0 0 auto;
-                /* Prevent buttons from shrinking */
-                padding: 10px 20px;
-                font-size: 0.9em;
+                flex-grow: 1;
+                /* Allow buttons to grow */
+                max-width: 45%;
+                /* But not more than half the screen width */
             }
 
             .big-scan-button {
@@ -3520,6 +3557,12 @@
                 loadingTasks.delete('database');
                 checkLoadingCompletion();
             }
+            const redirectHash = sessionStorage.getItem('redirect_hash');
+            if (redirectHash) {
+                window.location.hash = redirectHash;
+                sessionStorage.removeItem('redirect_hash');
+                handleRouting(); // Manually trigger routing
+            }
         }
 
         /**
@@ -3745,6 +3788,7 @@
          */
         // Replace your handleAuthClick function with this updated version
         function handleAuthClick(e) {
+            sessionStorage.setItem('redirect_hash', window.location.hash);
             if (e) e.preventDefault();
 
             console.log('Auth button clicked - redirecting to Google auth');
@@ -6298,7 +6342,7 @@
                                 if (isAdmin) {
                                     const bulkAddBtn = document.createElement('button');
                                     bulkAddBtn.className = 'btn-sm btn-green';
-                                    bulkAddBtn.innerHTML = '<i class="fa-solid fa-calendar-plus"></i>';
+                                    bulkAddBtn.innerHTML = '<i class="fa-solid fa-users-rays"></i>';
                                     bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
                                     bulkAddBtn.style.fontWeight = '500';
                                     bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(currentDay); };
@@ -6356,7 +6400,7 @@
                             actionsCell.appendChild(addUserIcon);
                         }
                         const addTimeIcon = document.createElement('i');
-                        addTimeIcon.className = 'fa-solid fa-clock-rotate-left action-icon add-time';
+                        addTimeIcon.className = 'fa-solid fa-plus action-icon add-time';
                         addTimeIcon.title = 'Add +1 Hour';
                         addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
                         const editIcon = document.createElement('i');
@@ -6615,6 +6659,11 @@
                 }
                 stopScanBtn.style.display = 'none';
             }
+            const scanButtonsContainer = document.querySelector('.scan-buttons');
+            if (scanButtonsContainer) {
+                const anyButtonVisible = (startScanBtn.style.display !== 'none' || stopScanBtn.style.display !== 'none');
+                scanButtonsContainer.style.display = anyButtonVisible ? 'flex' : 'none';
+            }
         }
 
 
@@ -6785,6 +6834,14 @@
         }
 
         function showImprovedNotification(type, title, message, duration) {
+            if (!isAdmin && (title.includes('Warning') || title.includes('Error'))) {
+                // Don't show non-admin users fetch warnings/errors that they can't act on.
+                if (message.includes('load course list') || message.includes('fetch database')) {
+                    console.warn(`Notification suppressed for non-admin: ${title}`);
+                    return;
+                }
+            }
+
             // Skip redundant notifications
             if (title === 'Courses Warning' && message === 'Using default course list') {
                 return;
