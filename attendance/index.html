@@ -1101,6 +1101,19 @@
             animation: dialog-fade-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         }
 
+        /* Makes the main content area of the dialog scrollable if it's too long */
+        .dialog-content {
+            max-height: 60vh;
+            /* Limit height to 60% of the viewport */
+            overflow-y: auto;
+            /* Add a scrollbar if content overflows */
+            padding: 5px;
+            /* A little space for the scrollbar */
+            margin: 0 -15px;
+            /* Negative margin to extend scroll area to edges */
+            padding: 0 15px;
+        }
+
         @keyframes dialog-fade-in {
             to {
                 transform: scale(1);
@@ -1251,48 +1264,82 @@
         .toggle-button-group {
             display: flex;
             flex-grow: 1;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid #ccc;
         }
+
+        /* REMOVED the border from the container */
 
         .toggle-button {
             flex-grow: 1;
             padding: 12px 5px;
-            /* Adjusted padding for a snug fit */
             text-align: center;
             background-color: var(--background-color);
             color: var(--text-color);
-            border: none;
+            border: 1px solid #ccc;
             cursor: pointer;
-            transition: background-color 0.2s ease, color 0.2s ease;
+            transition: all 0.2s ease-in-out;
+            /* Better transition */
             font-size: 0.9em;
             font-weight: 500;
         }
 
+        .toggle-button:first-child {
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
+        }
+
+        .toggle-button:last-child {
+            border-top-right-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+
         .toggle-button:not(:last-child) {
-            border-right: 1px solid #ccc;
+            border-right: none;
         }
 
         .toggle-button.active {
             background-color: var(--primary-color);
             color: white;
+            border-color: var(--primary-color);
+            box-shadow: 0 2px 8px rgba(57, 73, 171, 0.4);
+            transform: translateY(-2px);
         }
 
-        .dark-mode .toggle-button-group {
-            border-color: #555;
+        .toggle-button:hover:not(.active) {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+            transform: translateY(-1px);
+        }
+
+        .toggle-button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background-color: #f0f0f0;
         }
 
         .dark-mode .toggle-button {
             background-color: #333;
-        }
-
-        .dark-mode .toggle-button:not(:last-child) {
-            border-right-color: #555;
+            border-color: #555;
         }
 
         .dark-mode .toggle-button.active {
-            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .dark-mode .toggle-button:hover:not(.active) {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .dark-mode .toggle-button:disabled {
+            background-color: #222;
+            color: #666;
+            border-color: #444;
+        }
+
+        /* Smaller buttons for Section letters */
+        .toggle-button.btn-char {
+            flex-grow: 0;
+            padding: 12px 15px;
         }
 
         .number-input-container {
@@ -1311,7 +1358,6 @@
             font-size: 0.9em;
             font-weight: 500;
             -moz-appearance: textfield;
-            /* Firefox */
         }
 
         .number-input-field::-webkit-outer-spin-button,
@@ -1328,25 +1374,43 @@
             color: #333;
             padding: 11px 0;
             font-size: 1.1em;
+            border: 1px solid #ccc;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
         }
 
         .number-input-btn:hover {
             background-color: #e0e0e0;
-            transform: none;
+        }
+
+        .number-input-btn:active {
+            background-color: #d0d0d0;
         }
 
         .number-input-btn:first-child {
             border-top-left-radius: 8px;
             border-bottom-left-radius: 8px;
+            border-right: none;
+        }
+
+        .number-input-btn:last-child {
+            border-top-right-radius: 8px;
+            border-bottom-right-radius: 8px;
+            border-left: none;
         }
 
         .dark-mode .number-input-btn {
             background-color: #444;
             color: #f0f0f0;
+            border-color: #555;
         }
 
         .dark-mode .number-input-btn:hover {
             background-color: #555;
+        }
+
+        .dark-mode .number-input-btn:active {
+            background-color: #666;
         }
 
         /* Dark Mode Dialogs */
@@ -3089,7 +3153,7 @@
         }
 
         /**
- * Direct EIS Export function with interactive UI for category and hours.
+ * Direct EIS Export function with interactive UI, performance fixes, and dynamic sections.
  */
         async function showDirectEisExportDialog() {
             if (!isAdmin || !currentCourse) {
@@ -3104,222 +3168,264 @@
 
             document.body.style.overflow = 'hidden';
 
-            await fetchCourseInfo();
-            const courseMetadata = getCourseMetadata(currentCourse);
-
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
-            dialogBackdrop.appendChild(dialog);
 
-            // --- Prepare values for the new UI ---
-            const today = new Date().toISOString().split('T')[0];
-            const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
-            const defaultHours = parseInt(courseMetadata?.default_hours || 2);
-            const defaultCategory = courseMetadata?.default_category || 'theory';
-            const suggestedDate = courseMetadata ? getSuggestedDate(courseMetadata) : today;
+            // Build dialog with placeholder data immediately for instant feedback
             const formattedCourseName = currentCourse.replace(/_/g, ' ');
 
-            let weekOptions = '';
-            for (let i = 1; i <= 14; i++) weekOptions += `<option value="${i}" ${i === currentWeek ? 'selected' : ''}>Week ${i}</option>`;
-
-            const sectionOptions = ['ALL', 'Theory A', 'Theory B', 'Theory C', 'Lab A', 'Lab B', 'Lab C', 'Lab D', 'Practice A', 'Practice B', 'Practice C', 'Practice D'];
-            let sectionOptionsHTML = '';
-            sectionOptions.forEach(opt => {
-                sectionOptionsHTML += `<option value="${opt}" ${opt === defaultSection ? 'selected' : ''}>${opt}</option>`;
-            });
-
             dialog.innerHTML = `
-        <h3 class="dialog-title">Add to EPOKA Interactive System</h3>
-        <div class="form-group"><label>Course:</label><input class="form-control" value="${formattedCourseName}" disabled></div>
-        <div class="form-group"><label>EIS ID:</label><input class="form-control" value="${eisId}" disabled></div>
-        <div class="form-group"><label for="export-week">Week:</label><select id="export-week" class="form-control">${weekOptions}</select></div>
-        
-        <div class="form-group">
-            <label>Category:</label>
-            <div id="category-btn-group" class="toggle-button-group">
-                <button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">Theory</button>
-                <button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">Lab</button>
-                <button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">Practice</button>
+        <h3 class="dialog-title">Add to EIS</h3>
+        <div class="dialog-content"> <div class="form-group"><label>Course:</label><input class="form-control" value="${formattedCourseName}" disabled></div>
+            <div class="form-group"><label>EIS ID:</label><input class="form-control" value="${eisId}" disabled></div>
+            <div class="form-group"><label for="export-week">Week:</label><select id="export-week" class="form-control" disabled><option>Loading...</option></select></div>
+            
+            <div class="form-group">
+                <label>Category:</label>
+                <div id="category-btn-group" class="toggle-button-group">
+                    <button class="toggle-button" disabled>Theory</button>
+                    <button class="toggle-button" disabled>Lab</button>
+                </div>
             </div>
-        </div>
 
-        <div class="form-group">
-            <label>Hours:</label>
-            <div id="hours-btn-group" class="toggle-button-group">
-                <button class="toggle-button ${defaultHours === 1 ? 'active' : ''}" data-value="1">1</button>
-                <button class="toggle-button ${defaultHours === 2 ? 'active' : ''}" data-value="2">2</button>
-                <button class="toggle-button ${defaultHours === 3 ? 'active' : ''}" data-value="3">3</button>
-                <button class="toggle-button ${defaultHours === 4 ? 'active' : ''}" data-value="4">4</button>
+            <div class="form-group" id="hours-form-group">
+                <label>Hours:</label>
+                <div class="number-input-container">
+                    <button class="number-input-btn" id="hours-decrement" disabled>-</button>
+                    <input type="number" id="hours-custom-input" class="form-control number-input-field" value="1" min="1" max="25" disabled>
+                    <button class="number-input-btn" id="hours-increment" disabled>+</button>
+                </div>
             </div>
-            <div class="number-input-container">
-                 <button class="number-input-btn" id="hours-decrement">-</button>
-                 <input type="number" id="hours-custom-input" class="form-control number-input-field" value="${defaultHours >= 5 ? defaultHours : 5}" min="5" max="25" ${defaultHours >= 5 ? '' : 'disabled'}>
-                 <button class="number-input-btn" id="hours-increment">+</button>
+
+            <div class="form-group"><label for="export-date">Date:</label><input type="date" id="export-date" class="form-control" disabled></div>
+            <div class="form-group"><label for="export-topic">Topic:</label><input type="text" id="export-topic" class="form-control" value="Lecture"></div>
+
+            <div class="form-group">
+                <label>Section:</label>
+                <div id="section-type-group" class="toggle-button-group">
+                    <button class="toggle-button" data-value="ALL">ALL</button>
+                    <button class="toggle-button" data-value="Theory">Theory</button>
+                    <button class="toggle-button" data-value="Lab">Lab</button>
+                    <button class="toggle-button" data-value="Practice">Practice</button>
+                </div>
             </div>
-        </div>
-
-        <div class="form-group"><label for="export-date">Date:</label><input type="date" id="export-date" class="form-control" value="${suggestedDate}"></div>
-        <div class="form-group"><label for="export-topic">Topic:</label><input type="text" id="export-topic" class="form-control" value="Lecture"></div>
-        
-        <div class="collapsible-trigger">More Options <i class="fas fa-chevron-down"></i></div>
-        <div class="collapsible-content">
-            <div style="font-weight: bold; margin-bottom: 10px;">EIS Processing Options</div>
-            <label><input type="checkbox" id="new-tab-option" checked> Open EIS in new tab</label>
-            <label><input type="checkbox" id="mark-missing-option" checked> Mark students without UID as absent</label>
-            <hr>
-            <div style="font-weight: bold; margin-bottom: 10px;">Instructions</div>
-            <p style="font-size: 0.9em;">1. Install <a href="https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">Tampermonkey</a> in your browser.</p>
-            <p style="font-size: 0.9em;">2. Install the Userscript <a href="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js" target="_blank">by clicking here</a>.</p>
-            <hr>
-            <button id="save-export-btn" class="btn-blue btn-sm">Download File</button>
-        </div>
-
-        <div class="dialog-actions">
+            <div class="form-group">
+                <label></label> <div id="section-char-group" class="toggle-button-group">
+                    <button class="toggle-button btn-char" data-value="A">A</button>
+                    <button class="toggle-button btn-char" data-value="B">B</button>
+                    <button class="toggle-button btn-char" data-value="C">C</button>
+                    <button class="toggle-button btn-char" data-value="D">D</button>
+                </div>
+            </div>
+            
+            <div class="collapsible-trigger">More Options <i class="fas fa-chevron-down"></i></div>
+            <div class="collapsible-content">
+                <button id="save-export-btn" class="btn-blue btn-sm">Export to File</button>
+                <hr>
+                <div style="font-weight: bold; margin-bottom: 10px;">Preferences</div>
+                <label><input type="checkbox" id="new-tab-option" checked> Open EIS in new tab</label>
+                <label><input type="checkbox" id="mark-missing-option" checked> Mark students without UID as absent</label>
+                <hr>
+                <div style="font-weight: bold; margin-bottom: 10px;">Instructions</div>
+                <p style="font-size: 0.9em;">1. Install <a href="https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">Tampermonkey</a>.</p>
+                <p style="font-size: 0.9em;">2. Install the <a href="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js" target="_blank">Userscript</a>.</p>
+            </div>
+        </div> <div class="dialog-actions">
             <button id="cancel-export-btn" class="btn-blue">Cancel</button>
             <button id="confirm-eis-export-btn" class="btn-green">Add to EIS</button>
         </div>`;
 
-            document.body.appendChild(dialogBackdrop);
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop); // Show dialog immediately
 
-            // --- Get Element References ---
-            const categoryGroup = dialog.querySelector('#category-btn-group');
-            const hoursGroup = dialog.querySelector('#hours-btn-group');
-            const customHoursInput = dialog.querySelector('#hours-custom-input');
-            const collapsibleTrigger = dialog.querySelector('.collapsible-trigger');
-            const collapsibleContent = dialog.querySelector('.collapsible-content');
+            // --- Fetch data AFTER dialog is shown, then populate and attach listeners ---
+            fetchCourseInfo().then(() => {
+                const courseMetadata = getCourseMetadata(currentCourse);
+                const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
+                const defaultHours = parseInt(courseMetadata?.default_hours || 2);
+                const defaultCategory = courseMetadata?.default_category || 'theory';
+                const defaultSection = courseMetadata?.default_section || 'ALL';
+                const suggestedDate = courseMetadata ? getSuggestedDate(courseMetadata) : new Date().toISOString().split('T')[0];
 
-            // --- Event Listeners ---
-            const closeDialog = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = '';
-            };
+                // Populate Week dropdown
+                const weekSelect = dialog.querySelector('#export-week');
+                weekSelect.innerHTML = '';
+                for (let i = 1; i <= 14; i++) weekSelect.innerHTML += `<option value="${i}" ${i === currentWeek ? 'selected' : ''}>Week ${i}</option>`;
+                weekSelect.disabled = false;
 
-            categoryGroup.addEventListener('click', (e) => {
-                if (e.target.classList.contains('toggle-button')) {
-                    categoryGroup.querySelectorAll('.toggle-button').forEach(btn => btn.classList.remove('active'));
-                    e.target.classList.add('active');
-                }
-            });
+                // Populate Date
+                const dateInput = dialog.querySelector('#export-date');
+                dateInput.value = suggestedDate;
+                dateInput.disabled = false;
 
-            hoursGroup.addEventListener('click', (e) => {
-                if (e.target.classList.contains('toggle-button')) {
-                    hoursGroup.querySelectorAll('.toggle-button').forEach(btn => btn.classList.remove('active'));
-                    e.target.classList.add('active');
-                    customHoursInput.disabled = true;
-                    customHoursInput.classList.remove('active');
-                }
-            });
+                // Populate Category buttons
+                const categoryGroup = dialog.querySelector('#category-btn-group');
+                categoryGroup.innerHTML = `
+            <button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">Theory</button>
+            <button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">Lab</button>
+            <button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">Practice</button>`;
 
-            const activateCustomHours = () => {
-                hoursGroup.querySelectorAll('.toggle-button').forEach(btn => btn.classList.remove('active'));
-                customHoursInput.disabled = false;
-                customHoursInput.classList.add('active');
-                customHoursInput.focus();
-            };
-            customHoursInput.addEventListener('input', activateCustomHours);
-            customHoursInput.addEventListener('focus', activateCustomHours);
+                // Populate Hours counter
+                const hoursGroup = dialog.querySelector('#hours-form-group'); // CORRECTED SELECTOR
+                const hoursContainer = hoursGroup.querySelector('.number-input-container');
+                hoursContainer.innerHTML = `
+            <button class="number-input-btn" id="hours-decrement">-</button>
+            <input type="number" id="hours-custom-input" class="form-control number-input-field" value="${defaultHours}" min="1" max="25">
+            <button class="number-input-btn" id="hours-increment">+</button>`;
 
-            dialog.querySelector('#hours-decrement').addEventListener('click', () => {
-                activateCustomHours();
-                customHoursInput.stepDown();
-            });
-            dialog.querySelector('#hours-increment').addEventListener('click', () => {
-                activateCustomHours();
-                customHoursInput.stepUp();
-            });
+                // Set initial state for Section buttons
+                let [defaultSectionType, defaultSectionChar] = defaultSection.split(' ');
+                if (defaultSection === 'ALL') defaultSectionType = 'ALL';
 
-            collapsibleTrigger.addEventListener('click', () => {
-                collapsibleContent.classList.toggle('is-open');
-                const icon = collapsibleTrigger.querySelector('i');
-                icon.classList.toggle('fa-chevron-down');
-                icon.classList.toggle('fa-chevron-up');
-            });
+                const sectionTypeGroup = dialog.querySelector('#section-type-group');
+                const sectionCharGroup = dialog.querySelector('#section-char-group');
 
-            const createExportData = () => {
-                const selectedCategory = categoryGroup.querySelector('.toggle-button.active')?.dataset.value || defaultCategory;
-                let selectedHours;
-                const activeHourButton = hoursGroup.querySelector('.toggle-button.active');
-                if (activeHourButton) {
-                    selectedHours = activeHourButton.dataset.value;
-                } else {
-                    selectedHours = customHoursInput.value;
+                sectionTypeGroup.querySelector(`[data-value="${defaultSectionType}"]`)?.classList.add('active');
+                if (defaultSectionChar) {
+                    sectionCharGroup.querySelector(`[data-value="${defaultSectionChar}"]`)?.classList.add('active');
                 }
 
-                const data = {
-                    parameters: {
-                        section: dialog.querySelector('#export-section').value,
-                        week: dialog.querySelector('#export-week').value,
-                        hours: selectedHours,
-                        category: selectedCategory,
-                        date: dialog.querySelector('#export-date').value,
-                        topic: dialog.querySelector('#export-topic').value,
-                        course: currentCourse || 'Default'
-                    },
-                    attendance: {},
-                    nameMap: { ...uidToNameMap }
+                // --- All Functions and Event Listeners are defined inside the .then() ---
+
+                const closeDialog = () => {
+                    document.body.removeChild(dialogBackdrop);
+                    document.body.style.overflow = '';
                 };
 
-                if (logs && logs.length > 0) {
-                    const uidCounts = {};
-                    const selectedDate = new Date(data.parameters.date);
-                    selectedDate.setHours(0, 0, 0, 0);
-                    const nextDay = new Date(selectedDate);
-                    nextDay.setDate(nextDay.getDate() + 1);
+                const updateSectionButtons = () => {
+                    const selectedType = sectionTypeGroup.querySelector('.active')?.dataset.value;
+                    const selectedChar = sectionCharGroup.querySelector('.active')?.dataset.value;
 
-                    logs.forEach(log => {
-                        const logDate = new Date(log.timestamp);
-                        if (logDate >= selectedDate && logDate < nextDay) {
-                            uidCounts[log.uid] = (uidCounts[log.uid] || 0) + 1;
-                        }
+                    // Enable/disable Char buttons based on Type
+                    sectionCharGroup.querySelectorAll('.toggle-button').forEach(btn => {
+                        if (selectedType === 'Theory' && btn.dataset.value === 'D') btn.disabled = true;
+                        else if (selectedType === 'ALL') btn.disabled = true;
+                        else btn.disabled = false;
                     });
-                    data.attendance = uidCounts;
-                }
-                return data;
-            };
 
-            document.getElementById('confirm-eis-export-btn').addEventListener('click', () => {
-                const data = createExportData();
-                const eisId = getCurrentCourseEisId();
-                const openInNewTab = dialog.querySelector('#new-tab-option').checked;
-                const markMissing = dialog.querySelector('#mark-missing-option').checked;
-
-                data.options = {
-                    markMissingAsAbsent: markMissing
+                    // Enable/disable Type buttons based on Char
+                    sectionTypeGroup.querySelectorAll('.toggle-button').forEach(btn => {
+                        if (selectedChar === 'D' && btn.dataset.value === 'Theory') btn.disabled = true;
+                        else if (selectedChar) btn.disabled = (btn.dataset.value === 'ALL');
+                        else btn.disabled = false;
+                    });
                 };
 
-                const jsonString = JSON.stringify(data);
-                copyToClipboard(jsonString).then(() => {
-                    const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
-                    showImprovedNotification('success', 'Data Copied', `Attendance data copied. Click "Paste Data" on the EIS page.`);
-                    if (openInNewTab) {
-                        window.open(eisUrl, '_blank');
-                    } else {
-                        window.location.href = eisUrl;
+                categoryGroup.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('toggle-button')) {
+                        categoryGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                        e.target.classList.add('active');
                     }
-                    closeDialog();
-                }).catch((error) => {
-                    console.error("Clipboard error:", error);
-                    showImprovedNotification('error', 'Clipboard Error', `Could not copy to clipboard. Use the Download File option instead.`);
                 });
-            });
 
-            document.getElementById('save-export-btn').addEventListener('click', () => {
-                const data = createExportData();
-                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
-                const downloadEl = document.createElement('a');
-                downloadEl.setAttribute("href", dataStr);
-                downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${data.parameters.date}.json`);
-                downloadEl.style.display = "none";
-                document.body.appendChild(downloadEl);
-                downloadEl.click();
-                document.body.removeChild(downloadEl);
-                showImprovedNotification('success', 'Export Saved', `Attendance data saved as a file.`);
-                closeDialog();
-            });
+                sectionTypeGroup.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('toggle-button') && !e.target.disabled) {
+                        sectionTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                        e.target.classList.add('active');
+                        if (e.target.dataset.value === 'ALL') {
+                            sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                        }
+                        updateSectionButtons();
+                    }
+                });
 
-            document.getElementById('cancel-export-btn').addEventListener('click', closeDialog);
+                sectionCharGroup.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('toggle-button') && !e.target.disabled) {
+                        sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                        e.target.classList.add('active');
+                        updateSectionButtons();
+                    }
+                });
+
+                const customHoursInput = dialog.querySelector('#hours-custom-input');
+                dialog.querySelector('#hours-decrement').addEventListener('click', () => customHoursInput.stepDown());
+                dialog.querySelector('#hours-increment').addEventListener('click', () => customHoursInput.stepUp());
+
+                dialog.querySelector('.collapsible-trigger').addEventListener('click', (e) => {
+                    const content = e.target.nextElementSibling;
+                    content.classList.toggle('is-open');
+                    const icon = e.target.querySelector('i');
+                    icon.classList.toggle('fa-chevron-down');
+                    icon.classList.toggle('fa-chevron-up');
+                });
+
+                updateSectionButtons(); // Initial check
+
+                const createExportData = () => {
+                    let section = sectionTypeGroup.querySelector('.active')?.dataset.value || 'ALL';
+                    const sectionChar = sectionCharGroup.querySelector('.active')?.dataset.value;
+                    if (section !== 'ALL' && sectionChar) {
+                        section = `${section} ${sectionChar}`;
+                    }
+
+                    const data = {
+                        parameters: {
+                            week: weekSelect.value,
+                            hours: customHoursInput.value,
+                            category: categoryGroup.querySelector('.active')?.dataset.value || defaultCategory,
+                            date: dateInput.value,
+                            topic: dialog.querySelector('#export-topic').value,
+                            course: currentCourse || 'Default',
+                            section: section,
+                        },
+                        attendance: {},
+                        nameMap: { ...uidToNameMap }
+                    };
+
+                    if (logs && logs.length > 0) {
+                        const uidCounts = {};
+                        const selectedDate = new Date(data.parameters.date);
+                        selectedDate.setHours(0, 0, 0, 0);
+                        const nextDay = new Date(selectedDate);
+                        nextDay.setDate(nextDay.getDate() + 1);
+
+                        logs.forEach(log => {
+                            const logDate = new Date(log.timestamp);
+                            if (logDate >= selectedDate && logDate < nextDay) {
+                                uidCounts[log.uid] = (uidCounts[log.uid] || 0) + 1;
+                            }
+                        });
+                        data.attendance = uidCounts;
+                    }
+                    return data;
+                };
+
+                document.getElementById('confirm-eis-export-btn').addEventListener('click', () => {
+                    const data = createExportData();
+                    const eisId = getCurrentCourseEisId();
+                    const openInNewTab = dialog.querySelector('#new-tab-option').checked;
+                    const markMissing = dialog.querySelector('#mark-missing-option').checked;
+                    data.options = { markMissingAsAbsent: markMissing };
+                    const jsonString = JSON.stringify(data);
+                    copyToClipboard(jsonString).then(() => {
+                        const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
+                        showImprovedNotification('success', 'Data Copied', `Attendance data copied. Click "Paste Data" on the EIS page.`);
+                        if (openInNewTab) window.open(eisUrl, '_blank');
+                        else window.location.href = eisUrl;
+                        closeDialog();
+                    }).catch((error) => {
+                        console.error("Clipboard error:", error);
+                        showImprovedNotification('error', 'Clipboard Error', `Could not copy to clipboard. Use the Export to File option instead.`);
+                    });
+                });
+
+                document.getElementById('save-export-btn').addEventListener('click', () => {
+                    const data = createExportData();
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+                    const downloadEl = document.createElement('a');
+                    downloadEl.setAttribute("href", dataStr);
+                    downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${data.parameters.date}.json`);
+                    document.body.appendChild(downloadEl);
+                    downloadEl.click();
+                    document.body.removeChild(downloadEl);
+                    showImprovedNotification('success', 'Export Saved', `Attendance data saved as a file.`);
+                    // Don't close the dialog after exporting, user might want to still add to EIS
+                });
+
+                document.getElementById('cancel-export-btn').addEventListener('click', closeDialog);
+            });
         }
 
 
