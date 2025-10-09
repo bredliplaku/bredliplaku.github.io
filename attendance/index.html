@@ -5553,293 +5553,212 @@
         }
 
         /**
-         * Add manual log entry.
-         */
+ * Add manual log entry.
+ */
         function showAddLogEntryDialog() {
             if (!isAdmin) return;
-
             if (!currentCourse) {
                 showImprovedNotification('warning', 'No Course Selected', 'Please select a course before adding a log entry');
                 return;
             }
 
-            // Create dialog for adding a manual log entry
+            document.body.style.overflow = 'hidden'; // Prevent background scroll
+
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
 
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
 
-            // Get current date and time for default values
             const now = new Date();
-            const formattedDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
-            const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
-
-            // Build options for known people from database
-            let nameOptions = '';
+            const formattedDate = now.toISOString().split('T')[0];
+            const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5);
             const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
-
-            sortedEntries.forEach(([uid, name]) => {
-                nameOptions += `<option value="${uid}">${name} (${uid})</option>`;
-            });
+            const nameOptions = sortedEntries.map(([uid, name]) => `<option value="${uid}">${name} (${uid})</option>`).join('');
 
             dialog.innerHTML = `
-	<h3 class="dialog-title">Add Manual Log Entry</h3>
-	<div class="form-group">
-		<label for="manual-name">Person:</label>
-		<select id="manual-name" class="form-control">
-			<option value="">-- Select Person --</option>
-			${nameOptions}
-		</select>
-	</div>
-	<div class="form-group">
-		<label for="manual-date">Date:</label>
-		<input type="date" id="manual-date" class="form-control" value="${formattedDate}">
-	</div>
-	<div class="form-group">
-		<label for="manual-time">Time:</label>
-		<input type="time" id="manual-time" class="form-control" value="${formattedTime}">
-	</div>
-	<div class="dialog-actions">
-		<button id="save-manual-log-btn" class="btn-green">Add Entry</button>
-		<button id="cancel-manual-btn">Cancel</button>
-	</div>
-`;
+        <h3 class="dialog-title">Add Manual Log Entry</h3>
+        <div class="form-group">
+            <label for="manual-name">Person:</label>
+            <select id="manual-name" class="form-control">
+                <option value="">-- Select Person --</option>
+                ${nameOptions}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="manual-date">Date:</label>
+            <input type="date" id="manual-date" class="form-control" value="${formattedDate}">
+        </div>
+        <div class="form-group">
+            <label for="manual-time">Time:</label>
+            <input type="time" id="manual-time" class="form-control" value="${formattedTime}">
+        </div>
+        <div class="dialog-actions">
+            <button id="cancel-manual-btn" class="btn-red">Cancel</button>
+            <button id="save-manual-log-btn" class="btn-green">Add Entry</button>
+        </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // Handle save button
-            document.getElementById('save-manual-log-btn').addEventListener('click', function () {
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = ''; // Restore scroll
+            };
+
+            document.getElementById('save-manual-log-btn').addEventListener('click', () => {
                 const selectedUid = document.getElementById('manual-name').value;
                 const manualDate = document.getElementById('manual-date').value;
                 const manualTime = document.getElementById('manual-time').value;
 
-                if (!selectedUid) {
-                    alert('Please select a person.');
+                if (!selectedUid || !manualDate || !manualTime) {
+                    showAlertDialog('Invalid Input', 'Please fill out all fields.');
                     return;
                 }
 
-                if (!manualDate) {
-                    alert('Please enter a date.');
-                    return;
-                }
-
-                if (!manualTime) {
-                    alert('Please enter a time.');
-                    return;
-                }
-
-                // Create new log entry
-                const timestamp = new Date(`${manualDate}T${manualTime}:00`);
                 const newLog = {
                     uid: selectedUid,
-                    timestamp: timestamp.getTime(),
+                    timestamp: new Date(`${manualDate}T${manualTime}:00`).getTime(),
                     id: Date.now() + Math.random().toString(36).substr(2, 9),
                     manual: true
                 };
 
-                // Add to logs
                 logs.unshift(newLog);
-
-                // Sync with sheets if online
-                if (isOnline && isSignedIn) {
-                    appendLogToSheet(newLog).catch(err => console.error('Error appending log:', err));
-                }
-
+                saveLogsToLocalStorage();
                 updateUI();
 
+                if (isOnline && isSignedIn) {
+                    appendLogToSheet(newLog);
+                }
+
                 const name = uidToNameMap[selectedUid] || 'Unknown';
-                showImprovedNotification('success', 'Manual Entry Added', `Added attendance for ${name} at ${manualDate} ${manualTime}`);
-
-                document.body.removeChild(dialogBackdrop);
+                showImprovedNotification('success', 'Manual Entry Added', `Added attendance for ${name}.`);
+                closeDialog();
             });
 
-            // Handle cancel button
-            document.getElementById('cancel-manual-btn').addEventListener('click', function () {
-                document.body.removeChild(dialogBackdrop);
-            });
+            document.getElementById('cancel-manual-btn').addEventListener('click', closeDialog);
         }
 
         /**
-         * Show dialog to edit a log entry group.
-         * @param {Object} group - The log group to edit.
-         */
-        /**
-         * Show dialog to edit a log entry group.
-         * @param {Object} group - The log group to edit.
-         */
+ * Show dialog to edit a log entry group.
+ * @param {Object} group - The log group to edit.
+ */
         function showEditLogDialog(group) {
             if (!isAdmin) return;
+            document.body.style.overflow = 'hidden'; // Prevent background scroll
 
-            // Create dialog backdrop
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
-
-            // Create dialog box
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
 
-            // FIX: Sort the logs by timestamp (earliest to latest) before displaying
             group.originalLogs.sort((a, b) => a.timestamp - b.timestamp);
-
-            // Get date from first log in group
             const firstLog = group.originalLogs[0];
             const commonDateObj = new Date(firstLog.timestamp);
             const formattedDate = commonDateObj.toISOString().split('T')[0];
 
-            // Create timestamp edit fields for each log in group
             let timestampFields = '';
             group.originalLogs.forEach((log, index) => {
                 const timeObj = new Date(log.timestamp);
                 const formattedTime = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
-
                 timestampFields += `
-		<div class="timestamp-edit-group" data-log-id="${log.id}">
-			<div style="display: flex; justify-content: space-between; align-items: center;">
-				<h4>Timestamp ${index + 1}</h4>
-				<button class="delete-time-btn btn-red" style="padding: 2px 8px; font-size: 0.8em;" data-index="${index}">
-					<i class="fas fa-trash"></i> Delete
-				</button>
-			</div>
-			<div class="form-group">
-				<label>Time:</label>
-				<input type="time" class="form-control timestamp-time" value="${formattedTime}">
-			</div>
-		</div>
-	`;
+            <div class="timestamp-edit-group" data-log-id="${log.id}">
+                <div class="form-group">
+                    <label for="timestamp-time-${index}">Timestamp ${index + 1}:</label>
+                    <input type="time" id="timestamp-time-${index}" class="form-control timestamp-time" value="${formattedTime}">
+                    <button class="delete-time-btn btn-red btn-sm" data-index="${index}" title="Delete Timestamp">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>`;
             });
 
             dialog.innerHTML = `
-	<h3 class="dialog-title">Edit Log Entry</h3>
-	<div class="form-group">
-		<label for="edit-name">Name:</label>
-		<input type="text" id="edit-name" class="form-control" value="${group.name}">
-		<small style="color: #777; display: block; margin-top: 5px;">This will update the database for this UID</small>
-	</div>
-	<div class="form-group">
-		<label for="edit-uid">UID:</label>
-		<input type="text" id="edit-uid" class="form-control" value="${group.uid}" disabled>
-	</div>
-	<div class="form-group">
-		<label>Date:</label>
-		<input type="date" id="edit-date" class="form-control" value="${formattedDate}">
-	</div>
-	<div id="timestamp-container">
-		${timestampFields}
-	</div>
-	<div class="dialog-actions">
-		<button id="save-edit-log-btn" class="btn-blue">Save</button>
-		<button id="cancel-edit-log-btn" class="btn-red">Cancel</button>
-	</div>
-`;
+        <h3 class="dialog-title">Edit Log Entry</h3>
+        <div class="form-group">
+            <label for="edit-name">Name:</label>
+            <input type="text" id="edit-name" class="form-control" value="${group.name}">
+        </div>
+        <div class="form-group">
+            <label for="edit-uid">UID:</label>
+            <input type="text" id="edit-uid" class="form-control" value="${group.uid}" disabled>
+        </div>
+        <div class="form-group">
+            <label for="edit-date">Date:</label>
+            <input type="date" id="edit-date" class="form-control" value="${formattedDate}">
+        </div>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+        <div id="timestamp-container">${timestampFields}</div>
+        <div class="dialog-actions">
+            <button id="cancel-edit-log-btn" class="btn-red">Cancel</button>
+            <button id="save-edit-log-btn" class="btn-blue">Save Changes</button>
+        </div>`;
 
-            // Add some custom styling
-            const style = document.createElement('style');
-            style.textContent = `
-	.timestamp-edit-group {
-		background-color: #f9f9f9;
-		padding: 10px;
-		border-radius: 5px;
-		margin-bottom: 10px;
-	}
-	.timestamp-edit-group h4 {
-		margin-top: 0;
-		margin-bottom: 10px;
-		color: #3949ab;
-	}
-	.timestamp-edit-group.deleted {
-		display: none;
-	}
-`;
-
-            dialog.appendChild(style);
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // Track logs to delete
-            const logsToDelete = new Set();
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = ''; // Restore scroll
+            };
 
-            // Handle delete time buttons
+            const logsToDelete = new Set();
             dialog.querySelectorAll('.delete-time-btn').forEach(btn => {
                 btn.addEventListener('click', function () {
                     const index = parseInt(this.getAttribute('data-index'));
                     const logId = group.originalLogs[index].id;
                     const timestampGroup = this.closest('.timestamp-edit-group');
-
-                    // Count visible timestamp groups (not deleted)
                     const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)').length;
 
-                    // Don't allow deleting the last timestamp
                     if (visibleGroups <= 1) {
-                        showImprovedNotification('warning', 'Cannot Delete', 'At least one timestamp must remain.');
+                        showAlertDialog('Cannot Delete', 'At least one timestamp must remain.');
                         return;
                     }
-
-                    // Mark for deletion
                     logsToDelete.add(logId);
                     timestampGroup.classList.add('deleted');
-
-                    showImprovedNotification('info', 'Timestamp Marked for Deletion', 'The timestamp will be deleted when you save changes.');
+                    timestampGroup.style.display = 'none'; // Hide it visually
+                    showImprovedNotification('info', 'Marked for Deletion', 'Timestamp will be removed upon saving.');
                 });
             });
 
-            // Handle save button
-            document.getElementById('save-edit-log-btn').addEventListener('click', function () {
+            document.getElementById('save-edit-log-btn').addEventListener('click', () => {
                 const newName = document.getElementById('edit-name').value.trim();
                 const newDate = document.getElementById('edit-date').value;
 
                 if (!newName) {
-                    alert('Name cannot be empty.');
+                    showAlertDialog('Invalid Input', 'Name cannot be empty.');
                     return;
                 }
 
-                // Update name in database
                 uidToNameMap[group.uid] = newName;
 
-                // Update each log in the group
                 const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)');
-
                 visibleGroups.forEach(groupElement => {
                     const logId = groupElement.getAttribute('data-log-id');
                     const timeInput = groupElement.querySelector('.timestamp-time').value;
-
-                    // Find the corresponding log
                     const log = logs.find(log => log.id === logId);
-
                     if (log) {
-                        // Update timestamp with new date and time
-                        const newTimestamp = new Date(`${newDate}T${timeInput}:00`);
-                        log.timestamp = newTimestamp.getTime();
+                        log.timestamp = new Date(`${newDate}T${timeInput}:00`).getTime();
                     }
                 });
 
-                // Remove logs marked for deletion
                 if (logsToDelete.size > 0) {
                     logs = logs.filter(log => !logsToDelete.has(log.id));
                 }
 
-                // Sort logs by timestamp
                 logs.sort((a, b) => b.timestamp - a.timestamp);
-
-                // Sync with sheets if online
-                if (isOnline && isSignedIn) {
-                    Promise.all([
-                        syncDatabaseToSheet(),
-                        syncLogsWithSheet()
-                    ]).catch(err => console.error('Error syncing after edit:', err));
-                }
                 saveLogsToLocalStorage();
+
+                if (isOnline && isSignedIn) {
+                    Promise.all([syncDatabaseToSheet(), syncLogsWithSheet()]);
+                }
+
                 updateUI();
-
-                showImprovedNotification('success', 'Log Updated', 'Log entry has been updated successfully.');
-                document.body.removeChild(dialogBackdrop);
+                showImprovedNotification('success', 'Log Updated', 'The log entry was updated successfully.');
+                closeDialog();
             });
 
-            // Handle cancel button
-            document.getElementById('cancel-edit-log-btn').addEventListener('click', function () {
-                document.body.removeChild(dialogBackdrop);
-            });
+            document.getElementById('cancel-edit-log-btn').addEventListener('click', closeDialog);
         }
 
         /**
