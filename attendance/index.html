@@ -874,10 +874,8 @@
         .logs-table td {
             padding: 12px 15px;
             border-top: 1px solid #e0e0e0;
-            vertical-align: middle;
-            /* Force top alignment */
-            padding-top: 16px;
-            /* Adjust padding to visually center */
+            vertical-align: middle !important;
+            /* Force middle alignment */
         }
 
         .logs-table tr:hover {
@@ -1560,13 +1558,10 @@
             color: var(--primary-dark);
             font-size: 1.0em;
             cursor: pointer;
-            padding: 0 10px;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
             transition: color 0.3s, transform 0.2s;
-            /* Added transform */
-            display: inline-block;
-            line-height: inherit;
-            /* Align with other icons */
-            vertical-align: middle;
         }
 
         .theme-toggle:hover {
@@ -2383,12 +2378,14 @@
                                 <tr>
                                     <th class="sortable name-column" data-sort="name">Name <i
                                             class="sort-icon fas fa-sort"></i></th>
-                                    <th class="sortable uid-column" data-sort="uid">UID <i
+
+                                    <th class="sortable uid-column admin-only" data-sort="uid">UID <i
                                             class="sort-icon fas fa-sort"></i></th>
-                                    <th class="sortable date-column" data-sort="date">Date <i
+                                    <th class="sortable date-column admin-only" data-sort="date">Date <i
                                             class="sort-icon fas fa-sort-down"></i></th>
+
                                     <th>Time</th>
-                                    <th class="admin-only" style="display: none;">Actions</th>
+                                    <th class="admin-only">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="logs-tbody">
@@ -2779,14 +2776,11 @@
 
         function handleRouting() {
             const hash = window.location.hash.replace('#', '');
-
-            // Only handle routing if a hash is present and it's a valid course
             if (hash && availableCourses.includes(hash)) {
+                // If the course in the URL is different from the current one, load it.
                 if (currentCourse !== hash) {
-                    selectCourseButton(hash);
+                    handleCourseChange(hash);
                 }
-                // Ensure scanner tab is active for a course view
-                document.querySelector('.tab[data-tab="scanner-tab"]').click();
             }
         }
 
@@ -3507,13 +3501,12 @@
                                     isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
                                     updateAuthUI();
                                     if (isOnline) {
-                                        // Add a short delay to allow the new auth token to be fully processed by Google's backend.
                                         setTimeout(() => {
                                             fetchAvailableCourses().catch(err => console.error('Error fetching courses after auth:', err));
                                             fetchDatabaseFromSheet().catch(err => console.error('Error fetching database after auth:', err));
-                                        }, 500); // 500ms delay
+                                        }, 500);
                                     }
-                                    showMainContent();
+                                    handleRouting(); // ADD THIS LINE HERE
                                 })
                                 .catch(e => {
                                     console.error('Error fetching user info after redirect:', e);
@@ -7181,32 +7174,20 @@
         }
 
         function selectCourseButton(course) {
-            if (window.location.hash !== `#${course}`) window.location.hash = course;
-            // Check if we're already loading this course
-            const existingRequest = activeRequests.get(course);
-            if (existingRequest && !existingRequest.cancelled && currentCourse === course) {
-                console.log(`Already loading course: ${course}`);
-                return;
-            }
-
             currentCourse = course;
+            localStorage.setItem('last_active_course', currentCourse);
 
             // Update active button visually
             document.querySelectorAll('.course-button').forEach(btn => {
-                btn.classList.remove('active');
                 const btnTextContent = btn.textContent.trim().replace(/\s+/g, ' ');
-                const courseDisplay = course.replace('_', ' ');
-
+                const courseDisplay = course.replace(/_/g, ' ');
                 if (btnTextContent.includes(courseDisplay)) {
                     btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
                 }
             });
-
-            // Update page title immediately
             updatePageTitle();
-
-            // Load course data with request tracking
-            handleCourseChange(course);
         }
 
         // Initialize the application when window loads
