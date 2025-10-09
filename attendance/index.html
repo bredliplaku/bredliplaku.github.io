@@ -3362,16 +3362,31 @@
 
         // Check for auth redirect
         function checkAuthRedirect() {
-            // Handle auth redirect token at the very start
             if (window.location.hash && window.location.hash.includes('access_token=')) {
                 console.log('Detected auth redirect with token');
 
-                // Parse the hash parameters
+                // 1. Get the original course hash we saved before leaving
+                const originalHash = sessionStorage.getItem('redirect_hash');
+                sessionStorage.removeItem('redirect_hash'); // Clean up immediately
+
+                // 2. Parse the authentication token from the URL
                 const params = {};
                 window.location.hash.substring(1).split('&').forEach(pair => {
                     const [key, value] = pair.split('=');
                     params[key] = decodeURIComponent(value);
                 });
+
+                // 3. Clean the URL (remove the access_token)
+                if (history.replaceState) {
+                    history.replaceState(null, null, window.location.pathname);
+                } else {
+                    window.location.hash = '';
+                }
+
+                // 4. NOW, restore the original course hash to the URL
+                if (originalHash) {
+                    window.location.hash = originalHash;
+                }
 
                 if (params.access_token) {
                     console.log('Successfully extracted access token');
@@ -3389,8 +3404,11 @@
                                     isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
                                     updateAuthUI();
                                     if (isOnline) {
-                                        fetchAvailableCourses().catch(err => console.error('Error:', err));
-                                        fetchDatabaseFromSheet().catch(err => console.error('Error:', err));
+                                        // Add a short delay to allow the new auth token to be fully processed by Google's backend.
+                                        setTimeout(() => {
+                                            fetchAvailableCourses().catch(err => console.error('Error fetching courses after auth:', err));
+                                            fetchDatabaseFromSheet().catch(err => console.error('Error fetching database after auth:', err));
+                                        }, 500); // 500ms delay
                                     }
                                     showMainContent();
                                 })
@@ -4218,7 +4236,7 @@
             currentSort = 'date-desc';
         }
 
-        function handleCourseChange(courseName) {
+        async function handleCourseChange(courseName) {
             // 1. Cancel any other pending requests.
             activeRequests.forEach((req, course) => {
                 if (course !== courseName) {
@@ -4231,33 +4249,39 @@
             // 2. Set the new course and update UI to show loading.
             currentCourse = courseName;
             localStorage.setItem('last_active_course', currentCourse);
-            updatePageTitle(); // Update title to show loading state
+            updatePageTitle();
+            const tableContainer = document.querySelector('#scanner-tab .table-container');
+            tableContainer.classList.add('reloading');
 
-            // 3. Immediately load from local storage for a fast UI response.
-            logs = restoreLogsFromLocalStorage();
-            updateUI(); // Show local data right away
-
-            // 4. Create a new, trackable request for this course.
+            // 3. Create a new, trackable request for this course.
             const requestId = ++currentRequestId;
             const request = { id: requestId, course: currentCourse, cancelled: false };
             activeRequests.set(currentCourse, request);
 
-            // 5. If online, safely fetch from the network.
+            // 4. Fetch from server FIRST (if online).
+            let serverLogs = [];
             if (isOnline && isSignedIn) {
-                console.log(`Starting safe fetch for ${currentCourse} (Request #${requestId})`);
-                fetchLogsWithRequestTracking(currentCourse, request)
-                    .then((success) => {
-                        if (success) {
-                            console.log(`Successfully completed fetch for ${currentCourse}`);
-                        }
-                    })
-                    .finally(() => {
-                        // Clean up the request from our tracker.
-                        if (activeRequests.get(currentCourse)?.id === requestId) {
-                            activeRequests.delete(currentCourse);
-                        }
-                    });
+                console.log(`Starting server fetch for ${currentCourse} (Request #${requestId})`);
+                // Use fetchLogsFromSheet directly as it's simpler for this flow.
+                serverLogs = await fetchLogsFromSheet().catch(err => {
+                    console.error("Server fetch failed, will rely on local data.", err);
+                    return []; // Return empty array on failure
+                });
             }
+
+            // 5. After fetching, check if this request has been cancelled by a newer one.
+            if (request.cancelled) {
+                console.log(`Request #${requestId} for ${courseName} was cancelled. Aborting update.`);
+                return; // Stop processing
+            }
+
+            // 6. Get local logs and merge, with server logs as the priority.
+            const localLogs = restoreLogsFromLocalStorage();
+            logs = mergeLogs(serverLogs, localLogs);
+
+            // 7. Save the corrected, merged data back to local storage and update the UI.
+            saveLogsToLocalStorage();
+            updateUI(); // This will handle fading the table back in
         }
 
         // Fetch logs with request tracking
@@ -4908,10 +4932,14 @@
                 }
 
                 populateCourseDropdown();
-                handleRouting(); // Handle initial URL now that courses are loaded
-                window.addEventListener('hashchange', handleRouting); // Handle changes
                 loadingTasks.delete('courses');
                 checkLoadingCompletion();
+
+                // Only handle routing if we are NOT in the middle of a sign-in redirect.
+                // The sign-in logic will handle the redirect itself.
+                if (!sessionStorage.getItem('redirect_hash')) {
+                    handleRouting();
+                }
             } catch (error) {
                 console.error('Error fetching courses:', error);
                 console.log('Using default courses due to error');
@@ -4990,27 +5018,28 @@
 
 
 
-        function mergeLogs(localLogs, serverLogs) {
-            // Create a map of logs by ID for faster lookup
-            const logMap = {};
+        /**
+         * Merges server and local logs, with the server as the source of truth.
+         * @param {Array} serverLogs - The array of logs fetched from Google Sheets.
+         * @param {Array} localLogs - The array of logs from the browser's local storage.
+         * @returns {Array} The merged and sorted array of logs.
+         */
+        function mergeLogs(serverLogs, localLogs) {
+            // The server is the master list. Start with all server logs.
+            const finalLogMap = new Map(serverLogs.map(log => [log.id, log]));
 
-            // Add all local logs to the map
-            localLogs.forEach(log => {
-                logMap[log.id] = log;
-            });
-
-            // Add or update server logs, preferring newer timestamps
-            serverLogs.forEach(serverLog => {
-                const existingLog = logMap[serverLog.id];
-
-                // If log doesn't exist locally or server has newer version, use server version
-                if (!existingLog || serverLog.timestamp > existingLog.timestamp) {
-                    logMap[serverLog.id] = serverLog;
+            // Now, go through the local logs.
+            localLogs.forEach(localLog => {
+                // If a local log's ID does NOT exist on the server, it means
+                // it was created offline. We need to add it to our final list.
+                if (!finalLogMap.has(localLog.id)) {
+                    finalLogMap.set(localLog.id, localLog);
                 }
+                // If the ID *does* exist, we do nothing, because we trust the server's version.
             });
 
-            // Convert map back to array and sort by timestamp (newest first)
-            return Object.values(logMap).sort((a, b) => b.timestamp - a.timestamp);
+            // Convert the map back to an array and sort by the latest timestamp.
+            return Array.from(finalLogMap.values()).sort((a, b) => b.timestamp - a.timestamp);
         }
 
 
@@ -6423,17 +6452,20 @@
                         addTimeIcon.className = 'fa-solid fa-plus action-icon add-time';
                         addTimeIcon.title = 'Add +1 Hour';
                         addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
-                        const editIcon = document.createElement('i');
-                        editIcon.className = 'fa-solid fa-pencil action-icon edit';
-                        editIcon.title = 'Edit';
-                        editIcon.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
+
                         const deleteIcon = document.createElement('i');
                         deleteIcon.className = 'fa-solid fa-trash-can action-icon delete';
                         deleteIcon.title = 'Delete';
                         deleteIcon.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
+
+                        const editIcon = document.createElement('i');
+                        editIcon.className = 'fa-solid fa-pencil action-icon edit';
+                        editIcon.title = 'Edit';
+                        editIcon.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
+
                         actionsCell.appendChild(addTimeIcon);
-                        actionsCell.appendChild(editIcon);
                         actionsCell.appendChild(deleteIcon);
+                        actionsCell.appendChild(editIcon);
                         row.appendChild(actionsCell);
                     }
                     logsTbody.appendChild(row);
