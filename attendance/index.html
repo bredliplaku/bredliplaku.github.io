@@ -1316,9 +1316,6 @@
             display: flex;
             flex-grow: 1;
             gap: 5px;
-            padding-bottom: 5px;
-            padding-left: 20%;
-            padding-right: 12px
         }
 
         .toggle-button {
@@ -5649,26 +5646,22 @@
             const existingDialog = document.querySelector('.dialog-backdrop');
             if (existingDialog) existingDialog.remove();
 
-            // --- NEW LOGIC START ---
-            // Determine button colors based on the action type
             const confirmBtnClass = isDestructive ? 'btn-red' : 'btn-green';
-            const cancelBtnClass = 'btn-blue'; // Make Cancel a neutral blue
-            // --- NEW LOGIC END ---
+            const cancelBtnClass = 'btn-blue';
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
 
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
-            // Use the new class variables for the buttons
             dialog.innerHTML = `
-        <h3 class="dialog-title">${title}</h3>
-        <p>${message}</p>
-        <div class="dialog-actions">
-            <button id="dialog-cancel-btn" class="${cancelBtnClass}">${cancelText}</button>
-            <button id="dialog-confirm-btn" class="${confirmBtnClass}">${confirmText}</button>
-        </div>
-    `;
+                <h3 class="dialog-title">${title}</h3>
+                <p>${message}</p>
+                <div class="dialog-actions">
+                    <button id="dialog-cancel-btn" class="${cancelBtnClass}">${cancelText}</button>
+                    <button id="dialog-confirm-btn" class="${confirmBtnClass}">${confirmText}</button>
+                </div>
+            `;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
@@ -5677,7 +5670,9 @@
             const cancelBtn = document.getElementById('dialog-cancel-btn');
 
             const closeDialog = () => {
-                document.body.removeChild(dialogBackdrop);
+                if (document.body.contains(dialogBackdrop)) {
+                    document.body.removeChild(dialogBackdrop);
+                }
                 document.body.style.overflow = '';
             };
 
@@ -5699,6 +5694,7 @@
          */
         function clearDatabase() {
             if (!isAdmin) return;
+
             showConfirmationDialog({
                 title: 'Wipe the ENTIRE Database?',
                 message: 'This will remove all UID-name mappings permanently. This action cannot be undone.',
@@ -6002,21 +5998,27 @@
         function clearLogs() {
             if (!isAdmin) return;
 
+            let dialogInstance; // To hold a reference to the dialog
+
+            const onConfirmAction = () => {
+                logs = [];
+                saveLogsToLocalStorage();
+                updateUI();
+                if (isOnline && isSignedIn) {
+                    syncLogsWithSheet()
+                        .then(() => showImprovedNotification('success', 'Logs Cleared', 'All logs have been removed.'))
+                        .catch(err => console.error('Error clearing logs:', err));
+                }
+                // The dialogInstance is closed via the showConfirmationDialog's own logic now
+            };
+
+            // The showConfirmationDialog will now handle its own closing
             showConfirmationDialog({
                 title: 'Delete logs for this course?',
                 message: 'This will remove all logs for the current course. This action cannot be undone.',
                 confirmText: 'Delete',
                 isDestructive: true,
-                onConfirm: () => {
-                    logs = [];
-                    saveLogsToLocalStorage();
-                    updateUI();
-                    if (isOnline && isSignedIn) {
-                        syncLogsWithSheet()
-                            .then(() => showImprovedNotification('success', 'Logs Cleared', 'All logs have been removed.'))
-                            .catch(err => console.error('Error clearing logs:', err));
-                    }
-                }
+                onConfirm: onConfirmAction
             });
         }
 
