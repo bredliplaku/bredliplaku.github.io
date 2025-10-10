@@ -5896,21 +5896,36 @@
             document.getElementById('cancel-edit-log-btn').addEventListener('click', closeDialog);
         }
 
-        function confirmDeleteLog(group) { // This function now deletes the LATEST timestamp
+        function confirmDeleteLog(group) {
             if (!isAdmin) return;
-            if (group.originalLogs.length <= 1) {
-                showAlertDialog('Cannot Delete', 'This is the only timestamp. To remove the entire entry, please use the Edit dialog.');
-                return;
+
+            // Case 1: More than one log exists. Delete the latest one immediately without confirmation.
+            if (group.originalLogs.length > 1) {
+                const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
+
+                logs = logs.filter(log => log.id !== latestLog.id);
+                saveLogsToLocalStorage();
+                updateUI();
+                showImprovedNotification('success', 'Timestamp Removed', 'The latest timestamp for this entry was removed.');
+                if (isOnline && isSignedIn) syncLogsWithSheet();
             }
-
-            // Find the latest log in the group
-            const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
-
-            logs = logs.filter(log => log.id !== latestLog.id);
-            saveLogsToLocalStorage();
-            updateUI();
-            showImprovedNotification('success', 'Timestamp Removed', 'The latest timestamp for this entry was removed.');
-            if (isOnline && isSignedIn) syncLogsWithSheet();
+            // Case 2: Only one log remains. Ask for confirmation before deleting the entire entry for that day.
+            else if (group.originalLogs.length === 1) {
+                showConfirmationDialog({
+                    title: 'Delete all logs for this date?',
+                    message: `This will remove all logs for ${group.name} on this date. This is the last timestamp.`,
+                    confirmText: 'Delete',
+                    isDestructive: true,
+                    onConfirm: () => {
+                        const idsToRemove = group.originalLogs.map(log => log.id);
+                        logs = logs.filter(log => !idsToRemove.includes(log.id));
+                        saveLogsToLocalStorage();
+                        updateUI();
+                        showImprovedNotification('success', 'Entry Deleted', `All timestamps for ${group.name} on this date were removed.`);
+                        if (isOnline && isSignedIn) syncLogsWithSheet();
+                    }
+                });
+            }
         }
 
         function clearLogs() {
