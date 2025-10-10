@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Attendance Auto-Import
 // @namespace    https://bredliplaku.com/
-// @version      1.2
+// @version      1.3
 // @description  Automatically import attendance data from clipboard on EIS page load, now with improved reliability.
 // @author       Bredli Plaku
 // @match        https://eis.epoka.edu.al/courseattendance/*/newcl
@@ -14,9 +14,23 @@
 (function () {
     'use strict';
 
+    // This checks the system's preferred color scheme
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+    // This function adds or removes a class from the body to toggle the theme
+    function handleThemeChange(event) {
+        document.body.classList.toggle('eis-dark-mode', event.matches);
+    }
+
+    // Listen for changes (e.g., if you change your OS theme while the page is open)
+    prefersDark.addEventListener('change', handleThemeChange);
+
+    // Apply the theme immediately on script load
+    handleThemeChange(prefersDark);
+
     // --- Configuration ---
     let CONFIG = {
-        checkedMeansAbsent: true,
+        checkedMeansAbsent: false,
         markMissingAsAbsent: true,
         autoReadClipboard: true,
         autoSave: false
@@ -173,11 +187,31 @@
             const nameCell = row.querySelector("td:nth-child(3)");
             if (!nameCell) return;
 
-            let cleanName = nameCell.textContent.replace(/\s+R\s+EX|\s+EX|\s+R|\s+\(R\)|\s+\(EX\)/g, "").trim();
-            if (row.querySelector("td[data-exempted='EX']")) {
-                skipped++;
-                return;
+            const rawName = nameCell.textContent.trim();
+
+            // --- NEW EXEMPTION LOGIC ---
+            // 1. Check if the student is truly exempted based on "R EX"
+            const isExempted = /\sR\sEX/.test(rawName);
+
+            // 2. If they are exempted AND the option to mark them as absent is checked, treat them like a missing student
+            if (isExempted && CONFIG.markExemptedAsAbsent) {
+                const allRowCheckboxes = Array.from(row.querySelectorAll("input[type='checkbox']"));
+                const checkboxes = allRowCheckboxes.slice(1, 1 + parseInt(numHours));
+
+                checkboxes.forEach(checkbox => {
+                    const shouldBeChecked = CONFIG.checkedMeansAbsent; // This will be TRUE if checked=absent
+                    if (checkbox.checked !== shouldBeChecked) checkbox.click();
+                });
+
+                updateHiddenFieldsForAbsent(row, numHours, rawName);
+                row.classList.add('active', 'eis-highlighted-row', 'eis-no-uid-row');
+                skipped++; // Count them as skipped/exempted
+                return; // Move to the next student
             }
+
+            // --- NEW NAME CLEANING LOGIC ---
+            // This now correctly handles "Name R EX" and "Name R" to get a clean name
+            const cleanName = rawName.replace(/\s+R\s+EX/g, "").replace(/\s+R/g, "").trim();
 
             let foundUid = null;
             for (const [uid, name] of Object.entries(nameMap)) {
@@ -207,6 +241,7 @@
             checkboxes.forEach((checkbox, i) => {
                 const hourNumber = i + 1;
                 const isHourAttended = hourNumber <= attendCount;
+                // This logic is now correct based on the CONFIG value you set
                 const shouldBeChecked = CONFIG.checkedMeansAbsent ? !isHourAttended : isHourAttended;
                 if (checkbox.checked !== shouldBeChecked) {
                     checkbox.click();
@@ -267,7 +302,7 @@
             @keyframes highlight-flash { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(57, 73, 171, 0.2); } }
             .eis-no-uid-row { background-color: #ffebee !important; }
             .eis-loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 10000; transition: opacity 0.3s; }
-            .eis-loading-content { background: white; padding: 25px; border-radius: 12px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+            .eis-loading-content { background: white; padding: 25px; border-radius: 16px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.3); transition: background-color 0.3s, color 0.3s; }
             .eis-notifications { position: fixed; bottom: 20px; right: 20px; z-index: 10001; width: 350px; max-width: 90%; }
             .eis-notification { background: #fff; color: #333; padding: 15px; border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,0.2); margin-top: 10px; display: flex; align-items: center; animation: slideIn 0.3s ease; }
             .eis-notification.removing { opacity: 0; transform: translateX(100%); }
@@ -279,6 +314,25 @@
             .eis-notification-title { font-weight: bold; }
             .eis-notification-close { background: none; border: none; font-size: 1.5em; opacity: 0.5; cursor: pointer; margin-left: auto; padding: 0 5px; }
             .eis-notification-close:hover { opacity: 1; }
+
+            /* --- NEW DARK MODE STYLES --- */
+            body.eis-dark-mode .eis-loading-content {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+            }
+            body.eis-dark-mode .eis-loading-content h3,
+            body.eis-dark-mode .eis-loading-content small {
+                color: #e0e0e0;
+            }
+            body.eis-dark-mode .eis-loading-content textarea {
+                background-color: #1c1c1e;
+                color: #e0e0e0;
+                border: 1px solid #555;
+            }
+            body.eis-dark-mode .eis-notification {
+                background-color: #3a3a3c;
+                color: #e0e0e0;
+            }
         `;
         document.head.appendChild(style);
     }
