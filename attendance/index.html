@@ -1266,8 +1266,6 @@
             flex-grow: 1;
         }
 
-        /* REMOVED the border from the container */
-
         .toggle-button {
             flex-grow: 1;
             padding: 12px 5px;
@@ -3816,7 +3814,14 @@
                     console.log('User is admin:', isAdmin);
                     updateAuthUI();
                     showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
-                    // The hash restoration is now handled by fetchAvailableCourses
+
+                    // *** NEW LOGIC: AUTOMATIC SYNC ON SIGN-IN ***
+                    if (isAdmin && logs.length > 0) {
+                        console.log(`Found ${logs.length} local logs. Initiating automatic sync.`);
+                        showImprovedNotification('info', 'Syncing...', 'Automatically syncing locally saved logs.');
+                        // Use a short timeout to allow the welcome message to appear first
+                        setTimeout(syncData, 1000);
+                    }
                 }).catch(error => {
                     console.error('Error fetching user info after sign-in:', error);
                     showImprovedNotification('error', 'Auth Error', 'Could not retrieve your profile information.');
@@ -3981,25 +3986,25 @@
         }
 
         function handleSignoutClick() {
-            // "Soft" sign-out: clear local state without revoking the token on Google's side.
-            console.log('Performing soft sign-out.');
+            console.log('Entering Lector Mode (locking session).');
 
-            // Clear the stored token
+            // 1. Clear the stored token from the browser
             localStorage.removeItem('gapi_token');
 
-            // Reset all application state variables
+            // 2. Reset authentication and admin status
+            // This will hide admin controls via the updateAuthUI() call
             isSignedIn = false;
             isAdmin = false;
             currentUser = null;
-            logs = [];
-            currentCourse = '';
-            // Note: We keep uidToNameMap so the database doesn't need to be refetched if they sign back in.
 
-            // Update the entire UI to reflect the signed-out state
+            // --- CRUCIAL ---
+            // 3. DO NOT clear the 'logs' array or the 'currentCourse'.
+            // This keeps the app functional for scanning.
+
+            // 4. Update the UI to show the "Sign in" button instead of user info
             updateAuthUI();
-            updateUI(); // This clears the tables and info panels
 
-            showImprovedNotification('success', 'Signed Out', 'You have been signed out successfully.');
+            showImprovedNotification('info', 'Session Locked', `Scanning for '${currentCourse}' is still active.`);
         }
 
         // Update sync status indicator
