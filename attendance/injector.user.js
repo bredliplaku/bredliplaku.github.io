@@ -337,12 +337,12 @@
         document.head.appendChild(style);
     }
 
-    function showLoadingIndicator(message = "Processing...") {
+    function showLoadingIndicator(message = "Processing Attendance Data") {
         hideLoadingIndicator();
         const overlay = document.createElement('div');
         overlay.id = 'eis-loading-overlay';
         overlay.className = 'eis-loading-overlay';
-        overlay.innerHTML = `<div class="eis-loading-content"><div style="font-weight:bold; margin-bottom:5px;">${message}</div><small>EIS Attendance Injector</small></div>`;
+        overlay.innerHTML = `<div class="eis-loading-content"><div style="font-weight:bold; margin-bottom:5px;">${message}</div><small>Please wait...</small></div>`;
         document.body.appendChild(overlay);
     }
 
