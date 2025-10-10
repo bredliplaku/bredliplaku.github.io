@@ -1264,6 +1264,8 @@
         .toggle-button-group {
             display: flex;
             flex-grow: 1;
+            gap: 5px;
+            /* Adds space between buttons */
         }
 
         .toggle-button {
@@ -1296,16 +1298,22 @@
 
         .toggle-button.active {
             background-color: var(--primary-color);
-            color: white;
+            color: white !important;
+            /* Ensure text is always white on active */
             border-color: var(--primary-color);
-            box-shadow: 0 2px 8px rgba(57, 73, 171, 0.4);
-            transform: translateY(-2px);
+            box-shadow: none;
+            /* Removes shadow */
+            transform: none;
+            /* Makes the button flat */
         }
 
         .toggle-button:hover:not(.active) {
             border-color: var(--primary-color);
             color: var(--primary-color);
-            transform: translateY(-1px);
+            transform: none;
+            /* Makes the button flat */
+            background-color: #e9ecef;
+            /* Adds a light background on hover */
         }
 
         .toggle-button:disabled {
@@ -1324,8 +1332,9 @@
         }
 
         .dark-mode .toggle-button:hover:not(.active) {
-            border-color: var(--primary-color);
-            color: var(--primary-color);
+            background-color: #3a3a3c;
+            /* Lighter grey for dark mode hover */
+            color: #f0f0f0;
         }
 
         .dark-mode .toggle-button:disabled {
@@ -1336,7 +1345,7 @@
 
         /* Smaller buttons for Section letters */
         .toggle-button.btn-char {
-            flex-grow: 0;
+            flex-grow: 1;
             padding: 12px 15px;
         }
 
@@ -1352,10 +1361,13 @@
             border: 1px solid #ccc;
             border-left: none;
             border-right: none;
-            padding: 12px 0;
+            padding: 11px 0;
+            /* Match button height */
             font-size: 0.9em;
             font-weight: 500;
             -moz-appearance: textfield;
+            border-radius: 0;
+            /* Removes rounded corners from the middle part */
         }
 
         .number-input-field::-webkit-outer-spin-button,
@@ -2522,6 +2534,7 @@
         const SYNC_RETRY_INTERVAL = 15000; // Retry failed syncs after 15 seconds
         let activeRequests = new Map(); // Track active requests per course
         let currentRequestId = 0; // Global request counter
+        let databaseLoadPromise = null;
 
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -3162,69 +3175,74 @@
             const formattedCourseName = currentCourse.replace(/_/g, ' ');
 
             dialog.innerHTML = `
-        <h3 class="dialog-title">Add to EPOKA Interactive System</h3>
-        <div class="dialog-content"> <div class="form-group"><label>Course:</label><input class="form-control" value="${formattedCourseName}" disabled></div>
-            <div class="form-group"><label>EIS ID:</label><input class="form-control" value="${eisId}" disabled></div>
-            <div class="form-group"><label for="export-week">Week:</label><select id="export-week" class="form-control" disabled><option>Loading...</option></select></div>
-            
-            <div class="form-group">
-                <label>Category:</label>
-                <div id="category-btn-group" class="toggle-button-group">
-                    <button class="toggle-button" disabled>Theory</button>
-                    <button class="toggle-button" disabled>Lab</button>
-                    <button class="toggle-button" disabled>Practice</button>
-                </div>
-            </div>
+                <h3 class="dialog-title">Add to EIS</h3>
+                <div class="dialog-content">
+                    <div class="form-group"><label>Course:</label><input class="form-control" value="${formattedCourseName}" disabled></div>
+                    <div class="form-group"><label>EIS ID:</label><input class="form-control" value="${eisId}" disabled></div>
+                    <div class="form-group"><label for="export-week">Week:</label><select id="export-week" class="form-control" disabled><option>Loading...</option></select></div>
+                    
+                    <div class="form-group">
+                        <label>Category:</label>
+                        <div id="category-btn-group" class="toggle-button-group">
+                            <button class="toggle-button" disabled>Theory</button>
+                            <button class="toggle-button" disabled>Lab</button>
+                            <button class="toggle-button" disabled>Practice</button>
+                        </div>
+                    </div>
 
-            <div class="form-group" id="hours-form-group">
-                <label>Hours:</label>
-                <div class="number-input-container">
-                    <button class="number-input-btn" id="hours-decrement" disabled>-</button>
-                    <input type="number" id="hours-custom-input" class="form-control number-input-field" value="1" min="1" max="25" disabled>
-                    <button class="number-input-btn" id="hours-increment" disabled>+</button>
-                </div>
-            </div>
+                    <div class="form-group" id="hours-form-group">
+                        <label>Hours:</label>
+                        <div class="number-input-container">
+                            <button class="number-input-btn" id="hours-decrement" disabled>-</button>
+                            <input type="number" id="hours-custom-input" class="form-control number-input-field" value="1" min="1" max="25" disabled>
+                            <button class="number-input-btn" id="hours-increment" disabled>+</button>
+                        </div>
+                    </div>
 
-            <div class="form-group"><label for="export-date">Date:</label><input type="date" id="export-date" class="form-control" disabled></div>
-            <div class="form-group"><label for="export-topic">Topic:</label><input type="text" id="export-topic" class="form-control" value="Lecture"></div>
+                    <div class="form-group"><label for="export-date">Date:</label><input type="date" id="export-date" class="form-control" disabled></div>
+                    <div class="form-group"><label for="export-topic">Topic:</label><input type="text" id="export-topic" class="form-control" value="Lecture"></div>
 
-            <div class="form-group">
-                <label>Section:</label>
-                <div id="section-type-group" class="toggle-button-group">
-                    <button class="toggle-button" data-value="ALL">ALL</button>
-                    <button class="toggle-button" data-value="Theory">Theory</button>
-                    <button class="toggle-button" data-value="Lab">Lab</button>
-                    <button class="toggle-button" data-value="Practice">Practice</button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label></label> <div id="section-char-group" class="toggle-button-group">
-                    <button class="toggle-button btn-char" data-value="A">A</button>
-                    <button class="toggle-button btn-char" data-value="B">B</button>
-                    <button class="toggle-button btn-char" data-value="C">C</button>
-                    <button class="toggle-button btn-char" data-value="D">D</button>
-                </div>
-            </div>
-            
-            <div class="collapsible-trigger">More Options <i class="fas fa-chevron-down"></i></div>
-            <div class="collapsible-content">
-                <button id="save-export-btn" class="btn-blue btn-sm">Export to File</button>
-                <hr>
-                <div style="font-weight: bold; margin-bottom: 10px;">Preferences</div>
-                <label><input type="checkbox" id="new-tab-option" checked> Open EIS in new tab</label>
-                <label><input type="checkbox" id="mark-missing-option" checked> Mark students without UID as absent</label>
-                <hr>
-                <div style="font-weight: bold; margin-bottom: 10px;">Instructions</div>
-                <p style="font-size: 0.9em;">1. Install <a href="https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">Tampermonkey</a>.</p>
-                <p style="font-size: 0.9em;">2. Install the <a href="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js" target="_blank">Userscript</a>.</p>
-            </div>
-        </div> <div class="dialog-actions">
-            <button id="cancel-export-btn" class="btn-blue">Cancel</button>
-            <button id="confirm-eis-export-btn" class="btn-green">Add to EIS</button>
-        </div>`;
+                    <div class="form-group">
+                        <label>Section:</label>
+                        <div id="section-type-group" class="toggle-button-group">
+                            <button class="toggle-button" data-value="ALL">ALL</button>
+                            <button class="toggle-button" data-value="Theory">Theory</button>
+                            <button class="toggle-button" data-value="Lab">Lab</button>
+                            <button class="toggle-button" data-value="Practice">Practice</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label></label>
+                        <div id="section-char-group" class="toggle-button-group">
+                            <button class="toggle-button btn-char" data-value="A">A</button>
+                            <button class="toggle-button btn-char" data-value="B">B</button>
+                            <button class="toggle-button btn-char" data-value="C">C</button>
+                            <button class="toggle-button btn-char" data-value="D">D</button>
+                        </div>
+                    </div>
+                    <!-- New element for validation message -->
+                    <div id="section-validation-msg" style="color: var(--danger-color); font-size: 0.8em; text-align: right; height: 1em; margin-top: 2px;"></div>
+                    
+                    <div class="collapsible-trigger">More Options <i class="fas fa-chevron-down"></i></div>
+                    <div class="collapsible-content">
+                        <button id="save-export-btn" class="btn-blue btn-sm">Export to File</button>
+                        <hr>
+                        <div style="font-weight: bold; margin-bottom: 10px;">Preferences</div>
+                        <label><input type="checkbox" id="new-tab-option" checked> Open EIS in new tab</label>
+                        <label><input type="checkbox" id="mark-missing-option" checked> Mark students without UID as absent</label>
+                        <hr>
+                        <div style="font-weight: bold; margin-bottom: 10px;">Instructions</div>
+                        <p style="font-size: 0.9em;">1. Install <a href="https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">Tampermonkey</a>.</p>
+                        <p style="font-size: 0.9em;">2. Install the <a href="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js" target="_blank">Userscript</a>.</p>
+                    </div>
+                </div> 
+                <div class="dialog-actions">
+                    <button id="cancel-export-btn" class="btn-blue">Cancel</button>
+                    <button id="confirm-eis-export-btn" class="btn-green">Add to EIS</button>
+                </div>`;
 
             dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop); // Show dialog immediately
+            document.body.appendChild(dialogBackdrop);
 
             // --- Fetch data AFTER dialog is shown, then populate and attach listeners ---
             fetchCourseInfo().then(() => {
@@ -3249,31 +3267,44 @@
                 // Populate Category buttons
                 const categoryGroup = dialog.querySelector('#category-btn-group');
                 categoryGroup.innerHTML = `
-            <button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">Theory</button>
-            <button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">Lab</button>
-            <button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">Practice</button>`;
+                    <button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">Theory</button>
+                    <button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">Lab</button>
+                    <button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">Practice</button>`;
 
                 // Populate Hours counter
-                const hoursGroup = dialog.querySelector('#hours-form-group'); // CORRECTED SELECTOR
+                const hoursGroup = dialog.querySelector('#hours-form-group');
                 const hoursContainer = hoursGroup.querySelector('.number-input-container');
                 hoursContainer.innerHTML = `
-            <button class="number-input-btn" id="hours-decrement">-</button>
-            <input type="number" id="hours-custom-input" class="form-control number-input-field" value="${defaultHours}" min="1" max="25">
-            <button class="number-input-btn" id="hours-increment">+</button>`;
-
-                // Set initial state for Section buttons
-                let [defaultSectionType, defaultSectionChar] = defaultSection.split(' ');
-                if (defaultSection === 'ALL') defaultSectionType = 'ALL';
+                    <button class="number-input-btn" id="hours-decrement">-</button>
+                    <input type="number" id="hours-custom-input" class="form-control number-input-field" value="${defaultHours}" min="1" max="25">
+                    <button class="number-input-btn" id="hours-increment">+</button>`;
 
                 const sectionTypeGroup = dialog.querySelector('#section-type-group');
                 const sectionCharGroup = dialog.querySelector('#section-char-group');
+                const confirmBtn = dialog.querySelector('#confirm-eis-export-btn');
+                const validationMsg = dialog.querySelector('#section-validation-msg');
 
-                sectionTypeGroup.querySelector(`[data-value="${defaultSectionType}"]`)?.classList.add('active');
-                if (defaultSectionChar) {
-                    sectionCharGroup.querySelector(`[data-value="${defaultSectionChar}"]`)?.classList.add('active');
-                }
+                // --- Validation and UI Logic ---
+                const validateSectionSelection = () => {
+                    const selectedType = sectionTypeGroup.querySelector('.active')?.dataset.value;
+                    const selectedChar = sectionCharGroup.querySelector('.active')?.dataset.value;
+                    let isValid = false;
 
-                // --- All Functions and Event Listeners are defined inside the .then() ---
+                    if (selectedType === 'ALL' && !selectedChar) {
+                        isValid = true;
+                        validationMsg.textContent = '';
+                    } else if (selectedType && selectedType !== 'ALL' && selectedChar) {
+                        isValid = true;
+                        validationMsg.textContent = '';
+                    } else if (selectedType && selectedType !== 'ALL' && !selectedChar) {
+                        isValid = false;
+                        validationMsg.textContent = 'Please select a section letter.';
+                    } else {
+                        isValid = false;
+                        validationMsg.textContent = '';
+                    }
+                    confirmBtn.disabled = !isValid;
+                };
 
                 const closeDialog = () => {
                     document.body.removeChild(dialogBackdrop);
@@ -3285,18 +3316,24 @@
                     const selectedChar = sectionCharGroup.querySelector('.active')?.dataset.value;
 
                     sectionCharGroup.querySelectorAll('.toggle-button').forEach(btn => {
-                        if (selectedType === 'Theory' && btn.dataset.value === 'D') btn.disabled = true;
-                        else if (selectedType === 'ALL') btn.disabled = true;
-                        else btn.disabled = false;
+                        btn.disabled = (selectedType === 'ALL') || (selectedType === 'Theory' && btn.dataset.value === 'D');
                     });
 
                     sectionTypeGroup.querySelectorAll('.toggle-button').forEach(btn => {
-                        if (selectedChar === 'D' && btn.dataset.value === 'Theory') btn.disabled = true;
-                        else if (selectedChar) btn.disabled = (btn.dataset.value === 'ALL');
-                        else btn.disabled = false;
+                        btn.disabled = (selectedChar === 'D' && btn.dataset.value === 'Theory') || (selectedChar && btn.dataset.value === 'ALL');
                     });
                 };
 
+                // Set initial state for Section buttons
+                let [defaultSectionType, defaultSectionChar] = defaultSection.split(' ');
+                if (defaultSection === 'ALL') defaultSectionType = 'ALL';
+
+                sectionTypeGroup.querySelector(`[data-value="${defaultSectionType}"]`)?.classList.add('active');
+                if (defaultSectionChar) {
+                    sectionCharGroup.querySelector(`[data-value="${defaultSectionChar}"]`)?.classList.add('active');
+                }
+
+                // --- Event Listeners ---
                 categoryGroup.addEventListener('click', (e) => {
                     if (e.target.classList.contains('toggle-button')) {
                         categoryGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
@@ -3312,14 +3349,20 @@
                             sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
                         }
                         updateSectionButtons();
+                        validateSectionSelection();
                     }
                 });
 
                 sectionCharGroup.addEventListener('click', (e) => {
                     if (e.target.classList.contains('toggle-button') && !e.target.disabled) {
-                        sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                        e.target.classList.add('active');
+                        if (e.target.classList.contains('active')) {
+                            e.target.classList.remove('active');
+                        } else {
+                            sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                            e.target.classList.add('active');
+                        }
                         updateSectionButtons();
+                        validateSectionSelection();
                     }
                 });
 
@@ -3335,15 +3378,12 @@
                     icon.classList.toggle('fa-chevron-up');
                 });
 
-                updateSectionButtons(); // Initial check
-
                 const createExportData = () => {
                     let section = sectionTypeGroup.querySelector('.active')?.dataset.value || 'ALL';
                     const sectionChar = sectionCharGroup.querySelector('.active')?.dataset.value;
                     if (section !== 'ALL' && sectionChar) {
                         section = `${section} ${sectionChar}`;
                     }
-
                     const data = {
                         parameters: {
                             week: weekSelect.value,
@@ -3357,14 +3397,12 @@
                         attendance: {},
                         nameMap: { ...uidToNameMap }
                     };
-
                     if (logs && logs.length > 0) {
                         const uidCounts = {};
                         const selectedDate = new Date(data.parameters.date);
                         selectedDate.setHours(0, 0, 0, 0);
                         const nextDay = new Date(selectedDate);
                         nextDay.setDate(nextDay.getDate() + 1);
-
                         logs.forEach(log => {
                             const logDate = new Date(log.timestamp);
                             if (logDate >= selectedDate && logDate < nextDay) {
@@ -3407,6 +3445,10 @@
                 });
 
                 document.getElementById('cancel-export-btn').addEventListener('click', closeDialog);
+
+                // --- Initial State Setup ---
+                updateSectionButtons();
+                validateSectionSelection();
             });
         }
 
@@ -3465,41 +3507,27 @@
                     params[key] = decodeURIComponent(value);
                 });
 
-                // 3. Clean the URL (remove the access_token)
+                // 3. Clean the URL, but restore the original course hash
                 if (history.replaceState) {
-                    history.replaceState(null, null, window.location.pathname);
+                    // Replace the URL with the base path plus the original hash
+                    history.replaceState(null, null, window.location.pathname + (originalHash || ''));
                 } else {
-                    window.location.hash = '';
-                }
-
-                // 4. NOW, restore the original course hash to the URL
-                if (originalHash) {
-                    window.location.hash = originalHash;
+                    // Fallback for older browsers
+                    window.location.hash = originalHash || '';
                 }
 
                 if (params.access_token) {
                     console.log('Successfully extracted access token');
-
-                    // Set the token in gapi client (will happen after gapi is loaded)
-                    // This function now ONLY sets the token and waits for the main init process.
                     const processToken = () => {
                         if (typeof gapi !== 'undefined' && gapi.client) {
                             gapi.client.setToken({ access_token: params.access_token });
                             localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
                             isSignedIn = true;
-                            // It no longer fetches user info or courses here.
                         } else {
                             setTimeout(processToken, 100);
                         }
                     };
                     processToken();
-
-                    // Clean up the URL to remove the token (for security)
-                    if (history.replaceState) {
-                        history.replaceState(null, null, window.location.pathname);
-                    } else {
-                        window.location.hash = '';
-                    }
                 }
             }
         }
@@ -3687,9 +3715,11 @@
                     updateAuthUI();
 
                     if (isOnline) {
+                        databaseLoadPromise = fetchDatabaseFromSheet();
                         await Promise.all([
                             fetchAvailableCourses(),
-                            fetchDatabaseFromSheet()
+                            fetchDatabaseFromSheet(),
+                            databaseLoadPromise
                         ]);
                     } else {
                         loadingTasks.delete('courses');
@@ -4242,6 +4272,7 @@
         }
 
         async function handleCourseChange(courseName) {
+            await databaseLoadPromise;
             // 1. Cancel any other pending requests.
             activeRequests.forEach((req, course) => {
                 if (course !== courseName) {
@@ -5375,7 +5406,7 @@
                 // Fetch the course info data
                 const response = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: 'COURSE_INFO!A2:G'
+                    range: 'COURSE_INFO!A2:H'
                 });
 
                 const rows = response.result.values || [];
@@ -6320,25 +6351,32 @@
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
 
-                            // *** FIX FOR SEPARATOR HEIGHT AND ADMIN BUTTON ***
+                            // Use a consistent flexbox wrapper for alignment
+                            const flexWrapper = document.createElement('div');
+                            flexWrapper.style.cssText = 'display: flex; align-items: center; width: 100%;';
+
+                            const dateText = document.createElement('span');
+                            dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                            flexWrapper.appendChild(dateText);
+
                             if (isAdmin) {
                                 separatorCell.colSpan = 5; // Admin has 5 columns
-                                const flexWrapper = document.createElement('div');
-                                flexWrapper.style.cssText = 'display: flex; justify-content: space-between; align-items: center; width: 100%;';
-                                const dateText = document.createElement('span');
-                                dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                                // Push the button to the far right for admins
+                                flexWrapper.style.justifyContent = 'space-between';
+
                                 const bulkAddBtn = document.createElement('button');
                                 bulkAddBtn.className = 'btn-sm btn-green';
                                 bulkAddBtn.innerHTML = '<i class="fa-solid fa-users-rays"></i>';
                                 bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
                                 bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(currentDay); };
-                                flexWrapper.appendChild(dateText);
                                 flexWrapper.appendChild(bulkAddBtn);
-                                separatorCell.appendChild(flexWrapper);
                             } else {
                                 separatorCell.colSpan = 3; // Non-admin has 3 columns
-                                separatorCell.innerHTML = `<div><i class="fas fa-calendar-day"></i> ${group.date}</div>`;
+                                // Keep default (left) alignment for non-admins
+                                flexWrapper.style.justifyContent = 'flex-start';
                             }
+
+                            separatorCell.appendChild(flexWrapper);
                             separatorRow.appendChild(separatorCell);
                             logsTbody.appendChild(separatorRow);
                         }
