@@ -3489,36 +3489,17 @@
                     console.log('Successfully extracted access token');
 
                     // Set the token in gapi client (will happen after gapi is loaded)
+                    // This function now ONLY sets the token and waits for the main init process.
                     const processToken = () => {
                         if (typeof gapi !== 'undefined' && gapi.client) {
                             gapi.client.setToken({ access_token: params.access_token });
                             localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
                             isSignedIn = true;
-
-                            // Get user info and update UI
-                            fetchUserInfo()
-                                .then(() => {
-                                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-                                    updateAuthUI();
-                                    if (isOnline) {
-                                        setTimeout(() => {
-                                            fetchAvailableCourses().catch(err => console.error('Error fetching courses after auth:', err));
-                                            fetchDatabaseFromSheet().catch(err => console.error('Error fetching database after auth:', err));
-                                        }, 500);
-                                    }
-                                    handleRouting(); // ADD THIS LINE HERE
-                                })
-                                .catch(e => {
-                                    console.error('Error fetching user info after redirect:', e);
-                                    showMainContent();
-                                });
+                            // It no longer fetches user info or courses here.
                         } else {
-                            // If gapi isn't loaded yet, try again shortly
                             setTimeout(processToken, 100);
                         }
                     };
-
-                    // Start the token processing
                     processToken();
 
                     // Clean up the URL to remove the token (for security)
@@ -3706,52 +3687,58 @@
                 gapi.client.init({
                     apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS
-                }).then(() => {
+                }).then(async () => { // Make the callback async
                     console.log('GAPI client initialized successfully.');
                     loadingTasks.delete('gapi');
 
-                    // This function will now handle fetching ALL initial data.
-                    loadInitialData();
+                    // --- ALL DATA LOADING NOW HAPPENS HERE, IN ORDER ---
+
+                    // 1. Check for a token from localStorage or a redirect.
+                    const savedToken = localStorage.getItem('gapi_token');
+                    if (savedToken) {
+                        try {
+                            gapi.client.setToken(JSON.parse(savedToken));
+                            isSignedIn = true;
+                            // 2. Fetch user info to see if they are an admin.
+                            await fetchUserInfo();
+                            isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                        } catch (e) {
+                            console.error("Token restore failed:", e);
+                            isSignedIn = false;
+                            isAdmin = false;
+                            localStorage.removeItem('gapi_token');
+                        }
+                    }
+
+                    // 3. Update the UI with the auth state (shows sign-in button if needed).
+                    updateAuthUI(); // This also completes the 'auth' task.
+
+                    // 4. Fetch public data (courses and database).
+                    if (isOnline) {
+                        await Promise.all([
+                            fetchAvailableCourses(),
+                            fetchDatabaseFromSheet()
+                        ]);
+                    } else {
+                        // If offline, just mark the tasks as complete.
+                        loadingTasks.delete('courses');
+                        loadingTasks.delete('database');
+                        checkLoadingCompletion();
+                    }
+
+                    // 5. Finally, handle any hash from a redirect.
+                    const redirectHash = sessionStorage.getItem('redirect_hash');
+                    if (redirectHash) {
+                        window.location.hash = redirectHash;
+                        sessionStorage.removeItem('redirect_hash');
+                    }
+                    handleRouting(); // Trigger routing now that everything is loaded.
 
                 }).catch(error => {
                     console.error('Error initializing GAPI client:', error);
                     showImprovedNotification('error', 'API Error', 'Failed to initialize Google API.');
                 });
             });
-        }
-
-        async function loadInitialData() {
-            // Try to restore a saved session.
-            const savedToken = localStorage.getItem('gapi_token');
-            if (savedToken) {
-                try {
-                    gapi.client.setToken(JSON.parse(savedToken));
-                    isSignedIn = true;
-                    await fetchUserInfo(); // Wait for user info to determine admin status
-                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-                } catch (e) {
-                    console.error("Token restore failed:", e);
-                    isSignedIn = false;
-                    isAdmin = false;
-                    localStorage.removeItem('gapi_token');
-                }
-            }
-
-            updateAuthUI(); // This completes the 'auth' task.
-
-            // Now, fetch the public data (courses and database).
-            if (isOnline) {
-                // We use Promise.all to run them in parallel and wait for both to finish.
-                await Promise.all([
-                    fetchAvailableCourses(),
-                    fetchDatabaseFromSheet()
-                ]);
-            } else {
-                // If offline, we can't fetch, so we just complete the tasks.
-                loadingTasks.delete('courses');
-                loadingTasks.delete('database');
-                checkLoadingCompletion();
-            }
         }
 
         /**
