@@ -3285,24 +3285,16 @@
                     <div class="form-group"><label>Course:</label><input class="form-control" value="${formattedCourseName}" disabled></div>
                     <div class="form-group"><label>EIS ID:</label><input class="form-control" value="${eisId}" disabled></div>
                     <div class="form-group"><label for="export-week">Week:</label><select id="export-week" class="form-control" disabled><option>Loading...</option></select></div>
+                    <div class="form-group"><label>Category:</label><div id="category-btn-group" class="toggle-button-group"></div></div>
                     
-                    <div class="form-group">
-                        <label>Category:</label>
-                        <div id="category-btn-group" class="toggle-button-group">
-                            <button class="toggle-button" disabled>Theory</button>
-                            <button class="toggle-button" disabled>Lab</button>
-                            <button class="toggle-button" disabled>Practice</button>
-                        </div>
-                    </div>
-
                     <div class="form-group" id="hours-form-group">
                         <label>Hours:</label>
                         <div class="number-input-wrapper">
-                        <div class="number-input-container">
-                            <button class="number-input-btn" id="hours-decrement" disabled>-</button>
-                            <input type="number" id="hours-custom-input" class="form-control number-input-field" value="1" min="1" max="25" disabled>
-                            <button class="number-input-btn" id="hours-increment" disabled>+</button>
-                        </div>
+                            <div class="number-input-container">
+                                <input type="number" id="hours-custom-input" class="form-control number-input-field" value="1" min="1" max="25">
+                                <button class="number-input-btn" id="hours-decrement">-</button>
+                                <button class="number-input-btn" id="hours-increment">+</button>
+                            </div>
                         </div>
                     </div>
 
@@ -3318,7 +3310,7 @@
                             <button class="toggle-button" data-value="Practice">Practice</button>
                         </div>
                     </div>
-                    <div class="form-group">
+                    <div id="section-char-container" class="form-group section-char-group">
                         <label></label>
                         <div id="section-char-group" class="toggle-button-group">
                             <button class="toggle-button btn-char" data-value="A">A</button>
@@ -3327,7 +3319,6 @@
                             <button class="toggle-button btn-char" data-value="D">D</button>
                         </div>
                     </div>
-                    <!-- New element for validation message -->
                     <div id="section-validation-msg" style="color: var(--danger-color); font-size: 0.8em; text-align: right; height: 1em; margin-top: 2px;"></div>
                     
                     <div class="collapsible-trigger">More Options <i class="fas fa-chevron-down"></i></div>
@@ -3336,8 +3327,8 @@
                         <hr>
                         <div style="font-weight: bold; margin-bottom: 10px;">Preferences</div>
                         <label><input type="checkbox" id="mark-exempted-option"> Always mark exempted students as absent</label>
-                        <label><input type="checkbox" id="new-tab-option" checked> Open EIS in new tab</label>
-                        <label><input type="checkbox" id="mark-missing-option" checked> Mark students without UID as absent</label>
+                        <label><input type="checkbox" id="new-tab-option"> Open EIS in new tab</label>
+                        <label><input type="checkbox" id="mark-missing-option"> Mark students without UID as absent</label>
                         <hr>
                         <div style="font-weight: bold; margin-bottom: 10px;">Instructions</div>
                         <p style="font-size: 0.9em;">1. Install <a href="https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">Tampermonkey</a>.</p>
@@ -3349,99 +3340,79 @@
                     <button id="confirm-eis-export-btn" class="btn-green">Add to EIS</button>
                 </div>`;
 
+            const style = document.createElement('style');
+            style.id = 'temp-dialog-styles';
+            style.textContent = `
+                .section-char-group {
+                    transition: max-height 0.4s ease-out, opacity 0.3s ease-in, margin-top 0.4s ease-out, margin-bottom 0.4s ease-out;
+                    max-height: 100px; opacity: 1; overflow: hidden; margin-bottom: 15px;
+                }
+                .section-char-group.is-hidden {
+                    max-height: 0; opacity: 0; margin-top: 0; margin-bottom: 0;
+                }`;
+            document.head.appendChild(style);
+
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Fetch data AFTER dialog is shown, then populate and attach listeners ---
             fetchCourseInfo().then(() => {
                 const courseMetadata = getCourseMetadata(currentCourse);
-                const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
-                const defaultHours = parseInt(courseMetadata?.default_hours || 2);
-                const defaultCategory = courseMetadata?.default_category || 'theory';
                 const defaultSection = courseMetadata?.default_section || 'ALL';
-                const suggestedDate = courseMetadata ? getSuggestedDate(courseMetadata) : new Date().toISOString().split('T')[0];
 
-                // Populate Week dropdown
                 const weekSelect = dialog.querySelector('#export-week');
-                weekSelect.innerHTML = '';
-                for (let i = 1; i <= 14; i++) weekSelect.innerHTML += `<option value="${i}" ${i === currentWeek ? 'selected' : ''}>Week ${i}</option>`;
-                weekSelect.disabled = false;
-
-                // Populate Date
                 const dateInput = dialog.querySelector('#export-date');
-                dateInput.value = suggestedDate;
-                dateInput.disabled = false;
-
-                // Populate Category buttons
                 const categoryGroup = dialog.querySelector('#category-btn-group');
-                categoryGroup.innerHTML = `
-                    <button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">Theory</button>
-                    <button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">Lab</button>
-                    <button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">Practice</button>`;
-
-                // Populate Hours counter
-                const hoursGroup = dialog.querySelector('#hours-form-group');
-                const hoursContainer = hoursGroup.querySelector('.number-input-container');
-                hoursContainer.innerHTML = `
-                    <button class="number-input-btn" id="hours-decrement">-</button>
-                    <input type="number" id="hours-custom-input" class="form-control number-input-field" value="${defaultHours}" min="1" max="25">
-                    <button class="number-input-btn" id="hours-increment">+</button>`;
-
                 const sectionTypeGroup = dialog.querySelector('#section-type-group');
                 const sectionCharGroup = dialog.querySelector('#section-char-group');
+                const sectionCharContainer = dialog.querySelector('#section-char-container');
                 const confirmBtn = dialog.querySelector('#confirm-eis-export-btn');
                 const validationMsg = dialog.querySelector('#section-validation-msg');
 
-                // --- Validation and UI Logic ---
+                const preferences = ['mark-exempted-option', 'new-tab-option', 'mark-missing-option'];
+                preferences.forEach(id => {
+                    const checkbox = dialog.querySelector(`#${id}`);
+                    const savedState = localStorage.getItem(`eis_pref_${id}`);
+                    if (savedState === null) {
+                        if (id !== 'mark-exempted-option') checkbox.checked = true;
+                    } else {
+                        checkbox.checked = JSON.parse(savedState);
+                    }
+                    checkbox.addEventListener('change', () => {
+                        localStorage.setItem(`eis_pref_${id}`, checkbox.checked);
+                    });
+                });
+
+                const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
+                for (let i = 1; i <= 14; i++) weekSelect.innerHTML += `<option value="${i}" ${i === currentWeek ? 'selected' : ''}>Week ${i}</option>`;
+                weekSelect.disabled = false;
+                dateInput.value = courseMetadata ? getSuggestedDate(courseMetadata) : new Date().toISOString().split('T')[0];
+                dateInput.disabled = false;
+                const defaultCategory = courseMetadata?.default_category || 'theory';
+                categoryGroup.innerHTML = `<button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">Theory</button><button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">Lab</button><button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">Practice</button>`;
+                dialog.querySelector('#hours-custom-input').value = parseInt(courseMetadata?.default_hours || 2);
+                dialog.querySelector('#hours-custom-input').disabled = false;
+
                 const validateSectionSelection = () => {
                     const selectedType = sectionTypeGroup.querySelector('.active')?.dataset.value;
                     const selectedChar = sectionCharGroup.querySelector('.active')?.dataset.value;
-                    let isValid = false;
-
-                    if (selectedType === 'ALL' && !selectedChar) {
-                        isValid = true;
-                        validationMsg.textContent = '';
-                    } else if (selectedType && selectedType !== 'ALL' && selectedChar) {
-                        isValid = true;
-                        validationMsg.textContent = '';
-                    } else if (selectedType && selectedType !== 'ALL' && !selectedChar) {
-                        isValid = false;
-                        validationMsg.textContent = 'Please select a section letter.';
-                    } else {
-                        isValid = false;
-                        validationMsg.textContent = '';
-                    }
+                    let isValid = (selectedType === 'ALL' && !selectedChar) || (selectedType && selectedType !== 'ALL' && selectedChar);
+                    validationMsg.textContent = (!isValid && selectedType && selectedType !== 'ALL' && !selectedChar) ? 'Please select a section letter.' : '';
                     confirmBtn.disabled = !isValid;
-                };
-
-                const closeDialog = () => {
-                    document.body.removeChild(dialogBackdrop);
-                    document.body.style.overflow = '';
                 };
 
                 const updateSectionButtons = () => {
                     const selectedType = sectionTypeGroup.querySelector('.active')?.dataset.value;
                     const selectedChar = sectionCharGroup.querySelector('.active')?.dataset.value;
-
-                    sectionCharGroup.querySelectorAll('.toggle-button').forEach(btn => {
-                        btn.disabled = (selectedType === 'ALL') || (selectedType === 'Theory' && btn.dataset.value === 'D');
-                    });
-
-                    sectionTypeGroup.querySelectorAll('.toggle-button').forEach(btn => {
-                        btn.disabled = (selectedChar === 'D' && btn.dataset.value === 'Theory') || (selectedChar && btn.dataset.value === 'ALL');
-                    });
+                    sectionCharGroup.querySelectorAll('.toggle-button').forEach(btn => btn.disabled = (selectedType === 'ALL') || (selectedType === 'Theory' && btn.dataset.value === 'D'));
+                    sectionTypeGroup.querySelectorAll('.toggle-button').forEach(btn => btn.disabled = (selectedChar === 'D' && btn.dataset.value === 'Theory') || (selectedChar && btn.dataset.value === 'ALL'));
                 };
 
-                // Set initial state for Section buttons
-                let [defaultSectionType, defaultSectionChar] = defaultSection.split(' ');
-                if (defaultSection === 'ALL') defaultSectionType = 'ALL';
+                const closeDialog = () => {
+                    document.body.removeChild(dialogBackdrop);
+                    document.head.removeChild(document.getElementById('temp-dialog-styles'));
+                    document.body.style.overflow = '';
+                };
 
-                sectionTypeGroup.querySelector(`[data-value="${defaultSectionType}"]`)?.classList.add('active');
-                if (defaultSectionChar) {
-                    sectionCharGroup.querySelector(`[data-value="${defaultSectionChar}"]`)?.classList.add('active');
-                }
-
-                // --- Event Listeners ---
                 categoryGroup.addEventListener('click', (e) => {
                     if (e.target.classList.contains('toggle-button')) {
                         categoryGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
@@ -3453,12 +3424,12 @@
                     if (e.target.classList.contains('toggle-button') && !e.target.disabled) {
                         sectionTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
                         e.target.classList.add('active');
-
-                        // If "ALL" is clicked, it is now the ONLY way to clear the character selection
                         if (e.target.dataset.value === 'ALL') {
+                            sectionCharContainer.classList.add('is-hidden');
                             sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                        } else {
+                            sectionCharContainer.classList.remove('is-hidden');
                         }
-
                         updateSectionButtons();
                         validateSectionSelection();
                     }
@@ -3468,7 +3439,6 @@
                     if (e.target.classList.contains('toggle-button') && !e.target.disabled) {
                         sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
                         e.target.classList.add('active');
-
                         updateSectionButtons();
                         validateSectionSelection();
                     }
@@ -3477,13 +3447,9 @@
                 const customHoursInput = dialog.querySelector('#hours-custom-input');
                 dialog.querySelector('#hours-decrement').addEventListener('click', () => customHoursInput.stepDown());
                 dialog.querySelector('#hours-increment').addEventListener('click', () => customHoursInput.stepUp());
-
                 dialog.querySelector('.collapsible-trigger').addEventListener('click', (e) => {
-                    const content = e.target.closest('.collapsible-trigger').nextElementSibling;
-                    content.classList.toggle('is-open');
-                    const icon = e.target.closest('.collapsible-trigger').querySelector('i');
-                    icon.classList.toggle('fa-chevron-down');
-                    icon.classList.toggle('fa-chevron-up');
+                    e.currentTarget.nextElementSibling.classList.toggle('is-open');
+                    e.currentTarget.querySelector('i').classList.toggle('fa-chevron-up');
                 });
 
                 const createExportData = () => {
@@ -3492,36 +3458,24 @@
                     if (section !== 'ALL' && sectionChar) {
                         section = `${section} ${sectionChar}`;
                     }
-
-                    // --- THIS IS THE MISSING LINE ---
-                    const markExempted = dialog.querySelector('#mark-exempted-option').checked;
-                    const markMissing = dialog.querySelector('#mark-missing-option').checked;
-
                     const data = {
                         parameters: {
-                            week: weekSelect.value,
-                            hours: customHoursInput.value,
+                            week: weekSelect.value, hours: customHoursInput.value,
                             category: categoryGroup.querySelector('.active')?.dataset.value || defaultCategory,
-                            date: dateInput.value,
-                            topic: dialog.querySelector('#export-topic').value,
-                            course: currentCourse || 'Default',
-                            section: section,
+                            date: dateInput.value, topic: dialog.querySelector('#export-topic').value,
+                            course: currentCourse || 'Default', section: section,
                         },
                         options: {
-                            // Now the variables are correctly defined before being used
-                            markMissingAsAbsent: markMissing,
-                            markExemptedAsAbsent: markExempted
+                            markMissingAsAbsent: dialog.querySelector('#mark-missing-option').checked,
+                            markExemptedAsAbsent: dialog.querySelector('#mark-exempted-option').checked
                         },
-                        attendance: {},
-                        nameMap: { ...uidToNameMap }
+                        attendance: {}, nameMap: { ...uidToNameMap }
                     };
-
                     if (logs && logs.length > 0) {
                         const uidCounts = {};
                         const selectedDate = new Date(data.parameters.date);
                         selectedDate.setHours(0, 0, 0, 0);
-                        const nextDay = new Date(selectedDate);
-                        nextDay.setDate(nextDay.getDate() + 1);
+                        const nextDay = new Date(selectedDate); nextDay.setDate(nextDay.getDate() + 1);
                         logs.forEach(log => {
                             const logDate = new Date(log.timestamp);
                             if (logDate >= selectedDate && logDate < nextDay) {
@@ -3533,25 +3487,22 @@
                     return data;
                 };
 
-                document.getElementById('confirm-eis-export-btn').addEventListener('click', () => {
+                confirmBtn.addEventListener('click', () => {
                     const data = createExportData();
-                    const openInNewTab = dialog.querySelector('#new-tab-option').checked;
-                    const markMissing = dialog.querySelector('#mark-missing-option').checked;
-                    data.options = { markMissingAsAbsent: markMissing };
                     const jsonString = JSON.stringify(data);
                     copyToClipboard(jsonString).then(() => {
                         const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
                         showImprovedNotification('success', 'Data Copied', `Attendance data copied. Click "Paste Data" on the EIS page.`);
-                        if (openInNewTab) window.open(eisUrl, '_blank');
+                        if (dialog.querySelector('#new-tab-option').checked) window.open(eisUrl, '_blank');
                         else window.location.href = eisUrl;
                         closeDialog();
-                    }).catch((error) => {
+                    }).catch(error => {
                         console.error("Clipboard error:", error);
                         showImprovedNotification('error', 'Clipboard Error', `Could not copy to clipboard. Use the Export to File option instead.`);
                     });
                 });
 
-                document.getElementById('save-export-btn').addEventListener('click', () => {
+                dialog.querySelector('#save-export-btn').addEventListener('click', () => {
                     const data = createExportData();
                     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
                     const downloadEl = document.createElement('a');
@@ -3563,9 +3514,15 @@
                     showImprovedNotification('success', 'Export Saved', `Attendance data saved as a file.`);
                 });
 
-                document.getElementById('cancel-export-btn').addEventListener('click', closeDialog);
+                dialog.querySelector('#cancel-export-btn').addEventListener('click', closeDialog);
 
-                // --- Initial State Setup ---
+                let [defaultSectionType, defaultSectionChar] = defaultSection.split(' ');
+                if (defaultSection === 'ALL') defaultSectionType = 'ALL';
+                sectionTypeGroup.querySelector(`[data-value="${defaultSectionType}"]`)?.classList.add('active');
+                if (defaultSectionChar) sectionCharGroup.querySelector(`[data-value="${defaultSectionChar}"]`)?.classList.add('active');
+                if (sectionTypeGroup.querySelector('.active')?.dataset.value === 'ALL') {
+                    sectionCharContainer.classList.add('is-hidden');
+                }
                 updateSectionButtons();
                 validateSectionSelection();
             });
@@ -4142,21 +4099,23 @@
         function handleSignoutClick() {
             console.log('Entering Lector Mode (locking session).');
 
-            // 1. Save the current state of logs to localStorage to prevent data loss
+            // 1. Save the current state of logs to localStorage to prevent data loss.
+            // This is the step that was likely failing before.
             saveLogsToLocalStorage();
 
-            // 2. Remove the Google token from storage. On a refresh, the app will now be fully signed out.
+            // 2. Remove the Google token. A page refresh will now require a new sign-in.
             localStorage.removeItem('gapi_token');
 
-            // 3. Reset authentication flags in JavaScript memory
+            // 3. Reset ONLY the authentication flags in JavaScript memory.
             isSignedIn = false;
             isAdmin = false;
             currentUser = null;
 
-            // --- THE KEY TO LECTOR MODE ---
-            // We DO NOT clear 'currentCourse' or 'logs' from memory.
-            // We also DO NOT call the full updateUI().
-            // We ONLY update the authentication part of the UI.
+            // --- CRITICAL ---
+            // DO NOT clear 'currentCourse' or 'logs'. They must stay in memory
+            // for scanning and the UI to work correctly in Lector Mode.
+
+            // 4. Update ONLY the authentication part of the UI (hides user info, shows sign-in button).
             updateAuthUI();
 
             showImprovedNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refreshing the page will end the session.`);
