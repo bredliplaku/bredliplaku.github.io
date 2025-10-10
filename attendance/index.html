@@ -932,6 +932,8 @@
             padding: 3px 6px;
             font-size: 0.85em;
             white-space: nowrap;
+            vertical-align: middle;
+            /* Add this line */
         }
 
         .actions-cell {
@@ -1101,7 +1103,7 @@
 
         /* Makes the main content area of the dialog scrollable if it's too long */
         .dialog-content {
-            max-height: 60vh;
+            max-height: 70vh;
             /* Limit height to 60% of the viewport */
             overflow-y: auto;
             /* Add a scrollbar if content overflows */
@@ -2381,7 +2383,7 @@
 
                                     <th class="sortable uid-column admin-only" data-sort="uid">UID <i
                                             class="sort-icon fas fa-sort"></i></th>
-                                    <th class="sortable date-column admin-only" data-sort="date">Date <i
+                                    <th class="sortable date-column" data-sort="date">Date <i
                                             class="sort-icon fas fa-sort-down"></i></th>
 
                                     <th>Time</th>
@@ -2771,10 +2773,8 @@
         function handleRouting() {
             const hash = window.location.hash.replace('#', '');
             if (hash && availableCourses.includes(hash)) {
-                // If the course in the URL is different from the current one, load it.
-                if (currentCourse !== hash) {
-                    handleCourseChange(hash);
-                }
+                // Directly call handleCourseChange for the course in the hash
+                handleCourseChange(hash);
             }
         }
 
@@ -3164,7 +3164,7 @@
             const formattedCourseName = currentCourse.replace(/_/g, ' ');
 
             dialog.innerHTML = `
-        <h3 class="dialog-title">Add to EIS</h3>
+        <h3 class="dialog-title">Add to EPOKA Interactive System</h3>
         <div class="dialog-content"> <div class="form-group"><label>Course:</label><input class="form-control" value="${formattedCourseName}" disabled></div>
             <div class="form-group"><label>EIS ID:</label><input class="form-control" value="${eisId}" disabled></div>
             <div class="form-group"><label for="export-week">Week:</label><select id="export-week" class="form-control" disabled><option>Loading...</option></select></div>
@@ -3526,6 +3526,7 @@
             updateOnlineStatus();
             window.addEventListener('online', updateOnlineStatus);
             window.addEventListener('offline', updateOnlineStatus);
+            window.addEventListener('hashchange', handleRouting, false);
 
             // Check if NFC is supported - ONLY in Chrome on Android
             const isAndroid = /Android/i.test(navigator.userAgent);
@@ -3980,45 +3981,25 @@
         }
 
         function handleSignoutClick() {
-            try {
-                const token = gapi.client.getToken();
-                if (token !== null) {
-                    console.log('Revoking token and signing out');
-                    google.accounts.oauth2.revoke(token.access_token, () => {
-                        gapi.client.setToken('');
-                        localStorage.removeItem('gapi_token');
-                        isSignedIn = false;
-                        isAdmin = false;
-                        currentUser = null;
-                        updateAuthUI();
-                        logs = [];
-                        uidToNameMap = {};
-                        updateUI();
-                    });
-                } else {
-                    // If no token, just clear the UI state
-                    console.log('No token to revoke, cleaning up state');
-                    localStorage.removeItem('gapi_token');
-                    isSignedIn = false;
-                    isAdmin = false;
-                    currentUser = null;
-                    updateAuthUI();
-                    logs = [];
-                    uidToNameMap = {};
-                    updateUI();
-                }
-            } catch (error) {
-                console.error('Error during sign out:', error);
-                // Force sign-out even if there's an error
-                localStorage.removeItem('gapi_token');
-                isSignedIn = false;
-                isAdmin = false;
-                currentUser = null;
-                updateAuthUI();
-                logs = [];
-                uidToNameMap = {};
-                updateUI();
-            }
+            // "Soft" sign-out: clear local state without revoking the token on Google's side.
+            console.log('Performing soft sign-out.');
+
+            // Clear the stored token
+            localStorage.removeItem('gapi_token');
+
+            // Reset all application state variables
+            isSignedIn = false;
+            isAdmin = false;
+            currentUser = null;
+            logs = [];
+            currentCourse = '';
+            // Note: We keep uidToNameMap so the database doesn't need to be refetched if they sign back in.
+
+            // Update the entire UI to reflect the signed-out state
+            updateAuthUI();
+            updateUI(); // This clears the tables and info panels
+
+            showImprovedNotification('success', 'Signed Out', 'You have been signed out successfully.');
         }
 
         // Update sync status indicator
@@ -6290,142 +6271,111 @@
                 }
 
                 const filteredLogs = filter ?
-                    logsToDisplay.filter(log => {
-                        if (log.uid.toLowerCase().includes(filter)) return true;
-                        const name = uidToNameMap[log.uid];
-                        if (name && name.toLowerCase().includes(filter)) return true;
-                        return false;
-                    }) :
+                    logsToDisplay.filter(log => (log.uid.toLowerCase().includes(filter) || (uidToNameMap[log.uid] && uidToNameMap[log.uid].toLowerCase().includes(filter)))) :
                     logsToDisplay;
-
                 const grouped = {};
                 filteredLogs.forEach(log => {
                     const dateObj = new Date(log.timestamp);
-                    if (isNaN(dateObj.getTime())) { return; }
+                    if (isNaN(dateObj.getTime())) return;
                     const day = String(dateObj.getDate()).padStart(2, '0');
                     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
                     const uid = log.uid;
-                    const time = dateObj.toLocaleTimeString();
-                    const name = uidToNameMap[uid] || 'Unknown';
                     const key = `${date}_${uid}`;
                     if (!grouped[key]) {
-                        grouped[key] = { date, dateObj: new Date(year, month - 1, day), uid, name, times: [], timeObjs: [], originalLogs: [] };
+                        grouped[key] = { date, dateObj: new Date(year, month - 1, day), uid, name: uidToNameMap[uid] || 'Unknown', times: [], timeObjs: [], originalLogs: [] };
                     }
-                    grouped[key].times.push(time);
-                    grouped[key].timeObjs.push(dateObj.getTime());
                     grouped[key].originalLogs.push(log);
                 });
-
                 let result = Object.values(grouped);
                 const [field, direction] = currentSort.split('-');
                 const sortMultiplier = direction === 'asc' ? 1 : -1;
-                switch (field) {
-                    case 'date':
-                        result.sort((a, b) => {
-                            const dateCompare = sortMultiplier * (a.dateObj - b.dateObj);
-                            if (dateCompare !== 0) return dateCompare;
-                            return a.name.localeCompare(b.name);
-                        });
-                        break;
-                    case 'name':
-                        result.sort((a, b) => sortMultiplier * a.name.localeCompare(b.name));
-                        break;
-                    case 'uid':
-                        result.sort((a, b) => sortMultiplier * a.uid.localeCompare(b.uid));
-                        break;
-                }
+                result.sort((a, b) => {
+                    if (field === 'date') {
+                        const dateCompare = sortMultiplier * (a.dateObj - b.dateObj);
+                        return dateCompare !== 0 ? dateCompare : a.name.localeCompare(b.name);
+                    }
+                    if (field === 'name') return sortMultiplier * a.name.localeCompare(b.name);
+                    if (field === 'uid') return sortMultiplier * a.uid.localeCompare(b.uid);
+                    return 0;
+                });
 
                 filteredCount.textContent = filteredLogs.length;
                 emptyLogs.style.display = result.length > 0 ? 'none' : 'block';
                 logsTbody.innerHTML = '';
                 let currentDay = null;
+
                 result.forEach((group) => {
                     if (currentSort.startsWith('date')) {
                         const thisDay = group.date;
                         if (thisDay !== currentDay) {
                             currentDay = thisDay;
-                            if (isSignedIn) {
-                                const separatorRow = document.createElement('tr');
-                                separatorRow.className = 'day-separator';
+                            const separatorRow = document.createElement('tr');
+                            separatorRow.className = 'day-separator';
+                            const separatorCell = document.createElement('td');
 
-                                if (isAdmin) {
-                                    // For admins, create one wide cell that spans all 5 columns.
-                                    const separatorCell = document.createElement('td');
-                                    separatorCell.colSpan = 5;
-
-                                    const flexWrapper = document.createElement('div');
-                                    // This style pushes the date left and the button right.
-                                    flexWrapper.style.cssText = 'display: flex; justify-content: space-between; align-items: center; width: 100%;';
-
-                                    const dateText = document.createElement('span');
-                                    dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                                    flexWrapper.appendChild(dateText);
-
-                                    const bulkAddBtn = document.createElement('button');
-                                    bulkAddBtn.className = 'btn-sm btn-green';
-                                    bulkAddBtn.innerHTML = '<i class="fa-solid fa-users-rays"></i>';
-                                    bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
-                                    bulkAddBtn.style.fontWeight = '500';
-                                    bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(currentDay); };
-                                    flexWrapper.appendChild(bulkAddBtn);
-
-                                    separatorCell.appendChild(flexWrapper);
-                                    separatorRow.appendChild(separatorCell);
-                                } else {
-                                    // For non-admins, create two separate cells to match the columns perfectly.
-                                    const dateCell = document.createElement('td');
-                                    dateCell.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-
-                                    const emptyCell = document.createElement('td'); // An empty cell for the 'Time' column.
-
-                                    separatorRow.appendChild(dateCell);
-                                    separatorRow.appendChild(emptyCell);
-                                }
-
-                                logsTbody.appendChild(separatorRow);
+                            // *** FIX FOR SEPARATOR HEIGHT AND ADMIN BUTTON ***
+                            if (isAdmin) {
+                                separatorCell.colSpan = 5; // Admin has 5 columns
+                                const flexWrapper = document.createElement('div');
+                                flexWrapper.style.cssText = 'display: flex; justify-content: space-between; align-items: center; width: 100%;';
+                                const dateText = document.createElement('span');
+                                dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                                const bulkAddBtn = document.createElement('button');
+                                bulkAddBtn.className = 'btn-sm btn-green';
+                                bulkAddBtn.innerHTML = '<i class="fa-solid fa-users-rays"></i>';
+                                bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
+                                bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(currentDay); };
+                                flexWrapper.appendChild(dateText);
+                                flexWrapper.appendChild(bulkAddBtn);
+                                separatorCell.appendChild(flexWrapper);
+                            } else {
+                                separatorCell.colSpan = 3; // Non-admin has 3 columns
+                                separatorCell.innerHTML = `<div><i class="fas fa-calendar-day"></i> ${group.date}</div>`;
                             }
+                            separatorRow.appendChild(separatorCell);
+                            logsTbody.appendChild(separatorRow);
                         }
                     }
+
                     const row = document.createElement('tr');
-                    if (group.name === 'Unknown') { row.classList.add('unknown-row'); }
+                    if (group.name === 'Unknown') row.classList.add('unknown-row');
+
                     const nameCell = document.createElement('td');
                     nameCell.className = 'name-cell name-column';
                     nameCell.textContent = group.name;
-                    if (group.originalLogs.some(log => log.manual)) {
-                        const excusedIcon = document.createElement('i');
-                        excusedIcon.className = 'fa-solid fa-circle-info excused-icon';
-                        excusedIcon.addEventListener('click', function (e) { e.stopPropagation(); showImprovedNotification('info', 'Excused Absence', 'This attendance record was <b>manually added</b> as an excused absence.'); });
-                        nameCell.appendChild(document.createTextNode(' '));
-                        nameCell.appendChild(excusedIcon);
-                    }
                     row.appendChild(nameCell);
+
+                    // *** FIX FOR UID AND DATE VISIBILITY ***
                     if (isAdmin) {
                         const uidCell = document.createElement('td');
                         uidCell.className = 'uid-cell uid-column';
                         uidCell.textContent = group.uid;
                         row.appendChild(uidCell);
-                        const dateCell = document.createElement('td');
-                        dateCell.className = 'date-cell date-column';
-                        dateCell.textContent = group.date;
-                        row.appendChild(dateCell);
                     }
+
+                    // Date column is now visible to EVERYONE
+                    const dateCell = document.createElement('td');
+                    dateCell.className = 'date-cell date-column';
+                    dateCell.textContent = group.date;
+                    row.appendChild(dateCell);
+
                     const timesCell = document.createElement('td');
                     timesCell.className = 'times-cell';
-                    const sortedIndices = group.timeObjs.map((timeObj, index) => ({ timeObj, index })).sort((a, b) => a.timeObj - b.timeObj).map(item => item.index);
-                    sortedIndices.forEach(index => {
+                    group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
-                        const timeObj = new Date(group.timeObjs[index]);
+                        const timeObj = new Date(log.timestamp);
                         timeTag.textContent = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
                         timesCell.appendChild(timeTag);
                     });
                     row.appendChild(timesCell);
+
                     if (isAdmin) {
                         const actionsCell = document.createElement('td');
                         actionsCell.className = 'actions-cell admin-only';
-                        actionsCell.style.textAlign = 'right';
+                        // ... (rest of actions logic is fine)
                         if (group.name === 'Unknown') {
                             const addUserIcon = document.createElement('i');
                             addUserIcon.className = 'fa-solid fa-user-plus action-icon add-db';
@@ -6437,17 +6387,14 @@
                         addTimeIcon.className = 'fa-solid fa-plus action-icon add-time';
                         addTimeIcon.title = 'Add +1 Hour';
                         addTimeIcon.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
-
                         const deleteIcon = document.createElement('i');
                         deleteIcon.className = 'fa-solid fa-minus action-icon delete';
-                        deleteIcon.title = 'Delete';
+                        deleteIcon.title = 'Delete Latest Timestamp';
                         deleteIcon.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
-
                         const editIcon = document.createElement('i');
                         editIcon.className = 'fa-solid fa-pencil action-icon edit';
                         editIcon.title = 'Edit';
                         editIcon.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
-
                         actionsCell.appendChild(addTimeIcon);
                         actionsCell.appendChild(deleteIcon);
                         actionsCell.appendChild(editIcon);
@@ -6456,9 +6403,8 @@
                     logsTbody.appendChild(row);
                 });
 
-                // After the table has been rebuilt, fade it back in
                 tableContainer.classList.remove('reloading');
-            }, 150); // 150ms delay for the fade-out to be visible
+            }, 150);
         }
 
         /**
@@ -7033,27 +6979,11 @@
 
         function selectCourseButton(course) {
             // Do nothing if the course is already selected
-            if (currentCourse === course) {
+            if (currentCourse === course && window.location.hash === `#${course}`) {
                 return;
             }
-
-            currentCourse = course;
-            localStorage.setItem('last_active_course', currentCourse);
-            window.location.hash = course; // This updates the URL
-
-            // Update active button visually
-            document.querySelectorAll('.course-button').forEach(btn => {
-                const btnTextContent = btn.textContent.trim().replace(/\s+/g, ' ');
-                const courseDisplay = course.replace(/_/g, ' ');
-                if (btnTextContent.includes(courseDisplay)) {
-                    btn.classList.add('active');
-                } else {
-                    btn.classList.remove('active');
-                }
-            });
-
-            updatePageTitle();
-            handleCourseChange(course); // This triggers the data loading
+            // Simply update the hash. The 'hashchange' event will trigger the data load.
+            window.location.hash = course;
         }
 
         // Initialize the application when window loads
