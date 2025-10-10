@@ -2481,7 +2481,6 @@
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
-        const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
         // App state
         let logs = [];
@@ -2564,12 +2563,7 @@
         const userContainer = document.getElementById('user-container');
         const userName = document.getElementById('user-name');
         const userAvatar = document.getElementById('user-avatar');
-        const READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
-        const ADMIN_SCOPE = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
-        const TOKEN_SCOPE_KEY = 'token_scope_granted';
-        const AUTO_SIGNIN_KEY = 'prevent_auto_signin';
-
-        let currentScopes = READONLY_SCOPE; // Initial scope (will be updated based on user role)
+        const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
         function checkLoadingCompletion() {
             if (loadingTasks.size === 0) {
@@ -3629,28 +3623,19 @@
             if (typeof gapi === 'undefined' || typeof google === 'undefined') {
                 console.error('Google API scripts not loaded.');
                 showImprovedNotification('error', 'API Error', 'Google API libraries did not load. Please check your connection.');
-                // Even on failure, we need to complete the 'gapi' task to stop the loader.
                 loadingTasks.delete('gapi');
                 checkLoadingCompletion();
                 return;
             }
 
-            // This callback handles the response from signing in.
             const tokenCallback = (resp) => {
                 if (resp && resp.access_token) {
-                    // This is the SUCCESS path, where we get a valid token.
                     handleTokenResponse(resp);
                 } else if (resp.error) {
-                    // This is the FAILURE path.
                     console.error('Token request failed:', resp.error);
-
-                    // Check if this was a silent refresh that failed, which indicates an expired session.
                     const isSilentRefreshFailure = resp.error.includes('immediate_failed') || resp.error.includes('closed');
-
                     if (isSilentRefreshFailure) {
                         console.log("Silent auth failed. Marking session as expired.");
-
-                        // --- This is the crucial logic for handling an expired session ---
                         isSignedIn = false;
                         if (autoSyncInterval) {
                             clearInterval(autoSyncInterval);
@@ -3658,23 +3643,18 @@
                         }
                         updateSyncStatus("Session Expired", "error");
                         syncBtn.disabled = true;
-
-                        // This is the call that makes the "Sign In" button reappear.
                         updateAuthUI();
-
                         showImprovedNotification('warning', 'Session Expired', 'Please sign in again to resume syncing.');
                     } else {
-                        // This was a different kind of error (e.g., a network issue during sign-in).
                         showImprovedNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
                     }
                 }
             };
 
-            // Initialize the token client.
             try {
                 tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: CLIENT_ID,
-                    scope: currentScopes, // Starts with read-only scope
+                    scope: SCOPES, // Use the single, full-permission scope
                     callback: tokenCallback
                 });
             } catch (error) {
@@ -3682,24 +3662,19 @@
                 showImprovedNotification('error', 'API Error', 'Failed to initialize authentication.');
             }
 
-            // Load the GAPI client library.
             gapi.load('client', () => {
                 gapi.client.init({
                     apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS
-                }).then(async () => { // Make the callback async
+                }).then(async () => {
                     console.log('GAPI client initialized successfully.');
                     loadingTasks.delete('gapi');
 
-                    // --- ALL DATA LOADING NOW HAPPENS HERE, IN ORDER ---
-
-                    // 1. Check for a token from localStorage or a redirect.
                     const savedToken = localStorage.getItem('gapi_token');
                     if (savedToken) {
                         try {
                             gapi.client.setToken(JSON.parse(savedToken));
                             isSignedIn = true;
-                            // 2. Fetch user info to see if they are an admin.
                             await fetchUserInfo();
                             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
                         } catch (e) {
@@ -3710,29 +3685,21 @@
                         }
                     }
 
-                    // 3. Update the UI with the auth state (shows sign-in button if needed).
-                    updateAuthUI(); // This also completes the 'auth' task.
+                    updateAuthUI();
 
-                    // 4. Fetch public data (courses and database).
                     if (isOnline) {
                         await Promise.all([
                             fetchAvailableCourses(),
                             fetchDatabaseFromSheet()
                         ]);
                     } else {
-                        // If offline, just mark the tasks as complete.
                         loadingTasks.delete('courses');
                         loadingTasks.delete('database');
                         checkLoadingCompletion();
+                        // If offline, still try to handle routing with locally stored courses if any
+                        handleRouting();
                     }
-
-                    // 5. Finally, handle any hash from a redirect.
-                    const redirectHash = sessionStorage.getItem('redirect_hash');
-                    if (redirectHash) {
-                        window.location.hash = redirectHash;
-                        sessionStorage.removeItem('redirect_hash');
-                    }
-                    handleRouting(); // Trigger routing now that everything is loaded.
+                    // DO NOT handle routing here anymore. It's now handled inside fetchAvailableCourses.
 
                 }).catch(error => {
                     console.error('Error initializing GAPI client:', error);
@@ -3826,7 +3793,7 @@
         function handleTokenResponse(resp) {
             console.log('Received token response');
 
-            if (resp.error !== undefined) {
+            if (resp.error) {
                 console.error('Token response error:', resp.error);
                 showImprovedNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
                 return;
@@ -3839,75 +3806,19 @@
             }
 
             console.log('Access token received, storing token');
-
             try {
-                // Store token in localStorage for session persistence
                 localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
-                localStorage.setItem(TOKEN_SCOPE_KEY, 'true');
-
-                // User is signed in
                 isSignedIn = true;
 
-                // Get user info and update UI
                 fetchUserInfo().then(() => {
-                    // Check if user is admin
                     isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
                     console.log('User is admin:', isAdmin);
-
-                    // If this is initial sign-in and user is admin, request elevated permissions
-                    if (initialSignIn && isAdmin && currentScopes !== ADMIN_SCOPE) {
-                        console.log('Admin user detected, requesting elevated permissions');
-                        initialSignIn = false;
-                        currentScopes = ADMIN_SCOPE;
-
-                        // Create new token client with admin scopes
-                        try {
-                            tokenClient = google.accounts.oauth2.initTokenClient({
-                                client_id: CLIENT_ID,
-                                scope: ADMIN_SCOPE,
-                                callback: handleTokenResponse
-                            });
-
-                            // Request token without forcing consent prompt
-                            tokenClient.requestAccessToken();
-                            return;
-                        } catch (error) {
-                            console.error('Error requesting admin permissions:', error);
-                        }
-                    } else if (initialSignIn && !isAdmin && currentScopes !== READONLY_SCOPE) {
-                        console.log('Non-admin user, using read-only permissions');
-                        initialSignIn = false;
-                        currentScopes = READONLY_SCOPE;
-
-                        try {
-                            tokenClient = google.accounts.oauth2.initTokenClient({
-                                client_id: CLIENT_ID,
-                                scope: READONLY_SCOPE,
-                                callback: handleTokenResponse
-                            });
-
-                            // Request token without forcing consent prompt
-                            tokenClient.requestAccessToken();
-                            return;
-                        } catch (error) {
-                            console.error('Error requesting read-only permissions:', error);
-                        }
-                    }
-
-                    initialSignIn = false;
                     updateAuthUI();
                     showImprovedNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
-                    const redirectHash = sessionStorage.getItem('redirect_hash');
-                    if (redirectHash) {
-                        window.location.hash = redirectHash;
-                        sessionStorage.removeItem('redirect_hash');
-                        handleRouting(); // Manually trigger routing now
-                    }
-                    // Continue with your existing code to fetch courses, etc.
-                    // ...
+                    // The hash restoration is now handled by fetchAvailableCourses
                 }).catch(error => {
-                    // Your existing error handling code
-                    // ...
+                    console.error('Error fetching user info after sign-in:', error);
+                    showImprovedNotification('error', 'Auth Error', 'Could not retrieve your profile information.');
                 });
             } catch (error) {
                 console.error('Error processing token:', error);
@@ -4936,8 +4847,7 @@
                 console.log('Fetching available courses from spreadsheet...');
 
                 if (!isOnline) {
-                    console.log('Not online or not signed in, using default courses');
-                    // Default courses if offline or not signed in
+                    // Handle offline logic as before
                     availableCourses = [];
                     courseIDMap = {};
                     sheetNameMap = {};
@@ -4951,93 +4861,53 @@
 
                 const sheets = response.result.sheets || [];
                 const allSheetNames = sheets.map(sheet => sheet.properties.title);
-
-                // Check if we have a COURSE_INFO sheet
                 if (allSheetNames.includes('COURSE_INFO')) {
-                    try {
-                        console.log('COURSE_INFO sheet found, fetching course information...');
-
-                        // FIXED: Changed range from A2:C to A2:G to be consistent with fetchCourseInfo
-                        const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
-                            spreadsheetId: LOGS_SPREADSHEET_ID,
-                            range: "'COURSE_INFO'!A2:H" // Reading all columns
+                    const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: LOGS_SPREADSHEET_ID,
+                        range: "'COURSE_INFO'!A2:H"
+                    });
+                    const rows = codeResponse.result.values || [];
+                    if (rows.length > 0) {
+                        availableCourses = [];
+                        courseIDMap = {};
+                        sheetNameMap = {};
+                        rows.forEach(row => {
+                            if (row.length >= 1 && row[0]) {
+                                const courseDisplayName = row[0].trim();
+                                const courseID = (row.length >= 7 && row[6]) ? row[6].trim() : "";
+                                availableCourses.push(courseDisplayName);
+                                if (courseID) courseIDMap[courseDisplayName] = courseID;
+                                sheetNameMap[courseDisplayName] = courseDisplayName;
+                            }
                         });
-
-                        const rows = codeResponse.result.values || [];
-
-                        if (rows.length > 0) {
-                            // We found course codes, use this data
-                            availableCourses = [];
-                            courseIDMap = {};
-                            sheetNameMap = {};
-
-                            rows.forEach(row => {
-                                if (row.length >= 1 && row[0]) {
-                                    const courseDisplayName = row[0].trim();
-
-                                    const courseID = (row.length >= 7 && row[6]) ? row[6].trim() : "";
-
-                                    // Let's use display name by default for simplicity
-                                    const sheetName = courseDisplayName;
-
-                                    availableCourses.push(courseDisplayName);
-
-                                    if (courseID) {
-                                        courseIDMap[courseDisplayName] = courseID;
-                                    }
-
-                                    sheetNameMap[courseDisplayName] = sheetName;
-                                }
-                            });
-
-                            console.log('Fetched courses from COURSE_INFO:', availableCourses);
-                            console.log('Course ID mapping:', courseIDMap);
-                            console.log('Sheet name mapping:', sheetNameMap);
-                        } else {
-                            // No data in COURSE_INFO, fall back to sheet names
-                            availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
-                            console.log('No data in COURSE_INFO, using sheet names:', availableCourses);
-                        }
-                    } catch (codeError) {
-                        console.warn('Error reading COURSE_INFO sheet:', codeError);
+                    } else {
                         availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
                     }
                 } else {
-                    // No COURSE_INFO sheet, use sheet names directly
                     availableCourses = allSheetNames;
-                    console.log('No COURSE_INFO sheet found, using all sheet names:', availableCourses);
                 }
 
-                // If no courses found, use defaults
                 if (availableCourses.length === 0) {
-                    console.warn('No courses found in spreadsheet, using defaults');
-                    availableCourses = [];
+                    console.warn('No courses found in spreadsheet.');
                 }
 
-                populateCourseDropdown();
-                loadingTasks.delete('courses');
-                checkLoadingCompletion();
-
-                // Only handle routing if we are NOT in the middle of a sign-in redirect.
-                // The sign-in logic will handle the redirect itself.
-                if (!sessionStorage.getItem('redirect_hash')) {
-                    handleRouting();
-                }
             } catch (error) {
                 console.error('Error fetching courses:', error);
-                console.log('Using default courses due to error');
-                availableCourses = [];
-                courseIDMap = {};
-                sheetNameMap = {};
-                populateCourseDropdown();
-
-                // Only show a notification if the app has finished its initial load
                 if (!isInitializing) {
                     showImprovedNotification('warning', 'Courses Warning', 'Could not load course list from server.');
                 }
-
+            } finally {
+                populateCourseDropdown();
                 loadingTasks.delete('courses');
                 checkLoadingCompletion();
+
+                // *** NEW LOGIC: Restore hash and route AFTER courses are loaded ***
+                const redirectHash = sessionStorage.getItem('redirect_hash');
+                if (redirectHash) {
+                    window.location.hash = redirectHash;
+                    sessionStorage.removeItem('redirect_hash');
+                }
+                handleRouting(); // Now this will work correctly
             }
         }
 
