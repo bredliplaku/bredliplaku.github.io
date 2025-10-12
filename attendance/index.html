@@ -2840,6 +2840,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
+        const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -2872,7 +2873,7 @@
         let sheetNameMap = {}; // Maps display names to actual sheet names
         let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
         let cooldownUIDs = new Set();
-        let nfcAbortController = null; // Add this line
+        let nfcAbortController = null;
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -2998,6 +2999,30 @@
                     showNotification('warning', 'Sync Warning', 'Log saved locally, but failed to sync.');
                 });
             }
+        }
+
+        function tombstoneKey(course) {
+            return `${TOMBSTONES_STORAGE_KEY}_${course || 'UNKNOWN'}`;
+        }
+
+        function getTombstonesForCourse(course = currentCourse) {
+            try {
+                return new Set(JSON.parse(localStorage.getItem(tombstoneKey(course)) || '[]'));
+            } catch {
+                return new Set();
+            }
+        }
+
+        function saveTombstonesForCourse(set, course = currentCourse) {
+            localStorage.setItem(tombstoneKey(course), JSON.stringify([...set]));
+        }
+
+        function addToTombstones(id, course = currentCourse) {
+            const s = getTombstonesForCourse(course);
+            s.add(id);
+            saveTombstonesForCourse(s, course);
+            pendingChanges = true; // Mark that there are changes to sync
+            updateSyncStatus('Changes pending', 'waiting');
         }
 
         // Setup all event listeners in one place
@@ -4740,38 +4765,16 @@
         }
 
         function restoreLogsFromLocalStorage() {
-            const course = currentCourse;
-            if (!course) return [];
-
+            const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse || 'UNKNOWN'}`;
             try {
-                const storedLogsKey = `${LOGS_STORAGE_KEY}_${course}`;
-                const storedLogs = localStorage.getItem(storedLogsKey);
-
-                if (storedLogs) {
-                    const parsedLogs = JSON.parse(storedLogs);
-                    const validLogs = parsedLogs.filter(log => log && log.uid && log.timestamp && log.id);
-
-                    if (validLogs.length < parsedLogs.length) {
-                        console.warn(`Filtered out ${parsedLogs.length - validLogs.length} invalid logs during restore.`);
-                    }
-
-                    // Check if there are unsynced changes
-                    const lastSyncStr = localStorage.getItem(`${storedLogsKey}_last_sync`);
-                    const lastChangeStr = localStorage.getItem(`${storedLogsKey}_timestamp`);
-
-                    if (lastChangeStr && (!lastSyncStr || parseInt(lastChangeStr) > parseInt(lastSyncStr))) {
-                        pendingChanges = true;
-                        updateOnlineStatus(); // Use the main status updater
-                    }
-
-                    console.log(`Restored ${validLogs.length} logs from localStorage for course ${course}`);
-                    return validLogs;
-                }
+                const restored = JSON.parse(localStorage.getItem(storageKey)) || [];
+                const tombs = getTombstonesForCourse();
+                // Return only logs that are NOT in the tombstone list.
+                return restored.filter(l => !tombs.has(l.id));
             } catch (e) {
-                console.error('Error restoring logs from localStorage:', e);
+                console.warn('Failed to restore logs:', e);
+                return [];
             }
-
-            return [];
         }
 
         // Add this to track authentication state better
@@ -5314,41 +5317,54 @@
         /**
          * Fetch logs from Google Sheet for current course.
          */
-        async function fetchLogsFromSheet(courseName) { // The 'courseName' parameter is now correctly defined here
-            if (!courseName) {
-                return [];
-            }
+        async function fetchLogsFromSheet(courseName) {
+            if (!courseName) return [];
+            const sheetName = getSheetNameForCourse(courseName);
+            const formattedSheetName = formatSheetName(sheetName);
 
             try {
-                const sheetName = getSheetNameForCourse(courseName);
-                const formattedSheetName = formatSheetName(sheetName);
-                const range = `${formattedSheetName}!A2:D`;
-
-                console.log(`Fetching logs from sheet: ${sheetName}, using range: ${range}`);
-
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: range,
+                // 1. Fetch logs from the course sheet
+                const logRange = `${formattedSheetName}!A2:D`;
+                const logResponse = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID, range: logRange
                 });
+                const logRows = logResponse.result.values || [];
+                const sheetLogs = logRows.map(row => ({
+                    uid: row[0],
+                    timestamp: new Date(row[1]).getTime(),
+                    id: row[2],
+                    manual: row[3] === 'true'
+                })).filter(log => log.id && !isNaN(log.timestamp));
 
-                const rows = response.result.values || [];
-                const sheetLogs = rows.map(row => {
-                    if (row.length < 3) return null;
-                    const uid = String(row[0]);
-                    const timestamp = new Date(row[1]).getTime();
-                    const id = row[2];
-                    const manual = row.length >= 4 ? row[3] === 'true' : false;
-                    if (uid && !isNaN(timestamp) && id) {
-                        return { uid, timestamp, id, manual };
-                    }
-                    return null;
-                }).filter(log => log !== null);
+                // 2. Fetch all tombstones from the server for this course
+                const serverTombs = new Set();
+                try {
+                    const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
+                    const tombstoneResponse = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: LOGS_SPREADSHEET_ID, range: tombstoneRange
+                    });
+                    (tombstoneResponse.result.values || []).forEach(row => {
+                        const course = row[0];
+                        const logId = row[1];
+                        if (course === courseName && logId) {
+                            serverTombs.add(logId);
+                        }
+                    });
+                } catch (e) {
+                    console.info('No DELETED_LOG_IDS sheet found on server; skipping.', e.result?.error?.message);
+                }
 
-                // Return the logs instead of assigning directly to the global logs variable
-                return sheetLogs;
+                // 3. Sync local tombstones with server tombstones
+                const localTombs = getTombstonesForCourse(courseName);
+                const allTombs = new Set([...localTombs, ...serverTombs]);
+                saveTombstonesForCourse(allTombs, courseName);
+
+                // 4. Return only the logs that are NOT in the final tombstone list
+                return sheetLogs.filter(log => !allTombs.has(log.id));
+
             } catch (error) {
-                console.error('Error fetching logs:', error);
-                throw error; // Re-throw the error so the calling function can handle it
+                console.error('Error fetching logs and tombstones:', error);
+                throw error;
             }
         }
 
@@ -5391,19 +5407,53 @@
          * Sync logs with Google Sheet.
          */
         async function syncLogsWithSheet() {
-            if (!currentCourse || !isAdmin || !isOnline) {
-                console.log("Sync aborted: Pre-conditions not met.");
-                return;
-            }
+            if (!currentCourse || !isAdmin || !isOnline) return;
 
-            // This function now performs a full overwrite, which is necessary for deletions.
             try {
-                console.log("Starting full sync with spreadsheet...");
                 isSyncing = true;
                 updateSyncStatus("Syncing...", "syncing");
 
-                // 1. Prepare ALL local logs for the overwrite.
-                const sheetData = logs.map(log => [
+                // --- A) Sync Tombstones UP to the server ---
+                const localTombs = getTombstonesForCourse();
+                if (localTombs.size > 0) {
+                    // Fetch server tombstones to find out which ones are new
+                    const serverTombs = new Set();
+                    try {
+                        const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
+                        const tombstoneResponse = await gapi.client.sheets.spreadsheets.values.get({
+                            spreadsheetId: LOGS_SPREADSHEET_ID, range: tombstoneRange
+                        });
+                        (tombstoneResponse.result.values || []).forEach(r => {
+                            if (r[0] === currentCourse && r[1]) serverTombs.add(r[1]);
+                        });
+                    } catch (e) { console.info('No DELETED_LOG_IDS sheet to read from yet.'); }
+
+                    const newTombsToAppend = [...localTombs].filter(id => !serverTombs.has(id));
+
+                    if (newTombsToAppend.length > 0) {
+                        const tombstoneRows = newTombsToAppend.map(id => [currentCourse, id, new Date().toISOString()]);
+                        try {
+                            await gapi.client.sheets.spreadsheets.values.append({
+                                spreadsheetId: LOGS_SPREADSHEET_ID,
+                                range: 'DELETED_LOG_IDS!A:C',
+                                valueInputOption: 'USER_ENTERED',
+                                insertDataOption: 'INSERT_ROWS',
+                                resource: { values: tombstoneRows }
+                            });
+                            console.log(`Appended ${newTombsToAppend.length} tombstones to the server.`);
+                        } catch (e) {
+                            console.warn('Failed to append tombstones (will retry on next sync):', e);
+                        }
+                    }
+                }
+
+                // --- B) Sync Merged Logs UP to the server ---
+                // Fetch the latest server logs, which will be pre-filtered by tombstones
+                const serverLogs = await fetchLogsFromSheet(currentCourse);
+                const finalMergedLogs = mergeLogs(serverLogs, logs);
+
+                // The body for the update is the final merged list
+                const sheetData = finalMergedLogs.map(log => [
                     log.uid,
                     convertTimestampToLocalISOString(log.timestamp),
                     log.id,
@@ -5413,36 +5463,33 @@
                 const sheetName = getSheetNameForCourse(currentCourse);
                 const formattedSheetName = formatSheetName(sheetName);
 
-                // 2. Clear the entire sheet range first. This is the crucial step for deletions.
+                // Clear the sheet first
                 await gapi.client.sheets.spreadsheets.values.clear({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
                     range: `${formattedSheetName}!A2:D`,
                 });
 
-                // 3. Write the new, complete dataset. If logs are empty, this will leave the sheet empty.
+                // Write the new complete dataset
                 if (sheetData.length > 0) {
                     await gapi.client.sheets.spreadsheets.values.update({
                         spreadsheetId: LOGS_SPREADSHEET_ID,
                         range: `${formattedSheetName}!A2:D`,
-                        valueInputOption: 'USER_ENTERED', // Use USER_ENTERED to correctly parse dates
-                        resource: {
-                            values: sheetData
-                        }
+                        valueInputOption: 'USER_ENTERED',
+                        resource: { values: sheetData }
                     });
                 }
 
-                console.log(`Successfully completed full sync. Sheet now has ${logs.length} logs.`);
-
-                // After a successful sync, the local state is now the source of truth.
-                saveLogsToLocalStorage(); // Re-save to update timestamps and confirm state.
+                // --- C) Finalize state ---
+                logs = finalMergedLogs; // Update in-memory logs to the final merged state
+                saveLogsToLocalStorage(); // Save this correct state
+                console.log(`Successfully completed tombstone-aware sync for ${currentCourse}.`);
 
             } catch (error) {
-                console.error('Error during full sync:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets.');
-                throw error; // Re-throw to be handled by the calling function
+                console.error('Error during tombstone-aware sync:', error);
+                showNotification('error', 'Sync Error', 'Failed to sync with Google Sheets.');
+                throw error;
             } finally {
                 isSyncing = false;
-                // The calling function (syncData or autoSyncData) will handle the final status update.
             }
         }
 
@@ -5799,7 +5846,7 @@
                         start_date: row[1] || "",
                         end_date: row[2] || "",
                         holiday_weeks: row[3] || "0",
-                        holiday_start_date: row[4] || "", // ADD THIS LINE (Column E)
+                        holiday_start_date: row[4] || "",
                         default_hours: row[5] || "2",
                         default_category: row[6] || "theory",
                         eis_id: row[7] || "",
@@ -6183,6 +6230,9 @@
                 btn.addEventListener('click', function () {
                     const index = parseInt(this.getAttribute('data-index'));
                     const logId = group.originalLogs[index].id;
+
+                    addToTombstones(logId);
+
                     const timestampGroup = this.closest('.timestamp-edit-group');
                     const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)').length;
 
@@ -6205,6 +6255,7 @@
                     isDestructive: true,
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
+                        idsToRemove.forEach(id => addToTombstones(id));
                         logs = logs.filter(log => !idsToRemove.includes(log.id));
                         saveLogsToLocalStorage();
                         updateUI();
@@ -6260,7 +6311,7 @@
             // Case 1: More than one log exists. Delete the latest one immediately without confirmation.
             if (group.originalLogs.length > 1) {
                 const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
-
+                addToTombstones(latestLog.id);
                 logs = logs.filter(log => log.id !== latestLog.id);
                 saveLogsToLocalStorage();
                 updateUI();
@@ -6276,6 +6327,7 @@
                     isDestructive: true,
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
+                        idsToRemove.forEach(id => addToTombstones(id));
                         logs = logs.filter(log => !idsToRemove.includes(log.id));
                         saveLogsToLocalStorage();
                         updateUI();
@@ -6292,6 +6344,11 @@
             let dialogInstance; // To hold a reference to the dialog
 
             const onConfirmAction = () => {
+                // Get all IDs from the current logs before clearing them.
+                const idsToRemove = logs.map(log => log.id);
+                // Add each of those IDs to the tombstones.
+                idsToRemove.forEach(id => addToTombstones(id));
+
                 logs = [];
                 saveLogsToLocalStorage();
                 updateUI();
