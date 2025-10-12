@@ -4981,10 +4981,9 @@
                 if (currentCourse) {
                     await syncLogsWithSheet();
                 } else if (availableCourses.length > 0) {
-                    // If no course selected but courses are available, select the first one
                     currentCourse = availableCourses[0];
                     courseSelect.value = currentCourse;
-                    await fetchLogsFromSheet();
+                    await fetchLogsFromSheet(currentCourse); // Correctly pass the currentCourse
                 }
 
                 // Clear the pending changes flag after successful sync
@@ -5302,13 +5301,13 @@
         /**
          * Fetch logs from Google Sheet for current course.
          */
-        async function fetchLogsFromSheet() {
-            if (!courseName) { // Check the parameter
+        async function fetchLogsFromSheet(courseName) { // The 'courseName' parameter is now correctly defined here
+            if (!courseName) {
                 return [];
             }
 
             try {
-                const sheetName = getSheetNameForCourse(courseName); // Use the parameter
+                const sheetName = getSheetNameForCourse(courseName);
                 const formattedSheetName = formatSheetName(sheetName);
                 const range = `${formattedSheetName}!A2:D`;
 
@@ -5318,14 +5317,27 @@
                     spreadsheetId: LOGS_SPREADSHEET_ID,
                     range: range,
                 });
+
+                const rows = response.result.values || [];
+                const sheetLogs = rows.map(row => {
+                    if (row.length < 3) return null;
+                    const uid = String(row[0]);
+                    const timestamp = new Date(row[1]).getTime();
+                    const id = row[2];
+                    const manual = row.length >= 4 ? row[3] === 'true' : false;
+                    if (uid && !isNaN(timestamp) && id) {
+                        return { uid, timestamp, id, manual };
+                    }
+                    return null;
+                }).filter(log => log !== null);
+
                 // Return the logs instead of assigning directly to the global logs variable
                 return sheetLogs;
             } catch (error) {
                 console.error('Error fetching logs:', error);
-                throw error;
+                throw error; // Re-throw the error so the calling function can handle it
             }
         }
-
 
 
         /**
@@ -5335,21 +5347,17 @@
          * @returns {Array} The merged and sorted array of logs.
          */
         function mergeLogs(serverLogs, localLogs) {
-            // The server is the master list. Start with all server logs.
-            const finalLogMap = new Map(serverLogs.map(log => [log.id, log]));
+            // 1. Create a Set of all log IDs that exist on the server for fast lookups.
+            const serverLogIds = new Set(serverLogs.map(log => log.id));
 
-            // Now, go through the local logs.
-            localLogs.forEach(localLog => {
-                // If a local log's ID does NOT exist on the server, it means
-                // it was created offline. We need to add it to our final list.
-                if (!finalLogMap.has(localLog.id)) {
-                    finalLogMap.set(localLog.id, localLog);
-                }
-                // If the ID *does* exist, we do nothing, because we trust the server's version.
-            });
+            // 2. Find only the local logs that are genuinely new (i.e., their ID is NOT on the server).
+            const newLocalLogs = localLogs.filter(localLog => !serverLogIds.has(localLog.id));
 
-            // Convert the map back to an array and sort by the latest timestamp.
-            return Array.from(finalLogMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+            // 3. The final, correct list is ALL server logs plus any genuinely new local logs.
+            const finalLogs = [...serverLogs, ...newLocalLogs];
+
+            // 4. Sort the final merged list to ensure it's always in chronological order.
+            return finalLogs.sort((a, b) => b.timestamp - a.timestamp);
         }
 
 
@@ -5370,61 +5378,68 @@
          * Sync logs with Google Sheet.
          */
         async function syncLogsWithSheet() {
-            if (!currentCourse || !isAdmin) {
+            if (!currentCourse || !isAdmin || !isOnline) {
+                console.log("Sync aborted: Pre-conditions not met.");
                 return;
             }
 
             try {
-                console.log("Starting sync with spreadsheet...");
-                // Show syncing indicator on the sync button
-                const syncIcon = syncBtn.querySelector('i');
-                if (syncIcon) {
-                    syncIcon.classList.add('fa-spin');
-                }
+                console.log("Starting safe sync with spreadsheet...");
                 isSyncing = true;
+                updateSyncStatus("Syncing...", "syncing");
 
-                // Get the actual sheet name
-                const sheetName = getSheetNameForCourse(currentCourse);
-                const formattedSheetName = formatSheetName(sheetName);
+                // 1. Get the current state of the server.
+                const serverLogs = await fetchLogsFromSheet(currentCourse);
 
-                // Prepare the data for the spreadsheet using the universal timestamp conversion.
-                const sheetData = logs.map(log => [
+                // 2. Use our new merge logic to find ONLY the logs that are new.
+                const serverLogIds = new Set(serverLogs.map(log => log.id));
+                const newLogsToAppend = logs.filter(localLog => !serverLogIds.has(localLog.id));
+
+                if (newLogsToAppend.length === 0) {
+                    console.log("No new logs to append. Sync complete.");
+                    logs = serverLogs.sort((a, b) => b.timestamp - a.timestamp); // Ensure local state matches server
+                    saveLogsToLocalStorage(); // Save the corrected state
+                    updateUI();
+                    return; // Nothing more to do.
+                }
+
+                // 3. Prepare ONLY the new logs for appending.
+                const sheetData = newLogsToAppend.map(log => [
                     log.uid,
                     convertTimestampToLocalISOString(log.timestamp),
                     log.id,
                     log.manual ? 'true' : 'false'
                 ]);
 
-                console.log(`Syncing ${sheetData.length} logs to spreadsheet...`);
+                console.log(`Appending ${sheetData.length} new logs to the sheet...`);
 
-                // Clear existing data in the target range
-                await gapi.client.sheets.spreadsheets.values.clear({
+                // 4. Use the 'append' method, which is safe and doesn't delete anything.
+                const sheetName = getSheetNameForCourse(currentCourse);
+                const formattedSheetName = formatSheetName(sheetName);
+                await gapi.client.sheets.spreadsheets.values.append({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${formattedSheetName}!A2:D`,
+                    range: `${formattedSheetName}!A:D`,
+                    valueInputOption: 'USER_ENTERED',
+                    insertDataOption: 'INSERT_ROWS',
+                    resource: {
+                        values: sheetData
+                    }
                 });
 
-                // Write the new data if there is any
-                if (sheetData.length > 0) {
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: `${formattedSheetName}!A2:D`,
-                        valueInputOption: 'RAW',
-                        resource: { values: sheetData }
-                    });
-                }
+                // 5. After successfully appending, re-merge to get the final correct state.
+                logs = [...serverLogs, ...newLogsToAppend].sort((a, b) => b.timestamp - a.timestamp);
+                saveLogsToLocalStorage();
+                updateUI();
 
-                console.log(`Successfully synced ${logs.length} logs with ${currentCourse} sheet`);
+                console.log(`Successfully appended ${newLogsToAppend.length} logs.`);
+
             } catch (error) {
-                console.error('Error syncing logs:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets');
+                console.error('Error during safe sync:', error);
+                showNotification('error', 'Sync Error', 'Failed to sync new logs with Google Sheets.');
                 throw error;
             } finally {
-                // Remove syncing indicator
-                const syncIcon = syncBtn.querySelector('i');
-                if (syncIcon) {
-                    syncIcon.classList.remove('fa-spin');
-                }
                 isSyncing = false;
+                updateSyncStatus(isOnline ? "Online" : "Offline", isOnline ? "online" : "offline");
             }
         }
 
