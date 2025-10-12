@@ -3997,50 +3997,46 @@
                     loadingTasks.delete('gapi');
 
                     const savedToken = localStorage.getItem('gapi_token');
+                    let isStudentOnRefresh = false;
+
                     if (savedToken) {
                         try {
                             gapi.client.setToken(JSON.parse(savedToken));
                             isSignedIn = true;
-                            await fetchUserInfo();
+                            await fetchUserInfo(); // Get user role first
                             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-
-                            // --- START OF FIX ---
-                            // Call this for EVERYONE immediately after user info is fetched.
-                            // This removes the 'auth' task and unblocks the loader.
-                            updateAuthUI();
-
-                            // NOW, run the student-specific data loading.
-                            if (!isAdmin) {
-                                loadAllCourseLogsForStudent();
-                            }
-                            // --- END OF FIX ---
-
+                            isStudentOnRefresh = !isAdmin; // Flag if the returning user is a student
                         } catch (e) {
                             console.error("Token restore failed:", e);
                             isSignedIn = false;
                             isAdmin = false;
                             localStorage.removeItem('gapi_token');
-                            updateAuthUI(); // Show UI even on failure.
                         }
-                    } else {
-                        updateAuthUI(); // This path is correct.
                     }
 
+                    // --- START OF CRITICAL FIX ---
+                    // 1. Unblock the UI and mark authentication as complete for EVERYONE.
+                    updateAuthUI();
+
+                    // 2. Fetch all essential data (courses and database).
+                    // This MUST happen before we try to load student-specific logs.
                     if (isOnline) {
-                        databaseLoadPromise = fetchDatabaseFromSheet();
                         await Promise.all([
                             fetchAvailableCourses(),
-                            fetchDatabaseFromSheet(),
-                            databaseLoadPromise
+                            fetchDatabaseFromSheet()
                         ]);
                     } else {
+                        // If offline, just mark the tasks as complete.
                         loadingTasks.delete('courses');
                         loadingTasks.delete('database');
                         checkLoadingCompletion();
-                        // If offline, still try to handle routing with locally stored courses if any
-                        handleRouting();
                     }
-                    // DO NOT handle routing here anymore. It's now handled inside fetchAvailableCourses.
+
+                    // 3. NOW, if the user is a student, trigger their proactive data loading.
+                    // This function now has the 'availableCourses' list and will work correctly.
+                    if (isStudentOnRefresh) {
+                        loadAllCourseLogsForStudent();
+                    }
 
                 }).catch(error => {
                     console.error('Error initializing GAPI client:', error);
