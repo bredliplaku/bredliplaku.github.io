@@ -1040,6 +1040,8 @@
             /* Make them square by default */
         }
 
+
+
         .logs-table tr.day-separator .btn-icon {
             border-radius: 4px;
             /* Make them square by default */
@@ -1105,11 +1107,7 @@
             background-color: rgba(57, 73, 171, 0.08);
             color: var(--primary-color);
             font-weight: 500;
-            display: flex;
-            /* This is the key change */
-            justify-content: space-between;
-            /* Pushes date and buttons to opposite ends */
-            align-items: center;
+            /* Ensure display: flex is NOT here */
         }
 
         .dark-mode .logs-table tr.day-separator td {
@@ -1121,13 +1119,24 @@
             /* Bottom border for separation */
         }
 
-        .logs-table tr.day-separator button {
-            position: absolute;
-            /* Lifts button out of flow */
-            right: 15px;
-            /* Pins it to the far right */
-            top: 50%;
-            transform: translateY(-50%);
+        /* The wrapper div that was missing its style */
+        .day-separator-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        /* The button is now a simple flex item */
+        .logs-table tr.day-separator .btn-icon {
+            border-radius: 15px;
+            /* Pill shape */
+        }
+
+        /* The click effect now works correctly without "flying away" */
+        .logs-table tr.day-separator .btn-icon:active {
+            transform: scale(0.95);
+            filter: brightness(90%);
         }
 
         .logs-table tr.day-separator button:hover {
@@ -6828,9 +6837,10 @@
 
             showConfirmationDialog({
                 title: 'Add another hour?',
-                message: `Are you sure you want to add an extra hour log for EVERY student on ${dateStr}?`,
+                message: `Are you sure you want to add an extra hour log for EVERY student present on ${dateStr}?`,
                 confirmText: 'Add',
                 onConfirm: () => {
+                    // 1. Find all logs that occurred on the specified day.
                     const logsForDay = logs.filter(log => {
                         const logDate = new Date(log.timestamp);
                         const day = String(logDate.getDate()).padStart(2, '0');
@@ -6839,37 +6849,44 @@
                         return `${day}-${month}-${year}` === dateStr;
                     });
 
-                    const studentsToday = {};
+                    // 2. Group these logs by student UID to find the latest scan for each person.
+                    const studentsOnDay = {};
                     logsForDay.forEach(log => {
-                        if (!studentsToday[log.uid]) studentsToday[log.uid] = [];
-                        studentsToday[log.uid].push(log.timestamp);
+                        if (!studentsOnDay[log.uid] || log.timestamp > studentsOnDay[log.uid]) {
+                            studentsOnDay[log.uid] = log.timestamp;
+                        }
                     });
 
-                    const newLogs = [];
-                    let addedCount = 0;
-                    for (const uid in studentsToday) {
-                        const latestTimestamp = Math.max(...studentsToday[uid]);
+                    // 3. Create a brand new array of new log objects.
+                    const newLogsToAdd = Object.keys(studentsOnDay).map(uid => {
+                        const latestTimestamp = studentsOnDay[uid];
                         const newDate = new Date(latestTimestamp);
-                        newDate.setHours(newDate.getHours() + 1);
+                        newDate.setHours(newDate.getHours() + 1); // Add one hour
 
-                        newLogs.push({
+                        // Return a new log object. This does not modify any existing data.
+                        return {
                             uid: uid,
                             timestamp: newDate.getTime(),
                             id: Date.now() + Math.random().toString(36).substr(2, 9) + `_${uid}`,
-                            manual: false
-                        });
-                        addedCount++;
-                    }
+                            manual: true // Mark as a manual bulk addition
+                        };
+                    });
 
-                    if (newLogs.length > 0) {
-                        logs.unshift(...newLogs);
+                    if (newLogsToAdd.length > 0) {
+                        // 4. Add the new logs to the main logs array.
+                        logs.unshift(...newLogsToAdd);
+
+                        // 5. Save and refresh the UI.
                         saveLogsToLocalStorage();
                         updateUI();
-                        showNotification('success', 'Bulk Add Complete', `Added ${addedCount} new log(s) for ${dateStr}.`);
+                        showNotification('success', 'Bulk Add Complete', `Added ${newLogsToAdd.length} new log(s) for ${dateStr}.`);
 
+                        // 6. Sync the new, complete list with the server.
                         if (isOnline && isSignedIn) {
                             syncLogsWithSheet().catch(err => console.error('Error syncing after bulk add:', err));
                         }
+                    } else {
+                        showNotification('info', 'No Action Taken', `No students found on ${dateStr} to add logs to.`);
                     }
                 }
             });
@@ -6957,17 +6974,25 @@
                             const separatorRow = document.createElement('tr');
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
+                            separatorCell.colSpan = 5; // Set the span on the cell
+
+                            // Create a wrapper div for the flex content
+                            const flexWrapper = document.createElement('div');
+                            flexWrapper.className = 'day-separator-content';
+
                             const dateText = document.createElement('span');
                             dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                            separatorCell.appendChild(dateText);
-                            separatorCell.colSpan = 5;
+                            flexWrapper.appendChild(dateText); // Add date to wrapper
+
                             const dateForButton = thisDay;
                             const bulkAddBtn = document.createElement('button');
                             bulkAddBtn.className = 'btn-green btn-icon';
                             bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
                             bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
                             bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
-                            separatorCell.appendChild(bulkAddBtn);
+                            flexWrapper.appendChild(bulkAddBtn); // Add button to wrapper
+
+                            separatorCell.appendChild(flexWrapper); // Add wrapper to cell
                             separatorRow.appendChild(separatorCell);
                             logsTbody.appendChild(separatorRow);
                         }
