@@ -1170,6 +1170,12 @@
             display: flex;
             flex-wrap: wrap;
             gap: 5px;
+            align-items: center;
+            /* Aligns items within a single line */
+            align-content: center;
+            /* Aligns the whole block of lines if they wrap */
+            height: 100%;
+            /* Crucial for align-content to work */
         }
 
         .time-tag {
@@ -6641,6 +6647,7 @@
             });
         }
 
+        // REPLACE your entire old updateLogsList function with this one.
         function updateLogsList() {
             const tableContainer = document.querySelector('#scanner-tab .table-container');
             tableContainer.classList.add('reloading');
@@ -6664,9 +6671,6 @@
                     });
                 }
 
-                // --- START OF SEARCH LOGIC CHANGE ---
-
-                // 1. Group ALL logs first, before filtering.
                 const grouped = {};
                 logsToDisplay.forEach(log => {
                     const dateObj = new Date(log.timestamp);
@@ -6684,37 +6688,23 @@
                 });
                 let result = Object.values(grouped);
 
-                // 2. Now, filter the grouped results.
                 if (filter) {
                     result = result.filter(group => {
                         const name = group.name || '';
                         const uid = group.uid || '';
                         const date = group.date || '';
-
-                        // Check if any of the timestamps in the group match the time filter
                         const hasMatchingTime = group.originalLogs.some(log => {
                             const timeObj = new Date(log.timestamp);
                             const timeStr = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
                             return timeStr.includes(filter);
                         });
-
-                        // Return true if the filter matches the name, UID, date, or any of the times.
-                        return (
-                            name.toLowerCase().includes(filter) ||
-                            uid.toLowerCase().includes(filter) ||
-                            date.includes(filter) ||
-                            hasMatchingTime
-                        );
+                        return name.toLowerCase().includes(filter) || uid.toLowerCase().includes(filter) || date.includes(filter) || hasMatchingTime;
                     });
                 }
 
-                // 3. Update the count based on the number of individual logs in the final filtered result.
                 const finalLogCount = result.reduce((acc, group) => acc + group.originalLogs.length, 0);
                 filteredCount.textContent = finalLogCount;
 
-                // --- END OF SEARCH LOGIC CHANGE ---
-
-                // Sort the final filtered result
                 const [field, direction] = currentSort.split('-');
                 const sortMultiplier = direction === 'asc' ? 1 : -1;
                 result.sort((a, b) => {
@@ -6736,25 +6726,20 @@
                         const thisDay = group.date;
                         if (thisDay !== currentDay) {
                             currentDay = thisDay;
-                            // ... (rest of the separator creation logic remains the same)
                             const separatorRow = document.createElement('tr');
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
                             const dateText = document.createElement('span');
                             dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
                             separatorCell.appendChild(dateText);
-                            if (isAdmin) {
-                                separatorCell.colSpan = 5;
-                                const dateForButton = thisDay;
-                                const bulkAddBtn = document.createElement('button');
-                                bulkAddBtn.className = 'btn-green btn-icon';
-                                bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
-                                bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
-                                bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
-                                separatorCell.appendChild(bulkAddBtn);
-                            } else {
-                                separatorCell.colSpan = 3;
-                            }
+                            separatorCell.colSpan = 5;
+                            const dateForButton = thisDay;
+                            const bulkAddBtn = document.createElement('button');
+                            bulkAddBtn.className = 'btn-green btn-icon';
+                            bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
+                            bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
+                            bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
+                            separatorCell.appendChild(bulkAddBtn);
                             separatorRow.appendChild(separatorCell);
                             logsTbody.appendChild(separatorRow);
                         }
@@ -6786,7 +6771,7 @@
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
                         const timeObj = new Date(log.timestamp);
-                        timeTag.textContent = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
+                        timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
                         timesCell.appendChild(timeTag);
                     });
                     row.appendChild(timesCell);
@@ -6797,6 +6782,7 @@
                         const actionsWrapper = document.createElement('div');
                         actionsWrapper.className = 'actions-cell-content';
 
+                        // --- START OF LOGIC FIX ---
                         if (group.name === 'Unknown') {
                             const addUserBtn = document.createElement('button');
                             addUserBtn.className = 'btn-green btn-icon';
@@ -6829,6 +6815,7 @@
 
                         actionsCell.appendChild(actionsWrapper);
                         row.appendChild(actionsCell);
+                        // --- END OF LOGIC FIX ---
                     }
                     logsTbody.appendChild(row);
                 });
@@ -7393,11 +7380,9 @@
         }
 
         function populateCourseButtons() {
-            // Get button container
             const courseButtonsContainer = document.getElementById('course-buttons-container');
             if (!courseButtonsContainer) return;
 
-            // Hide the whole container if not signed in
             if (!isSignedIn) {
                 courseButtonsContainer.style.display = 'none';
                 return;
@@ -7405,23 +7390,40 @@
                 courseButtonsContainer.style.display = 'flex';
             }
 
-            // Clear existing buttons
             courseButtonsContainer.innerHTML = '';
 
-            // For signed-in users, add buttons for all available courses
-            availableCourses.forEach(course => {
+            let coursesToDisplay = availableCourses;
+
+            // If the user is a student, filter the courses to only show ones they have logs for.
+            if (!isAdmin && currentUser) {
+                const studentNameNormalised = normalizeName(currentUser.name);
+                coursesToDisplay = availableCourses.filter(course => {
+                    const logsForCourse = JSON.parse(localStorage.getItem(`${LOGS_STORAGE_KEY}_${course}`) || '[]');
+                    if (logsForCourse.length === 0) {
+                        return false; // No logs for this course at all
+                    }
+                    // Check if at least one log in this course belongs to the student
+                    return logsForCourse.some(log => {
+                        const logOwnerName = uidToNameMap[log.uid] || '';
+                        return normalizeName(logOwnerName) === studentNameNormalised;
+                    });
+                });
+            }
+
+            // Now, create buttons only for the courses in the final list.
+            coursesToDisplay.forEach(course => {
                 const button = document.createElement('div');
                 button.className = 'course-button' + (currentCourse === course ? ' active' : '');
-                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace('_', ' ')}`;
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace(/_/g, ' ')}`;
                 button.addEventListener('click', () => {
                     selectCourseButton(course);
                 });
                 courseButtonsContainer.appendChild(button);
             });
 
-            // If no course selected but courses available, select first one
-            if (!currentCourse && availableCourses.length > 0) {
-                selectCourseButton(availableCourses[0]);
+            // If no course is selected but there are courses to display, select the first one.
+            if (!currentCourse && coursesToDisplay.length > 0) {
+                selectCourseButton(coursesToDisplay[0]);
             }
         }
 
