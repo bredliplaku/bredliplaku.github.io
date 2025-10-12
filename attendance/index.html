@@ -4816,37 +4816,36 @@
 
         async function handleCourseChange(courseName) {
             if (isAdmin) {
-                // --- ADMIN LOGIC (uses local storage and syncs) ---
+                // --- Find and REPLACE the existing admin logic with this ---
                 await databaseLoadPromise;
-                activeRequests.forEach((req, course) => {
-                    if (course !== courseName) req.cancelled = true;
-                });
-                activeRequests.clear();
-
                 currentCourse = courseName;
                 localStorage.setItem('last_active_course', currentCourse);
                 updatePageTitle();
                 document.querySelector('#scanner-tab .table-container').classList.add('reloading');
 
-                const requestId = ++currentRequestId;
-                const request = { id: requestId, course: currentCourse, cancelled: false };
-                activeRequests.set(currentCourse, request);
+                try {
+                    // 1. Fetch all necessary data in parallel
+                    const [serverLogs, serverTombs, localLogs, localTombs] = await Promise.all([
+                        fetchLogsFromSheet(currentCourse),
+                        fetchTombstonesForCourse(currentCourse),
+                        Promise.resolve(restoreLogsFromLocalStorage()),
+                        Promise.resolve(getTombstonesForCourse(currentCourse))
+                    ]);
 
-                let serverLogs = [];
-                if (isOnline && isSignedIn) {
-                    serverLogs = await fetchLogsFromSheet(currentCourse).catch(err => {
-                        console.error("Server fetch failed, will rely on local data.", err);
-                        return [];
-                    });
+                    // 2. Perform the robust merge
+                    logs = mergeLogs(serverLogs, localLogs, localTombs, serverTombs);
+
+                    // 3. Persist the corrected state and update UI
+                    saveLogsToLocalStorage(); // This saves the cleaned, merged logs
+                    saveTombstonesForCourse(new Set([...localTombs, ...serverTombs])); // Also save the combined tombstones
+                    updateUI();
+
+                } catch (err) {
+                    console.error("Failed to load course data:", err);
+                    // Fallback to local data on error
+                    logs = restoreLogsFromLocalStorage();
+                    updateUI();
                 }
-
-                if (request.cancelled) return;
-
-                const localLogs = restoreLogsFromLocalStorage();
-                logs = mergeLogs(serverLogs, localLogs);
-
-                saveLogsToLocalStorage();
-                updateUI();
             } else {
                 // --- STUDENT LOGIC (uses in-memory cache ONLY) ---
                 currentCourse = courseName;
@@ -5550,25 +5549,90 @@
             }
         }
 
+        /**
+ * Fetches the set of deleted log IDs (tombstones) for a specific course from the server.
+ * @param {string} courseName - The name of the course.
+ * @returns {Promise<Set<string>>} A promise that resolves with a Set of deleted log IDs.
+ */
+        async function fetchTombstonesForCourse(courseName) {
+            if (!courseName) return new Set();
+
+            const serverTombs = new Set();
+            try {
+                const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: tombstoneRange
+                });
+
+                (response.result.values || []).forEach(row => {
+                    const course = row[0];
+                    const logId = row[1];
+                    if (course === courseName && logId) {
+                        serverTombs.add(logId);
+                    }
+                });
+            } catch (e) {
+                // This is not a critical error if the sheet doesn't exist yet.
+                console.info('No DELETED_LOG_IDS sheet found on server; skipping.', e.result?.error?.message);
+            }
+            return serverTombs;
+        }
+
 
         /**
-         * Merges server and local logs, with the server as the source of truth.
-         * @param {Array} serverLogs - The array of logs fetched from Google Sheets.
-         * @param {Array} localLogs - The array of logs from the browser's local storage.
-         * @returns {Array} The merged and sorted array of logs.
-         */
-        function mergeLogs(serverLogs, localLogs) {
-            // 1. Create a Set of all log IDs that exist on the server for fast lookups.
-            const serverLogIds = new Set(serverLogs.map(log => log.id));
+ * Merge server + local logs with tombstones.
+ * Local changes win on conflicts; deleted IDs are always removed.
+ */
+        function mergeLogs(serverLogs, localLogs, localTombstones = new Set(), serverTombstones = new Set()) {
+            // 0) Normalise inputs (avoid null/undefined)
+            serverLogs = Array.isArray(serverLogs) ? serverLogs : [];
+            localLogs = Array.isArray(localLogs) ? localLogs : [];
 
-            // 2. Find only the local logs that are genuinely new (i.e., their ID is NOT on the server).
-            const newLocalLogs = localLogs.filter(localLog => !serverLogIds.has(localLog.id));
+            // 1) Union of tombstones (server + local)
+            const deleted = new Set([...localTombstones, ...serverTombstones]);
 
-            // 3. The final, correct list is ALL server logs plus any genuinely new local logs.
-            const finalLogs = [...serverLogs, ...newLocalLogs];
+            // 2) Helper: coerce/validate minimal log shape
+            const norm = (l) => {
+                if (!l || !l.id) return null;
+                let ts = l.timestamp;
+                if (typeof ts === "string") {
+                    const parsed = Date.parse(ts);
+                    ts = Number.isFinite(parsed) ? parsed : NaN;
+                }
+                if (typeof ts !== "number" || !Number.isFinite(ts)) return null;
+                return { ...l, timestamp: ts };
+            };
 
-            // 4. Sort the final merged list to ensure it's always in chronological order.
-            return finalLogs.sort((a, b) => b.timestamp - a.timestamp);
+            // 3) Build map keyed by id. Start with server (baseline), then overlay local (local wins).
+            const byId = new Map();
+
+            for (const raw of serverLogs) {
+                const log = norm(raw);
+                if (!log || deleted.has(log.id)) continue;
+                byId.set(log.id, log);
+            }
+
+            for (const raw of localLogs) {
+                const log = norm(raw);
+                if (!log || deleted.has(log.id)) continue;
+
+                if (byId.has(log.id)) {
+                    const merged = { ...byId.get(log.id), ...log };
+                    byId.set(log.id, merged);
+                } else {
+                    byId.set(log.id, log);
+                }
+            }
+
+            // 4) Materialise & sort (desc by timestamp, stable tie-breaker on id)
+            const out = Array.from(byId.values());
+            out.sort((a, b) => {
+                if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
+                return String(a.id).localeCompare(String(b.id));
+            });
+
+            return out;
         }
 
 
@@ -5598,44 +5662,26 @@
                 // --- A) Sync Tombstones UP to the server ---
                 const localTombs = getTombstonesForCourse();
                 if (localTombs.size > 0) {
-                    // Fetch server tombstones to find out which ones are new
-                    const serverTombs = new Set();
-                    try {
-                        const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
-                        const tombstoneResponse = await gapi.client.sheets.spreadsheets.values.get({
-                            spreadsheetId: LOGS_SPREADSHEET_ID, range: tombstoneRange
-                        });
-                        (tombstoneResponse.result.values || []).forEach(r => {
-                            if (r[0] === currentCourse && r[1]) serverTombs.add(r[1]);
-                        });
-                    } catch (e) { console.info('No DELETED_LOG_IDS sheet to read from yet.'); }
-
+                    const serverTombs = await fetchTombstonesForCourse(currentCourse);
                     const newTombsToAppend = [...localTombs].filter(id => !serverTombs.has(id));
 
                     if (newTombsToAppend.length > 0) {
                         const tombstoneRows = newTombsToAppend.map(id => [currentCourse, id, new Date().toISOString()]);
-                        try {
-                            await gapi.client.sheets.spreadsheets.values.append({
-                                spreadsheetId: LOGS_SPREADSHEET_ID,
-                                range: 'DELETED_LOG_IDS!A:C',
-                                valueInputOption: 'USER_ENTERED',
-                                insertDataOption: 'INSERT_ROWS',
-                                resource: { values: tombstoneRows }
-                            });
-                            console.log(`Appended ${newTombsToAppend.length} tombstones to the server.`);
-                        } catch (e) {
-                            console.warn('Failed to append tombstones (will retry on next sync):', e);
-                        }
+                        await gapi.client.sheets.spreadsheets.values.append({
+                            spreadsheetId: LOGS_SPREADSHEET_ID,
+                            range: 'DELETED_LOG_IDS!A:C',
+                            valueInputOption: 'USER_ENTERED',
+                            insertDataOption: 'INSERT_ROWS',
+                            resource: { values: tombstoneRows }
+                        });
+                        console.log(`Appended ${newTombsToAppend.length} tombstones to the server.`);
                     }
                 }
 
                 // --- B) Sync Merged Logs UP to the server ---
-                // Fetch the latest server logs, which will be pre-filtered by tombstones
-                const serverLogs = await fetchLogsFromSheet(currentCourse);
-                const finalMergedLogs = mergeLogs(serverLogs, logs);
-
-                // The body for the update is the final merged list
-                const sheetData = finalMergedLogs.map(log => [
+                // The body for the update is simply the current state of the 'logs' array,
+                // which should already be merged and cleaned from handleCourseChange.
+                const sheetData = logs.map(log => [
                     log.uid,
                     convertTimestampToLocalISOString(log.timestamp),
                     log.id,
@@ -5661,9 +5707,6 @@
                     });
                 }
 
-                // --- C) Finalize state ---
-                logs = finalMergedLogs; // Update in-memory logs to the final merged state
-                saveLogsToLocalStorage(); // Save this correct state
                 console.log(`Successfully completed tombstone-aware sync for ${currentCourse}.`);
 
             } catch (error) {
