@@ -1127,6 +1127,28 @@
             width: 100%;
         }
 
+        .day-separator-actions {
+            display: flex;
+            gap: 2px;
+        }
+
+        .day-separator-actions .btn-icon {
+            border-radius: 4px;
+            /* Make them square by default */
+        }
+
+        /* Round the LEFT corners of the FIRST button */
+        .day-separator-actions .btn-icon:first-child {
+            border-top-left-radius: 14px;
+            border-bottom-left-radius: 14px;
+        }
+
+        /* Round the RIGHT corners of the LAST button */
+        .day-separator-actions .btn-icon:last-child {
+            border-top-right-radius: 14px;
+            border-bottom-right-radius: 14px;
+        }
+
         /* The button is now a simple flex item */
         .logs-table tr.day-separator .btn-icon {
             border-radius: 15px;
@@ -3143,7 +3165,7 @@
             newDate.setHours(newDate.getHours() + 1);
 
             // Create the new log object
-            const newLog = {
+            let newLog = {
                 uid: group.uid,
                 timestamp: newDate.getTime(),
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
@@ -3773,7 +3795,7 @@
         /**
      * Direct EIS Export function with interactive UI, performance fixes, and dynamic sections.
      */
-        async function showDirectEisExportDialog() {
+        async function showDirectEisExportDialog(prefilledDateStr = null) {
             if (!isAdmin || !currentCourse) {
                 showNotification('warning', 'No Course Selected', 'Please select a course first.');
                 return;
@@ -3860,8 +3882,30 @@
                     checkbox.addEventListener('change', () => localStorage.setItem(`eis_pref_${id}`, checkbox.checked));
                 });
                 const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
-                for (let i = 1; i <= 14; i++) weekSelect.innerHTML += `<option value="${i}" ${i === currentWeek ? 'selected' : ''}>Week ${i}</option>`;
-                dateInput.value = courseMetadata ? getSuggestedDate(courseMetadata) : new Date().toISOString().split('T')[0];
+                // Populate the week dropdown first (it's independent of the date)
+                for (let i = 1; i <= 14; i++) {
+                    weekSelect.innerHTML += `<option value="${i}">Week ${i}</option>`;
+                }
+
+                if (prefilledDateStr) {
+                    // A date was passed from the button click (format: DD-MM-YYYY)
+                    const [day, month, year] = prefilledDateStr.split('-');
+                    const prefilledDate = new Date(`${year}-${month}-${day}`);
+
+                    // Set the date input's value (format: YYYY-MM-DD)
+                    dateInput.value = `${year}-${month}-${day}`;
+
+                    // Auto-select the week based on this date
+                    if (courseMetadata) {
+                        const week = calculateWeekForDate(courseMetadata, prefilledDate);
+                        weekSelect.value = Math.min(week, 14); // Ensure week doesn't exceed 14
+                    }
+                } else {
+                    // Original fallback logic if the dialog is opened from elsewhere
+                    dateInput.value = courseMetadata ? getSuggestedDate(courseMetadata) : new Date().toISOString().split('T')[0];
+                    const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
+                    weekSelect.value = currentWeek;
+                }
                 const defaultCategory = courseMetadata?.default_category || 'theory';
                 categoryGroup.innerHTML = `<button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">Theory</button><button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">Lab</button><button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">Practice</button>`;
                 customHoursInput.value = parseInt(courseMetadata?.default_hours || 2);
@@ -6352,7 +6396,7 @@
                     return;
                 }
 
-                const newLog = {
+                let newLog = {
                     uid: selectedUid,
                     timestamp: new Date(`${manualDate}T${manualTime}:00`).getTime(),
                     id: Date.now() + Math.random().toString(36).substr(2, 9),
@@ -6481,35 +6525,56 @@
 
             document.getElementById('save-edit-log-btn').addEventListener('click', () => {
                 const newName = document.getElementById('edit-name').value.trim();
-                const newDate = document.getElementById('edit-date').value;
+                const newDateStr = document.getElementById('edit-date').value; // e.g., "2025-10-10"
 
                 if (!newName) {
                     showAlertDialog('Invalid Input', 'Name cannot be empty.');
                     return;
                 }
 
+                // Update the name in the central database mapping
                 uidToNameMap[group.uid] = newName;
 
+                // --- START OF TIMEZONE-SAFE FIX ---
+
+                // 1. Parse the new date string into its components to avoid timezone errors.
+                const [year, month, day] = newDateStr.split('-').map(Number);
+
+                // 2. Loop through the visible timestamps in the dialog.
                 const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)');
                 visibleGroups.forEach(groupElement => {
                     const logId = groupElement.getAttribute('data-log-id');
-                    const timeInput = groupElement.querySelector('.timestamp-time').value;
+                    const timeInput = groupElement.querySelector('.timestamp-time').value; // e.g., "14:30"
+                    const [hours, minutes] = timeInput.split(':').map(Number);
+
+                    // Find the log in the main 'logs' array by its unique ID.
                     const log = logs.find(log => log.id === logId);
                     if (log) {
-                        log.timestamp = newTimestamp.getTime();
-                        touchLogForEdit(log); // Add this line to bump the version
+                        // 3. Construct a new Date object using the individual, reliable components.
+                        // Note: The month is 0-indexed in JavaScript (0=Jan, 11=Dec).
+                        const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
+                        log.timestamp = newTimestampObj.getTime();
+
+                        // 4. IMPORTANT: Bump the version to mark this log as updated.
+                        touchLogForEdit(log);
                     }
                 });
 
+                // --- END OF TIMEZONE-SAFE FIX ---
+
+                // Handle logs that were marked for deletion.
                 if (logsToDelete.size > 0) {
                     logs = logs.filter(log => !logsToDelete.has(log.id));
                 }
 
-                logs.sort((a, b) => b.timestamp - a.timestamp);
+                // Save all changes and sync with the server.
                 saveLogsToLocalStorage();
-
                 if (isOnline && isSignedIn) {
-                    Promise.all([syncDatabaseToSheet(), syncLogsWithSheet()]);
+                    // We only need to sync the database if the name was actually changed.
+                    if (group.name !== newName) {
+                        syncDatabaseToSheet();
+                    }
+                    syncLogsWithSheet();
                 }
 
                 updateUI();
@@ -7033,19 +7098,34 @@
 
                             const dateText = document.createElement('span');
                             dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                            flexWrapper.appendChild(dateText); // Add date to wrapper
+                            flexWrapper.appendChild(dateText);
 
-                            const dateForButton = thisDay;
+                            // Create a container for the action buttons
+                            const buttonContainer = document.createElement('div');
+                            buttonContainer.className = 'day-separator-actions'; // A new class for styling
+
+                            const dateForButton = thisDay; // e.g., "12-10-2025"
+
+                            // 1. Create the new "Add to EIS" button
+                            const eisBtn = document.createElement('button');
+                            eisBtn.className = 'btn-blue btn-icon';
+                            eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i>';
+                            eisBtn.title = 'Add to EIS for this day';
+                            eisBtn.onclick = (e) => {
+                                e.stopPropagation();
+                                showDirectEisExportDialog(dateForButton); // Pass the specific date
+                            };
+                            buttonContainer.appendChild(eisBtn);
+
+                            // 2. Create the existing "Add +1 Hour" button
                             const bulkAddBtn = document.createElement('button');
                             bulkAddBtn.className = 'btn-green btn-icon';
                             bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
                             bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
                             bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
-                            flexWrapper.appendChild(bulkAddBtn); // Add button to wrapper
+                            buttonContainer.appendChild(bulkAddBtn);
 
-                            separatorCell.appendChild(flexWrapper); // Add wrapper to cell
-                            separatorRow.appendChild(separatorCell);
-                            logsTbody.appendChild(separatorRow);
+                            flexWrapper.appendChild(buttonContainer);
                         }
                     }
 
@@ -7126,6 +7206,30 @@
 
                 tableContainer.classList.remove('reloading');
             }, 150);
+        }
+
+        /**
+ * Calculate the course week for a specific date.
+ * @param {Object} metadata - Course metadata.
+ * @param {Date} forDate - The specific date to calculate the week for.
+ * @returns {number} The calculated week number.
+ */
+        function calculateWeekForDate(metadata, forDate) {
+            if (!metadata || !metadata.start_date) return 1;
+
+            const startDate = new Date(metadata.start_date);
+            const holidayWeeks = parseInt(metadata.holiday_weeks || 0);
+            const holidayStartDate = metadata.holiday_start_date ? new Date(metadata.holiday_start_date) : null;
+
+            if (isNaN(startDate.getTime())) return 1;
+
+            const weekNumber = Math.ceil((forDate - startDate) / (7 * 24 * 60 * 60 * 1000));
+            let adjustedWeek = weekNumber;
+
+            if (holidayWeeks > 0 && holidayStartDate && !isNaN(holidayStartDate.getTime()) && forDate >= holidayStartDate) {
+                adjustedWeek = weekNumber - holidayWeeks;
+            }
+            return Math.max(adjustedWeek, 1);
         }
 
         /**
@@ -7421,7 +7525,7 @@
             }
 
             const timestamp = new Date();
-            const newLog = {
+            let newLog = {
                 uid: serialNumber,
                 timestamp: timestamp.getTime(),
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
