@@ -1145,11 +1145,7 @@
             border-bottom-right-radius: 14px;
         }
 
-        /* The button is now a simple flex item */
-        .logs-table tr.day-separator .btn-icon {
-            border-radius: 15px;
-            /* Pill shape */
-        }
+
 
         /* The click effect now works correctly without "flying away" */
         .logs-table tr.day-separator .btn-icon:active {
@@ -5657,7 +5653,10 @@
          * Sync logs with Google Sheet.
          */
         async function syncLogsWithSheet() {
-            if (!currentCourse || !isAdmin || !isOnline) return;
+            if (!currentCourse || !isAdmin || !isOnline) {
+                console.log("Sync aborted: Pre-conditions not met.");
+                return;
+            }
 
             try {
                 isSyncing = true;
@@ -5683,29 +5682,27 @@
                 }
 
                 // --- B) Sync Merged Logs UP to the server ---
-                // The body for the update is simply the current state of the 'logs' array,
-                // which should already be merged and cleaned from handleCourseChange.
-                const sheetData = logs.map(log => [
-                    log.uid,
-                    convertTimestampToLocalISOString(log.timestamp),
-                    log.id,
-                    log.manual ? 'true' : 'false'
-                ]);
+
+                // Use the new toSheetRow function to create the correct 7-column data.
+                const sheetData = logs.map(toSheetRow);
 
                 const sheetName = getSheetNameForCourse(currentCourse);
                 const formattedSheetName = formatSheetName(sheetName);
 
-                // Clear the sheet first
+                // Define the correct, full range for all 7 columns.
+                const fullRange = `${formattedSheetName}!A2:G`;
+
+                // Clear the entire sheet range first.
                 await gapi.client.sheets.spreadsheets.values.clear({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${formattedSheetName}!A2:D`,
+                    range: fullRange,
                 });
 
-                // Write the new complete dataset
+                // Write the new, complete 7-column dataset.
                 if (sheetData.length > 0) {
                     await gapi.client.sheets.spreadsheets.values.update({
                         spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: `${formattedSheetName}!A2:D`,
+                        range: fullRange, // Use the correct full range here
                         valueInputOption: 'USER_ENTERED',
                         resource: { values: sheetData }
                     });
@@ -5719,6 +5716,7 @@
                 throw error;
             } finally {
                 isSyncing = false;
+                // The calling function will handle the final status update.
             }
         }
 
@@ -7063,7 +7061,7 @@
 
                             // 1. Create the new "Add to EIS" button
                             const eisBtn = document.createElement('button');
-                            eisBtn.className = 'btn-blue btn-sm'; // Use btn-sm, NOT btn-icon
+                            eisBtn.className = 'btn-sm';
                             eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Add to EIS'; // Add text
                             eisBtn.title = 'Add to EIS for this day';
                             eisBtn.onclick = (e) => {
