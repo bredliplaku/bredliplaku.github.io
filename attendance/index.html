@@ -393,48 +393,6 @@
             background-color: rgba(255, 255, 255, 0.1);
         }
 
-        .searchable-select-container {
-            position: relative;
-            flex-grow: 1;
-        }
-
-        .searchable-select-input {
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        .searchable-select-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            max-height: 150px;
-            overflow-y: auto;
-            border: 1px solid #ccc;
-            background-color: var(--card-background);
-            z-index: 1001;
-            display: none;
-            overflow: hidden;
-            border-radius: 8px;
-        }
-
-        .searchable-select-dropdown div {
-            padding: 10px;
-            cursor: pointer;
-        }
-
-        .searchable-select-dropdown div:hover {
-            background-color: #f0f0f0;
-        }
-
-        .dark-mode .searchable-select-dropdown {
-            border-color: #555;
-        }
-
-        .dark-mode .searchable-select-dropdown div:hover {
-            background-color: #333;
-        }
-
         /* Style for disabled/uneditable fields */
         input:disabled,
         select:disabled {
@@ -455,6 +413,7 @@
             justify-content: flex-start;
             gap: 10px;
             overflow-x: visible;
+            margin-bottom: 10px;
         }
 
         .course-button {
@@ -2240,11 +2199,9 @@
         @media (max-width: 768px) {
             .course-button {
                 flex: 0 1 auto;
-            }
-
-            .course-buttons-container:has(.course-button + .course-button) .course-button {
-                flex: 1 1 0;
-                /* equal widths only when two or more */
+                /* natural width, can shrink but not fill */
+                white-space: nowrap;
+                /* prevent text from breaking into lines */
             }
 
             .logs-table tr.day-separator td {
@@ -6046,14 +6003,12 @@
             const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
 
             dialog.innerHTML = `
-        <h3 class="dialog-title">Add Manual Log Entry</h3>
+    <h3 class="dialog-title">Add Manual Log Entry</h3>
         <div class="form-group">
             <label for="manual-name-search">Name:</label>
-            <div class="searchable-select-container">
-                <input type="text" id="manual-name-search" class="form-control searchable-select-input" placeholder="Search by name or UID...">
-                <input type="hidden" id="manual-uid">
-                <div class="searchable-select-dropdown"></div>
-            </div>
+            <input type="text" id="manual-name-search" class="form-control" list="student-list" placeholder="Search by name or UID...">
+            <datalist id="student-list"></datalist>
+            <input type="hidden" id="manual-uid">
         </div>
         <div class="form-group">
             <label for="manual-date">Date:</label>
@@ -6073,41 +6028,28 @@
 
             const searchInput = dialog.querySelector('#manual-name-search');
             const uidInput = dialog.querySelector('#manual-uid');
-            const dropdown = dialog.querySelector('.searchable-select-dropdown');
-            let closeDropdownTimeout;
+            const dataList = dialog.querySelector('#student-list');
 
-            const populateDropdown = (filter = '') => {
-                dropdown.innerHTML = '';
-                const lowerFilter = filter.toLowerCase();
-                const filteredEntries = sortedEntries.filter(([uid, name]) =>
-                    name.toLowerCase().includes(lowerFilter) ||
-                    uid.toLowerCase().includes(lowerFilter)
-                );
+            // Populate the datalist with all students
+            sortedEntries.forEach(([uid, name]) => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.dataset.uid = uid; // Store the UID on the option
+                dataList.appendChild(option);
+            });
 
-                if (filteredEntries.length === 0) {
-                    dropdown.innerHTML = '<div style="color: #888; padding: 10px;">No results found</div>';
+            // When the user types or selects a name, find the matching UID
+            searchInput.addEventListener('input', () => {
+                let selectedUid = '';
+                const currentName = searchInput.value;
+                // Find the option in the datalist that matches the input's value
+                for (const option of dataList.options) {
+                    if (option.value === currentName) {
+                        selectedUid = option.dataset.uid;
+                        break;
+                    }
                 }
-
-                filteredEntries.slice(0, 100).forEach(([uid, name]) => { // Limit to 100 results for performance
-                    const item = document.createElement('div');
-                    item.textContent = `${name} (${uid})`;
-                    item.addEventListener('click', () => {
-                        searchInput.value = name;
-                        uidInput.value = uid;
-                        dropdown.style.display = 'none';
-                    });
-                    dropdown.appendChild(item);
-                });
-                dropdown.style.display = 'block';
-            };
-
-            searchInput.addEventListener('focus', () => populateDropdown(searchInput.value));
-            searchInput.addEventListener('input', () => populateDropdown(searchInput.value));
-            searchInput.addEventListener('blur', () => {
-                // Delay hiding the dropdown to allow click events to register
-                closeDropdownTimeout = setTimeout(() => {
-                    dropdown.style.display = 'none';
-                }, 150);
+                uidInput.value = selectedUid; // Update the hidden UID field
             });
 
             const closeDialog = () => {
