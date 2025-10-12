@@ -2884,6 +2884,7 @@
         const SYNC_INTERVAL = 60000; // Auto-sync every 60 seconds
         const SYNC_RETRY_INTERVAL = 15000; // Retry failed syncs after 15 seconds
         let activeRequests = new Map(); // Track active requests per course
+        let studentLogCache = {};
         let currentRequestId = 0; // Global request counter
         let databaseLoadPromise = null;
 
@@ -4594,51 +4595,56 @@
         }
 
         async function handleCourseChange(courseName) {
-            await databaseLoadPromise;
-            // 1. Cancel any other pending requests.
-            activeRequests.forEach((req, course) => {
-                if (course !== courseName) {
-                    console.log(`Cancelling pending request for previous course: ${course}`);
-                    req.cancelled = true;
-                }
-            });
-            activeRequests.clear();
-
-            // 2. Set the new course and update UI to show loading.
-            currentCourse = courseName;
-            localStorage.setItem('last_active_course', currentCourse);
-            updatePageTitle();
-            const tableContainer = document.querySelector('#scanner-tab .table-container');
-            tableContainer.classList.add('reloading');
-
-            // 3. Create a new, trackable request for this course.
-            const requestId = ++currentRequestId;
-            const request = { id: requestId, course: currentCourse, cancelled: false };
-            activeRequests.set(currentCourse, request);
-
-            // 4. Fetch from server FIRST (if online).
-            let serverLogs = [];
-            if (isOnline && isSignedIn) {
-                console.log(`Starting server fetch for ${currentCourse} (Request #${requestId})`);
-                serverLogs = await fetchLogsFromSheet(currentCourse).catch(err => { // Pass currentCourse here
-                    console.error("Server fetch failed, will rely on local data.", err);
-                    return [];
+            if (isAdmin) {
+                // --- ADMIN LOGIC (uses local storage and syncs) ---
+                await databaseLoadPromise;
+                activeRequests.forEach((req, course) => {
+                    if (course !== courseName) req.cancelled = true;
                 });
+                activeRequests.clear();
+
+                currentCourse = courseName;
+                localStorage.setItem('last_active_course', currentCourse);
+                updatePageTitle();
+                document.querySelector('#scanner-tab .table-container').classList.add('reloading');
+
+                const requestId = ++currentRequestId;
+                const request = { id: requestId, course: currentCourse, cancelled: false };
+                activeRequests.set(currentCourse, request);
+
+                let serverLogs = [];
+                if (isOnline && isSignedIn) {
+                    serverLogs = await fetchLogsFromSheet(currentCourse).catch(err => {
+                        console.error("Server fetch failed, will rely on local data.", err);
+                        return [];
+                    });
+                }
+
+                if (request.cancelled) return;
+
+                const localLogs = restoreLogsFromLocalStorage();
+                logs = mergeLogs(serverLogs, localLogs);
+
+                saveLogsToLocalStorage();
+                updateUI();
+            } else {
+                // --- STUDENT LOGIC (uses in-memory cache ONLY) ---
+                currentCourse = courseName;
+                updatePageTitle();
+
+                // Get the student's pre-loaded logs from the in-memory cache.
+                const studentLogsForCourse = studentLogCache[currentCourse] || [];
+                const studentNameNormalised = normalizeName(currentUser.name);
+
+                // Filter to show only this student's logs and update the global 'logs' variable.
+                logs = studentLogsForCourse.filter(log => {
+                    const logOwnerName = uidToNameMap[log.uid] || '';
+                    return normalizeName(logOwnerName) === studentNameNormalised;
+                });
+
+                // Refresh the UI. No network calls or local storage access is needed.
+                updateUI();
             }
-
-            // 5. After fetching, check if this request has been cancelled by a newer one.
-            if (request.cancelled) {
-                console.log(`Request #${requestId} for ${courseName} was cancelled. Aborting update.`);
-                return; // Stop processing
-            }
-
-            // 6. Get local logs and merge, with server logs as the priority.
-            const localLogs = restoreLogsFromLocalStorage();
-            logs = mergeLogs(serverLogs, localLogs);
-
-            // 7. Save the corrected, merged data back to local storage and update the UI.
-            saveLogsToLocalStorage();
-            updateUI(); // This will handle fading the table back in
         }
 
         // Fetch logs with request tracking
@@ -4883,39 +4889,31 @@
  * This is intended to be run for non-admin students upon sign-in.
  */
         async function loadAllCourseLogsForStudent() {
-            if (isAdmin || !isOnline || !isSignedIn) return; // Only run for students who are online
+            if (isAdmin || !isOnline || !isSignedIn) return;
 
-            console.log("Student signed in. Proactively loading all course logs...");
+            console.log("Student signed in. Proactively loading all course logs from server...");
+            studentLogCache = {}; // Clear any previous cache
             const fetchPromises = [];
 
             for (const course of availableCourses) {
-                const storageKey = `${LOGS_STORAGE_KEY}_${course}`;
-                const localLogs = localStorage.getItem(storageKey);
-
-                // Only fetch from the server if we have no local data for this course.
-                if (!localLogs) {
-                    const promise = fetchLogsFromSheet(course) // Use the refactored fetch function
-                        .then(serverLogs => {
-                            if (serverLogs) {
-                                localStorage.setItem(storageKey, JSON.stringify(serverLogs));
-                                console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
-                            }
-                        })
-                        .catch(err => {
-                            // This is not a critical error, just log it. The course will appear empty.
-                            console.error(`Failed to pre-fetch logs for ${course}:`, err);
-                        });
-                    fetchPromises.push(promise);
-                }
+                const promise = fetchLogsFromSheet(course)
+                    .then(serverLogs => {
+                        if (serverLogs && serverLogs.length > 0) {
+                            // Store the fetched logs in our in-memory cache
+                            studentLogCache[course] = serverLogs;
+                            console.log(`Fetched and cached ${serverLogs.length} logs for ${course} in memory.`);
+                        }
+                    })
+                    .catch(err => {
+                        console.error(`Failed to pre-fetch logs for ${course}:`, err);
+                    });
+                fetchPromises.push(promise);
             }
 
-            // Wait for all background fetches to complete.
             await Promise.all(fetchPromises);
 
             console.log("Finished pre-loading all student logs.");
-
-            // After pre-loading, refresh the entire UI to show the correct buttons.
-            updateUI();
+            updateUI(); // Refresh the UI to show the correct course buttons
         }
 
 
@@ -7097,6 +7095,12 @@
          * @param {Object} event - The NFC reading event.
          */
         async function handleNfcReading({ serialNumber }) {
+            if (isSignedIn && !isAdmin) {
+                playSound(false); // Play an error sound for feedback.
+                showNotification('error', 'Action Not Allowed', 'Only administrators can record attendance.');
+                return; // Stop the function immediately.
+            }
+
             // COOLDOWN LOGIC: Check if this card's UID was just scanned.
             if (cooldownUIDs.has(serialNumber)) {
                 console.log(`UID ${serialNumber} is on cooldown. Scan ignored.`);
@@ -7391,17 +7395,13 @@
             }
 
             courseButtonsContainer.innerHTML = '';
-
             let coursesToDisplay = availableCourses;
 
-            // If the user is a student, filter the courses to only show ones they have logs for.
+            // For students, filter courses based on the in-memory cache.
             if (!isAdmin && currentUser) {
                 const studentNameNormalised = normalizeName(currentUser.name);
                 coursesToDisplay = availableCourses.filter(course => {
-                    const logsForCourse = JSON.parse(localStorage.getItem(`${LOGS_STORAGE_KEY}_${course}`) || '[]');
-                    if (logsForCourse.length === 0) {
-                        return false; // No logs for this course at all
-                    }
+                    const logsForCourse = studentLogCache[course] || [];
                     // Check if at least one log in this course belongs to the student
                     return logsForCourse.some(log => {
                         const logOwnerName = uidToNameMap[log.uid] || '';
@@ -7410,18 +7410,14 @@
                 });
             }
 
-            // Now, create buttons only for the courses in the final list.
             coursesToDisplay.forEach(course => {
                 const button = document.createElement('div');
                 button.className = 'course-button' + (currentCourse === course ? ' active' : '');
                 button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace(/_/g, ' ')}`;
-                button.addEventListener('click', () => {
-                    selectCourseButton(course);
-                });
+                button.addEventListener('click', () => selectCourseButton(course));
                 courseButtonsContainer.appendChild(button);
             });
 
-            // If no course is selected but there are courses to display, select the first one.
             if (!currentCourse && coursesToDisplay.length > 0) {
                 selectCourseButton(coursesToDisplay[0]);
             }
