@@ -3150,6 +3150,8 @@
                 manual: true // Mark as a manual addition
             };
 
+            newLog = touchLogForEdit(newLog);
+
             // Add the new log to the beginning of the main logs array
             logs.unshift(newLog);
 
@@ -4816,7 +4818,6 @@
 
         async function handleCourseChange(courseName) {
             if (isAdmin) {
-                // --- Find and REPLACE the existing admin logic with this ---
                 await databaseLoadPromise;
                 currentCourse = courseName;
                 localStorage.setItem('last_active_course', currentCourse);
@@ -4824,25 +4825,21 @@
                 document.querySelector('#scanner-tab .table-container').classList.add('reloading');
 
                 try {
-                    // 1. Fetch all necessary data in parallel
                     const [serverLogs, serverTombs, localLogs, localTombs] = await Promise.all([
                         fetchLogsFromSheet(currentCourse),
                         fetchTombstonesForCourse(currentCourse),
                         Promise.resolve(restoreLogsFromLocalStorage()),
-                        Promise.resolve(getTombstonesForCourse(currentCourse))
+                        Promise.resolve(getTombstonesForCourse())
                     ]);
 
-                    // 2. Perform the robust merge
                     logs = mergeLogs(serverLogs, localLogs, localTombs, serverTombs);
 
-                    // 3. Persist the corrected state and update UI
-                    saveLogsToLocalStorage(); // This saves the cleaned, merged logs
-                    saveTombstonesForCourse(new Set([...localTombs, ...serverTombs])); // Also save the combined tombstones
+                    saveLogsToLocalStorage();
+                    saveTombstonesForCourse(new Set([...localTombs, ...serverTombs]));
                     updateUI();
 
                 } catch (err) {
-                    console.error("Failed to load course data:", err);
-                    // Fallback to local data on error
+                    console.error("Failed to load course data, falling back to local:", err);
                     logs = restoreLogsFromLocalStorage();
                     updateUI();
                 }
@@ -5502,55 +5499,64 @@
             if (!courseName) return [];
             const sheetName = getSheetNameForCourse(courseName);
             const formattedSheetName = formatSheetName(sheetName);
-
             try {
-                // 1. Fetch logs from the course sheet
-                const logRange = `${formattedSheetName}!A2:D`;
-                const logResponse = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID, range: logRange
+                const range = `${formattedSheetName}!A2:G`; // Read up to column G
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: LOGS_SPREADSHEET_ID, range: range
                 });
-                const logRows = logResponse.result.values || [];
-                const sheetLogs = logRows.map(row => ({
-                    uid: row[0],
-                    timestamp: new Date(row[1]).getTime(),
-                    id: row[2],
-                    manual: row[3] === 'true'
-                })).filter(log => log.id && !isNaN(log.timestamp));
-
-                // 2. Fetch all tombstones from the server for this course
-                const serverTombs = new Set();
-                try {
-                    const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
-                    const tombstoneResponse = await gapi.client.sheets.spreadsheets.values.get({
-                        spreadsheetId: LOGS_SPREADSHEET_ID, range: tombstoneRange
-                    });
-                    (tombstoneResponse.result.values || []).forEach(row => {
-                        const course = row[0];
-                        const logId = row[1];
-                        if (course === courseName && logId) {
-                            serverTombs.add(logId);
-                        }
-                    });
-                } catch (e) {
-                    console.info('No DELETED_LOG_IDS sheet found on server; skipping.', e.result?.error?.message);
-                }
-
-                // 3. Sync local tombstones with server tombstones
-                const localTombs = getTombstonesForCourse(courseName);
-                const allTombs = new Set([...localTombs, ...serverTombs]);
-                saveTombstonesForCourse(allTombs, courseName);
-
-                // 4. Return only the logs that are NOT in the final tombstone list
-                return sheetLogs.filter(log => !allTombs.has(log.id));
-
+                const rows = response.result.values || [];
+                return rows.map(row => {
+                    const [uid, timestampISO, id, manual, version, updatedAtISO, updatedBy] = row;
+                    return {
+                        uid,
+                        timestamp: timestampISO ? Date.parse(timestampISO) : 0,
+                        id,
+                        manual: manual === 'true',
+                        version: version != null ? Number(version) : 0,
+                        updatedAt: updatedAtISO ? Date.parse(updatedAtISO) : 0,
+                        updatedBy
+                    };
+                }).filter(log => log.id && Number.isFinite(log.timestamp));
             } catch (error) {
-                console.error('Error fetching logs and tombstones:', error);
+                console.error('Error fetching logs:', error);
                 throw error;
             }
         }
 
         /**
- * Fetches the set of deleted log IDs (tombstones) for a specific course from the server.
+ * Updates a log's version and updatedAt timestamp for an edit.
+ * @param {object} log - The log object to update.
+ * @param {string} [userEmail] - Optional: The email of the user making the change.
+ * @returns {object} The updated log object.
+ */
+        function touchLogForEdit(log, userEmail) {
+            log.version = (log.version || 0) + 1;
+            log.updatedAt = Date.now();
+            if (userEmail && currentUser) {
+                log.updatedBy = currentUser.email;
+            }
+            return log;
+        }
+
+        /**
+         * Converts a log object into an array for writing to the Google Sheet.
+         * @param {object} log - The log object.
+         * @returns {Array} The log data as a row array.
+         */
+        function toSheetRow(log) {
+            return [
+                log.uid || "",
+                convertTimestampToLocalISOString(log.timestamp),
+                log.id,
+                log.manual ? 'true' : 'false',
+                log.version || 0,
+                log.updatedAt ? new Date(log.updatedAt).toISOString() : new Date(log.timestamp).toISOString(),
+                log.updatedBy || ""
+            ];
+        }
+
+        /**
+ * Fetches the set of deleted log IDs (tombstones) for a course from the server.
  * @param {string} courseName - The name of the course.
  * @returns {Promise<Set<string>>} A promise that resolves with a Set of deleted log IDs.
  */
@@ -5573,7 +5579,6 @@
                     }
                 });
             } catch (e) {
-                // This is not a critical error if the sheet doesn't exist yet.
                 console.info('No DELETED_LOG_IDS sheet found on server; skipping.', e.result?.error?.message);
             }
             return serverTombs;
@@ -6354,6 +6359,7 @@
                     manual: true
                 };
 
+                newLog = touchLogForEdit(newLog);
                 logs.unshift(newLog);
                 saveLogsToLocalStorage();
                 updateUI();
@@ -6490,7 +6496,8 @@
                     const timeInput = groupElement.querySelector('.timestamp-time').value;
                     const log = logs.find(log => log.id === logId);
                     if (log) {
-                        log.timestamp = new Date(`${newDate}T${timeInput}:00`).getTime();
+                        log.timestamp = newTimestamp.getTime();
+                        touchLogForEdit(log); // Add this line to bump the version
                     }
                 });
 
@@ -6913,6 +6920,7 @@
                             id: Date.now() + Math.random().toString(36).substr(2, 9) + `_${uid}`,
                             manual: true // Mark as a manual bulk addition
                         };
+                        return touchLogForEdit(newLog);
                     });
 
                     if (newLogsToAdd.length > 0) {
@@ -7419,6 +7427,7 @@
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: false
             };
+            newLog = touchLogForEdit(newLog);
             logs.unshift(newLog);
             saveLogsToLocalStorage();
             updateUI();
