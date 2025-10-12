@@ -3098,6 +3098,7 @@
         let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
         let cooldownUIDs = new Set();
         let nfcAbortController = null;
+        let initialPullDone = false;
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -4862,15 +4863,15 @@
                         fetchLogsFromSheet(currentCourse),
                         fetchTombstonesForCourse(currentCourse)
                     ]);
-                    const localLogs = restoreLogsFromLocalStorage();
-                    const localTombs = getTombstonesForCourse();
 
-                    // Perform the robust merge
+                    const localLogs = restoreLogsFromLocalStorage(currentCourse) || [];
+                    const localTombs = getTombstonesForCourse(currentCourse) || new Set();
+
+                    // SERVER FIRST, LOCAL SECOND (local wins only if newer by version/updatedAt)
                     logs = mergeLogs(serverLogs, localLogs, localTombs, serverTombs);
 
-                    // Persist the corrected state and update UI
-                    saveLogsToLocalStorage();
-                    saveTombstonesForCourse(new Set([...localTombs, ...serverTombs]));
+                    // persist the merged state immediately so stale local can’t re-overwrite later
+                    saveLogsToLocalStorage(currentCourse, logs);
                     updateUI();
 
                 } catch (err) {
@@ -5541,32 +5542,43 @@
         async function fetchLogsFromSheet(courseName) {
             if (!courseName) return [];
             const sheetName = getSheetNameForCourse(courseName);
-            const formattedSheetName = formatSheetName(sheetName);
-            const range = `${formattedSheetName}!A2:G?t=${Date.now()}`;
+            const range = `${formatSheetName(sheetName)}!A2:G`;
 
-            try {
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range
-                });
+            const { result } = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: LOGS_SPREADSHEET_ID,
+                range
+            });
 
-                const rows = response.result.values || [];
-                return rows.map(row => {
-                    const [uid, timestampISO, id, manual, version, updatedAtISO, updatedBy] = row;
-                    return {
-                        uid: String(uid || ""),
-                        timestamp: timestampISO ? Date.parse(timestampISO) : 0,
-                        id,
-                        manual: manual === 'true',
-                        version: version != null ? Number(version) : 0,
-                        updatedAt: updatedAtISO ? Date.parse(updatedAtISO) : 0,
-                        updatedBy: updatedBy || ""
-                    };
-                }).filter(log => log.id && Number.isFinite(log.timestamp));
-            } catch (error) {
-                console.error('Error fetching logs:', error);
-                throw error;
+            const rows = result.values || [];
+            return rows.map(r => {
+                const [uid, tsISO, id, manual, version, updISO, updatedBy] = r;
+                return {
+                    uid: String(uid || ''),
+                    timestamp: tsISO ? Date.parse(tsISO) : 0,
+                    id,
+                    manual: manual === 'true',
+                    version: version != null ? Number(version) : 0,
+                    updatedAt: updISO ? Date.parse(updISO) : 0,
+                    updatedBy: updatedBy || ''
+                };
+            }).filter(l => l.id && Number.isFinite(l.timestamp));
+        }
+
+        async function fetchTombstonesForCourse(courseName) {
+            if (!courseName) return new Set();
+            const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
+
+            const { result } = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: LOGS_SPREADSHEET_ID,
+                range: tombstoneRange
+            });
+
+            const set = new Set();
+            for (const row of (result.values || [])) {
+                const [course, id] = row;
+                if (course === courseName && id) set.add(id);
             }
+            return set;
         }
 
         /**
@@ -5578,11 +5590,13 @@
         function touchLogForEdit(log, userEmail) {
             log.version = (log.version || 0) + 1;
             log.updatedAt = Date.now();
-            if (userEmail && currentUser) {
-                log.updatedBy = currentUser.email;
-            }
+            if (userEmail) log.updatedBy = userEmail;
             return log;
         }
+
+        // after you adjust log.timestamp:
+        touchLogForEdit(log, currentUser?.email);
+
 
         /**
          * Converts a log object into an array for writing to the Google Sheet.
@@ -5591,15 +5605,16 @@
          */
         function toSheetRow(log) {
             return [
-                log.uid || "",
-                convertTimestampToLocalISOString(log.timestamp),
+                log.uid || '',
+                new Date(Number(log.timestamp || Date.now())).toISOString(),
                 log.id,
                 log.manual ? 'true' : 'false',
-                log.version || 0,
-                log.updatedAt ? new Date(log.updatedAt).toISOString() : new Date(log.timestamp).toISOString(),
-                log.updatedBy || ""
+                Number(log.version || 0),
+                new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
+                String(log.updatedBy || '')
             ];
         }
+
 
 
         /**
@@ -5612,7 +5627,7 @@
 
             const serverTombs = new Set();
             try {
-                const tombstoneRange = `DELETED_LOG_IDS!A2:C?t=${Date.now()}`;
+                const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
                 const response = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
                     range: tombstoneRange
@@ -5689,10 +5704,17 @@
                 pad(date.getSeconds());
         }
 
+        async function initialiseCourse(course) {
+            await pullAndMerge(course); // the block in #2
+            initialPullDone = true;
+        }
+
         /**
          * Sync logs with Google Sheet.
          */
         async function syncLogsWithSheet() {
+            if (!initialPullDone) return;
+
             if (!currentCourse || !isAdmin || !isOnline) return;
 
             try {
