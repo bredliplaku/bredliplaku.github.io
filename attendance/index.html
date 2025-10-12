@@ -4003,15 +4003,26 @@
                             isSignedIn = true;
                             await fetchUserInfo();
                             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+
+                            // --- START OF NEW LOGIC ---
+                            // If the restored user is a student, trigger their data loading now.
+                            if (!isAdmin) {
+                                loadAllCourseLogsForStudent(); // This will pre-load data and then call updateUI().
+                            } else {
+                                updateAuthUI(); // Admins can see the UI immediately.
+                            }
+                            // --- END OF NEW LOGIC ---
+
                         } catch (e) {
                             console.error("Token restore failed:", e);
                             isSignedIn = false;
                             isAdmin = false;
                             localStorage.removeItem('gapi_token');
+                            updateAuthUI(); // Show UI even on failure.
                         }
+                    } else {
+                        updateAuthUI(); // If there's no token, show the UI immediately.
                     }
-
-                    updateAuthUI();
 
                     if (isOnline) {
                         databaseLoadPromise = fetchDatabaseFromSheet();
@@ -4273,27 +4284,31 @@
          * @returns {number|null} Current week number or null if metadata is invalid
          */
         function calculateCurrentWeek(metadata) {
-            if (!metadata || !metadata.start_date || !metadata.end_date) {
-                return null;
-            }
+            if (!metadata || !metadata.start_date) return null;
 
             const startDate = new Date(metadata.start_date);
-            const endDate = new Date(metadata.end_date);
             const today = new Date();
             const holidayWeeks = parseInt(metadata.holiday_weeks || 0);
 
-            // Make sure dates are valid
-            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-                return null;
-            }
+            // Get the holiday start date, if it exists
+            const holidayStartDate = metadata.holiday_start_date ? new Date(metadata.holiday_start_date) : null;
 
-            // Calculate week number
-            const totalWeeks = Math.ceil((endDate - startDate) / (7 * 24 * 60 * 60 * 1000));
+            if (isNaN(startDate.getTime())) return null;
+
+            // Calculate the current calendar week of the semester
             const currentWeek = Math.ceil((today - startDate) / (7 * 24 * 60 * 60 * 1000));
-            const adjustedWeek = currentWeek - holidayWeeks;
 
-            // Ensure week is within valid range
-            return Math.min(Math.max(adjustedWeek, 1), totalWeeks);
+            // --- START OF NEW LOGIC ---
+            let adjustedWeek = currentWeek;
+
+            // Only subtract holiday weeks if today's date is ON or AFTER the holiday start date
+            if (holidayWeeks > 0 && holidayStartDate && !isNaN(holidayStartDate.getTime()) && today >= holidayStartDate) {
+                adjustedWeek = currentWeek - holidayWeeks;
+            }
+            // --- END OF NEW LOGIC ---
+
+            // Ensure week is within a valid range (at least 1)
+            return Math.max(adjustedWeek, 1);
         }
 
         /**
@@ -5383,70 +5398,59 @@
                 return;
             }
 
+            // This function now performs a full overwrite, which is necessary for deletions.
             try {
-                console.log("Starting safe sync with spreadsheet...");
+                console.log("Starting full sync with spreadsheet...");
                 isSyncing = true;
                 updateSyncStatus("Syncing...", "syncing");
 
-                // 1. Get the current state of the server.
-                const serverLogs = await fetchLogsFromSheet(currentCourse);
-
-                // 2. Use our new merge logic to find ONLY the logs that are new.
-                const serverLogIds = new Set(serverLogs.map(log => log.id));
-                const newLogsToAppend = logs.filter(localLog => !serverLogIds.has(localLog.id));
-
-                if (newLogsToAppend.length === 0) {
-                    console.log("No new logs to append. Sync complete.");
-                    logs = serverLogs.sort((a, b) => b.timestamp - a.timestamp); // Ensure local state matches server
-                    saveLogsToLocalStorage(); // Save the corrected state
-                    updateUI();
-                    return; // Nothing more to do.
-                }
-
-                // 3. Prepare ONLY the new logs for appending.
-                const sheetData = newLogsToAppend.map(log => [
+                // 1. Prepare ALL local logs for the overwrite.
+                const sheetData = logs.map(log => [
                     log.uid,
                     convertTimestampToLocalISOString(log.timestamp),
                     log.id,
                     log.manual ? 'true' : 'false'
                 ]);
 
-                console.log(`Appending ${sheetData.length} new logs to the sheet...`);
-
-                // 4. Use the 'append' method, which is safe and doesn't delete anything.
                 const sheetName = getSheetNameForCourse(currentCourse);
                 const formattedSheetName = formatSheetName(sheetName);
-                await gapi.client.sheets.spreadsheets.values.append({
+
+                // 2. Clear the entire sheet range first. This is the crucial step for deletions.
+                await gapi.client.sheets.spreadsheets.values.clear({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${formattedSheetName}!A:D`,
-                    valueInputOption: 'USER_ENTERED',
-                    insertDataOption: 'INSERT_ROWS',
-                    resource: {
-                        values: sheetData
-                    }
+                    range: `${formattedSheetName}!A2:D`,
                 });
 
-                // 5. After successfully appending, re-merge to get the final correct state.
-                logs = [...serverLogs, ...newLogsToAppend].sort((a, b) => b.timestamp - a.timestamp);
-                saveLogsToLocalStorage();
-                updateUI();
+                // 3. Write the new, complete dataset. If logs are empty, this will leave the sheet empty.
+                if (sheetData.length > 0) {
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: LOGS_SPREADSHEET_ID,
+                        range: `${formattedSheetName}!A2:D`,
+                        valueInputOption: 'USER_ENTERED', // Use USER_ENTERED to correctly parse dates
+                        resource: {
+                            values: sheetData
+                        }
+                    });
+                }
 
-                console.log(`Successfully appended ${newLogsToAppend.length} logs.`);
+                console.log(`Successfully completed full sync. Sheet now has ${logs.length} logs.`);
+
+                // After a successful sync, the local state is now the source of truth.
+                saveLogsToLocalStorage(); // Re-save to update timestamps and confirm state.
 
             } catch (error) {
-                console.error('Error during safe sync:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync new logs with Google Sheets.');
-                throw error;
+                console.error('Error during full sync:', error);
+                showNotification('error', 'Sync Error', 'Failed to sync logs with Google Sheets.');
+                throw error; // Re-throw to be handled by the calling function
             } finally {
                 isSyncing = false;
-                updateSyncStatus(isOnline ? "Online" : "Offline", isOnline ? "online" : "offline");
+                // The calling function (syncData or autoSyncData) will handle the final status update.
             }
         }
 
-
         /**
-                * Sync database to Google Sheets with format standardization
-                */
+        * Sync database to Google Sheets with format standardization
+        */
         async function syncDatabaseToSheet() {
             if (!isSignedIn || !isAdmin || !isOnline) {
                 console.warn('Database sync aborted: Not signed in as admin or not online.');
@@ -5770,7 +5774,7 @@
                 // Fetch the course info data
                 const response = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: 'COURSE_INFO!A2:H'
+                    range: 'COURSE_INFO!A2:I'
                 });
 
                 const rows = response.result.values || [];
@@ -5794,13 +5798,14 @@
 
                     // Store in the global courseInfoMap - FIXED INDICES HERE
                     window.courseInfoMap[course] = {
-                        start_date: row[1] || "",         // Column B - Start Date
-                        end_date: row[2] || "",           // Column C - End Date
-                        holiday_weeks: row[3] || "0",     // Column D - Holiday Weeks
-                        default_hours: row[4] || "2",     // Column E - Default Hours
-                        default_category: row[5] || "theory", // Column F - Default Category
-                        eis_id: row[6] || "",              // Column G - EIS ID
-                        default_section: row[7] || "ALL" // ADD THIS LINE (Column H)
+                        start_date: row[1] || "",
+                        end_date: row[2] || "",
+                        holiday_weeks: row[3] || "0",
+                        holiday_start_date: row[4] || "", // ADD THIS LINE (Column E)
+                        default_hours: row[5] || "2",
+                        default_category: row[6] || "theory",
+                        eis_id: row[7] || "",
+                        default_section: row[8] || "ALL"
                     };
 
                     // If EIS ID is provided, update the courseIDMap
