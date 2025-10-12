@@ -1095,8 +1095,12 @@
         }
 
         /* Add this rule to hide the date column when sorting by date */
-        .logs-table.sorting-by-date .date-column {
+        body.is-admin .logs-table.sorting-by-date .date-column {
             display: none !important;
+        }
+
+        body:not(.is-admin) .app-info {
+            display: none;
         }
 
         /* Center the UID and Date column titles */
@@ -4383,6 +4387,23 @@
             // Add class to body to trigger CSS display rules
             document.body.classList.toggle('is-admin', isAdmin);
 
+            const sortSelect = document.getElementById('sort-select');
+            if (sortSelect) {
+                // Get all options as an array
+                const options = Array.from(sortSelect.options);
+                options.forEach(option => {
+                    const isStudentOnlyOption = option.value.includes('date');
+                    // Hide or show options based on admin status
+                    option.style.display = (isAdmin || isStudentOnlyOption) ? '' : 'none';
+                });
+
+                // If a non-admin has a non-date sort selected, reset it
+                if (!isAdmin && !currentSort.startsWith('date')) {
+                    currentSort = 'date-desc';
+                    sortSelect.value = currentSort;
+                }
+            }
+
             // Get elements that need direct manipulation
             const loginContainer = document.getElementById('login-container');
             const userContainer = document.getElementById('user-container');
@@ -6620,12 +6641,11 @@
                     });
                 }
 
-                const filteredLogs = filter ?
-                    logsToDisplay.filter(log => (log.uid.toLowerCase().includes(filter) || (uidToNameMap[log.uid] && uidToNameMap[log.uid].toLowerCase().includes(filter)))) :
-                    logsToDisplay;
+                // --- START OF SEARCH LOGIC CHANGE ---
 
+                // 1. Group ALL logs first, before filtering.
                 const grouped = {};
-                filteredLogs.forEach(log => {
+                logsToDisplay.forEach(log => {
                     const dateObj = new Date(log.timestamp);
                     if (isNaN(dateObj.getTime())) return;
                     const day = String(dateObj.getDate()).padStart(2, '0');
@@ -6639,8 +6659,39 @@
                     }
                     grouped[key].originalLogs.push(log);
                 });
-
                 let result = Object.values(grouped);
+
+                // 2. Now, filter the grouped results.
+                if (filter) {
+                    result = result.filter(group => {
+                        const name = group.name || '';
+                        const uid = group.uid || '';
+                        const date = group.date || '';
+
+                        // Check if any of the timestamps in the group match the time filter
+                        const hasMatchingTime = group.originalLogs.some(log => {
+                            const timeObj = new Date(log.timestamp);
+                            const timeStr = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
+                            return timeStr.includes(filter);
+                        });
+
+                        // Return true if the filter matches the name, UID, date, or any of the times.
+                        return (
+                            name.toLowerCase().includes(filter) ||
+                            uid.toLowerCase().includes(filter) ||
+                            date.includes(filter) ||
+                            hasMatchingTime
+                        );
+                    });
+                }
+
+                // 3. Update the count based on the number of individual logs in the final filtered result.
+                const finalLogCount = result.reduce((acc, group) => acc + group.originalLogs.length, 0);
+                filteredCount.textContent = finalLogCount;
+
+                // --- END OF SEARCH LOGIC CHANGE ---
+
+                // Sort the final filtered result
                 const [field, direction] = currentSort.split('-');
                 const sortMultiplier = direction === 'asc' ? 1 : -1;
                 result.sort((a, b) => {
@@ -6653,25 +6704,22 @@
                     return 0;
                 });
 
-                filteredCount.textContent = filteredLogs.length;
                 emptyLogs.style.display = result.length > 0 ? 'none' : 'block';
                 logsTbody.innerHTML = '';
                 let currentDay = null;
 
                 result.forEach((group) => {
-                    if (currentSort.startsWith('date')) {
+                    if (isAdmin && currentSort.startsWith('date')) {
                         const thisDay = group.date;
                         if (thisDay !== currentDay) {
                             currentDay = thisDay;
+                            // ... (rest of the separator creation logic remains the same)
                             const separatorRow = document.createElement('tr');
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
-
                             const dateText = document.createElement('span');
                             dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-
                             separatorCell.appendChild(dateText);
-
                             if (isAdmin) {
                                 separatorCell.colSpan = 5;
                                 const dateForButton = thisDay;
@@ -6691,6 +6739,7 @@
 
                     const row = document.createElement('tr');
                     if (group.name === 'Unknown') row.classList.add('unknown-row');
+
                     const nameCell = document.createElement('td');
                     nameCell.className = 'name-cell name-column';
                     nameCell.textContent = group.name;
@@ -6725,7 +6774,6 @@
                         const actionsWrapper = document.createElement('div');
                         actionsWrapper.className = 'actions-cell-content';
 
-                        // Create and append buttons conditionally and sequentially.
                         if (group.name === 'Unknown') {
                             const addUserBtn = document.createElement('button');
                             addUserBtn.className = 'btn-green btn-icon';
