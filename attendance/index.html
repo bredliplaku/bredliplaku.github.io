@@ -1156,7 +1156,10 @@
             border-bottom-right-radius: 14px;
         }
 
-
+        .day-separator-actions .eis-day-btn {
+            border-top-left-radius: 14px;
+            border-bottom-left-radius: 14px;
+        }
 
         /* The click effect now works correctly without "flying away" */
         .logs-table tr.day-separator .btn-icon:active {
@@ -2456,16 +2459,13 @@
 
         /* Responsive adjustments */
         @media (max-width: 768px) {
-
-            /* 1. Hide the "Add to EIS" button on mobile */
-            .eis-day-btn {
+            .day-separator-actions .eis-day-btn {
                 display: none;
             }
 
-            /* 2. When the EIS button is hidden, the "+1 Hour" button becomes the only child.
-          This rule makes it a standalone, fully-rounded button. */
-            .day-separator-actions .btn-icon:first-child {
-                border-radius: 50px;
+            .day-separator-actions .btn-icon {
+                border-top-left-radius: 14px;
+                border-bottom-left-radius: 14px;
             }
 
             /* 3. Revert the date alignment to the left for mobile */
@@ -3123,6 +3123,7 @@
         let studentLogCache = {};
         let currentRequestId = 0; // Global request counter
         let databaseLoadPromise = null;
+        let databaseResolve = null;
 
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -4146,10 +4147,6 @@
             if (lastActiveCourse) {
                 console.log(`Restoring last active course: ${lastActiveCourse}`);
                 currentCourse = lastActiveCourse;
-
-                // Also restore the logs immediately from localStorage
-                logs = restoreLogsFromLocalStorage(currentCourse);
-                console.log(`Restored ${logs.length} logs from localStorage for ${currentCourse}`);
             }
 
             // Handle auth redirect
@@ -4871,21 +4868,25 @@
                 document.querySelector('#scanner-tab .table-container').classList.add('reloading');
 
                 try {
-                    const [serverLogs, serverTombs, localLogs, localTombs] = await Promise.all([
+                    // Fetch all necessary data in parallel
+                    const [serverLogs, serverTombs] = await Promise.all([
                         fetchLogsFromSheet(currentCourse),
-                        fetchTombstonesForCourse(currentCourse),
-                        Promise.resolve(restoreLogsFromLocalStorage()),
-                        Promise.resolve(getTombstonesForCourse())
+                        fetchTombstonesForCourse(currentCourse)
                     ]);
+                    const localLogs = restoreLogsFromLocalStorage();
+                    const localTombs = getTombstonesForCourse();
 
+                    // Perform the robust merge
                     logs = mergeLogs(serverLogs, localLogs, localTombs, serverTombs);
 
+                    // Persist the corrected state and update UI
                     saveLogsToLocalStorage();
                     saveTombstonesForCourse(new Set([...localTombs, ...serverTombs]));
                     updateUI();
 
                 } catch (err) {
-                    console.error("Failed to load course data, falling back to local:", err);
+                    console.error("Critical error fetching course data from server:", err);
+                    showNotification('error', 'Sync Failed', 'Could not load data from server. Showing local data only.');
                     logs = restoreLogsFromLocalStorage();
                     updateUI();
                 }
@@ -4920,7 +4921,7 @@
 
                 const sheetName = getSheetNameForCourse(courseName);
                 const formattedSheetName = formatSheetName(sheetName);
-                const range = `${formattedSheetName}!A2:D`;
+                const range = `${formattedSheetName}!A2:G`;
 
                 console.log(`Fetching logs for ${courseName} (request #${request.id})`);
 
@@ -5308,6 +5309,10 @@
 * Fetch database entries from Google Sheet with format detection
 */
         async function fetchDatabaseFromSheet() {
+            if (!databaseLoadPromise) {
+                databaseLoadPromise = new Promise(resolve => { databaseResolve = resolve; });
+            }
+
             try {
                 // First detect the format
                 const formatInfo = await detectAndMigrateDatabaseFormat();
@@ -5413,7 +5418,10 @@
                 // This 'catch' block is now resilient and will not freeze the app.
 
             } finally {
-                // Always mark the database task as complete, whether it succeeded or failed.
+                if (databaseResolve) {
+                    databaseResolve();
+                    databaseResolve = null; // Prevent re-resolving
+                }
                 loadingTasks.delete('database');
                 checkLoadingCompletion();
             }
@@ -5545,22 +5553,25 @@
             if (!courseName) return [];
             const sheetName = getSheetNameForCourse(courseName);
             const formattedSheetName = formatSheetName(sheetName);
+            const range = `${formattedSheetName}!A2:G`; // Always read all 7 columns
+
             try {
-                const range = `${formattedSheetName}!A2:G`; // Read up to column G
                 const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID, range: range
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range
                 });
+
                 const rows = response.result.values || [];
                 return rows.map(row => {
                     const [uid, timestampISO, id, manual, version, updatedAtISO, updatedBy] = row;
                     return {
-                        uid,
+                        uid: String(uid || ""),
                         timestamp: timestampISO ? Date.parse(timestampISO) : 0,
                         id,
                         manual: manual === 'true',
                         version: version != null ? Number(version) : 0,
                         updatedAt: updatedAtISO ? Date.parse(updatedAtISO) : 0,
-                        updatedBy
+                        updatedBy: updatedBy || ""
                     };
                 }).filter(log => log.id && Number.isFinite(log.timestamp));
             } catch (error) {
@@ -5601,6 +5612,7 @@
             ];
         }
 
+
         /**
  * Fetches the set of deleted log IDs (tombstones) for a course from the server.
  * @param {string} courseName - The name of the course.
@@ -5636,14 +5648,10 @@
  * Local changes win on conflicts; deleted IDs are always removed.
  */
         function mergeLogs(serverLogs, localLogs, localTombstones = new Set(), serverTombstones = new Set()) {
-            // 0) Normalise inputs (avoid null/undefined)
             serverLogs = Array.isArray(serverLogs) ? serverLogs : [];
             localLogs = Array.isArray(localLogs) ? localLogs : [];
-
-            // 1) Union of tombstones (server + local)
             const deleted = new Set([...localTombstones, ...serverTombstones]);
 
-            // 2) Helper: coerce/validate minimal log shape
             const norm = (l) => {
                 if (!l || !l.id) return null;
                 let ts = l.timestamp;
@@ -5651,13 +5659,11 @@
                     const parsed = Date.parse(ts);
                     ts = Number.isFinite(parsed) ? parsed : NaN;
                 }
-                if (typeof ts !== "number" || !Number.isFinite(ts)) return null;
-                return { ...l, timestamp: ts };
+                if (!Number.isFinite(ts)) return null;
+                return { ...l, timestamp: ts, version: Number(l.version || 0), updatedAt: Number(l.updatedAt || 0) };
             };
 
-            // 3) Build map keyed by id. Start with server (baseline), then overlay local (local wins).
             const byId = new Map();
-
             for (const raw of serverLogs) {
                 const log = norm(raw);
                 if (!log || deleted.has(log.id)) continue;
@@ -5668,24 +5674,18 @@
                 const log = norm(raw);
                 if (!log || deleted.has(log.id)) continue;
 
-                if (byId.has(log.id)) {
-                    const merged = { ...byId.get(log.id), ...log };
-                    byId.set(log.id, merged);
+                const existing = byId.get(log.id);
+                if (existing) {
+                    // Conflict resolution: newer version wins; tie-breaker is newer updatedAt
+                    if (log.version > existing.version || (log.version === existing.version && log.updatedAt > existing.updatedAt)) {
+                        byId.set(log.id, log);
+                    }
                 } else {
                     byId.set(log.id, log);
                 }
             }
-
-            // 4) Materialise & sort (desc by timestamp, stable tie-breaker on id)
-            const out = Array.from(byId.values());
-            out.sort((a, b) => {
-                if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
-                return String(a.id).localeCompare(String(b.id));
-            });
-
-            return out;
+            return Array.from(byId.values()).sort((a, b) => b.timestamp - a.timestamp);
         }
-
 
         // Helper function to convert a timestamp to a local ISO-like string (without timezone info)
         function convertTimestampToLocalISOString(timestamp) {
@@ -5704,10 +5704,7 @@
          * Sync logs with Google Sheet.
          */
         async function syncLogsWithSheet() {
-            if (!currentCourse || !isAdmin || !isOnline) {
-                console.log("Sync aborted: Pre-conditions not met.");
-                return;
-            }
+            if (!currentCourse || !isAdmin || !isOnline) return;
 
             try {
                 isSyncing = true;
@@ -5728,38 +5725,28 @@
                             insertDataOption: 'INSERT_ROWS',
                             resource: { values: tombstoneRows }
                         });
-                        console.log(`Appended ${newTombsToAppend.length} tombstones to the server.`);
                     }
                 }
 
                 // --- B) Sync Merged Logs UP to the server ---
-
-                // Use the new toSheetRow function to create the correct 7-column data.
-                const sheetData = logs.map(toSheetRow);
-
+                const sheetData = logs.map(toSheetRow); // Use your existing helper
                 const sheetName = getSheetNameForCourse(currentCourse);
                 const formattedSheetName = formatSheetName(sheetName);
+                const fullRange = `${formattedSheetName}!A2:G`; // Use the 7-column range
 
-                // Define the correct, full range for all 7 columns.
-                const fullRange = `${formattedSheetName}!A2:G`;
+                await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: LOGS_SPREADSHEET_ID, range: fullRange });
 
-                // Clear the entire sheet range first.
-                await gapi.client.sheets.spreadsheets.values.clear({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: fullRange,
-                });
-
-                // Write the new, complete 7-column dataset.
                 if (sheetData.length > 0) {
                     await gapi.client.sheets.spreadsheets.values.update({
                         spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: fullRange, // Use the correct full range here
+                        range: fullRange,
                         valueInputOption: 'USER_ENTERED',
                         resource: { values: sheetData }
                     });
                 }
 
                 console.log(`Successfully completed tombstone-aware sync for ${currentCourse}.`);
+                saveTombstonesForCourse(new Set()); // Clear local tombstones after a successful sync
 
             } catch (error) {
                 console.error('Error during tombstone-aware sync:', error);
@@ -5767,7 +5754,6 @@
                 throw error;
             } finally {
                 isSyncing = false;
-                // The calling function will handle the final status update.
             }
         }
 
@@ -5890,7 +5876,7 @@
 
                 await gapi.client.sheets.spreadsheets.values.append({
                     spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${formattedSheetName}!A2:D`,
+                    range: `${formattedSheetName}!A2:G`,
                     valueInputOption: 'RAW',
                     insertDataOption: 'INSERT_ROWS',
                     resource: {
@@ -7359,7 +7345,8 @@
         /**
          * Update the entire UI.
          */
-        function updateUI() {
+        async function updateUI() {
+            await databaseLoadPromise;
             updateLogsList();
             updateDatabaseList();
             updateDatabaseStatus();
