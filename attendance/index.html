@@ -3205,7 +3205,7 @@
                 manual: true // Mark as a manual addition
             };
 
-            newLog = touchLogForEdit(newLog);
+            newLog = touchLogForEdit(newLog, currentUser?.email);
 
             // Add the new log to the beginning of the main logs array
             logs.unshift(newLog);
@@ -6404,7 +6404,7 @@
                     manual: true
                 };
 
-                newLog = touchLogForEdit(newLog);
+                newLog = touchLogForEdit(newLog, currentUser?.email);
                 logs.unshift(newLog);
                 saveLogsToLocalStorage();
                 updateUI();
@@ -6557,7 +6557,7 @@
                         log.timestamp = newTimestampObj.getTime();
 
                         // 4. IMPORTANT: Bump the version to mark this log as updated.
-                        touchLogForEdit(log);
+                        touchLogForEdit(log, currentUser?.email);
                     }
                 });
 
@@ -6956,7 +6956,6 @@
                 message: `Are you sure you want to add an extra hour log for EVERY student present on ${dateStr}?`,
                 confirmText: 'Add',
                 onConfirm: () => {
-                    // 1. Find all logs that occurred on the specified day.
                     const logsForDay = logs.filter(log => {
                         const logDate = new Date(log.timestamp);
                         const day = String(logDate.getDate()).padStart(2, '0');
@@ -6965,7 +6964,6 @@
                         return `${day}-${month}-${year}` === dateStr;
                     });
 
-                    // 2. Group these logs by student UID to find the latest scan for each person.
                     const studentsOnDay = {};
                     logsForDay.forEach(log => {
                         if (!studentsOnDay[log.uid] || log.timestamp > studentsOnDay[log.uid]) {
@@ -6973,32 +6971,31 @@
                         }
                     });
 
-                    // 3. Create a brand new array of new log objects.
+                    // --- START OF FIX ---
                     const newLogsToAdd = Object.keys(studentsOnDay).map(uid => {
                         const latestTimestamp = studentsOnDay[uid];
                         const newDate = new Date(latestTimestamp);
-                        newDate.setHours(newDate.getHours() + 1); // Add one hour
+                        newDate.setHours(newDate.getHours() + 1);
 
-                        // Return a new log object. This does not modify any existing data.
-                        return {
+                        // 1. Create the new log object in a variable.
+                        let newLog = {
                             uid: uid,
                             timestamp: newDate.getTime(),
                             id: Date.now() + Math.random().toString(36).substr(2, 9) + `_${uid}`,
-                            manual: true // Mark as a manual bulk addition
+                            manual: true
                         };
-                        return touchLogForEdit(newLog);
+
+                        // 2. Apply the versioning, then return the final object.
+                        return touchLogForEdit(newLog, currentUser?.email);
                     });
+                    // --- END OF FIX ---
 
                     if (newLogsToAdd.length > 0) {
-                        // 4. Add the new logs to the main logs array.
                         logs.unshift(...newLogsToAdd);
-
-                        // 5. Save and refresh the UI.
                         saveLogsToLocalStorage();
                         updateUI();
                         showNotification('success', 'Bulk Add Complete', `Added ${newLogsToAdd.length} new log(s) for ${dateStr}.`);
 
-                        // 6. Sync the new, complete list with the server.
                         if (isOnline && isSignedIn) {
                             syncLogsWithSheet().catch(err => console.error('Error syncing after bulk add:', err));
                         }
@@ -7546,7 +7543,7 @@
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: false
             };
-            newLog = touchLogForEdit(newLog);
+            newLog = touchLogForEdit(newLog, currentUser?.email);
             logs.unshift(newLog);
             saveLogsToLocalStorage();
             updateUI();
