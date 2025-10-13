@@ -3396,8 +3396,8 @@
 
         function handleRouting() {
             const hash = window.location.hash.replace('#', '');
-            if (hash && availableCourses.includes(hash)) {
-                // Directly call handleCourseChange for the course in the hash
+            // Only change course if the hash is valid and different from the current one
+            if (hash && availableCourses.includes(hash) && hash !== currentCourse) {
                 handleCourseChange(hash);
             }
         }
@@ -4104,14 +4104,6 @@
             setupEnhancedSyncButton();
             setupAuthStateTracking();
 
-            // Restore from localStorage
-            // First try to restore the last active course
-            const lastActiveCourse = localStorage.getItem('last_active_course');
-            if (lastActiveCourse) {
-                console.log(`Restoring last active course: ${lastActiveCourse}`);
-                currentCourse = lastActiveCourse;
-            }
-
             // Handle auth redirect
             checkAuthRedirect();
 
@@ -4371,8 +4363,9 @@
                     // --- START OF NEW LOGIC ---
                     if (isAdmin) {
                         // If the user is an admin, sync any pending data immediately.
-                        if (logs.length > 0) {
-                            setTimeout(syncData, 1000);
+                        if (logs.length > 0 || pendingChanges) {
+                            console.log("Admin signed in. Triggering immediate sync.");
+                            setTimeout(syncData, 1000); // 1-second delay to allow UI to update
                         }
                     } else {
                         // If the user is a student, start the proactive log loading.
@@ -4582,8 +4575,16 @@
             const syncText = document.getElementById('sync-text');
             const syncStatus = document.getElementById('sync-status');
 
-            if (syncText) syncText.textContent = message;
+            // --- NEW LOGIC START ---
+            // If the browser is offline, ALWAYS show the offline status, regardless of the requested change.
+            if (!isOnline) {
+                if (syncText) syncText.textContent = 'Offline';
+                if (syncStatus) syncStatus.className = 'sync-status offline';
+                return; // Exit the function early
+            }
+            // --- NEW LOGIC END ---
 
+            if (syncText) syncText.textContent = message;
             if (syncStatus) {
                 syncStatus.className = 'sync-status ' + (status || 'offline');
             }
@@ -5441,11 +5442,10 @@
                 console.log('Fetching available courses from spreadsheet...');
 
                 if (!isOnline) {
-                    // Handle offline logic as before
                     availableCourses = [];
                     courseIDMap = {};
                     sheetNameMap = {};
-                    return; // Exit early if offline
+                    return;
                 }
 
                 const response = await gapi.client.sheets.spreadsheets.get({
@@ -5491,18 +5491,39 @@
                     showNotification('warning', 'Courses Warning', 'Could not load course list from server.');
                 }
             } finally {
-                // THIS 'FINALLY' BLOCK IS THE CRITICAL FIX
-                populateCourseDropdown();
+                // --- NEW INITIALISATION LOGIC START ---
+                const hashCourse = window.location.hash.replace('#', '');
+                const lastActiveCourse = localStorage.getItem('last_active_course');
+                let courseToLoad = '';
+
+                // Priority 1: Check if the URL hash is a valid, available course.
+                if (hashCourse && availableCourses.includes(hashCourse)) {
+                    courseToLoad = hashCourse;
+                    console.log(`Prioritising course from URL hash: ${courseToLoad}`);
+                }
+                // Priority 2: Fallback to local storage if the value is a valid course.
+                else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
+                    courseToLoad = lastActiveCourse;
+                    console.log(`Falling back to last active course from local storage: ${courseToLoad}`);
+                }
+                // Priority 3: Fallback to the very first course in the list.
+                else if (availableCourses.length > 0) {
+                    courseToLoad = availableCourses[0];
+                    console.log(`Falling back to first available course: ${courseToLoad}`);
+                }
+
+                // Now, if we have a course to load, update the state and UI.
+                if (courseToLoad) {
+                    // Update the URL hash to be consistent with the state
+                    window.location.hash = courseToLoad;
+                    // This will trigger handleCourseChange via the hashchange event listener
+                } else {
+                    populateCourseDropdown(); // Still populate, even if no course is selected
+                }
+                // --- NEW INITIALISATION LOGIC END ---
+
                 loadingTasks.delete('courses');
                 checkLoadingCompletion();
-
-                // Restore hash and route AFTER courses are loaded
-                const redirectHash = sessionStorage.getItem('redirect_hash');
-                if (redirectHash) {
-                    window.location.hash = redirectHash;
-                    sessionStorage.removeItem('redirect_hash');
-                }
-                handleRouting();
             }
         }
 
@@ -7487,7 +7508,7 @@
             cooldownUIDs.add(serialNumber);
             setTimeout(() => {
                 cooldownUIDs.delete(serialNumber); // Remove from cooldown after 1.5 seconds.
-            }, 1500);
+            }, 2000);
 
 
             // --- Handle different user states ---
