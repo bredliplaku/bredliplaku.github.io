@@ -191,7 +191,8 @@
 
             // --- NEW EXEMPTION LOGIC ---
             // 1. Check if the student is truly exempted based on "R EX"
-            const isExempted = /\sR\sEX/.test(rawName);
+            // FIX: Added $ to anchor the match to the end of the string.
+            const isExempted = /\s+R\s+EX$/.test(rawName);
 
             // 2. If they are exempted AND the option to mark them as absent is checked, treat them like a missing student
             if (isExempted && CONFIG.markExemptedAsAbsent) {
@@ -304,7 +305,7 @@
             .eis-loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 10000; transition: opacity 0.3s; }
             .eis-loading-content { background: white; padding: 25px; border-radius: 16px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.3); transition: background-color 0.3s, color 0.3s; }
             .eis-notifications { position: fixed; bottom: 20px; right: 20px; z-index: 10001; width: 350px; max-width: 90%; }
-            .eis-notification { background: #fff; color: #333; padding: 15px; border-radius: 12px; box-shadow: 0 3px 10px rgba(0,0,0,0.2); margin-top: 10px; display: flex; align-items: center; animation: slideIn 0.3s ease; }
+            .eis-notification { background: #fff; color: #333; padding: 15px; border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,0.2); margin-top: 10px; display: flex; align-items: center; animation: slideIn 0.3s ease; }
             .eis-notification.removing { opacity: 0; transform: translateX(100%); }
             @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
             .eis-notification i { margin-right: 10px; font-size: 1.2em; }
@@ -337,12 +338,12 @@
         document.head.appendChild(style);
     }
 
-    function showLoadingIndicator(message = "Processing...") {
+    function showLoadingIndicator(message = "Processing Attendance Data") {
         hideLoadingIndicator();
         const overlay = document.createElement('div');
         overlay.id = 'eis-loading-overlay';
         overlay.className = 'eis-loading-overlay';
-        overlay.innerHTML = `<div class="eis-loading-content"><div style="font-weight:bold; margin-bottom:5px;">${message}</div><small>EIS Attendance Injector</small></div>`;
+        overlay.innerHTML = `<div class="eis-loading-content"><div style="font-weight:bold; margin-bottom:5px;">${message}</div><small>Please wait...</small></div>`;
         document.body.appendChild(overlay);
     }
 
