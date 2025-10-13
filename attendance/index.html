@@ -3033,6 +3033,7 @@
 
         // App state
         let logs = [];
+        let offlineLogsToMerge = {};
         let isScanning = false;
         let nfcSupported = false;
         let nfcReader = null;
@@ -4208,7 +4209,37 @@
                             await fetchUserInfo();
                             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
 
-                            // Now that we are signed in, fetch online data
+                            // Scan ALL local storage for any unsynced offline/lector-mode logs
+                            offlineLogsToMerge = {}; // Reset the merge object
+                            let offlineScanCount = 0;
+                            for (let i = 0; i < localStorage.length; i++) {
+                                const key = localStorage.key(i);
+                                if (key && key.startsWith(LOGS_STORAGE_KEY) && key.endsWith('_timestamp')) {
+                                    // This is a timestamp key, let's check its associated log data
+                                    const logKey = key.replace('_timestamp', '');
+                                    const courseName = logKey.replace(`${LOGS_STORAGE_KEY}_`, '');
+
+                                    // For now, we assume any local data could be unsynced. A more advanced
+                                    // check could compare against a 'last sync time' if needed.
+                                    const logDataRaw = localStorage.getItem(logKey);
+                                    if (logDataRaw) {
+                                        try {
+                                            const logData = JSON.parse(logDataRaw);
+                                            if (logData.length > 0) {
+                                                offlineLogsToMerge[courseName] = logData;
+                                                offlineScanCount += logData.length;
+                                                console.log(`Found ${logData.length} offline logs for course '${courseName}'.`);
+                                            }
+                                        } catch (e) { console.error(`Could not parse logs for key ${logKey}`, e); }
+                                    }
+                                }
+                            }
+
+                            if (offlineScanCount > 0) {
+                                showNotification('info', 'Offline Scans Found', `Found ${offlineScanCount} scans made while offline. They will be synced when you select their course.`);
+                            }
+
+                            // Now proceed with fetching online data
                             await Promise.all([
                                 fetchAvailableCourses(),
                                 fetchDatabaseFromSheet()
@@ -4252,30 +4283,21 @@
          * Save logs to localStorage to prevent data loss
          */
         function saveLogsToLocalStorage() {
-            if (!currentCourse) {
-                console.warn('Cannot save logs: No current course selected');
-                return;
-            }
+            // This now correctly uses the global currentCourse, which will be 'Default'
+            // when signed out, or the actual course name when in a sign-out session (Lector Mode).
+            const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse || 'Default'}`;
 
             try {
-                // Cancel any pending requests for other courses to prevent conflicts
-                activeRequests.forEach((request, course) => {
-                    if (course !== currentCourse) {
-                        request.cancelled = true;
-                    }
-                });
-
-                // Save with course-specific key
-                const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse}`;
                 localStorage.setItem(storageKey, JSON.stringify(logs));
-                localStorage.setItem('last_active_course', currentCourse);
+                if (currentCourse && currentCourse !== 'Default') {
+                    localStorage.setItem('last_active_course', currentCourse);
+                }
                 localStorage.setItem(`${storageKey}_timestamp`, Date.now().toString());
 
-                // Mark changes as pending for syncing
                 pendingChanges = true;
                 updateSyncStatus("Changes pending", "waiting");
 
-                console.log(`Saved ${logs.length} logs to localStorage for course ${currentCourse}`);
+                console.log(`Saved ${logs.length} logs to localStorage for course: ${currentCourse || 'Default'}`);
 
             } catch (e) {
                 console.error('Error saving logs to localStorage:', e);
@@ -4540,29 +4562,54 @@
             return todayStr;
         }
 
+        // REPLACEMENT FUNCTION
         function handleSignoutClick() {
-            console.log('Entering Lector Mode (locking session).');
+            if (isAdmin) {
+                // --- LECTURER MODE LOGIC (FOR ADMINS ONLY) ---
+                console.log('Entering Lector Mode (locking session).');
 
-            // 1. Save the current state of logs to localStorage to prevent data loss.
-            // This is the step that was likely failing before.
-            saveLogsToLocalStorage();
+                // Save the current state of logs to localStorage to keep them for the session.
+                saveLogsToLocalStorage();
 
-            // 2. Remove the Google token. A page refresh will now require a new sign-in.
-            localStorage.removeItem('gapi_token');
+                // Remove the Google token. A page refresh will require a new sign-in.
+                localStorage.removeItem('gapi_token');
 
-            // 3. Reset ONLY the authentication flags in JavaScript memory.
-            isSignedIn = false;
-            isAdmin = false;
-            currentUser = null;
+                // Reset ONLY the authentication flags in JavaScript memory.
+                isSignedIn = false;
+                isAdmin = false;
+                currentUser = null;
 
-            // --- CRITICAL ---
-            // DO NOT clear 'currentCourse' or 'logs'. They must stay in memory
-            // for scanning and the UI to work correctly in Lector Mode.
+                // CRITICAL: Do NOT clear 'currentCourse' or 'logs' to keep scanning active.
 
-            // 4. Update ONLY the authentication part of the UI (hides user info, shows sign-in button).
-            updateAuthUI();
+                // Update ONLY the authentication part of the UI (hides user info, shows sign-in button).
+                updateAuthUI();
 
-            showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refreshing the page will end the session.`);
+                showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refreshing the page will end the session.`);
+
+            } else {
+                // --- STANDARD SIGN-OUT LOGIC (FOR STUDENTS) ---
+                console.log('Student signing out.');
+
+                // 1. Remove the Google token.
+                localStorage.removeItem('gapi_token');
+
+                // 2. Clear all sensitive state variables from memory.
+                isSignedIn = false;
+                isAdmin = false;
+                currentUser = null;
+                logs = [];
+                currentCourse = '';
+                studentLogCache = {}; // Clear the student's cached data.
+
+                // 3. Clear the last active course from local storage so it doesn't try to reload.
+                localStorage.removeItem('last_active_course');
+
+                // 4. Update the entire UI to reflect the clean, signed-out state.
+                updateAuthUI();
+                updateUI(); // This will clear the logs table.
+
+                showNotification('success', 'Signed Out', 'You have been successfully signed out.');
+            }
         }
 
         // Update sync status indicator
@@ -4866,6 +4913,40 @@
                     logs = restoreLogsFromLocalStorage();
                     updateUI();
                 }
+
+                // --- NEW & CORRECTED MERGE LOGIC START ---
+                // Check if there are pending offline logs specifically for THIS course
+                if (isAdmin && offlineLogsToMerge[currentCourse]) {
+                    const logsForThisCourse = offlineLogsToMerge[currentCourse];
+                    console.log(`Merging ${logsForThisCourse.length} offline logs into course ${currentCourse}.`);
+
+                    logs = mergeLogs(logs, logsForThisCourse);
+                    saveLogsToLocalStorage();
+                    syncData(); // Sync the merged data
+
+                    // Remove the merged logs from local storage and the merge object
+                    localStorage.removeItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
+                    delete offlineLogsToMerge[currentCourse];
+
+                    updateUI();
+                }
+
+                // Also check for logs from the generic "Default" bucket
+                if (isAdmin && offlineLogsToMerge['Default']) {
+                    const defaultLogs = offlineLogsToMerge['Default'];
+                    console.log(`Merging ${defaultLogs.length} 'Default' offline logs into course ${currentCourse}.`);
+
+                    logs = mergeLogs(logs, defaultLogs);
+                    saveLogsToLocalStorage();
+                    syncData();
+
+                    // Cleanup the default logs
+                    localStorage.removeItem(`${LOGS_STORAGE_KEY}_Default`);
+                    delete offlineLogsToMerge['Default'];
+
+                    updateUI();
+                }
+
             } else {
                 // Student logic remains unchanged
                 currentCourse = courseName;
