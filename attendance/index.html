@@ -3383,8 +3383,14 @@
         }
 
         function handleRouting() {
+            // Add this guard clause at the beginning.
+            // 'isInitializing' is set to false when the loading animation disappears.
+            if (isInitializing) {
+                return;
+            }
+
             const hash = window.location.hash.replace('#', '');
-            // Only change course if the hash is valid and different from the current one
+            // Only change course if the hash is valid and different from the current one.
             if (hash && availableCourses.includes(hash) && hash !== currentCourse) {
                 handleCourseChange(hash);
             }
@@ -5469,7 +5475,7 @@
                     showNotification('warning', 'Courses Warning', 'Could not load course list from server.');
                 }
             } finally {
-                // --- CORRECTED LOGIC START ---
+                // --- NEW & FINAL INITIALISATION LOGIC ---
                 const hashCourse = window.location.hash.replace('#', '');
                 const lastActiveCourse = localStorage.getItem('last_active_course');
                 let courseToLoad = '';
@@ -5477,27 +5483,37 @@
                 // Priority 1: Check if the URL hash is a valid, available course.
                 if (hashCourse && availableCourses.includes(hashCourse)) {
                     courseToLoad = hashCourse;
-                    console.log(`Prioritising course from URL hash: ${courseToLoad}`);
+                    console.log(`Priority 1: Loading course from URL hash: ${courseToLoad}`);
                 }
                 // Priority 2: Fallback to local storage if the value is a valid course.
                 else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
                     courseToLoad = lastActiveCourse;
-                    console.log(`Falling back to last active course from local storage: ${courseToLoad}`);
+                    console.log(`Priority 2: Loading course from local storage: ${courseToLoad}`);
                 }
                 // Priority 3: Fallback to the very first course in the list.
                 else if (availableCourses.length > 0) {
                     courseToLoad = availableCourses[0];
-                    console.log(`Falling back to first available course: ${courseToLoad}`);
+                    console.log(`Priority 3: Loading first available course: ${courseToLoad}`);
                 }
 
-                // Step 1: ALWAYS draw the course buttons so they are never missing.
+                // Set the currentCourse variable immediately.
+                currentCourse = courseToLoad;
+
+                // Update the URL hash to be consistent with the final decision.
+                // Using replaceState prevents adding to browser history.
+                if (history.replaceState) {
+                    history.replaceState(null, null, '#' + courseToLoad);
+                } else {
+                    window.location.hash = courseToLoad;
+                }
+
+                // Now, draw the buttons and load the data for the determined course.
                 populateCourseDropdown();
 
-                // Step 2: If we determined a course to load, load it DIRECTLY.
                 if (courseToLoad) {
                     handleCourseChange(courseToLoad);
                 }
-                // --- CORRECTED LOGIC END ---
+                // --- END OF LOGIC ---
 
                 loadingTasks.delete('courses');
                 checkLoadingCompletion();
