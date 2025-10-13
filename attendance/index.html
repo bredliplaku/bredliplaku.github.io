@@ -4201,43 +4201,45 @@
                     let isStudentOnRefresh = false;
 
                     if (savedToken) {
+                        // SIGNED-IN PATH
                         try {
                             gapi.client.setToken(JSON.parse(savedToken));
                             isSignedIn = true;
-                            await fetchUserInfo(); // Get user role first
+                            await fetchUserInfo();
                             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
-                            isStudentOnRefresh = !isAdmin; // Flag if the returning user is a student
+
+                            // Now that we are signed in, fetch online data
+                            await Promise.all([
+                                fetchAvailableCourses(),
+                                fetchDatabaseFromSheet()
+                            ]);
+
                         } catch (e) {
                             console.error("Token restore failed:", e);
                             isSignedIn = false;
                             isAdmin = false;
                             localStorage.removeItem('gapi_token');
+                            // Fall through to the signed-out path
                         }
                     }
 
-                    // --- START OF CRITICAL FIX ---
-                    // 1. Unblock the UI and mark authentication as complete for EVERYONE.
-                    updateAuthUI();
+                    if (!isSignedIn) {
+                        // SIGNED-OUT PATH
+                        console.log("Operating in signed-out mode.");
+                        availableCourses = ['Default']; // Create a default course
+                        currentCourse = 'Default';
 
-                    // 2. Fetch all essential data (courses and database).
-                    // This MUST happen before we try to load student-specific logs.
-                    if (isOnline) {
-                        await Promise.all([
-                            fetchAvailableCourses(),
-                            fetchDatabaseFromSheet()
-                        ]);
-                    } else {
-                        // If offline, just mark the tasks as complete.
+                        // Manually complete the loading tasks so the UI appears
                         loadingTasks.delete('courses');
                         loadingTasks.delete('database');
                         checkLoadingCompletion();
+
+                        // Draw the UI with the default course
+                        populateCourseDropdown();
+                        updateUI();
                     }
 
-                    // 3. NOW, if the user is a student, trigger their proactive data loading.
-                    // This function now has the 'availableCourses' list and will work correctly.
-                    if (isStudentOnRefresh) {
-                        loadAllCourseLogsForStudent();
-                    }
+                    updateAuthUI();
 
                 }).catch(error => {
                     console.error('Error initializing GAPI client:', error);
@@ -5062,24 +5064,47 @@
          * Populate course dropdown with available courses.
          */
         function populateCourseDropdown() {
-            // Original dropdown code (keep it for backward compatibility)
+            const courseButtonsContainer = document.getElementById('course-buttons-container');
+            if (!courseButtonsContainer) return;
+
+            // This block handles the logic when the user is signed out.
             if (!isSignedIn) {
-                const defaultOption = document.createElement('option');
-                defaultOption.value = 'Default';
-                defaultOption.textContent = 'Default';
-                courseSelect.appendChild(defaultOption);
-                courseSelect.value = 'Default';
-                currentCourse = 'Default';
-            } else {
-                availableCourses.forEach(course => {
-                    const option = document.createElement('option');
-                    option.value = course;
-                    option.textContent = course.replace('_', ' ');
+                courseButtonsContainer.innerHTML = ''; // Clear any old buttons
+                const button = document.createElement('div');
+                button.className = 'course-button active'; // Make the default button active
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; Default`;
+                courseButtonsContainer.appendChild(button);
+                courseButtonsContainer.style.display = 'flex';
+                return; // Exit the function here for signed-out users
+            }
+
+            // This block handles the logic for signed-in users.
+            courseButtonsContainer.style.display = 'flex';
+            courseButtonsContainer.innerHTML = '';
+            let coursesToDisplay = availableCourses;
+
+            if (!isAdmin && currentUser) {
+                const studentNameNormalised = normalizeName(currentUser.name);
+                coursesToDisplay = availableCourses.filter(course => {
+                    const logsForCourse = studentLogCache[course] || [];
+                    return logsForCourse.some(log => {
+                        const logOwnerName = uidToNameMap[log.uid] || '';
+                        return normalizeName(logOwnerName) === studentNameNormalised;
+                    });
                 });
             }
 
-            // Also populate course buttons
-            populateCourseButtons();
+            coursesToDisplay.forEach(course => {
+                const button = document.createElement('div');
+                button.className = 'course-button' + (currentCourse === course ? ' active' : '');
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace(/_/g, ' ')}`;
+                button.addEventListener('click', () => selectCourseButton(course));
+                courseButtonsContainer.appendChild(button);
+            });
+
+            if (!currentCourse && coursesToDisplay.length > 0) {
+                selectCourseButton(coursesToDisplay[0]);
+            }
         }
 
         /**
