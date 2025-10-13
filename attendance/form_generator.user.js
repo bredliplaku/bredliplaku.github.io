@@ -11,7 +11,7 @@
 // @grant        GM_addStyle
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
     // Import additional formal/official document signing fonts
@@ -534,6 +534,7 @@
     }
 
     // Enhanced function to extract attendance data handling both editable and locked cases
+    // Enhanced function to extract attendance data handling both editable and locked cases
     function extractAttendanceData() {
         const data = {
             courseTitle: '',
@@ -701,8 +702,17 @@
 
             const studentName = studentNameCell.textContent.trim();
 
-            // Filter out label indicators like R or EX from the name
-            const cleanName = studentName.replace(/\s+R\s+EX|\s+EX|\s+R|\s+\(R\)|\s+\(EX\)/g, "").trim();
+            // --- FIX START: More robust name cleaning ---
+            // This ensures we only remove the suffixes from the very end of the name,
+            // preventing accidental changes to names like "Alexander".
+            const cleanName = studentName
+                .replace(/\s+R\s+EX$/, '')   // Remove ' R EX' from the end
+                .replace(/\s+\(EX\)$/, '')   // Remove ' (EX)' from the end
+                .replace(/\s+EX$/, '')      // Remove ' EX' from the end
+                .replace(/\s+R$/, '')        // Remove ' R' from the end
+                .replace(/\s+\(R\)$/, '')    // Remove ' (R)' from the end
+                .trim();
+            // --- FIX END ---
 
             // Check for actual R and Ex labels in the student name or specific cells
             const hasRLbl = hasRLabel(studentNameCell, row);
@@ -771,7 +781,7 @@
                         const checkIndex = startIndex + i;
                         if (checkElements[checkIndex] &&
                             (checkElements[checkIndex].checked ||
-                             checkElements[checkIndex].classList.contains('fa-check-square-o'))) {
+                                checkElements[checkIndex].classList.contains('fa-check-square-o'))) {
                             // Mark this hour as attended
                             data.attendance[studentId][i] = true;
                         }
@@ -871,6 +881,7 @@
             { name: 'Lovers Quarrel', value: 'font-lovers-quarrel' },
             { name: 'Miss Fajardose', value: 'font-miss-fajardose' },
             { name: 'Italianno', value: 'font-italianno' },
+            { name: 'Aguafina Script', value: 'font-aguafina' },
             // More casual handwriting fonts
             { name: 'Homemade Apple', value: 'font-homemade-apple' },
             { name: 'Caveat', value: 'font-caveat' },
@@ -884,8 +895,7 @@
             { name: 'La Belle Aurore', value: 'font-belle-aurore' },
             { name: 'Bilbo', value: 'font-bilbo' },
             { name: 'Meie Script', value: 'font-meie-script' },
-            { name: 'Meddon', value: 'font-meddon' },
-            { name: 'Aguafina Script', value: 'font-aguafina' }
+            { name: 'Meddon', value: 'font-meddon' }
         ];
 
         // Generate font options HTML
@@ -909,7 +919,7 @@
         for (let i = 0; i < data.totalHours; i++) {
             dateInputsHtml += `
                 <div class="config-row">
-                    <label>Date for column ${i+1}:</label>
+                    <label>Date for column ${i + 1}:</label>
                     <input type="date" id="date-column-${i}" value="${data.isoDate || ''}" class="single-date-input">
                 </div>
             `;
@@ -1034,9 +1044,11 @@
             for (let i = 0; i < 5; i++) {
                 const dateCell = document.createElement('td');
 
-                // Check if we need to place a signature in this column
-                // and only if the student is not exempt
-                if (i < studentAttendance.length && !student.exempt && studentAttendance[i]) {
+                // --- FIX START: Removed the "!student.exempt" condition ---
+                // This will now draw a mark if the student was present,
+                // regardless of their exemption status.
+                if (i < studentAttendance.length && studentAttendance[i]) {
+                    // --- FIX END ---
                     // Get the display mode (names or checkmarks)
                     const displayMode = document.querySelector('#signature-display-select')?.value || 'checkmarks';
 
@@ -1061,7 +1073,7 @@
                     }
 
                     // Add a hidden input to track attendance for EIS compatibility
-                    dateCell.innerHTML += `<input type="hidden" name="stdabsences[${i}][checked]" value="${i+1}">`;
+                    dateCell.innerHTML += `<input type="hidden" name="stdabsences[${i}][checked]" value="${i + 1}">`;
                 }
 
                 row.appendChild(dateCell);
@@ -1115,7 +1127,7 @@
         document.body.appendChild(container);
 
         // Add event listeners for signature display mode and font select
-        document.getElementById('signature-display-select').addEventListener('change', function() {
+        document.getElementById('signature-display-select').addEventListener('change', function () {
             // Update all attendance markers based on display mode
             const displayMode = this.value;
             const signatures = document.querySelectorAll('.student-signature, .student-checkmark');
@@ -1168,7 +1180,7 @@
             }
         });
 
-        document.getElementById('signature-font-select').addEventListener('change', function() {
+        document.getElementById('signature-font-select').addEventListener('change', function () {
             // Only update if in names mode
             if (document.getElementById('signature-display-select').value === 'names') {
                 // Update all signatures with the new font
@@ -1203,7 +1215,7 @@
         });
 
         // Update the printed date when changed
-        document.getElementById('printed-date-input').addEventListener('change', function() {
+        document.getElementById('printed-date-input').addEventListener('change', function () {
             const dateValue = this.value; // YYYY-MM-DD
             if (dateValue) {
                 const date = new Date(dateValue);
@@ -1241,7 +1253,7 @@
         });
 
         // Add event listener for the "Set all dates at once" input
-        document.getElementById('all-dates-input').addEventListener('change', function() {
+        document.getElementById('all-dates-input').addEventListener('change', function () {
             const dateValue = this.value;
 
             // Update all individual date inputs
@@ -1281,7 +1293,7 @@
             document.querySelector('#signature-item-1 .remove-signature-btn').style.visibility = 'visible';
 
             // Add event listener for remove button
-            signatureItem.querySelector('.remove-signature-btn').addEventListener('click', function() {
+            signatureItem.querySelector('.remove-signature-btn').addEventListener('click', function () {
                 const id = this.getAttribute('data-id');
                 const item = document.getElementById(`signature-item-${id}`);
                 item.parentNode.removeChild(item);
@@ -1307,7 +1319,7 @@
 
         // Add event listeners for remove buttons
         document.querySelectorAll('.remove-signature-btn').forEach(button => {
-            button.addEventListener('click', function() {
+            button.addEventListener('click', function () {
                 const id = this.getAttribute('data-id');
                 const item = document.getElementById(`signature-item-${id}`);
                 item.parentNode.removeChild(item);
@@ -1325,7 +1337,7 @@
 
         // Add event listeners for individual date inputs
         document.querySelectorAll('.single-date-input').forEach(input => {
-            input.addEventListener('change', function() {
+            input.addEventListener('change', function () {
                 const index = this.id.split('-')[2];
                 const dateColumn = document.querySelector(`.date-column[data-index="${index}"]`);
                 if (dateColumn) {
