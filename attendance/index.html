@@ -3051,6 +3051,7 @@
         let isOnline = navigator.onLine;
         let isSyncing = false;
         let isInitializing = true;
+        let isChangingCourses = false;
         let pendingNotifications = [];
         let criticalErrorsOnly = true;
         let initialSignIn = true; // Flag to track initial sign-in
@@ -3454,6 +3455,8 @@
                 }
                 // Re-enable scrolling
                 document.body.classList.remove('is-loading');
+
+                updateUI();
 
             }, 500); // This MUST match the CSS transition duration
 
@@ -4952,12 +4955,14 @@
         }
 
         /**
-         * REFACTORED: Switches the active course in the UI.
-         * The data is already loaded, so this function is now much simpler.
-         */
+                 * REFACTORED: Switches the active course in the UI.
+                 */
         async function handleCourseChange(courseName) {
             // Do nothing if the course is not actually changing.
             if (currentCourse === courseName) return;
+
+            // FIX: Set the flag to true to trigger the animation.
+            isChangingCourses = true;
 
             currentCourse = courseName;
             localStorage.setItem('last_active_course', currentCourse);
@@ -5740,7 +5745,7 @@
         }
 
         /**
-         * Sync logs with Google Sheet.
+         * CORRECTED: Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
          */
         async function syncLogsWithSheet() {
             if (!currentCourse || !isAdmin || !isOnline || !courseData[currentCourse]) return;
@@ -5754,7 +5759,10 @@
                 // --- A) Sync Tombstones UP to the server ---
                 if (currentData.tombstones.size > 0) {
                     const serverTombs = await fetchTombstonesForCourse(currentCourse);
-                    const newTombsToAppend = [...localTombs].filter(id => !serverTombs.has(id));
+
+                    // FIX: This was incorrectly 'localTombs' and would cause an error.
+                    // It is now correctly referencing 'currentData.tombstones'.
+                    const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
 
                     if (newTombsToAppend.length > 0) {
                         const tombstoneRows = newTombsToAppend.map(id => [currentCourse, id, new Date().toISOString()]);
@@ -5769,10 +5777,10 @@
                 }
 
                 // --- B) Sync Merged Logs UP to the server ---
-                const sheetData = currentData.logs.map(toSheetRow); // Use your existing helper
+                const sheetData = currentData.logs.map(toSheetRow);
                 const sheetName = getSheetNameForCourse(currentCourse);
                 const formattedSheetName = formatSheetName(sheetName);
-                const fullRange = `${formattedSheetName}!A2:G`; // Use the 7-column range
+                const fullRange = `${formattedSheetName}!A2:G`;
 
                 await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: LOGS_SPREADSHEET_ID, range: fullRange });
 
@@ -5787,7 +5795,7 @@
 
                 console.log(`Successfully completed tombstone-aware sync for ${currentCourse}.`);
                 currentData.tombstones.clear();
-                saveCourseToLocalStorage(currentCourse); // Clear local tombstones after a successful sync
+                saveCourseToLocalStorage(currentCourse);
 
             } catch (error) {
                 console.error('Error during tombstone-aware sync:', error);
@@ -6510,7 +6518,7 @@
 
             const closeDialog = () => {
                 document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = ''; // Restore scroll
+                document.body.style.overflow = '';
             };
 
             const logsToDelete = new Set();
@@ -6541,81 +6549,62 @@
                     message: `This will remove all logs for ${group.name} on this date.`,
                     confirmText: 'Delete',
                     isDestructive: true,
+                    // --- START FIX ---
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         idsToRemove.forEach(id => addToTombstones(id));
-                        logs = logs.filter(log => !idsToRemove.includes(log.id));
-                        saveLogsToLocalStorage();
+                        // This line is now corrected to use courseData.
+                        courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
+                        saveCourseToLocalStorage(currentCourse);
                         updateUI();
                         showNotification('success', 'Entry Deleted', 'All timestamps for this entry were removed.');
                         if (isOnline && isSignedIn) syncLogsWithSheet();
+                        // We must also close the edit dialog since the entry is gone.
+                        closeDialog();
                     }
+                    // --- END FIX ---
                 });
             });
 
             document.getElementById('save-edit-log-btn').addEventListener('click', () => {
                 const newName = document.getElementById('edit-name').value.trim();
-                const newDateStr = document.getElementById('edit-date').value; // e.g., "2025-10-10"
-                const logsForCurrentCourse = courseData[currentCourse].logs;
-
-                visibleGroups.forEach(groupElement => {
-                    const logId = groupElement.getAttribute('data-log-id');
-                    const timeInput = groupElement.querySelector('.timestamp-time').value;
-                    const [hours, minutes] = timeInput.split(':').map(Number);
-
-                    // Find the log in this course's specific log array.
-                    const log = logsForCurrentCourse.find(log => log.id === logId);
-                    if (log) {
-                        const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
-                        log.timestamp = newTimestampObj.getTime();
-                        touchLogForEdit(log, currentUser?.email);
-                    }
-                });
+                const newDateStr = document.getElementById('edit-date').value;
 
                 if (!newName) {
                     showAlertDialog('Invalid Input', 'Name cannot be empty.');
                     return;
                 }
 
-                // Update the name in the central database mapping
-                uidToNameMap[group.uid] = newName;
+                // --- START FIX ---
+                uidToNameMap[group.uid] = newName; // Update the name in the central database mapping
 
-                // --- START OF TIMEZONE-SAFE FIX ---
-
-                // 1. Parse the new date string into its components to avoid timezone errors.
+                const logsForCurrentCourse = courseData[currentCourse].logs;
                 const [year, month, day] = newDateStr.split('-').map(Number);
 
-                // 2. Loop through the visible timestamps in the dialog.
+                // Update timestamps for all visible (not deleted) entries
                 const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)');
                 visibleGroups.forEach(groupElement => {
                     const logId = groupElement.getAttribute('data-log-id');
-                    const timeInput = groupElement.querySelector('.timestamp-time').value; // e.g., "14:30"
+                    const timeInput = groupElement.querySelector('.timestamp-time').value;
                     const [hours, minutes] = timeInput.split(':').map(Number);
 
-                    // Find the log in the main 'logs' array by its unique ID.
-                    const log = logs.find(log => log.id === logId);
+                    // Find the log in this course's specific log array.
+                    const log = logsForCurrentCourse.find(l => l.id === logId);
                     if (log) {
-                        // 3. Construct a new Date object using the individual, reliable components.
-                        // Note: The month is 0-indexed in JavaScript (0=Jan, 11=Dec).
                         const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
                         log.timestamp = newTimestampObj.getTime();
-
-                        // 4. IMPORTANT: Bump the version to mark this log as updated.
                         touchLogForEdit(log, currentUser?.email);
                     }
                 });
 
-                // --- END OF TIMEZONE-SAFE FIX ---
-
                 // Handle logs that were marked for deletion.
                 if (logsToDelete.size > 0) {
-                    logs = logs.filter(log => !logsToDelete.has(log.id));
+                    courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !logsToDelete.has(log.id));
                 }
+                // --- END FIX ---
 
-                // Save all changes and sync with the server.
                 saveCourseToLocalStorage(currentCourse);
                 if (isOnline && isSignedIn) {
-                    // We only need to sync the database if the name was actually changed.
                     if (group.name !== newName) {
                         syncDatabaseToSheet();
                     }
@@ -6630,10 +6619,15 @@
             document.getElementById('cancel-edit-log-btn').addEventListener('click', closeDialog);
         }
 
+        /**
+         * CORRECTED: Confirms deletion of the latest log or the entire group.
+         */
         function confirmDeleteLog(group) {
             if (!isAdmin) return;
 
-            // Case 1: More than one log exists. Delete the latest one immediately without confirmation.
+            // FIX: This line was missing.
+            const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
+
             if (group.originalLogs.length > 1) {
                 const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
                 addToTombstones(latestLog.id);
@@ -6641,9 +6635,7 @@
                 saveCourseToLocalStorage(currentCourse);
                 updateUI();
                 if (isOnline && isSignedIn) syncLogsWithSheet();
-            }
-            // Case 2: Only one log remains. Ask for confirmation before deleting the entire entry for that day.
-            else if (group.originalLogs.length === 1) {
+            } else if (group.originalLogs.length === 1) {
                 showConfirmationDialog({
                     title: 'Delete all logs for this date?',
                     message: `This will remove all logs for ${group.name} on this date. This is the last timestamp.`,
@@ -6999,33 +6991,58 @@
         }
 
         /**
- * CORRECTED: Adds a new log entry one hour after the latest existing entry.
- * @param {Object} group - The log group to add the time to.
- */
-        function addPlusOneHourLog(group) {
-            if (!isAdmin) return;
-            const latestTimestamp = Math.max(...group.originalLogs.map(log => log.timestamp));
-            const newDate = new Date(latestTimestamp);
-            newDate.setHours(newDate.getHours() + 1);
+          * NEW: Adds a +1 hour log to the latest entry for every student present on a given day.
+          * @param {string} dateStr - The date string in "DD-MM-YYYY" format.
+          */
+        function addPlusOneHourToDay(dateStr) {
+            if (!isAdmin || !currentCourse) return;
 
-            let newLog = {
-                uid: group.uid,
-                timestamp: newDate.getTime(),
-                id: Date.now() + Math.random().toString(36).substr(2, 9),
-                manual: true
-            };
-            newLog = touchLogForEdit(newLog, currentUser?.email);
+            const logsForCurrentCourse = courseData[currentCourse].logs;
+            const newLogsToAdd = [];
+            const uidsOnDay = new Set();
 
-            // FIX: Operates on the correct course data.
-            courseData[currentCourse].logs.unshift(newLog);
-            saveCourseToLocalStorage(currentCourse);
-            updateUI();
+            // 1. Find all logs on the specified day.
+            const logsOnDay = logsForCurrentCourse.filter(log => {
+                const logDate = new Date(log.timestamp);
+                const day = String(logDate.getDate()).padStart(2, '0');
+                const month = String(logDate.getMonth() + 1).padStart(2, '0');
+                const year = logDate.getFullYear();
+                return `${day}-${month}-${year}` === dateStr;
+            });
 
-            const formattedTime = newDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            if (isOnline && isSignedIn && isAdmin) {
-                syncLogsWithSheet().catch(err => {
-                    console.error('Error syncing after adding +1 hour log:', err);
-                });
+            // 2. Group by UID to find the latest log for each student.
+            const latestLogByUid = {};
+            logsOnDay.forEach(log => {
+                if (!latestLogByUid[log.uid] || log.timestamp > latestLogByUid[log.uid].timestamp) {
+                    latestLogByUid[log.uid] = log;
+                }
+            });
+
+            // 3. Create a new log for each student, +1 hour after their last scan.
+            for (const uid in latestLogByUid) {
+                const latestLog = latestLogByUid[uid];
+                const newDate = new Date(latestLog.timestamp);
+                newDate.setHours(newDate.getHours() + 1);
+
+                let newLog = {
+                    uid: uid,
+                    timestamp: newDate.getTime(),
+                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    manual: true
+                };
+                newLog = touchLogForEdit(newLog, currentUser?.email);
+                newLogsToAdd.push(newLog);
+            }
+
+            // 4. Add the new logs and update everything.
+            if (newLogsToAdd.length > 0) {
+                courseData[currentCourse].logs.unshift(...newLogsToAdd);
+                saveCourseToLocalStorage(currentCourse);
+                updateUI();
+                if (isOnline && isSignedIn) syncLogsWithSheet();
+                showNotification('success', 'Bulk Add Complete', `Added a new timestamp for ${newLogsToAdd.length} students on ${dateStr}.`);
+            } else {
+                showNotification('info', 'No Action', `No students to add a new timestamp for on ${dateStr}.`);
             }
         }
 
@@ -7034,15 +7051,14 @@
          */
         function updateLogsList() {
             const tableContainer = document.querySelector('#scanner-tab .table-container');
-            tableContainer.classList.add('reloading');
+            if (isChangingCourses) {
+                tableContainer.classList.add('reloading');
+            }
 
             // The main data source is now the courseData object for the current course.
             const currentCourseLogs = courseData[currentCourse]?.logs || [];
 
             setTimeout(() => {
-                // ... (The rest of the function logic is nearly identical, but it now
-                //      operates on 'currentCourseLogs' instead of the old 'logs' variable.)
-
                 if (!currentCourse) {
                     emptyLogs.style.display = 'block';
                     filteredCount.textContent = '0';
@@ -7240,8 +7256,10 @@
                     }
                     logsTbody.appendChild(row);
                 });
-
                 tableContainer.classList.remove('reloading');
+                if (isChangingCourses) {
+                    isChangingCourses = false; // Disarm the animation for the next update.
+                }
             }, 150);
         }
 
