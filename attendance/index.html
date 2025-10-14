@@ -3839,6 +3839,9 @@
                 showNotification('warning', 'No Course Selected', 'Please select a course first.');
                 return;
             }
+
+            await fetchCourseInfo();
+
             const eisId = getCurrentCourseEisId();
             if (!eisId) {
                 showNotification('error', 'EIS ID Missing', 'The EIS ID for this course is not set in the spreadsheet.');
@@ -6549,20 +6552,19 @@
                     message: `This will remove all logs for ${group.name} on this date.`,
                     confirmText: 'Delete',
                     isDestructive: true,
-                    // --- START FIX ---
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         idsToRemove.forEach(id => addToTombstones(id));
-                        // This line is now corrected to use courseData.
+
+                        // FIX: This line now correctly filters the courseData object.
                         courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
+
                         saveCourseToLocalStorage(currentCourse);
                         updateUI();
                         showNotification('success', 'Entry Deleted', 'All timestamps for this entry were removed.');
                         if (isOnline && isSignedIn) syncLogsWithSheet();
-                        // We must also close the edit dialog since the entry is gone.
                         closeDialog();
                     }
-                    // --- END FIX ---
                 });
             });
 
@@ -6991,58 +6993,33 @@
         }
 
         /**
-          * NEW: Adds a +1 hour log to the latest entry for every student present on a given day.
-          * @param {string} dateStr - The date string in "DD-MM-YYYY" format.
-          */
-        function addPlusOneHourToDay(dateStr) {
-            if (!isAdmin || !currentCourse) return;
+ * CORRECTED: Adds a new log entry one hour after the latest existing entry.
+ */
+        function addPlusOneHourLog(group) {
+            if (!isAdmin) return;
 
-            const logsForCurrentCourse = courseData[currentCourse].logs;
-            const newLogsToAdd = [];
-            const uidsOnDay = new Set();
+            const latestTimestamp = Math.max(...group.originalLogs.map(log => log.timestamp));
+            const newDate = new Date(latestTimestamp);
+            newDate.setHours(newDate.getHours() + 1);
 
-            // 1. Find all logs on the specified day.
-            const logsOnDay = logsForCurrentCourse.filter(log => {
-                const logDate = new Date(log.timestamp);
-                const day = String(logDate.getDate()).padStart(2, '0');
-                const month = String(logDate.getMonth() + 1).padStart(2, '0');
-                const year = logDate.getFullYear();
-                return `${day}-${month}-${year}` === dateStr;
-            });
+            let newLog = {
+                uid: group.uid,
+                timestamp: newDate.getTime(),
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                manual: true
+            };
+            newLog = touchLogForEdit(newLog, currentUser?.email);
 
-            // 2. Group by UID to find the latest log for each student.
-            const latestLogByUid = {};
-            logsOnDay.forEach(log => {
-                if (!latestLogByUid[log.uid] || log.timestamp > latestLogByUid[log.uid].timestamp) {
-                    latestLogByUid[log.uid] = log;
-                }
-            });
+            // FIX: This now correctly references the courseData object.
+            courseData[currentCourse].logs.unshift(newLog);
 
-            // 3. Create a new log for each student, +1 hour after their last scan.
-            for (const uid in latestLogByUid) {
-                const latestLog = latestLogByUid[uid];
-                const newDate = new Date(latestLog.timestamp);
-                newDate.setHours(newDate.getHours() + 1);
+            saveCourseToLocalStorage(currentCourse);
+            updateUI();
 
-                let newLog = {
-                    uid: uid,
-                    timestamp: newDate.getTime(),
-                    id: Date.now() + Math.random().toString(36).substr(2, 9),
-                    manual: true
-                };
-                newLog = touchLogForEdit(newLog, currentUser?.email);
-                newLogsToAdd.push(newLog);
-            }
-
-            // 4. Add the new logs and update everything.
-            if (newLogsToAdd.length > 0) {
-                courseData[currentCourse].logs.unshift(...newLogsToAdd);
-                saveCourseToLocalStorage(currentCourse);
-                updateUI();
-                if (isOnline && isSignedIn) syncLogsWithSheet();
-                showNotification('success', 'Bulk Add Complete', `Added a new timestamp for ${newLogsToAdd.length} students on ${dateStr}.`);
-            } else {
-                showNotification('info', 'No Action', `No students to add a new timestamp for on ${dateStr}.`);
+            if (isOnline && isSignedIn && isAdmin) {
+                syncLogsWithSheet().catch(err => {
+                    console.error('Error syncing after adding +1 hour log:', err);
+                });
             }
         }
 
@@ -7459,7 +7436,6 @@
                 showNotification('warning', 'No Course Selected', 'Please select a course before starting a scan.');
                 return;
             }
-
 
             if (!nfcSupported) {
                 if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
