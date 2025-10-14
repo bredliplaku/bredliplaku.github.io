@@ -3963,13 +3963,20 @@
                         options: { markMissingAsAbsent: dialog.querySelector('#mark-missing-option').checked, markExemptedAsAbsent: dialog.querySelector('#mark-exempted-option').checked },
                         attendance: {}, nameMap: { ...uidToNameMap }
                     };
-                    if (logs && logs.length > 0) {
+                    // Get the logs for the currently selected course from our new data structure.
+                    const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
+
+                    if (logsForCurrentCourse.length > 0) {
                         const uidCounts = {};
                         const selectedDate = new Date(data.parameters.date); selectedDate.setHours(0, 0, 0, 0);
                         const nextDay = new Date(selectedDate); nextDay.setDate(nextDay.getDate() + 1);
-                        logs.forEach(log => {
+
+                        // Iterate over the CORRECT logs array.
+                        logsForCurrentCourse.forEach(log => {
                             const logDate = new Date(log.timestamp);
-                            if (logDate >= selectedDate && logDate < nextDay) { uidCounts[log.uid] = (uidCounts[log.uid] || 0) + 1; }
+                            if (logDate >= selectedDate && logDate < nextDay) {
+                                uidCounts[log.uid] = (uidCounts[log.uid] || 0) + 1;
+                            }
                         });
                         data.attendance = uidCounts;
                     }
@@ -4640,7 +4647,7 @@
                 console.log('Entering Lector Mode (locking session).');
 
                 // Save the current state of logs to localStorage to keep them for the session.
-                saveLogsToLocalStorage();
+                saveCourseToLocalStorage(currentCourse);
 
                 // Remove the Google token. A page refresh will require a new sign-in.
                 localStorage.removeItem('gapi_token');
@@ -4957,85 +4964,6 @@
 
             // Simply update the UI to show the data for the new course.
             updateUI();
-        }
-
-        // Fetch logs with request tracking
-        async function fetchLogsWithRequestTracking(courseName, request) {
-            try {
-                // Check if request is still valid before making API call
-                if (request.cancelled || currentCourse !== courseName) {
-                    console.log(`Request cancelled before API call for ${courseName}`);
-                    return false;
-                }
-
-                const sheetName = getSheetNameForCourse(courseName);
-                const formattedSheetName = formatSheetName(sheetName);
-                const range = `${formattedSheetName}!A2:G`;
-
-                console.log(`Fetching logs for ${courseName} (request #${request.id})`);
-
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: range,
-                });
-
-                // Check again if request is still valid after API response
-                if (request.cancelled || currentCourse !== courseName) {
-                    console.log(`Request cancelled after API response for ${courseName}`);
-                    return false;
-                }
-
-                const rows = response.result.values || [];
-                const sheetLogs = [];
-
-                rows.forEach(row => {
-                    if (row.length >= 3) {
-                        const uid = String(row[0]);
-                        const timestamp = new Date(row[1]).getTime();
-                        const id = row[2] || Date.now() + Math.random().toString(36).substr(2, 9);
-                        const manual = row.length >= 4 ? row[3] === 'true' : false;
-
-                        if (uid && !isNaN(timestamp)) {
-                            sheetLogs.push({ uid, timestamp, id, manual });
-                        }
-                    }
-                });
-
-                // Final check before updating logs
-                if (request.cancelled || currentCourse !== courseName) {
-                    console.log(`Request cancelled before updating logs for ${courseName}`);
-                    return false;
-                }
-
-                // Merge with existing logs
-                if (sheetLogs.length > 0) {
-                    const mergedLogs = mergeLogs(logs, sheetLogs);
-                    if (mergedLogs.length !== logs.length) {
-                        logs = mergedLogs;
-
-                        // Save to localStorage with the specific course key
-                        const storageKey = `${LOGS_STORAGE_KEY}_${courseName}`;
-                        localStorage.setItem(storageKey, JSON.stringify(logs));
-                        localStorage.setItem(`${storageKey}_timestamp`, Date.now().toString());
-
-                        console.log(`Merged and saved ${logs.length} logs for ${courseName}`);
-                        updateUI();
-                    }
-                }
-
-                return true;
-
-            } catch (error) {
-                console.error(`Error fetching logs for ${courseName}:`, error);
-
-                // Only show error if this request is still current
-                if (!request.cancelled && currentCourse === courseName && !isInitializing) {
-                    showNotification('warning', 'Sync Error',
-                        `Could not sync ${courseName} with server, using local data`);
-                }
-
-                return false;
-            }
         }
 
         /**
@@ -7127,7 +7055,7 @@
 
                 if (isSignedIn && !isAdmin && currentUser) {
                     const studentNameNormalised = normalizeName(currentUser.name);
-                    logsToDisplay = logs.filter(log => {
+                    logsToDisplay = currentCourseLogs.filter(log => {
                         const logOwnerName = uidToNameMap[log.uid] || '';
                         const logOwnerNameNormalised = normalizeName(logOwnerName);
                         return logOwnerNameNormalised === studentNameNormalised;
