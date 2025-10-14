@@ -3446,22 +3446,18 @@
             }
 
             // Format timestamps for export
-            const exportData = logs.map(log => ({
+            const exportData = logsForCurrentCourse.map(log => ({
                 ...log,
                 timestamp: new Date(log.timestamp).toISOString()
             }));
 
-            // Create download link
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
             const downloadAnchor = document.createElement('a');
             downloadAnchor.setAttribute("href", dataStr);
             downloadAnchor.setAttribute("download", `${currentCourse || 'attendance'}_logs.json`);
-
-            // Trigger download
             document.body.appendChild(downloadAnchor);
             downloadAnchor.click();
             document.body.removeChild(downloadAnchor);
-
             showNotification('success', 'Export Complete', 'Logs exported to JSON file');
         }
 
@@ -6545,6 +6541,21 @@
             document.getElementById('save-edit-log-btn').addEventListener('click', () => {
                 const newName = document.getElementById('edit-name').value.trim();
                 const newDateStr = document.getElementById('edit-date').value; // e.g., "2025-10-10"
+                const logsForCurrentCourse = courseData[currentCourse].logs;
+
+                visibleGroups.forEach(groupElement => {
+                    const logId = groupElement.getAttribute('data-log-id');
+                    const timeInput = groupElement.querySelector('.timestamp-time').value;
+                    const [hours, minutes] = timeInput.split(':').map(Number);
+
+                    // Find the log in this course's specific log array.
+                    const log = logsForCurrentCourse.find(log => log.id === logId);
+                    if (log) {
+                        const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
+                        log.timestamp = newTimestampObj.getTime();
+                        touchLogForEdit(log, currentUser?.email);
+                    }
+                });
 
                 if (!newName) {
                     showAlertDialog('Invalid Input', 'Name cannot be empty.');
@@ -6587,7 +6598,7 @@
                 }
 
                 // Save all changes and sync with the server.
-                saveLogsToLocalStorage();
+                saveCourseToLocalStorage(currentCourse);
                 if (isOnline && isSignedIn) {
                     // We only need to sync the database if the name was actually changed.
                     if (group.name !== newName) {
@@ -6611,8 +6622,8 @@
             if (group.originalLogs.length > 1) {
                 const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
                 addToTombstones(latestLog.id);
-                logs = logs.filter(log => log.id !== latestLog.id);
-                saveLogsToLocalStorage();
+                courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
+                saveCourseToLocalStorage(currentCourse);
                 updateUI();
                 if (isOnline && isSignedIn) syncLogsWithSheet();
             }
@@ -6626,8 +6637,8 @@
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         idsToRemove.forEach(id => addToTombstones(id));
-                        logs = logs.filter(log => !idsToRemove.includes(log.id));
-                        saveLogsToLocalStorage();
+                        courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
+                        saveCourseToLocalStorage(currentCourse);
                         updateUI();
                         showNotification('success', 'Entry Deleted', `All timestamps for ${group.name} on this date were removed.`);
                         if (isOnline && isSignedIn) syncLogsWithSheet();
@@ -6967,65 +6978,34 @@
         }
 
         /**
-         * Adds a +1 hour log entry for every unique student present on a specific day.
-         * @param {string} dateStr - The date in 'DD-MM-YYYY' format.
-         */
-        function addPlusOneHourToDay(dateStr) {
+ * CORRECTED: Adds a new log entry one hour after the latest existing entry.
+ * @param {Object} group - The log group to add the time to.
+ */
+        function addPlusOneHourLog(group) {
             if (!isAdmin) return;
+            const latestTimestamp = Math.max(...group.originalLogs.map(log => log.timestamp));
+            const newDate = new Date(latestTimestamp);
+            newDate.setHours(newDate.getHours() + 1);
 
-            showConfirmationDialog({
-                title: 'Add another hour?',
-                message: `Are you sure you want to add an extra hour log for EVERY student present on ${dateStr}?`,
-                confirmText: 'Add',
-                onConfirm: () => {
-                    const logsForDay = logs.filter(log => {
-                        const logDate = new Date(log.timestamp);
-                        const day = String(logDate.getDate()).padStart(2, '0');
-                        const month = String(logDate.getMonth() + 1).padStart(2, '0');
-                        const year = logDate.getFullYear();
-                        return `${day}-${month}-${year}` === dateStr;
-                    });
+            let newLog = {
+                uid: group.uid,
+                timestamp: newDate.getTime(),
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                manual: true
+            };
+            newLog = touchLogForEdit(newLog, currentUser?.email);
 
-                    const studentsOnDay = {};
-                    logsForDay.forEach(log => {
-                        if (!studentsOnDay[log.uid] || log.timestamp > studentsOnDay[log.uid]) {
-                            studentsOnDay[log.uid] = log.timestamp;
-                        }
-                    });
+            // FIX: Operates on the correct course data.
+            courseData[currentCourse].logs.unshift(newLog);
+            saveCourseToLocalStorage(currentCourse);
+            updateUI();
 
-                    // --- START OF FIX ---
-                    const newLogsToAdd = Object.keys(studentsOnDay).map(uid => {
-                        const latestTimestamp = studentsOnDay[uid];
-                        const newDate = new Date(latestTimestamp);
-                        newDate.setHours(newDate.getHours() + 1);
-
-                        // 1. Create the new log object in a variable.
-                        let newLog = {
-                            uid: uid,
-                            timestamp: newDate.getTime(),
-                            id: Date.now() + Math.random().toString(36).substr(2, 9) + `_${uid}`,
-                            manual: true
-                        };
-
-                        // 2. Apply the versioning, then return the final object.
-                        return touchLogForEdit(newLog, currentUser?.email);
-                    });
-                    // --- END OF FIX ---
-
-                    if (newLogsToAdd.length > 0) {
-                        logs.unshift(...newLogsToAdd);
-                        saveLogsToLocalStorage();
-                        updateUI();
-                        showNotification('success', 'Bulk Add Complete', `Added ${newLogsToAdd.length} new log(s) for ${dateStr}.`);
-
-                        if (isOnline && isSignedIn) {
-                            syncLogsWithSheet().catch(err => console.error('Error syncing after bulk add:', err));
-                        }
-                    } else {
-                        showNotification('info', 'No Action Taken', `No students found on ${dateStr} to add logs to.`);
-                    }
-                }
-            });
+            const formattedTime = newDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            if (isOnline && isSignedIn && isAdmin) {
+                syncLogsWithSheet().catch(err => {
+                    console.error('Error syncing after adding +1 hour log:', err);
+                });
+            }
         }
 
         /**
