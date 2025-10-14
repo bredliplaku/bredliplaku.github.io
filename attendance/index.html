@@ -4460,11 +4460,9 @@
                         showNotification('info', 'Syncing...', 'Syncing offline changes now.');
                         // Use a short delay to allow the UI to update first
                         setTimeout(syncData, 1000);
-                    }
-                    // --- NEW LOGIC END ---
-                    else if (isAdmin) {
-                        // If there are no pending changes, still check for a normal sync
-                        if (logs.length > 0) {
+                    } else if (isAdmin) {
+                        const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
+                        if (logsForCurrentCourse.length > 0) {
                             setTimeout(syncData, 1000);
                         }
                     } else {
@@ -4882,11 +4880,15 @@
             // Update empty logs message for signed-in users
             const emptyLogs = document.getElementById('empty-logs');
             if (emptyLogs && isSignedIn) {
+
+                // --- FIX THIS BLOCK ---
+                const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
                 if (!currentCourse) {
                     emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
-                } else if (logs.length === 0) {
+                } else if (logsForCurrentCourse.length === 0) {
                     emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
                 }
+                // --- END FIX ---
             }
         }
 
@@ -6767,22 +6769,30 @@
             });
         }
 
-        // Deletes a single log by its ID and then syncs the changes.
+        /**
+         * CORRECTED: Deletes a single log entry and syncs the changes.
+         */
         function deleteLogEntry(logId) {
             if (!isAdmin) return; // Only admins can delete.
-            // Remove the log with the given ID.
-            logs = logs.filter(log => log.id !== logId);
+
+            // FIX: Filter the logs of the currently active course.
+            const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
+            courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== logId);
+
+            saveCourseToLocalStorage(currentCourse); // Save the change locally.
+
             if (isOnline && isSignedIn) {
                 syncLogsWithSheet()
                     .then(() => {
-                        showNotification('delete', 'Log Deleted', 'Successfully removed the log from the spreadsheet.');
+                        showNotification('delete', 'Log Deleted', 'Successfully removed the log.');
                         updateUI();
                     })
                     .catch(err => {
                         console.error('Error deleting log:', err);
-                        showNotification('error', 'Delete Error', 'Failed to remove the log from the spreadsheet.');
+                        showNotification('error', 'Delete Error', 'Failed to sync the deletion.');
                     });
             } else {
+                // If offline, just update the UI. The change is saved and will sync later.
                 updateUI();
             }
         }
@@ -7015,23 +7025,21 @@
 
             // Merge option
             document.getElementById('merge-logs-btn').addEventListener('click', () => {
-                // Create map of existing log IDs
-                const existingIds = new Set(logs.map(log => log.id));
+                const logsForCurrentCourse = courseData[currentCourse].logs;
+                const existingIds = new Set(logsForCurrentCourse.map(log => log.id));
 
-                // Add only new logs
                 let newCount = 0;
-
                 importedLogs.forEach(log => {
                     if (!existingIds.has(log.id)) {
-                        logs.push(log);
+                        // FIX: Push to the correct course's log array.
+                        logsForCurrentCourse.push(log);
                         newCount++;
                     }
                 });
 
-                // Sort logs by timestamp
-                logs.sort((a, b) => b.timestamp - a.timestamp);
+                logsForCurrentCourse.sort((a, b) => b.timestamp - a.timestamp);
+                saveCourseToLocalStorage(currentCourse);
 
-                // Sync with sheets if online
                 if (isOnline && isSignedIn) {
                     syncLogsWithSheet().catch(err => console.error('Error syncing logs:', err));
                 }
@@ -7043,10 +7051,10 @@
 
             // Replace option
             document.getElementById('replace-logs-btn').addEventListener('click', () => {
-                logs = [...importedLogs];
-                logs.sort((a, b) => b.timestamp - a.timestamp);
+                // FIX: Replace the logs for the current course only.
+                courseData[currentCourse].logs = [...importedLogs].sort((a, b) => b.timestamp - a.timestamp);
+                saveCourseToLocalStorage(currentCourse);
 
-                // Sync with sheets if online
                 if (isOnline && isSignedIn) {
                     syncLogsWithSheet().catch(err => console.error('Error syncing logs:', err));
                 }
@@ -7453,7 +7461,7 @@
         }
 
         /**
-         * Update the entire UI.
+         * CORRECTED: Update the entire UI.
          */
         async function updateUI() {
             await databaseLoadPromise;
@@ -7462,11 +7470,14 @@
             updateDatabaseStatus();
             updatePageTitle();
 
-            // Update total scans and last scan info
-            totalScans.textContent = logs.length;
+            // FIX: Get logs from the courseData object for the current course.
+            const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
 
-            if (logs.length > 0) {
-                const latestLog = logs[0]; // Since logs are now always sorted newest first
+            // Update total scans and last scan info
+            totalScans.textContent = logsForCurrentCourse.length;
+
+            if (logsForCurrentCourse.length > 0) {
+                const latestLog = logsForCurrentCourse[0]; // Assumes logs are sorted newest first
                 const lastTimestamp = new Date(latestLog.timestamp);
                 const pad = (n) => n.toString().padStart(2, '0');
                 const time = `${pad(lastTimestamp.getHours())}:${pad(lastTimestamp.getMinutes())}`;
@@ -7477,8 +7488,8 @@
             }
 
             // Enable/disable buttons
-            exportBtn.disabled = logs.length === 0;
-            clearBtn.disabled = logs.length === 0;
+            exportBtn.disabled = logsForCurrentCourse.length === 0;
+            clearBtn.disabled = logsForCurrentCourse.length === 0;
 
             if (isAdmin) {
                 // Admin-specific UI updates
@@ -7489,7 +7500,7 @@
             updateScanButtons();
             populateCourseButtons();
 
-            const hasLogs = logs.length > 0;
+            const hasLogs = logsForCurrentCourse.length > 0;
             filterInput.disabled = !hasLogs;
             sortSelect.disabled = !hasLogs;
         }
