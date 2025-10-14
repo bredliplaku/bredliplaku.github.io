@@ -3027,8 +3027,7 @@
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
 
         // App state
-        let logs = [];
-        let offlineLogsToMerge = {};
+        let courseData = {};
         let isScanning = false;
         let nfcSupported = false;
         let nfcReader = null;
@@ -4204,40 +4203,17 @@
                             await fetchUserInfo();
                             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
 
-                            // Scan ALL local storage for any unsynced offline/lector-mode logs
-                            offlineLogsToMerge = {}; // Reset the merge object
-                            let offlineScanCount = 0;
-                            for (let i = 0; i < localStorage.length; i++) {
-                                const key = localStorage.key(i);
-                                if (key && key.startsWith(LOGS_STORAGE_KEY) && key.endsWith('_timestamp')) {
-                                    // This is a timestamp key, let's check its associated log data
-                                    const logKey = key.replace('_timestamp', '');
-                                    const courseName = logKey.replace(`${LOGS_STORAGE_KEY}_`, '');
-
-                                    // For now, we assume any local data could be unsynced. A more advanced
-                                    // check could compare against a 'last sync time' if needed.
-                                    const logDataRaw = localStorage.getItem(logKey);
-                                    if (logDataRaw) {
-                                        try {
-                                            const logData = JSON.parse(logDataRaw);
-                                            if (logData.length > 0) {
-                                                offlineLogsToMerge[courseName] = logData;
-                                                offlineScanCount += logData.length;
-                                                console.log(`Found ${logData.length} offline logs for course '${courseName}'.`);
-                                            }
-                                        } catch (e) { console.error(`Could not parse logs for key ${logKey}`, e); }
-                                    }
-                                }
-                            }
-
-                            // Now proceed with fetching online data
+                            // Load all course and database data from the server at once.
                             await Promise.all([
                                 fetchAvailableCourses(),
                                 fetchDatabaseFromSheet()
                             ]);
 
+                            // New: Fetch data for ALL courses.
+                            await loadAllCourseDataFromServer();
+
                         } catch (e) {
-                            console.error("Token restore failed:", e);
+                            console.error("Token restore or initial data load failed:", e);
                             isSignedIn = false;
                             isAdmin = false;
                             localStorage.removeItem('gapi_token');
@@ -4271,40 +4247,65 @@
         }
 
         /**
-         * Save logs to localStorage to prevent data loss
+         * NEW: Fetches logs and tombstones for all available courses from the server
+         * and populates the main courseData object.
          */
-        function saveLogsToLocalStorage() {
-            // This now correctly uses the global currentCourse, which will be 'Default'
-            // when signed out, or the actual course name when in a sign-out session (Lector Mode).
-            const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse || 'Default'}`;
+        async function loadAllCourseDataFromServer() {
+            if (!isAdmin) return; // Only run for admins.
 
+            console.log(`Starting to fetch data for ${availableCourses.length} courses...`);
+
+            const allCoursePromises = availableCourses.map(async (courseName) => {
+                try {
+                    // Fetch local and server data concurrently for each course.
+                    const [serverLogs, serverTombs, localData] = await Promise.all([
+                        fetchLogsFromSheet(courseName),
+                        fetchTombstonesForCourse(courseName),
+                        loadCourseFromLocalStorage(courseName) // New local storage function
+                    ]);
+
+                    // Initialise the data structure for this course.
+                    courseData[courseName] = {
+                        logs: [],
+                        tombstones: new Set(),
+                    };
+
+                    // Merge server data with any locally stored data.
+                    const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
+                    courseData[courseName].logs = mergedLogs;
+
+                    // Save the merged result back to local storage for offline use.
+                    saveCourseToLocalStorage(courseName);
+
+                } catch (error) {
+                    console.error(`Failed to load data for course: ${courseName}`, error);
+                    // If server fails, fall back to just local data.
+                    courseData[courseName] = await loadCourseFromLocalStorage(courseName);
+                }
+            });
+
+            // Wait for all courses to finish loading.
+            await Promise.all(allCoursePromises);
+            console.log("Finished loading data for all courses.");
+        }
+
+        /**
+         * REFACTORED: Saves the data for a single, specified course to local storage.
+         * @param {string} courseName - The name of the course to save.
+         */
+        function saveCourseToLocalStorage(courseName) {
+            if (!courseName || !courseData[courseName]) return;
+
+            const storageKey = `${LOGS_STORAGE_KEY}_${courseName}`;
             try {
-                localStorage.setItem(storageKey, JSON.stringify(logs));
-                if (currentCourse && currentCourse !== 'Default') {
-                    localStorage.setItem('last_active_course', currentCourse);
-                }
+                const dataToSave = {
+                    logs: courseData[courseName].logs,
+                    tombstones: Array.from(courseData[courseName].tombstones) // Convert Set to Array for JSON
+                };
+                localStorage.setItem(storageKey, JSON.stringify(dataToSave));
                 localStorage.setItem(`${storageKey}_timestamp`, Date.now().toString());
-
-                pendingChanges = true;
-                updateSyncStatus("Changes pending", "waiting");
-
-                console.log(`Saved ${logs.length} logs to localStorage for course: ${currentCourse || 'Default'}`);
-
             } catch (e) {
-                console.error('Error saving logs to localStorage:', e);
-                if (e.name === 'QuotaExceededError') {
-                    // Try to clean up old data
-                    cleanupOldLocalStorage();
-
-                    // Try again
-                    try {
-                        const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse}`;
-                        localStorage.setItem(storageKey, JSON.stringify(logs));
-                    } catch (e2) {
-                        showNotification('error', 'Storage Full',
-                            'Browser storage is full. Some data may not be saved locally.');
-                    }
-                }
+                console.error(`Error saving course ${courseName} to localStorage:`, e);
             }
         }
 
@@ -4860,81 +4861,19 @@
             currentSort = 'date-desc';
         }
 
+        /**
+         * REFACTORED: Switches the active course in the UI.
+         * The data is already loaded, so this function is now much simpler.
+         */
         async function handleCourseChange(courseName) {
-            if (isAdmin) {
-                // --- LOGIC CORRECTION START ---
-                // Check if this course has been initialised in this session
-                if (!initialisedCourses.has(courseName)) {
-                    console.log(`Initialising course for the first time: ${courseName}`);
-                    document.querySelector('#scanner-tab .table-container').classList.add('reloading');
+            // Do nothing if the course is not actually changing.
+            if (currentCourse === courseName) return;
 
-                    // Set the flag to true HERE. This unblocks the sync function.
-                    initialPullDone = true;
+            currentCourse = courseName;
+            localStorage.setItem('last_active_course', currentCourse);
 
-                    initialisedCourses.add(courseName);
-                    console.log(`Initialisation complete for ${courseName}. Syncing is now enabled.`);
-                }
-                // --- LOGIC CORRECTION END ---
-
-                currentCourse = courseName;
-                localStorage.setItem('last_active_course', currentCourse);
-                updatePageTitle();
-                // The reloading class is now set in two places, which is fine, but we'll add it here for consistency.
-                document.querySelector('#scanner-tab .table-container').classList.add('reloading');
-
-                try {
-                    const [serverLogs, serverTombs] = await Promise.all([
-                        fetchLogsFromSheet(currentCourse),
-                        fetchTombstonesForCourse(currentCourse)
-                    ]);
-
-                    const localLogs = restoreLogsFromLocalStorage(currentCourse) || [];
-                    const localTombs = getTombstonesForCourse(currentCourse) || new Set();
-
-                    logs = mergeLogs(serverLogs, localLogs, localTombs, serverTombs);
-
-                    saveLogsToLocalStorage();
-                    updateUI();
-
-                } catch (err) {
-                    console.error("Critical error fetching course data from server:", err);
-                    showNotification('error', 'Sync Failed', 'Could not load data from server. Showing local data only.');
-                    logs = restoreLogsFromLocalStorage();
-                    updateUI();
-                }
-
-                // --- NEW & CORRECTED MERGE LOGIC START ---
-                // Check if there are pending offline logs specifically for THIS course
-                if (isAdmin && offlineLogsToMerge[currentCourse]) {
-                    const logsForThisCourse = offlineLogsToMerge[currentCourse];
-                    console.log(`Merging ${logsForThisCourse.length} offline logs into course ${currentCourse}.`);
-
-                    logs = mergeLogs(logs, logsForThisCourse);
-                    saveLogsToLocalStorage();
-                    syncData(); // Sync the merged data
-
-                    // Remove the merged logs from local storage and the merge object
-                    localStorage.removeItem(`${LOGS_STORAGE_KEY}_${currentCourse}`);
-                    delete offlineLogsToMerge[currentCourse];
-
-                    updateUI();
-                }
-
-            } else {
-                // Student logic remains unchanged
-                currentCourse = courseName;
-                updatePageTitle();
-
-                const studentLogsForCourse = studentLogCache[currentCourse] || [];
-                const studentNameNormalised = normalizeName(currentUser.name);
-
-                logs = studentLogsForCourse.filter(log => {
-                    const logOwnerName = uidToNameMap[log.uid] || '';
-                    return normalizeName(logOwnerName) === studentNameNormalised;
-                });
-
-                updateUI();
-            }
+            // Simply update the UI to show the data for the new course.
+            updateUI();
         }
 
         // Fetch logs with request tracking
@@ -5016,16 +4955,25 @@
             }
         }
 
-        function restoreLogsFromLocalStorage() {
-            const storageKey = `${LOGS_STORAGE_KEY}_${currentCourse || 'UNKNOWN'}`;
+        /**
+         * NEW: Loads data for a single course from local storage.
+         * @param {string} courseName - The name of the course to load.
+         * @returns {Promise<{logs: Array, tombstones: Set}>}
+         */
+        async function loadCourseFromLocalStorage(courseName) {
+            const storageKey = `${LOGS_STORAGE_KEY}_${courseName}`;
             try {
-                const restored = JSON.parse(localStorage.getItem(storageKey)) || [];
-                const tombs = getTombstonesForCourse();
-                // Return only logs that are NOT in the tombstone list.
-                return restored.filter(l => !tombs.has(l.id));
+                const rawData = localStorage.getItem(storageKey);
+                if (!rawData) return { logs: [], tombstones: new Set() };
+
+                const parsedData = JSON.parse(rawData);
+                return {
+                    logs: parsedData.logs || [],
+                    tombstones: new Set(parsedData.tombstones || [])
+                };
             } catch (e) {
-                console.warn('Failed to restore logs:', e);
-                return [];
+                console.warn(`Failed to restore logs for ${courseName} from localStorage:`, e);
+                return { logs: [], tombstones: new Set() };
             }
         }
 
@@ -5784,17 +5732,16 @@
          * Sync logs with Google Sheet.
          */
         async function syncLogsWithSheet() {
-            if (!initialPullDone) return;
+            if (!currentCourse || !isAdmin || !isOnline || !courseData[currentCourse]) return;
 
-            if (!currentCourse || !isAdmin || !isOnline) return;
+            const currentData = courseData[currentCourse];
 
             try {
                 isSyncing = true;
                 updateSyncStatus("Syncing...", "syncing");
 
                 // --- A) Sync Tombstones UP to the server ---
-                const localTombs = getTombstonesForCourse();
-                if (localTombs.size > 0) {
+                if (currentData.tombstones.size > 0) {
                     const serverTombs = await fetchTombstonesForCourse(currentCourse);
                     const newTombsToAppend = [...localTombs].filter(id => !serverTombs.has(id));
 
@@ -5811,7 +5758,7 @@
                 }
 
                 // --- B) Sync Merged Logs UP to the server ---
-                const sheetData = logs.map(toSheetRow); // Use your existing helper
+                const sheetData = currentData.logs.map(toSheetRow); // Use your existing helper
                 const sheetName = getSheetNameForCourse(currentCourse);
                 const formattedSheetName = formatSheetName(sheetName);
                 const fullRange = `${formattedSheetName}!A2:G`; // Use the 7-column range
@@ -5828,12 +5775,12 @@
                 }
 
                 console.log(`Successfully completed tombstone-aware sync for ${currentCourse}.`);
-                saveTombstonesForCourse(new Set()); // Clear local tombstones after a successful sync
+                currentData.tombstones.clear();
+                saveCourseToLocalStorage(currentCourse); // Clear local tombstones after a successful sync
 
             } catch (error) {
                 console.error('Error during tombstone-aware sync:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync with Google Sheets.');
-                throw error;
+                throw error; // Let the caller handle the UI notification.
             } finally {
                 isSyncing = false;
             }
@@ -6689,30 +6636,34 @@
             }
         }
 
+        /**
+         * REFACTORED: Clear logs for the currently selected course.
+         */
         function clearLogs() {
-            if (!isAdmin) return;
-
-            let dialogInstance; // To hold a reference to the dialog
+            if (!isAdmin || !currentCourse || !courseData[currentCourse]) return;
 
             const onConfirmAction = () => {
-                // Get all IDs from the current logs before clearing them.
-                const idsToRemove = logs.map(log => log.id);
-                // Add each of those IDs to the tombstones.
-                idsToRemove.forEach(id => addToTombstones(id));
+                const currentLogs = courseData[currentCourse].logs;
+                const currentTombstones = courseData[currentCourse].tombstones;
 
-                logs = [];
-                saveLogsToLocalStorage();
+                // Add all existing log IDs to the tombstones for syncing the deletion.
+                currentLogs.forEach(log => currentTombstones.add(log.id));
+
+                // Clear the logs array.
+                courseData[currentCourse].logs = [];
+
+                saveCourseToLocalStorage(currentCourse);
                 updateUI();
+
                 if (isOnline && isSignedIn) {
                     syncLogsWithSheet()
-                        .then(() => showNotification('delete', 'Logs Cleared', 'All logs have been removed.'))
+                        .then(() => showNotification('delete', 'Logs Cleared', `All logs for ${currentCourse} have been removed.`))
                         .catch(err => console.error('Error clearing logs:', err));
                 }
             };
 
-            // The showConfirmationDialog will now handle its own closing
             showConfirmationDialog({
-                title: 'Delete logs for this course?',
+                title: `Delete logs for ${currentCourse.replace(/_/g, ' ')}?`,
                 message: 'This will remove all logs for the current course. This action cannot be undone.',
                 confirmText: 'Delete',
                 isDestructive: true,
@@ -7077,12 +7028,20 @@
             });
         }
 
-        // REPLACE your entire old updateLogsList function with this one.
+        /**
+         * REFACTORED: Update the logs list based on the currently selected course.
+         */
         function updateLogsList() {
             const tableContainer = document.querySelector('#scanner-tab .table-container');
             tableContainer.classList.add('reloading');
 
+            // The main data source is now the courseData object for the current course.
+            const currentCourseLogs = courseData[currentCourse]?.logs || [];
+
             setTimeout(() => {
+                // ... (The rest of the function logic is nearly identical, but it now
+                //      operates on 'currentCourseLogs' instead of the old 'logs' variable.)
+
                 if (!currentCourse) {
                     emptyLogs.style.display = 'block';
                     filteredCount.textContent = '0';
@@ -7091,7 +7050,8 @@
                     return;
                 }
 
-                let logsToDisplay = logs;
+                let logsToDisplay = currentCourseLogs;
+
                 if (isSignedIn && !isAdmin && currentUser) {
                     const studentNameNormalised = normalizeName(currentUser.name);
                     logsToDisplay = logs.filter(log => {
@@ -7621,8 +7581,14 @@
                 manual: false
             };
             newLog = touchLogForEdit(newLog, currentUser?.email);
-            logs.unshift(newLog);
-            saveLogsToLocalStorage();
+
+            // Add the new log to the correct course's data.
+            if (!courseData[currentCourse]) {
+                courseData[currentCourse] = { logs: [], tombstones: new Set() };
+            }
+            courseData[currentCourse].logs.unshift(newLog);
+
+            saveCourseToLocalStorage(currentCourse); // Save the updated course data.
             updateUI();
 
             const name = uidToNameMap[serialNumber] || 'Unknown';
