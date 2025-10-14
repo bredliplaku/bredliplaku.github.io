@@ -3204,6 +3204,61 @@
         }
 
         /**
+         * NEW: Adds a +1 hour log to the latest entry for every student present on a given day.
+         * @param {string} dateStr - The date string in "DD-MM-YYYY" format.
+         */
+        function addPlusOneHourToDay(dateStr) {
+            if (!isAdmin || !currentCourse) return;
+
+            const logsForCurrentCourse = courseData[currentCourse].logs;
+            const newLogsToAdd = [];
+
+            // 1. Find all logs on the specified day.
+            const logsOnDay = logsForCurrentCourse.filter(log => {
+                const logDate = new Date(log.timestamp);
+                const day = String(logDate.getDate()).padStart(2, '0');
+                const month = String(logDate.getMonth() + 1).padStart(2, '0');
+                const year = logDate.getFullYear();
+                return `${day}-${month}-${year}` === dateStr;
+            });
+
+            // 2. Group by UID to find the latest log for each student.
+            const latestLogByUid = {};
+            logsOnDay.forEach(log => {
+                if (!latestLogByUid[log.uid] || log.timestamp > latestLogByUid[log.uid].timestamp) {
+                    latestLogByUid[log.uid] = log;
+                }
+            });
+
+            // 3. Create a new log for each student, +1 hour after their last scan.
+            for (const uid in latestLogByUid) {
+                const latestLog = latestLogByUid[uid];
+                const newDate = new Date(latestLog.timestamp);
+                newDate.setHours(newDate.getHours() + 1);
+
+                let newLog = {
+                    uid: uid,
+                    timestamp: newDate.getTime(),
+                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    manual: true
+                };
+                newLog = touchLogForEdit(newLog, currentUser?.email);
+                newLogsToAdd.push(newLog);
+            }
+
+            // 4. Add the new logs and update everything.
+            if (newLogsToAdd.length > 0) {
+                courseData[currentCourse].logs.unshift(...newLogsToAdd);
+                saveCourseToLocalStorage(currentCourse);
+                updateUI();
+                if (isOnline && isSignedIn) syncLogsWithSheet();
+                showNotification('success', 'Bulk Add Complete', `Added a new timestamp for ${newLogsToAdd.length} students on ${dateStr}.`);
+            } else {
+                showNotification('info', 'No Action', `No students to add a new timestamp for on ${dateStr}.`);
+            }
+        }
+
+        /**
          * Adds a new log entry one hour after the latest existing entry for a group.
          * @param {Object} group - The log group to add the time to.
          */
@@ -6467,7 +6522,7 @@
  */
         function showEditLogDialog(group) {
             if (!isAdmin) return;
-            document.body.style.overflow = 'hidden'; // Prevent background scroll
+            document.body.style.overflow = 'hidden';
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
@@ -6520,7 +6575,9 @@
             document.body.appendChild(dialogBackdrop);
 
             const closeDialog = () => {
-                document.body.removeChild(dialogBackdrop);
+                if (document.body.contains(dialogBackdrop)) {
+                    document.body.removeChild(dialogBackdrop);
+                }
                 document.body.style.overflow = '';
             };
 
@@ -6555,15 +6612,11 @@
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         idsToRemove.forEach(id => addToTombstones(id));
-
-                        // FIX: This line now correctly filters the courseData object.
                         courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
-
                         saveCourseToLocalStorage(currentCourse);
                         updateUI();
                         showNotification('success', 'Entry Deleted', 'All timestamps for this entry were removed.');
                         if (isOnline && isSignedIn) syncLogsWithSheet();
-                        closeDialog();
                     }
                 });
             });
@@ -6577,20 +6630,19 @@
                     return;
                 }
 
-                // --- START FIX ---
-                uidToNameMap[group.uid] = newName; // Update the name in the central database mapping
+                uidToNameMap[group.uid] = newName;
 
+                // --- FIX STARTS HERE ---
+                // This entire block is now fully corrected.
                 const logsForCurrentCourse = courseData[currentCourse].logs;
                 const [year, month, day] = newDateStr.split('-').map(Number);
 
-                // Update timestamps for all visible (not deleted) entries
                 const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)');
                 visibleGroups.forEach(groupElement => {
                     const logId = groupElement.getAttribute('data-log-id');
                     const timeInput = groupElement.querySelector('.timestamp-time').value;
                     const [hours, minutes] = timeInput.split(':').map(Number);
 
-                    // Find the log in this course's specific log array.
                     const log = logsForCurrentCourse.find(l => l.id === logId);
                     if (log) {
                         const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
@@ -6599,11 +6651,11 @@
                     }
                 });
 
-                // Handle logs that were marked for deletion.
                 if (logsToDelete.size > 0) {
+                    // This was the line causing the error. It now correctly filters 'logsForCurrentCourse'.
                     courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !logsToDelete.has(log.id));
                 }
-                // --- END FIX ---
+                // --- FIX ENDS HERE ---
 
                 saveCourseToLocalStorage(currentCourse);
                 if (isOnline && isSignedIn) {
