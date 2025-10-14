@@ -66,6 +66,11 @@
             display: none !important;
         }
 
+        #user-avatar {
+            cursor: default;
+            /* This keeps the feature hidden */
+        }
+
         body.is-admin .admin-only {
             display: block !important;
         }
@@ -3057,6 +3062,8 @@
         let nfcAbortController = null;
         let initialisedCourses = new Set();
         let initialPullDone = false;
+        let avatarClickCount = 0;
+        let lastAvatarClickTime = 0;
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -3121,6 +3128,63 @@
             } else {
                 console.log("Waiting for tasks:", Array.from(loadingTasks));
             }
+        }
+
+        /**
+         * NEW: Creates and shows a hidden button to clear all application data.
+         */
+        function showClearDataButton() {
+            // Prevent creating more than one button.
+            if (document.getElementById('hidden-clear-data-btn')) return;
+
+            const userContainer = document.getElementById('user-container');
+            if (!userContainer) return;
+
+            const clearButton = document.createElement('button');
+            clearButton.id = 'hidden-clear-data-btn';
+            clearButton.className = 'btn-red';
+            clearButton.textContent = 'Clear All Local Data';
+            clearButton.title = 'This will delete all locally stored attendance logs and settings.';
+            clearButton.style.marginLeft = '10px'; // Add some space
+
+            clearButton.addEventListener('click', () => {
+                showConfirmationDialog({
+                    title: 'Clear All Application Data?',
+                    message: 'This will remove all locally saved logs, settings, and sign you out. Data on Google Sheets will not be affected. Are you sure?',
+                    confirmText: 'Clear Data',
+                    isDestructive: true,
+                    onConfirm: () => {
+                        clearAllAppData();
+                    }
+                });
+            });
+
+            // Append the button next to the user info.
+            userContainer.querySelector('.user-info').appendChild(clearButton);
+        }
+
+        /**
+         * NEW: Finds and removes all data related to this app from localStorage.
+         */
+        function clearAllAppData() {
+            console.log('Clearing all application data from local storage...');
+            const keysToRemove = [];
+            // Find all keys used by this application.
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('attendance_') || key.startsWith('gapi_') || key.startsWith('eis_pref_') || ['theme', 'logs_sort', 'db_sort', 'last_active_course'].includes(key)) {
+                    keysToRemove.push(key);
+                }
+            }
+
+            // Remove the collected keys.
+            keysToRemove.forEach(key => {
+                console.log(`Removing key: ${key}`);
+                localStorage.removeItem(key);
+            });
+
+            // Refresh the page to apply the changes.
+            window.location.reload();
         }
 
         /**
@@ -3287,6 +3351,27 @@
                     }
                 });
             }
+
+            const userAvatar = document.getElementById('user-avatar');
+            if (userAvatar) {
+                userAvatar.addEventListener('click', () => {
+                    const now = Date.now();
+                    // If clicks are more than 1 second apart, reset the counter.
+                    if (now - lastAvatarClickTime > 1000) {
+                        avatarClickCount = 0;
+                    }
+
+                    lastAvatarClickTime = now;
+                    avatarClickCount++;
+
+                    if (avatarClickCount === 5) {
+                        console.log('Hidden clear data button activated.');
+                        showClearDataButton();
+                        avatarClickCount = 0; // Reset after activation
+                    }
+                });
+            }
+
             if (importExcelBtn) importExcelBtn.addEventListener('click', () => excelInput.click());
             if (excelInput) excelInput.addEventListener('change', handleExcelFile);
             if (filterInput) filterInput.addEventListener('input', handleFilterChange);
