@@ -540,7 +540,7 @@
             display: flex;
             background-color: var(--primary-color);
             color: var(--text-light);
-            padding: 15px 30px;
+            padding: 25px 30px;
             border-radius: 15px;
             text-decoration: none;
             font-size: 1.2em;
@@ -565,16 +565,15 @@
 
         /* The "Stop Scanning" state */
         .big-scan-button.is-scanning {
-            /* This creates the "blue with dark blue tint" effect */
-            background-color: var(--primary-dark);
-            animation: glow-blue 2.5s ease-in-out infinite;
+            background-color: var(--warning-color);
+            animation: glow-amber 2.5s ease-in-out infinite;
             transform: scale(1.0);
             box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
         }
 
         /* Keep the click effect even when in the "Stop" state */
         .big-scan-button.is-scanning:active {
-            background-color: var(--primary-dark);
+            background-color: var(--warning-color);
             transform: scale(0.90);
             filter: brightness(90%);
             animation: none;
@@ -1198,6 +1197,24 @@
             font-size: 0.85em;
         }
 
+        .time-tag.manual {
+            background-color: #fff3e0;
+            /* Light orange */
+            color: #e65100;
+            /* Dark orange text */
+        }
+
+        .time-tag.manual:hover {
+            border-color: #e65100;
+            /* Orange border on hover */
+        }
+
+        .dark-mode .time-tag.manual {
+            background-color: #4a2c0f;
+            /* Dark mode orange */
+            color: #ffcc80;
+        }
+
         .times-cell {
             display: flex;
             flex-wrap: wrap;
@@ -1509,7 +1526,6 @@
             color: #3949ab;
             margin-left: 5px;
             cursor: help;
-            /* Shows the help cursor on hover */
         }
 
         .dark-mode .excused-icon {
@@ -2329,17 +2345,26 @@
             }
         }
 
-        @keyframes glow-blue {
+        @keyframes glow-amber {
             0% {
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2), 0 0 5px rgba(255, 255, 255, 0.5), 0 0 10px var(--primary-color);
+                box-shadow:
+                    0 4px 8px rgba(0, 0, 0, 0.2),
+                    0 0 5px rgba(255, 230, 180, 0.4),
+                    0 0 10px #FFC107;
             }
 
             50% {
-                box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3), 0 0 15px rgba(255, 255, 255, 0.8), 0 0 25px var(--primary-color);
+                box-shadow:
+                    0 6px 12px rgba(0, 0, 0, 0.3),
+                    0 0 15px rgba(255, 230, 180, 0.7),
+                    0 0 25px #FFC107;
             }
 
             100% {
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2), 0 0 5px rgba(255, 255, 255, 0.5), 0 0 10px var(--primary-color);
+                box-shadow:
+                    0 4px 8px rgba(0, 0, 0, 0.2),
+                    0 0 5px rgba(255, 230, 180, 0.4),
+                    0 0 10px #FFC107;
             }
         }
 
@@ -2420,7 +2445,7 @@
                 display: none;
             }
 
-            .day-separator-actions .btn-icon {
+            .day-separator-actions .btn-green {
                 border-top-left-radius: 14px;
                 border-bottom-left-radius: 14px;
             }
@@ -2992,14 +3017,6 @@
                 </div>
             </div>
         </div>
-        <div id="scan-announcement-overlay" style="display: none;">
-            <div class="scan-announcement-content">
-                <div class="scan-announcement-icon"><i class="fas fa-check-circle"></i></div>
-                <div class="scan-announcement-title">Welcome</div>
-                <div id="scan-announcement-name" class="scan-announcement-name"></div>
-                <div class="scan-announcement-subtitle">Attendance Recorded</div>
-            </div>
-        </div>
         <footer class="footer">
             <div class="social-links">
                 <a href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank" rel="noopener noreferrer"><i
@@ -3017,6 +3034,14 @@
     <!-- Notification area -->
     <div id="in-page-notification-area" class="in-page-notifications"></div>
 
+    <div id="scan-announcement-overlay" style="display: none;">
+        <div class="scan-announcement-content">
+            <div class="scan-announcement-icon"><i class="fas fa-check-circle"></i></div>
+            <div class="scan-announcement-title">Welcome</div>
+            <div id="scan-announcement-name" class="scan-announcement-name"></div>
+            <div class="scan-announcement-subtitle">Attendance Recorded</div>
+        </div>
+    </div>
 
     <script>
         // Config
@@ -3058,6 +3083,7 @@
         let lastScannedUID = null;
         let courseIDMap = {}; // Object to store course information - name to ID mapping
         let sheetNameMap = {}; // Maps display names to actual sheet names
+        let excusedUIDs = new Set();
         let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
         let cooldownUIDs = new Set();
         let nfcAbortController = null;
@@ -5395,6 +5421,7 @@
                     if (row.length === 0) return; // Skip empty rows
 
                     let name, uid;
+                    let isExcused = row[3];
 
                     // Auto-detect format from data if headers were ambiguous
                     if (!detectedFormat && row.length >= 2) {
@@ -5453,6 +5480,9 @@
                         // Basic validation
                         if (name.length > 0 && uid.length > 0) {
                             sheetMappings[uid] = name;
+                            if (isExcused === 'TRUE' || isExcused === true) {
+                                excusedUIDs.add(uid);
+                            }
                         } else {
                             console.warn(`Invalid data at row ${index + 2}: name="${name}", uid="${uid}"`);
                         }
@@ -7220,18 +7250,6 @@
                     nameCell.className = 'name-cell name-column';
                     nameCell.textContent = group.name;
 
-                    // Check if any log in this group was manually added or edited.
-                    const wasManuallyModified = group.originalLogs.some(log => log.manual || log.version > 0);
-                    if (wasManuallyModified) {
-                        const manualIndicator = document.createElement('span');
-                        manualIndicator.innerHTML = '<i class="fas fa-pencil-alt"></i>';
-                        manualIndicator.style.marginLeft = '8px';
-                        manualIndicator.style.fontSize = '0.8em';
-                        manualIndicator.style.color = '#757575';
-                        manualIndicator.title = 'This entry was manually added or edited.';
-                        nameCell.appendChild(manualIndicator);
-                    }
-
                     row.appendChild(nameCell);
 
                     if (isAdmin) {
@@ -7251,6 +7269,15 @@
                     group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
+
+                        // --- START FIX ---
+                        // This now checks for the string 'true' or the boolean true.
+                        if (log.manual === true || log.manual === 'true') {
+                            timeTag.classList.add('manual');
+                            timeTag.title = 'Manually Added/Edited Timestamp';
+                        }
+                        // --- END FIX ---
+
                         const timeObj = new Date(log.timestamp);
                         timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
                         timesCell.appendChild(timeTag);
@@ -7397,11 +7424,22 @@
             // Add entries to table
             entries.forEach(([uid, name]) => {
                 const row = document.createElement('tr');
-
-                // Name cell
                 const nameCell = document.createElement('td');
                 nameCell.className = 'name-cell';
                 nameCell.textContent = name;
+
+                // --- START FIX ---
+                if (excusedUIDs.has(uid)) {
+                    const icon = document.createElement('span');
+                    icon.className = 'excused-icon';
+                    icon.innerHTML = '<i class="fas fa-user-check"></i>';
+
+                    icon.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        showNotification('info', 'Excused Absence', `This student has an excused absence for the course.`);
+                    });
+                    nameCell.appendChild(icon);
+                }
 
                 // UID cell
                 const uidCell = document.createElement('td');
