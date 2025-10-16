@@ -210,9 +210,9 @@
                 return; // Move to the next student
             }
 
-            // --- NEW NAME CLEANING LOGIC ---
+            // --- NEW NAME CLEANING LOGIC (WITH FIX) ---
             // This now correctly handles "Name R EX" and "Name R" to get a clean name
-            const cleanName = rawName.replace(/\s+R\s+EX/g, "").replace(/\s+R/g, "").trim();
+            const cleanName = rawName.replace(/\s+R\s+EX$/, "").replace(/\s+R$/, "").trim();
 
             let foundUid = null;
             for (const [uid, name] of Object.entries(nameMap)) {
@@ -242,7 +242,6 @@
             checkboxes.forEach((checkbox, i) => {
                 const hourNumber = i + 1;
                 const isHourAttended = hourNumber <= attendCount;
-                // This logic is now correct based on the CONFIG value you set
                 const shouldBeChecked = CONFIG.checkedMeansAbsent ? !isHourAttended : isHourAttended;
                 if (checkbox.checked !== shouldBeChecked) {
                     checkbox.click();

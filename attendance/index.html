@@ -1216,7 +1216,6 @@
             color: #e65100;
             /* Dark orange text */
             border-style: dashed;
-            cursor: help;
         }
 
         .time-tag.manual.excused:hover {
@@ -4383,14 +4382,38 @@
                             await fetchUserInfo();
                             isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
 
-                            // Load all course and database data from the server at once.
+                            // Load essential data first
                             await Promise.all([
-                                fetchAvailableCourses(),
+                                fetchAvailableCourses(), // This also determines the 'currentCourse'
                                 fetchDatabaseFromSheet()
                             ]);
 
-                            // New: Fetch data for ALL courses.
-                            await loadAllCourseDataFromServer();
+                            // --- PERFORMANCE OPTIMIZATION ---
+                            if (isAdmin) {
+                                // 1. Load the CURRENT active course first for a fast startup.
+                                if (currentCourse) {
+                                    console.log(`Prioritizing data load for active course: ${currentCourse}`);
+                                    const [serverLogs, serverTombs, localData] = await Promise.all([
+                                        fetchLogsFromSheet(currentCourse),
+                                        fetchTombstonesForCourse(currentCourse),
+                                        loadCourseFromLocalStorage(currentCourse)
+                                    ]);
+
+                                    if (!courseData[currentCourse]) courseData[currentCourse] = { logs: [], tombstones: new Set() };
+
+                                    const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
+                                    courseData[currentCourse].logs = mergedLogs;
+                                    saveCourseToLocalStorage(currentCourse);
+                                }
+
+                                // 2. Now that the app is responsive, load all other courses in the background.
+                                // Use setTimeout to ensure it doesn't block the initial UI render/sync.
+                                setTimeout(loadRemainingCoursesInBackground, 500);
+
+                            } else {
+                                // Student path remains the same
+                                await loadAllCourseDataFromServer();
+                            }
 
                         } catch (e) {
                             console.error("Token restore or initial data load failed:", e);
@@ -6626,30 +6649,36 @@
 
                 uidToNameMap[group.uid] = newName;
 
-                // --- FIX for ReferenceError ---
-                // This entire block is now fully corrected.
                 const logsForCurrentCourse = courseData[currentCourse].logs;
                 const [year, month, day] = newDateStr.split('-').map(Number);
 
                 const visibleGroups = dialog.querySelectorAll('.timestamp-edit-group:not(.deleted)');
                 visibleGroups.forEach(groupElement => {
                     const logId = groupElement.getAttribute('data-log-id');
-                    const timeInput = groupElement.querySelector('.timestamp-time').value;
-                    const [hours, minutes] = timeInput.split(':').map(Number);
+                    const timeInput = groupElement.querySelector('.timestamp-time'); // Get the element, not just value
+                    const [hours, minutes] = timeInput.value.split(':').map(Number);
 
                     const log = logsForCurrentCourse.find(l => l.id === logId);
                     if (log) {
                         const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
                         log.timestamp = newTimestampObj.getTime();
+
+                        // --- FIX STARTS HERE ---
+                        // Check if the input field had the manual class and update the log data
+                        if (timeInput.classList.contains('manual-timestamp-input')) {
+                            log.manual = true;
+                        } else {
+                            log.manual = false;
+                        }
+                        // --- FIX ENDS HERE ---
+
                         touchLogForEdit(log, currentUser?.email);
                     }
                 });
 
                 if (logsToDelete.size > 0) {
-                    // This was the line causing the error. It now correctly filters 'logsForCurrentCourse'.
                     courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !logsToDelete.has(log.id));
                 }
-                // --- END FIX ---
 
                 saveCourseToLocalStorage(currentCourse);
                 if (isOnline && isSignedIn) {
@@ -7039,8 +7068,8 @@
         }
 
         /**
- * CORRECTED: Adds a new log entry one hour after the latest existing entry.
- */
+           * CORRECTED: Adds a new log entry one hour after the latest existing entry.
+           */
         function addPlusOneHourLog(group) {
             if (!isAdmin) return;
 
@@ -7056,8 +7085,12 @@
             };
             newLog = touchLogForEdit(newLog, currentUser?.email);
 
+            // FIX: Add log to the correct course data array
             courseData[currentCourse].logs.unshift(newLog);
+
+            // FIX: Use the correct local storage function
             saveCourseToLocalStorage(currentCourse);
+
             updateUI();
 
             if (isOnline && isSignedIn && isAdmin) {
@@ -7234,7 +7267,6 @@
                         // Check if the log was manually added/edited.
                         if (log.manual === true || log.manual === 'true') {
                             timeTag.classList.add('manual'); // This adds your orange styling.
-                            timeTag.title = 'Manually Added/Edited Timestamp';
 
                             // Since it's manual, we also treat it as an excused absence.
                             timeTag.classList.add('excused'); // This adds the dashed border and help cursor.
@@ -7242,7 +7274,7 @@
                             // Add the click listener to show the notification.
                             timeTag.addEventListener('click', (e) => {
                                 e.stopPropagation();
-                                showNotification('info', 'Excused Absence', `${group.name} has been excused for this hour.`);
+                                showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
                             });
                         }
 
@@ -7300,6 +7332,39 @@
                     isChangingCourses = false; // Disarm the animation for the next update.
                 }
             }, 150);
+        }
+
+        /**
+         * NEW: Loads data for all non-active courses in the background.
+         */
+        async function loadRemainingCoursesInBackground() {
+            if (!isAdmin) return;
+
+            console.log(`Starting background fetch for remaining courses...`);
+            const remainingCourses = availableCourses.filter(c => c !== currentCourse);
+
+            const remainingCoursePromises = remainingCourses.map(async (courseName) => {
+                try {
+                    const [serverLogs, serverTombs, localData] = await Promise.all([
+                        fetchLogsFromSheet(courseName),
+                        fetchTombstonesForCourse(courseName),
+                        loadCourseFromLocalStorage(courseName)
+                    ]);
+
+                    if (!courseData[courseName]) courseData[courseName] = { logs: [], tombstones: new Set() };
+                    const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
+                    courseData[courseName].logs = mergedLogs;
+
+                    saveCourseToLocalStorage(courseName);
+                } catch (error) {
+                    console.error(`Failed to load background data for course: ${courseName}`, error);
+                    // Fall back to local data on error
+                    courseData[courseName] = await loadCourseFromLocalStorage(courseName);
+                }
+            });
+
+            await Promise.all(remainingCoursePromises);
+            console.log("Finished loading data for all remaining courses in the background.");
         }
 
         /**
