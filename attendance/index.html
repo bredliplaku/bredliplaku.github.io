@@ -409,7 +409,11 @@
             text-decoration: none;
             font-size: 0.9em;
             font-weight: 500;
-            transition: transform 0.1s ease-out, box-shadow 0.15s ease-out, background-color 0.2s, color 0.2s;
+            transition: transform 0.1s ease-out,
+                box-shadow 0.3s ease-out,
+                background-color 0.3s,
+                color 0.3s,
+                border-color 0.3s ease-out;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
             border: 2px solid transparent;
             cursor: pointer;
@@ -595,8 +599,11 @@
             /* Prevents layout shift on hover */
             box-shadow: 0 3px 5px rgba(0, 0, 0, 0.12);
             /* Standard shadow */
-            transition: background-color 0.15s ease-out, box-shadow 0.15s ease-out, border-color 0.15s ease-out, transform 0.15s ease-out;
-            /* Faster, snappier transition */
+            transition: background-color 0.25s ease-out,
+                box-shadow 0.3s ease-out,
+                border-color 0.3s ease-out,
+                transform 0.15s ease-out;
+            /* Keep transform snappy */
         }
 
         button,
@@ -2590,6 +2597,54 @@
                 /* Close the gap from hidden header items */
             }
 
+            #scanner-tab .table-container {
+                transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            /* Define the 'reloading' state */
+            #scanner-tab .table-container.reloading {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+
+            /* --- Animation Definitions --- */
+
+            /* Animation for Light Mode */
+            @keyframes highlight-fade {
+                from {
+                    background-color: rgba(92, 107, 192, 0.2);
+                }
+
+                to {
+                    background-color: transparent;
+                }
+            }
+
+            /* A separate animation for Dark Mode with different colours */
+            @keyframes highlight-fade-dark {
+                from {
+                    background-color: rgba(92, 107, 192, 0.4);
+                }
+
+                to {
+                    background-color: transparent;
+                }
+            }
+
+            /* --- Animation Application --- */
+
+            /* Apply the correct animation based on the theme */
+            .new-item-flash {
+                animation: highlight-fade 1.5s ease-out;
+            }
+
+            .dark-mode .new-item-flash {
+                animation-name: highlight-fade-dark;
+                /* Just change the name here */
+            }
+
             .sync-auth-container {
                 display: flex;
                 flex-direction: row;
@@ -2652,6 +2707,18 @@
 
         body.is-loading {
             overflow: hidden;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
         }
 
         /* --- Skeleton Loader Styles --- */
@@ -6600,7 +6667,11 @@
             <input type="date" id="edit-date" class="form-control" value="${formattedDate}">
         </div>
         <hr style="border: none; border-top: 1px solid #eee; margin: 10px 0;">
-        <div id="timestamp-container"><button id="delete-all-logs-btn" class="btn-red btn-sm" style="display:block; margin-bottom:10px; margin-left:auto">Delete All</button> ${timestampFields}</div>
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 5px; margin-bottom: 10px;">
+    <button id="add-new-time-btn" class="btn-green btn-sm">Add New Time</button>
+    <button id="delete-all-logs-btn" class="btn-red btn-sm">Delete All</button>
+</div>
+<div id="timestamp-container">${timestampFields}</div>
 <div class="dialog-actions">
     <button id="cancel-edit-log-btn" class="btn-red">Cancel</button>
     <button id="save-edit-log-btn" class="btn-green">Save Changes</button>
@@ -6608,6 +6679,44 @@
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
+
+            const timestampContainer = document.getElementById('timestamp-container');
+
+            document.getElementById('add-new-time-btn').addEventListener('click', () => {
+                const allTimes = timestampContainer.querySelectorAll('.timestamp-time');
+                let newTimeValue = '12:00';
+
+                // Default the new time to 1 hour after the latest existing time
+                if (allTimes.length > 0) {
+                    const latestTime = Array.from(allTimes).reduce((latest, current) => {
+                        return current.value > latest ? current.value : latest;
+                    }, '00:00');
+
+                    const [hours, minutes] = latestTime.split(':').map(Number);
+                    const nextHour = (hours + 1) % 24;
+                    newTimeValue = `${String(nextHour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+                }
+
+                const newIndex = Date.now(); // Unique index for the new element
+                const newTimestampGroup = document.createElement('div');
+                newTimestampGroup.className = 'timestamp-edit-group new-item-flash'; // Add a class for animation
+                newTimestampGroup.dataset.isNew = "true"; // Mark it as a new, unsaved entry
+                newTimestampGroup.innerHTML = `
+        <div class="form-group">
+            <label for="timestamp-time-${newIndex}">New Time:</label>
+            <input type="time" id="timestamp-time-${newIndex}" class="form-control timestamp-time manual-timestamp-input" value="${newTimeValue}">
+            <button class="delete-time-btn btn-red btn-icon" title="Remove">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>`;
+
+                timestampContainer.appendChild(newTimestampGroup);
+
+                // Make the new delete button work
+                newTimestampGroup.querySelector('.delete-time-btn').addEventListener('click', function () {
+                    this.closest('.timestamp-edit-group').remove();
+                });
+            });
 
             const closeDialog = () => {
                 if (document.body.contains(dialogBackdrop)) {
@@ -6697,6 +6806,24 @@
                 if (logsToDelete.size > 0) {
                     courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !logsToDelete.has(log.id));
                 }
+
+                const newTimestampGroups = dialog.querySelectorAll('.timestamp-edit-group[data-is-new="true"]');
+                newTimestampGroups.forEach(newGroup => {
+                    const timeValue = newGroup.querySelector('.timestamp-time').value;
+                    const [hours, minutes] = timeValue.split(':').map(Number);
+                    const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
+
+                    let newLog = {
+                        uid: group.uid,
+                        timestamp: newTimestampObj.getTime(),
+                        id: Date.now() + Math.random().toString(36).substr(2, 9),
+                        manual: true // All newly added times are manual
+                    };
+                    newLog = touchLogForEdit(newLog, currentUser?.email);
+
+                    // Add the new log to the main data array
+                    courseData[currentCourse].logs.unshift(newLog);
+                });
 
                 saveCourseToLocalStorage(currentCourse);
                 if (isOnline && isSignedIn) {
@@ -7689,6 +7816,14 @@
                 lastScannedUID = serialNumber;
                 playSound(true);
                 updateAuthUI(); // This function will display the message with the UID.
+                setTimeout(() => {
+                    const firstRow = logsTbody.querySelector('tr:not(.day-separator)');
+                    if (firstRow) {
+                        firstRow.classList.add('new-item-flash');
+                        // Remove the class after the animation is done so it doesn't interfere with hover states
+                        setTimeout(() => firstRow.classList.remove('new-item-flash'), 1500);
+                    }
+                }, 200); // Small delay to ensure the DOM has updated
                 return; // Stop here for guests.
             }
             // --- END FIX ---
