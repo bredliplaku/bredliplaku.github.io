@@ -3029,7 +3029,10 @@
                     </div>
 
                     <div id="empty-logs" class="empty-logs">
-                        <i class="fas fa-info-circle"></i> Please select a course to view attendance logs.
+                        <i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                        <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>
+                        <p style="font-size: 0.9em; color: #999;">Start scanning or select a different course to see the
+                            history.</p>
                     </div>
                 </div>
             </div>
@@ -3081,8 +3084,10 @@
                             </tbody>
                         </table>
                         <div id="empty-database" class="empty-logs" style="display: none;">
-                            <i class="fas fa-info-circle"></i> No database entries yet. Please sign in as admin to view
-                            and manage the database.
+                            <i class="fas fa-database" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                            <p style="font-size: 1.1em; margin-bottom: 5px;">The database is empty.</p>
+                            <p style="font-size: 0.9em; color: #999;">Import an Excel file or add a new entry to get
+                                started.</p>
                         </div>
                     </div>
                 </div>
@@ -3479,6 +3484,51 @@
                 });
             }
 
+            logsTbody.addEventListener('click', (event) => {
+                // Find the closest parent row of whatever was clicked
+                const targetRow = event.target.closest('tr[data-key]');
+                if (!targetRow) return; // Exit if the click wasn't on a valid log row
+
+                // Get the unique key from the row
+                const key = targetRow.dataset.key;
+
+                // Re-create the grouped data to find the specific group object for this key
+                const logsForCurrentCourse = getLogsForCurrentUser();
+                const grouped = {};
+                logsForCurrentCourse.forEach(log => {
+                    const dateObj = new Date(log.timestamp);
+                    if (isNaN(dateObj.getTime())) return;
+                    const day = String(dateObj.getDate()).padStart(2, '0');
+                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const year = dateObj.getFullYear();
+                    const date = `${day}-${month}-${year}`;
+                    const groupKey = `${date}_${log.uid}`;
+                    if (!grouped[groupKey]) {
+                        grouped[groupKey] = { key: groupKey, date, dateObj, uid: log.uid, name: uidToNameMap[log.uid] || 'Unknown', originalLogs: [] };
+                    }
+                    grouped[groupKey].originalLogs.push(log);
+                });
+                const group = grouped[key];
+
+                if (!group) return; // Exit if we couldn't find the group data for some reason
+
+                // Now, check which button inside the row was clicked
+                const addUserBtn = event.target.closest('.btn-green i.fa-user-plus');
+                const addTimeBtn = event.target.closest('.btn-green i.fa-plus');
+                const deleteBtn = event.target.closest('.btn-red');
+                const editBtn = event.target.closest('.btn-blue');
+
+                if (addUserBtn) {
+                    showAddEntryFromLog(group.uid);
+                } else if (addTimeBtn) {
+                    addPlusOneHourLog(group);
+                } else if (deleteBtn) {
+                    confirmDeleteLog(group);
+                } else if (editBtn) {
+                    showEditLogDialog(group);
+                }
+            });
+
             if (userAvatar) {
                 userAvatar.addEventListener('click', () => {
                     // This feature is for admins only
@@ -3506,7 +3556,7 @@
 
             if (importExcelBtn) importExcelBtn.addEventListener('click', () => excelInput.click());
             if (excelInput) excelInput.addEventListener('change', handleExcelFile);
-            if (filterInput) filterInput.addEventListener('input', handleFilterChange);
+            if (filterInput) filterInput.addEventListener('input', debounce(handleFilterChange, 300));
             if (sortSelect) sortSelect.addEventListener('change', handleSortChange);
             if (dbFilterInput) dbFilterInput.addEventListener('input', handleDbFilterChange);
             if (dbSortSelect) dbSortSelect.addEventListener('change', handleDbSortChange);
@@ -7246,8 +7296,28 @@
         }
 
         /**
-         * REFACTORED: Update the logs list based on the currently selected course.
-         */
+ * Creates a debounced function that delays invoking func until after wait milliseconds have elapsed
+ * since the last time the debounced function was invoked.
+ * @param {Function} func The function to debounce.
+ * @param {number} wait The number of milliseconds to delay.
+ * @returns {Function} Returns the new debounced function.
+ */
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        /**
+ * REFACTORED: Update the logs list based on the currently selected course.
+ * This version uses data-attributes for event delegation and no longer creates listeners in a loop.
+ */
         function updateLogsList() {
             const tableContainer = document.querySelector('#scanner-tab .table-container');
             if (isChangingCourses) {
@@ -7259,9 +7329,13 @@
 
             setTimeout(() => {
                 if (!currentCourse) {
-                    emptyLogs.style.display = 'block';
-                    filteredCount.textContent = '0';
                     logsTbody.innerHTML = '';
+                    filteredCount.textContent = '0';
+                    // Use the improved empty state message
+                    emptyLogs.innerHTML = `<i class="fas fa-hand-pointer" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                                   <p style="font-size: 1.1em; margin-bottom: 5px;">Please select a course.</p>
+                                   <p style="font-size: 0.9em; color: #999;">Choose a course above to view its attendance history.</p>`;
+                    emptyLogs.style.display = 'block';
                     tableContainer.classList.remove('reloading');
                     return;
                 }
@@ -7286,9 +7360,17 @@
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
                     const uid = log.uid;
-                    const key = `${date}_${uid}`;
+                    const key = `${date}_${uid}`; // This key uniquely identifies a student on a specific day.
                     if (!grouped[key]) {
-                        grouped[key] = { date, dateObj: new Date(year, month - 1, day), uid, name: uidToNameMap[uid] || 'Unknown', originalLogs: [] };
+                        // IMPORTANT: We store the 'key' inside the group object itself.
+                        grouped[key] = {
+                            key: key,
+                            date,
+                            dateObj: new Date(year, month - 1, day),
+                            uid,
+                            name: uidToNameMap[uid] || 'Unknown',
+                            originalLogs: []
+                        };
                     }
                     grouped[key].originalLogs.push(log);
                 });
@@ -7323,8 +7405,17 @@
                     return 0;
                 });
 
-                emptyLogs.style.display = result.length > 0 ? 'none' : 'block';
                 logsTbody.innerHTML = '';
+
+                if (result.length === 0) {
+                    emptyLogs.innerHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                                   <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>
+                                   <p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
+                    emptyLogs.style.display = 'block';
+                } else {
+                    emptyLogs.style.display = 'none';
+                }
+
                 let currentDay = null;
 
                 result.forEach((group) => {
@@ -7335,59 +7426,51 @@
                             const separatorRow = document.createElement('tr');
                             separatorRow.className = 'day-separator';
                             const separatorCell = document.createElement('td');
-                            separatorCell.colSpan = 5; // Set the span on the cell
-
-                            // Create a wrapper div for the flex content
+                            separatorCell.colSpan = 5;
                             const flexWrapper = document.createElement('div');
                             flexWrapper.className = 'day-separator-content';
-
                             const dateText = document.createElement('span');
                             dateText.className = 'day-separator-date';
                             dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
                             flexWrapper.appendChild(dateText);
-
-                            // Create a container for the action buttons
                             const buttonContainer = document.createElement('div');
-                            buttonContainer.className = 'day-separator-actions'; // A new class for styling
-
-                            const dateForButton = thisDay; // e.g., "12-10-2025"
-
-                            // 1. Create the new "Add to EIS" button
+                            buttonContainer.className = 'day-separator-actions';
+                            const dateForButton = thisDay;
                             const eisBtn = document.createElement('button');
                             eisBtn.className = 'btn-sm eis-day-btn';
-                            eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Add to EIS'; // Add text
+                            eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Add to EIS';
                             eisBtn.title = 'Add to EIS for this day';
+                            eisBtn.setAttribute('aria-label', `Add attendance for ${group.date} to EIS`);
                             eisBtn.onclick = (e) => {
                                 e.stopPropagation();
-                                showDirectEisExportDialog(dateForButton); // Pass the specific date
+                                showDirectEisExportDialog(dateForButton);
                             };
                             buttonContainer.appendChild(eisBtn);
-
-                            // 2. Create the existing "Add +1 Hour" button
                             const bulkAddBtn = document.createElement('button');
                             bulkAddBtn.className = 'btn-green btn-icon';
                             bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
-                            bulkAddBtn.title = `Add +1 Hour to All Students on This Day`;
-                            bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
+                            bulkAddBtn.title = 'Add +1 Hour to All Students on This Day';
+                            bulkAddBtn.setAttribute('aria-label', `Add a plus one hour log to all students on ${group.date}`);
+                            bulkAddBtn.onclick = (e) => {
+                                e.stopPropagation();
+                                addPlusOneHourToDay(dateForButton);
+                            };
                             buttonContainer.appendChild(bulkAddBtn);
-
                             flexWrapper.appendChild(buttonContainer);
-
-                            // These three lines were missing and are the cause of the problem.
                             separatorCell.appendChild(flexWrapper);
                             separatorRow.appendChild(separatorCell);
                             logsTbody.appendChild(separatorRow);
-                            // --- END OF FIX ---
                         }
                     }
 
                     const row = document.createElement('tr');
+                    row.dataset.key = group.key;
                     if (group.name === 'Unknown') row.classList.add('unknown-row');
 
+                    // --- The rest of the function creates the cells as before ---
                     const nameCell = document.createElement('td');
                     nameCell.className = 'name-cell name-column';
                     nameCell.textContent = group.name;
-
                     row.appendChild(nameCell);
 
                     if (isAdmin) {
@@ -7407,22 +7490,13 @@
                     group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
-
-                        // --- START OF CONSOLIDATED FIX ---
-                        // Check if the log was manually added/edited.
                         if (log.manual === true || log.manual === 'true') {
-                            timeTag.classList.add('manual'); // This adds your orange styling.
-
-                            // Since it's manual, we also treat it as an excused absence.
-                            timeTag.classList.add('excused'); // This adds the dashed border and help cursor.
-
-                            // Add the click listener to show the notification.
+                            timeTag.classList.add('manual', 'excused');
                             timeTag.addEventListener('click', (e) => {
                                 e.stopPropagation();
                                 showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
                             });
                         }
-
                         const timeObj = new Date(log.timestamp);
                         timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
                         timesCell.appendChild(timeTag);
@@ -7435,43 +7509,43 @@
                         const actionsWrapper = document.createElement('div');
                         actionsWrapper.className = 'actions-cell-content';
 
-                        // --- START OF LOGIC FIX ---
                         if (group.name === 'Unknown') {
                             const addUserBtn = document.createElement('button');
                             addUserBtn.className = 'btn-green btn-icon';
                             addUserBtn.title = 'Add to Database';
+                            addUserBtn.setAttribute('aria-label', `Add unknown UID ${group.uid} to database`);
                             addUserBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
-                            addUserBtn.addEventListener('click', (e) => { e.stopPropagation(); showAddEntryFromLog(group.uid); });
                             actionsWrapper.appendChild(addUserBtn);
                         }
 
                         const addTimeBtn = document.createElement('button');
                         addTimeBtn.className = 'btn-green btn-icon';
                         addTimeBtn.title = 'Add +1 Hour';
+                        addTimeBtn.setAttribute('aria-label', `Add another hour for ${group.name}`);
                         addTimeBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
-                        addTimeBtn.addEventListener('click', (e) => { e.stopPropagation(); addPlusOneHourLog(group); });
                         actionsWrapper.appendChild(addTimeBtn);
 
                         const deleteBtn = document.createElement('button');
                         deleteBtn.className = 'btn-red btn-icon';
                         deleteBtn.title = 'Delete Latest Timestamp';
+                        deleteBtn.setAttribute('aria-label', `Delete latest timestamp for ${group.name}`);
                         deleteBtn.innerHTML = '<i class="fa-solid fa-minus"></i>';
-                        deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); confirmDeleteLog(group); });
                         actionsWrapper.appendChild(deleteBtn);
 
                         const editBtn = document.createElement('button');
                         editBtn.className = 'btn-blue btn-icon';
                         editBtn.title = 'Edit';
+                        editBtn.setAttribute('aria-label', `Edit entry for ${group.name}`);
                         editBtn.innerHTML = '<i class="fa-solid fa-pencil"></i>';
-                        editBtn.addEventListener('click', (e) => { e.stopPropagation(); showEditLogDialog(group); });
                         actionsWrapper.appendChild(editBtn);
 
                         actionsCell.appendChild(actionsWrapper);
                         row.appendChild(actionsCell);
-                        // --- END OF LOGIC FIX ---
                     }
                     logsTbody.appendChild(row);
                 });
+
+                // This removes the 'reloading' class, triggering the fade-in animation.
                 tableContainer.classList.remove('reloading');
                 if (isChangingCourses) {
                     isChangingCourses = false; // Disarm the animation for the next update.
