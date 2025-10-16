@@ -1192,6 +1192,24 @@
             font-weight: 500;
         }
 
+        .time-tag.excused {
+            border-style: dashed;
+            cursor: help;
+        }
+
+        .manual-timestamp-input {
+            border-color: #fb8c00 !important;
+            /* Orange border */
+            box-shadow: 0 0 0 3px rgba(251, 140, 0, 0.1) !important;
+        }
+
+        .manual-timestamp-input:hover,
+        .manual-timestamp-input:focus {
+            border-color: #e65100 !important;
+            /* Darker orange on hover/focus */
+            box-shadow: 0 0 0 3px rgba(251, 140, 0, 0.2) !important;
+        }
+
         .time-tag .date-cell {
             white-space: nowrap;
             font-size: 0.85em;
@@ -5408,76 +5426,22 @@
 
                 // Process rows based on detected or inferred format
                 rows.forEach((row, index) => {
-                    if (row.length === 0) return; // Skip empty rows
-
                     let name, uid;
-                    let isExcused = row[3];
-
-                    // Auto-detect format from data if headers were ambiguous
-                    if (!detectedFormat && row.length >= 2) {
-                        // Check if first column looks like an index (number)
-                        if (!isNaN(parseInt(row[0])) && row.length >= 3) {
-                            detectedFormat = 'index-name-uid';
-                        } else if (row[0].length > 20 && row[1].length <= 20) {
-                            // First column is long (likely name), second is short (likely UID)
-                            detectedFormat = 'name-uid';
-                        } else if (row[1].length > 20 && row[0].length <= 20) {
-                            // First column is short (likely UID), second is long (likely name)
-                            detectedFormat = 'uid-name';
-                        } else {
-                            // Default assumption
-                            detectedFormat = 'name-uid';
-                        }
-                        console.log(`Auto-detected format from row ${index + 2}: ${detectedFormat}`);
+                    // This logic is now simplified and no longer looks for column D
+                    if (row.length >= 3 && !isNaN(parseInt(row[0]))) { // index-name-uid format
+                        name = row[1];
+                        uid = row[2];
+                    } else if (row.length >= 2) { // fallback name-uid
+                        name = row[0];
+                        uid = row[1];
                     }
 
-                    // Parse based on detected format
-                    switch (detectedFormat) {
-                        case 'index-name-uid':
-                            if (row.length >= 3) {
-                                name = row[1];
-                                uid = row[2];
-                            }
-                            break;
-                        case 'name-uid':
-                            if (row.length >= 2) {
-                                name = row[0];
-                                uid = row[1];
-                            }
-                            break;
-                        case 'uid-name':
-                            if (row.length >= 2) {
-                                uid = row[0];
-                                name = row[1];
-                            }
-                            break;
-                        default:
-                            // Try standard format first
-                            if (row.length >= 3 && !isNaN(parseInt(row[0]))) {
-                                name = row[1];
-                                uid = row[2];
-                            } else if (row.length >= 2) {
-                                name = row[0];
-                                uid = row[1];
-                            }
-                    }
-
-                    // Clean and validate
                     if (name && uid) {
                         name = String(name).trim();
                         uid = String(uid).trim();
-
-                        // Basic validation
                         if (name.length > 0 && uid.length > 0) {
                             sheetMappings[uid] = name;
-                            if (isExcused === 'TRUE' || isExcused === true) {
-                                excusedUIDs.add(uid);
-                            }
-                        } else {
-                            console.warn(`Invalid data at row ${index + 2}: name="${name}", uid="${uid}"`);
                         }
-                    } else {
-                        console.warn(`Could not parse row ${index + 2}:`, row);
                     }
                 });
 
@@ -5663,7 +5627,7 @@
         async function fetchLogsFromSheet(courseName) {
             if (!courseName) return [];
             const sheetName = getSheetNameForCourse(courseName);
-            const range = `${formatSheetName(sheetName)}!A2:G`;
+            const range = `${formatSheetName(sheetName)}!A2:H`; // Read up to column H
 
             const { result } = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: LOGS_SPREADSHEET_ID,
@@ -5672,7 +5636,7 @@
 
             const rows = result.values || [];
             return rows.map(r => {
-                const [uid, tsISO, id, manual, version, updISO, updatedBy] = r;
+                const [uid, tsISO, id, manual, version, updISO, updatedBy, isExcused] = r;
                 return {
                     uid: String(uid || ''),
                     timestamp: tsISO ? Date.parse(tsISO) : 0,
@@ -5680,7 +5644,8 @@
                     manual: manual === 'true',
                     version: version != null ? Number(version) : 0,
                     updatedAt: updISO ? Date.parse(updISO) : 0,
-                    updatedBy: updatedBy || ''
+                    updatedBy: updatedBy || '',
+                    isExcused: isExcused === 'TRUE' || isExcused === true // Add the new property
                 };
             }).filter(l => l.id && Number.isFinite(l.timestamp));
         }
@@ -5729,7 +5694,8 @@
                 log.manual ? 'true' : 'false',
                 Number(log.version || 0),
                 new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
-                String(log.updatedBy || '')
+                String(log.updatedBy || ''),
+                log.isExcused ? 'TRUE' : 'FALSE' // Add the new 'Excused' column (H)
             ];
         }
 
@@ -6562,16 +6528,22 @@
             group.originalLogs.forEach((log, index) => {
                 const timeObj = new Date(log.timestamp);
                 const formattedTime = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
+
+                // --- START FIX ---
+                // Check if the log is manual and add the class if it is.
+                const manualClass = (log.manual === true || log.manual === 'true') ? 'manual-timestamp-input' : '';
+                // --- END FIX ---
+
                 timestampFields += `
-            <div class="timestamp-edit-group" data-log-id="${log.id}">
-                <div class="form-group">
-                    <label for="timestamp-time-${index}">Hour ${index + 1}:</label>
-                    <input type="time" id="timestamp-time-${index}" class="form-control timestamp-time" value="${formattedTime}">
-                    <button class="delete-time-btn btn-red btn-icon" data-index="${index}" title="Delete Timestamp">
-        <i class="fas fa-trash"></i>
-    </button>
-                </div>
-            </div>`;
+<div class="timestamp-edit-group" data-log-id="${log.id}">
+    <div class="form-group">
+        <label for="timestamp-time-${index}">Hour ${index + 1}:</label>
+        <input type="time" id="timestamp-time-${index}" class="form-control timestamp-time ${manualClass}" value="${formattedTime}">
+        <button class="delete-time-btn btn-red btn-icon" data-index="${index}" title="Delete Timestamp">
+            <i class="fas fa-trash"></i>
+        </button>
+    </div>
+</div>`;
             });
 
             dialog.innerHTML = `
@@ -7260,13 +7232,20 @@
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
 
-                        // --- START FIX ---
-                        // This now checks for the string 'true' or the boolean true.
                         if (log.manual === true || log.manual === 'true') {
                             timeTag.classList.add('manual');
-                            timeTag.title = 'Excused Absence';
+                            timeTag.title = 'Manually Added/Edited Timestamp';
                         }
-                        // --- END FIX ---
+
+                        // --- START NEW LOGIC ---
+                        if (log.isExcused) {
+                            timeTag.classList.add('excused');
+                            timeTag.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                showNotification('info', 'Excused Absence', `${group.name} has been excused for this hour.`);
+                            });
+                        }
+                        // --- END NEW LOGIC ---
 
                         const timeObj = new Date(log.timestamp);
                         timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
@@ -7475,7 +7454,19 @@
             updateDatabaseStatus();
             updatePageTitle();
 
-            // FIX: Get logs from the courseData object for the current course.
+            // --- START FIX ---
+            // This logic ensures the course buttons are correctly hidden when on the database tab.
+            const activeTabId = document.querySelector('.tab.active')?.dataset.tab;
+            const courseButtonsContainer = document.getElementById('course-buttons-container');
+            if (courseButtonsContainer) {
+                if (activeTabId === 'database-tab') {
+                    courseButtonsContainer.style.display = 'none';
+                } else {
+                    courseButtonsContainer.style.display = 'flex';
+                }
+            }
+            // --- END FIX ---
+
             const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
 
             // Update total scans and last scan info
@@ -7612,10 +7603,19 @@
          * @param {Object} event - The NFC reading event.
          */
         async function handleNfcReading({ serialNumber }) {
+            // For non-signed-in users, just show the UID and stop.
+            if (!isSignedIn) {
+                lastScannedUID = serialNumber;
+                playSound(true);
+                updateAuthUI(); // This function will display the message with the UID.
+                return; // Stop here for guests.
+            }
+            // --- END FIX ---
+
             if (isSignedIn && !isAdmin) {
-                playSound(false); // Play an error sound for feedback.
+                playSound(false);
                 showNotification('error', 'Action Not Allowed', 'Only administrators can record attendance.');
-                return; // Stop the function immediately.
+                return;
             }
 
             // COOLDOWN LOGIC: Check if this card's UID was just scanned.
