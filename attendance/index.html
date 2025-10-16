@@ -71,6 +71,13 @@
             /* This keeps the feature hidden */
         }
 
+        /* Admin-only avatar border */
+        body.is-admin .user-avatar {
+            border: 2px solid var(--primary-color);
+            box-sizing: border-box;
+            /* Prevents the layout from shifting */
+        }
+
         body.is-admin .admin-only {
             display: block !important;
         }
@@ -3161,38 +3168,6 @@
             }
         }
 
-        /**
-         * NEW: Creates and shows a hidden button to clear all application data.
-         */
-        function showClearDataButton() {
-            // Prevent creating more than one button.
-            if (document.getElementById('hidden-clear-data-btn')) return;
-
-            const userContainer = document.getElementById('user-container');
-            if (!userContainer) return;
-
-            const clearButton = document.createElement('button');
-            clearButton.id = 'hidden-clear-data-btn';
-            clearButton.className = 'btn-red';
-            clearButton.textContent = 'Clear All Local Data';
-            clearButton.title = 'This will delete all locally stored attendance logs and settings.';
-            clearButton.style.marginLeft = '10px'; // Add some space
-
-            clearButton.addEventListener('click', () => {
-                showConfirmationDialog({
-                    title: 'Clear All Application Data?',
-                    message: 'This will remove all locally saved logs, settings, and sign you out. Data on Google Sheets will not be affected. Are you sure?',
-                    confirmText: 'Clear Data',
-                    isDestructive: true,
-                    onConfirm: () => {
-                        clearAllAppData();
-                    }
-                });
-            });
-
-            // Append the button next to the user info.
-            userContainer.querySelector('.user-info').appendChild(clearButton);
-        }
 
         /**
          * NEW: Finds and removes all data related to this app from localStorage.
@@ -3439,20 +3414,27 @@
             }
 
             const userAvatar = document.getElementById('user-avatar');
+            const userAvatar = document.getElementById('user-avatar');
             if (userAvatar) {
                 userAvatar.addEventListener('click', () => {
+                    // This feature is for admins only
+                    if (!isAdmin) return;
+
                     const now = Date.now();
-                    // If clicks are more than 1 second apart, reset the counter.
                     if (now - lastAvatarClickTime > 1000) {
-                        avatarClickCount = 0;
+                        avatarClickCount = 0; // Reset if clicks are too far apart
                     }
 
                     lastAvatarClickTime = now;
                     avatarClickCount++;
 
                     if (avatarClickCount === 5) {
-                        console.log('Hidden clear data button activated.');
-                        showClearDataButton();
+                        const clearCacheBtn = document.getElementById('clear-cache-btn');
+                        if (clearCacheBtn) {
+                            // Reveal the hidden button
+                            clearCacheBtn.style.display = 'inline-block';
+                            showNotification('info', 'Cache Button Unlocked', 'The clear cache button is now visible.');
+                        }
                         avatarClickCount = 0; // Reset after activation
                     }
                 });
@@ -4412,7 +4394,13 @@
 
                             } else {
                                 // Student path remains the same
-                                await loadAllCourseDataFromServer();
+                                if (isAdmin) {
+                                    // For admins, load all data with merge capabilities.
+                                    await loadAllCourseDataFromServer();
+                                } else {
+                                    // For students, load server data into their specific cache.
+                                    await loadAllCourseLogsForStudent();
+                                }
                             }
 
                         } catch (e) {
@@ -4447,6 +4435,38 @@
                     showNotification('error', 'API Error', 'Failed to initialize Google API.');
                 });
             });
+        }
+
+        /**
+         * NEW: Creates and manages the 'Clear Cache' button for admins.
+         * The button is created hidden and revealed via another action.
+         */
+        function setupClearDataButton() {
+            const userInfo = document.querySelector('.user-info');
+            const logoutBtn = document.getElementById('logout-btn');
+            if (!userInfo || !logoutBtn) return;
+
+            // Remove any old button to prevent duplicates
+            const existingBtn = document.getElementById('clear-cache-btn');
+            if (existingBtn) existingBtn.remove();
+
+            if (isAdmin) {
+                const clearButton = document.createElement('button');
+                clearButton.id = 'clear-cache-btn';
+                clearButton.className = 'btn-red btn-icon';
+                clearButton.title = 'Clear Cache and Refresh';
+                clearButton.innerHTML = '<i class="fa-solid fa-bomb"></i>';
+
+                // Hide the button by default
+                clearButton.style.display = 'none';
+
+                clearButton.addEventListener('click', () => {
+                    // Call the function directly without a confirmation dialog
+                    clearAllAppData();
+                });
+
+                userInfo.insertBefore(clearButton, logoutBtn);
+            }
         }
 
         /**
@@ -4865,6 +4885,8 @@
 
             // Add class to body to trigger CSS display rules
             document.body.classList.toggle('is-admin', isAdmin);
+
+            setupClearDataButton();
 
             const sortSelect = document.getElementById('sort-select');
             if (sortSelect) {
@@ -5647,7 +5669,7 @@
         async function fetchLogsFromSheet(courseName) {
             if (!courseName) return [];
             const sheetName = getSheetNameForCourse(courseName);
-            const range = `${formatSheetName(sheetName)}!A2:G`; // Only read up to column G now.
+            const range = `${formatSheetName(sheetName)}!A2:G`;
 
             const { result } = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: LOGS_SPREADSHEET_ID,
@@ -5656,17 +5678,16 @@
 
             const rows = result.values || [];
             return rows.map(r => {
-                // The 'isExcused' variable has been removed from this line.
                 const [uid, tsISO, id, manual, version, updISO, updatedBy] = r;
                 return {
                     uid: String(uid || ''),
                     timestamp: tsISO ? Date.parse(tsISO) : 0,
                     id,
-                    manual: manual === 'true',
+                    // FIX: Robustly check for boolean TRUE or string 'true'
+                    manual: manual === true || manual === 'true' || manual === 'TRUE',
                     version: version != null ? Number(version) : 0,
                     updatedAt: updISO ? Date.parse(updISO) : 0,
                     updatedBy: updatedBy || ''
-                    // The 'isExcused' property has been removed.
                 };
             }).filter(l => l.id && Number.isFinite(l.timestamp));
         }
@@ -5703,20 +5724,20 @@
 
 
         /**
-         * Converts a log object into an array for writing to the Google Sheet.
-         * @param {object} log - The log object.
-         * @returns {Array} The log data as a row array.
-         */
+                 * Converts a log object into an array for writing to the Google Sheet.
+                 * @param {object} log - The log object.
+                 * @returns {Array} The log data as a row array.
+                 */
         function toSheetRow(log) {
             return [
                 log.uid || '',
                 new Date(Number(log.timestamp || Date.now())).toISOString(),
                 log.id,
-                log.manual ? 'true' : 'false',
+                // FIX: Write an explicit string for 100% reliability with Google Sheets.
+                log.manual ? 'TRUE' : 'FALSE',
                 Number(log.version || 0),
                 new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
                 String(log.updatedBy || '')
-                // The 'isExcused' column (H) has been removed.
             ];
         }
 
