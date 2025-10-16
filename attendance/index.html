@@ -1210,7 +1210,7 @@
             font-size: 0.85em;
         }
 
-        .time-tag.manual {
+        .time-tag.manual.excused {
             background-color: #fff3e0;
             /* Light orange */
             color: #e65100;
@@ -1219,12 +1219,12 @@
             cursor: help;
         }
 
-        .time-tag.manual:hover {
+        .time-tag.manual.excused:hover {
             border-color: #e65100;
             /* Orange border on hover */
         }
 
-        .dark-mode .time-tag.manual {
+        .dark-mode .time-tag.manual.excused {
             background-color: #4a2c0f;
             /* Dark mode orange */
             color: #ffcc80;
@@ -5624,7 +5624,7 @@
         async function fetchLogsFromSheet(courseName) {
             if (!courseName) return [];
             const sheetName = getSheetNameForCourse(courseName);
-            const range = `${formatSheetName(sheetName)}!A2:H`; // Read up to column H
+            const range = `${formatSheetName(sheetName)}!A2:G`; // Only read up to column G now.
 
             const { result } = await gapi.client.sheets.spreadsheets.values.get({
                 spreadsheetId: LOGS_SPREADSHEET_ID,
@@ -5633,7 +5633,8 @@
 
             const rows = result.values || [];
             return rows.map(r => {
-                const [uid, tsISO, id, manual, version, updISO, updatedBy, isExcused] = r;
+                // The 'isExcused' variable has been removed from this line.
+                const [uid, tsISO, id, manual, version, updISO, updatedBy] = r;
                 return {
                     uid: String(uid || ''),
                     timestamp: tsISO ? Date.parse(tsISO) : 0,
@@ -5641,8 +5642,8 @@
                     manual: manual === 'true',
                     version: version != null ? Number(version) : 0,
                     updatedAt: updISO ? Date.parse(updISO) : 0,
-                    updatedBy: updatedBy || '',
-                    isExcused: isExcused === 'TRUE' || isExcused === true // Add the new property
+                    updatedBy: updatedBy || ''
+                    // The 'isExcused' property has been removed.
                 };
             }).filter(l => l.id && Number.isFinite(l.timestamp));
         }
@@ -5691,8 +5692,8 @@
                 log.manual ? 'true' : 'false',
                 Number(log.version || 0),
                 new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
-                String(log.updatedBy || ''),
-                log.isExcused ? 'TRUE' : 'FALSE' // Add the new 'Excused' column (H)
+                String(log.updatedBy || '')
+                // The 'isExcused' column (H) has been removed.
             ];
         }
 
@@ -7229,20 +7230,21 @@
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
 
+                        // --- START OF CONSOLIDATED FIX ---
+                        // Check if the log was manually added/edited.
                         if (log.manual === true || log.manual === 'true') {
-                            timeTag.classList.add('manual');
+                            timeTag.classList.add('manual'); // This adds your orange styling.
                             timeTag.title = 'Manually Added/Edited Timestamp';
-                        }
 
-                        // --- START NEW LOGIC ---
-                        if (log.isExcused) {
-                            timeTag.classList.add('excused');
+                            // Since it's manual, we also treat it as an excused absence.
+                            timeTag.classList.add('excused'); // This adds the dashed border and help cursor.
+
+                            // Add the click listener to show the notification.
                             timeTag.addEventListener('click', (e) => {
                                 e.stopPropagation();
                                 showNotification('info', 'Excused Absence', `${group.name} has been excused for this hour.`);
                             });
                         }
-                        // --- END NEW LOGIC ---
 
                         const timeObj = new Date(log.timestamp);
                         timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
