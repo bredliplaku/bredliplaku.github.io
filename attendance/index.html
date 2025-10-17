@@ -2007,6 +2007,35 @@
             color: var(--secondary-color);
         }
 
+        /* ADD THIS CSS */
+        #register-uid-btn {
+            display: none;
+            /* Hidden by default */
+        }
+
+        body:not(.is-admin) #register-uid-btn {
+            display: inline-flex;
+            /* Shown only for non-admins */
+            align-items: center;
+            gap: 8px;
+            padding-left: 14px;
+            padding-right: 14px;
+        }
+
+        /* Hide the button text on very small screens */
+        @media (max-width: 400px) {
+            #register-uid-btn {
+                font-size: 0;
+                /* Hide text */
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+
+            #register-uid-btn i {
+                margin: 0;
+            }
+        }
+
         /* Auth styles */
         .auth-container {
             display: flex;
@@ -2932,6 +2961,10 @@
                     <div class="user-info">
                         <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
                         <span id="user-name"></span>
+
+                        <button id="register-uid-btn" class="btn-blue" title="Register your Student ID Card"><i
+                                class="fas fa-id-card"></i> Register Student ID</button>
+
                         <button id="logout-btn" class="btn-red btn-icon" title="Sign Out"><i
                                 class="fas fa-sign-out-alt"></i></button>
                     </div>
@@ -3468,6 +3501,9 @@
             const loginBtn = document.getElementById('login-btn');
             const logoutBtn = document.getElementById('logout-btn');
             const dbSortSelect = document.getElementById('db-sort-select');
+
+            const registerUidBtn = document.getElementById('register-uid-btn');
+            if (registerUidBtn) registerUidBtn.addEventListener('click', showRegisterUIDDialog);
 
             const scanBtn = document.getElementById('scan-button');
             if (scanBtn) {
@@ -4778,6 +4814,102 @@
                 showNotification('error', 'User Info Error', error.message || 'Failed to get user information');
                 throw error;
             }
+        }
+
+        function showRegisterUIDDialog() {
+            if (!isSignedIn || isAdmin || !currentUser) return;
+
+            document.body.style.overflow = 'hidden';
+
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+
+            // Message for devices that don't support NFC
+            const nfcUnsupportedMsg = `
+        <div style="text-align: center; padding: 10px; background-color: var(--warning-color-light); border-radius: 8px; margin-top: 15px;">
+            <p style="margin: 0; color: var(--text-color); opacity: 1;">NFC scanning requires <a href="https://play.google.com/store/apps/details?id=com.android.chrome" target="_blank">Chrome on Android</a>.</p>
+            <p style="margin: 10px 0 0 0;">You can enter your UID manually below.</p>
+        </div>`;
+
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Scan Your Student ID Card</h3>
+        <p>Your details will be sent to admin for approval.</p>
+        <div class="form-group"><label>Name:</label><input class="form-control" value="${currentUser.name}" disabled></div>
+        <div class="form-group"><label>Email:</label><input class="form-control" value="${currentUser.email}" disabled></div>
+        <div class="form-group">
+            <label for="register-uid-input">UID:</label>
+            <input type="text" id="register-uid-input" class="form-control" placeholder="Scan card or type manually...">
+        </div>
+        <div id="nfc-status-container"></div>
+        <div class="dialog-actions">
+            <button id="cancel-register-btn" class="btn-red">Cancel</button>
+            <button id="submit-register-btn" class="btn-green" disabled>Submit</button>
+        </div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const uidInput = document.getElementById('register-uid-input');
+            const submitBtn = document.getElementById('submit-register-btn');
+            const nfcStatusContainer = document.getElementById('nfc-status-container');
+            let registrationNfcController = null;
+
+            const closeDialog = () => {
+                if (registrationNfcController) registrationNfcController.abort();
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+
+            const checkSubmitButton = () => {
+                submitBtn.disabled = uidInput.value.trim() === '';
+            };
+
+            uidInput.addEventListener('input', checkSubmitButton);
+
+            // Start scanning if supported
+            if (nfcSupported) {
+                nfcStatusContainer.innerHTML = `<div class="sync-status syncing"><i class="fa-solid fa-wifi"></i> <span>Ready to Scan...</span></div>`;
+                registrationNfcController = new AbortController();
+                const reader = new NDEFReader();
+                reader.scan({ signal: registrationNfcController.signal }).then(() => {
+                    reader.onreading = ({ serialNumber }) => {
+                        uidInput.value = serialNumber;
+                        playSound(true);
+                        nfcStatusContainer.innerHTML = `<div class="sync-status success"><i class="fas fa-check-circle"></i> <span>Card Scanned!</span></div>`;
+                        checkSubmitButton();
+                        registrationNfcController.abort(); // Stop scanning after success
+                    };
+                }).catch(err => {
+                    if (err.name !== 'AbortError') nfcStatusContainer.innerHTML = `<div class="sync-status error"><i class="fas fa-times-circle"></i> <span>Couldn't scan the card. Please make sure NFC is turned on and try again.</span></div>`;
+                });
+            } else {
+                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                if (isMobile) {
+                    nfcStatusContainer.innerHTML = nfcUnsupportedMsg;
+                }
+            }
+
+            document.getElementById('submit-register-btn').addEventListener('click', () => {
+                const uid = uidInput.value.trim();
+                if (!uid) return;
+
+                // --- IMPORTANT: REPLACE THESE WITH YOUR GOOGLE FORM'S ENTRY IDS ---
+                const FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeNVZGvBCU9cBOm9ToMgBknKMw2JY2OjIsEcOrvL3aS59Cl1w/viewform?usp=pp_url";
+                const NAME_ENTRY_ID = "entry.1516799729"; // Your Name field ID
+                const EMAIL_ENTRY_ID = "entry.1318156103"; // Your Email field ID
+                const UID_ENTRY_ID = "entry.882819593";   // Your UID field ID
+                // -----------------------------------------------------------------
+
+                const prefilledUrl = `${FORM_URL}&${NAME_ENTRY_ID}=${encodeURIComponent(currentUser.name)}&${EMAIL_ENTRY_ID}=${encodeURIComponent(currentUser.email)}&${UID_ENTRY_ID}=${encodeURIComponent(uid)}`;
+
+                window.open(prefilledUrl, '_blank');
+                showNotification('success', 'Redirecting...', 'Please complete the submission in the new tab.');
+                closeDialog();
+            });
+
+            document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
         }
 
         /**
