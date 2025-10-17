@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         EIS Attendance Sheet Generator
+// @name         MNdini Attendance Sheet Generator
 // @namespace    https://bredliplaku.com/
 // @version      1.3
 // @description  Generates attendance sheet that perfectly matches the original template with customizable fields
@@ -950,10 +950,10 @@
                 <h4 style="margin-top: 10px;">Signatures</h4>
                 <div class="signature-item" id="signature-item-1">
                     <select id="signature-title-1">
-                        <option value="Lecturer Prof. Dr.">Lecturer Prof. Dr.</option>
+                        <option value="Lecturer Prof. Dr." selected>Lecturer Prof. Dr.</option>
                         <option value="Lecturer Assoc. Prof. Dr.">Lecturer Assoc. Prof. Dr.</option>
                         <option value="Lecturer Dr.">Lecturer Dr.</option>
-                        <option value="Assistant Lecturer M.Sc." selected>Assistant Lecturer M.Sc.</option>
+                        <option value="Assistant Lecturer M.Sc.">Assistant Lecturer M.Sc.</option>
                     </select>
                     <input type="text" id="signature-name-1" value="${data.username}" style="flex: 1;">
                     <button class="remove-signature-btn" data-id="1" style="visibility: hidden;">Remove</button>
@@ -1275,8 +1275,8 @@
                 <select id="signature-title-${signatureCounter}">
                     <option value="Lecturer Prof. Dr.">Lecturer Prof. Dr.</option>
                     <option value="Lecturer Assoc. Prof. Dr.">Lecturer Assoc. Prof. Dr.</option>
-                    <option value="Lecturer Dr." selected>Lecturer Dr.</option>
-                    <option value="Assistant Lecturer M.Sc.">Assistant Lecturer M.Sc.</option>
+                    <option value="Lecturer Dr.">Lecturer Dr.</option>
+                    <option value="Assistant Lecturer M.Sc." selected>Assistant Lecturer M.Sc.</option>
                 </select>
                 <input type="text" id="signature-name-${signatureCounter}" value="" style="flex: 1;">
                 <button class="remove-signature-btn" data-id="${signatureCounter}">Remove</button>
