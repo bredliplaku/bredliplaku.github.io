@@ -4877,14 +4877,13 @@
                 }
             }
 
-            // MODIFIED CODE
+            // REVISED AND FINAL JavaScript
             document.getElementById('submit-register-btn').addEventListener('click', () => {
                 const uid = uidInput.value.trim();
-                if (!uid) return;
+                if (!uid || !currentUser) return;
 
-                // --- PASTE YOUR DEPLOYED WEB APP URL HERE ---
-                const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxq4sqp7vPY-ElSyJctWWDm-fw_jErPpDMNFlTOIHL6EzjqUTLGig5Y1gthKCoeuC95/exec";
-                // ---------------------------------------------
+                // Make sure this is your latest Apps Script URL
+                const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxUT-oSqwMc209it96HIsv_vntM8-DxeSlDs5llPg-PMe091YzetnN-G7y4PghfFA5z/exec";
 
                 const submitBtn = document.getElementById('submit-register-btn');
                 submitBtn.disabled = true;
@@ -4896,62 +4895,38 @@
                     uid: uid
                 };
 
-                // We can't use a normal fetch because of CORS, so we create a temporary form
-                const formData = new FormData();
-                formData.append('data', JSON.stringify(submitData));
-
-                const tempIframe = document.createElement('iframe');
-                tempIframe.name = 'submissionFrame';
-                tempIframe.style.display = 'none';
-                document.body.appendChild(tempIframe);
-
-                const tempForm = document.createElement('form');
-                tempForm.method = 'post';
-                tempForm.action = SCRIPT_URL;
-                tempForm.target = 'submissionFrame';
-
-                const hiddenInput = document.createElement('input');
-                hiddenInput.type = 'hidden';
-                hiddenInput.name = 'postData';
-                // Apps Script's doPost expects a specific structure
-                hiddenInput.value = JSON.stringify({ contents: JSON.stringify(submitData) });
-
-                tempForm.appendChild(hiddenInput);
-                document.body.appendChild(tempForm);
-
-                tempForm.submit();
-
-                // Assume success and provide immediate feedback
-                setTimeout(() => {
-                    showNotification('success', 'Submission Sent!', 'Your ID registration has been sent for approval.');
-                    closeDialog();
-                    // Clean up the temporary elements
-                    document.body.removeChild(tempIframe);
-                    document.body.removeChild(tempForm);
-                }, 500); // A small delay to ensure submission is sent
+                // Use fetch to send the data and wait for a real response
+                fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(submitData),
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8', // Use text/plain for this Apps Script method
+                    },
+                })
+                    .then(response => response.json()) // Wait for the server's response
+                    .then(data => {
+                        // The script responded. Check if it was a success.
+                        if (data.result === 'success') {
+                            showNotification('success', 'Submission Sent!', 'Your ID registration has been sent for approval.');
+                            closeDialog();
+                        } else {
+                            // The script responded with an error.
+                            console.error('Script Error:', data.message);
+                            showNotification('error', 'Submission Failed', 'The server reported an error. Please try again.');
+                            submitBtn.disabled = false; // Re-enable the button
+                            submitBtn.innerHTML = 'Submit';
+                        }
+                    })
+                    .catch(error => {
+                        // A network error occurred (e.g., user is offline).
+                        console.error('Network Error:', error);
+                        showNotification('error', 'Submission Failed', 'A network error occurred. Please check your connection.');
+                        submitBtn.disabled = false; // Re-enable the button
+                        submitBtn.innerHTML = 'Submit';
+                    });
             });
 
             document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
-        }
-
-        // ADD THIS NEW FUNCTION
-        /**
-         * Submits data to a Google Form in the background using a hidden iframe.
-         * @param {string} url - The fully constructed /formResponse URL.
-         */
-        function submitToGoogleForm(url) {
-            const iframe = document.createElement('iframe');
-            iframe.name = 'hidden_iframe';
-            iframe.id = 'hidden_iframe';
-            iframe.style.display = 'none';
-            document.body.appendChild(iframe);
-
-            iframe.src = url; // This triggers the submission
-
-            // Clean up the iframe after a short delay
-            setTimeout(() => {
-                document.body.removeChild(iframe);
-            }, 1000);
         }
 
         /**
@@ -7729,11 +7704,19 @@
                     group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
+                        // MODIFIED CODE
                         if (log.manual === true || log.manual === 'true') {
                             timeTag.classList.add('manual', 'excused');
                             timeTag.addEventListener('click', (e) => {
                                 e.stopPropagation();
-                                showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
+
+                                // Check if the current non-admin user is viewing their own log
+                                if (!isAdmin && currentUser && normalizeName(group.name) === normalizeName(currentUser.name)) {
+                                    showNotification('warning', 'Excused Absence', 'You have been excused for this hour.');
+                                } else {
+                                    // Default message for admins or other cases
+                                    showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
+                                }
                             });
                         }
                         const timeObj = new Date(log.timestamp);
