@@ -5085,8 +5085,8 @@
                 if (lastScannedUID) {
                     // Show last scanned UID
                     notSignedInMsg.innerHTML = `
-                <p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
-                <h2 style="margin-top: 10px; font-weight: bold; text-transform: uppercase; font-size: 1.5em; word-break: break-all;">${lastScannedUID}</h2>
+<p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
+<h2 style="margin-top: 10px; font-weight: bold; font-family: monospace; font-size: 1.8em; letter-spacing: 1px; word-break: break-all; color: var(--primary-dark);">${lastScannedUID}</h2>
             `;
                 } else {
                     // Default welcome message
@@ -5137,14 +5137,12 @@
             const emptyLogs = document.getElementById('empty-logs');
             if (emptyLogs && isSignedIn) {
 
-                // --- FIX THIS BLOCK ---
                 const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
                 if (!currentCourse) {
                     emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
                 } else if (logsForCurrentCourse.length === 0) {
                     emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
                 }
-                // --- END FIX ---
             }
         }
 
@@ -6204,43 +6202,102 @@
         function showAddEntryDialog() {
             if (!isAdmin) return;
 
-            showPromptDialog({
-                title: 'Add new Student',
-                message: 'Enter the UID for the new entry:',
-                onConfirm: (uid) => {
-                    const trimmedUid = uid ? uid.trim() : '';
-                    if (!trimmedUid) {
-                        showAlertDialog('Invalid Input', 'UID cannot be empty.');
-                        return;
-                    }
-                    if (uidToNameMap[trimmedUid]) {
-                        showAlertDialog('Duplicate Entry', 'This UID already exists in the database.');
-                        return;
-                    }
+            let dialogNfcController = null; // To control the NFC scan
 
-                    showPromptDialog({
-                        title: 'Add new Student',
-                        message: `Enter the name for UID: ${trimmedUid}`,
-                        onConfirm: (name) => {
-                            const trimmedName = name ? name.trim() : '';
-                            if (!trimmedName) {
-                                showAlertDialog('Invalid Input', 'Name cannot be empty.');
-                                return;
-                            }
-                            // Add to database
-                            uidToNameMap[trimmedUid] = trimmedName;
+            const closeDialog = () => {
+                if (dialogNfcController) dialogNfcController.abort();
+                const backdrop = document.querySelector('.dialog-backdrop');
+                if (backdrop) document.body.removeChild(backdrop);
+                document.body.style.overflow = '';
+            };
 
-                            // Sync to sheet if online
-                            if (isOnline && isSignedIn) {
-                                syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-                            }
-
-                            updateUI();
-                            showNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
-                        }
-                    });
+            const onConfirm = (uid) => {
+                const trimmedUid = uid ? uid.trim() : '';
+                if (!trimmedUid) {
+                    showAlertDialog('Invalid Input', 'UID cannot be empty.');
+                    return;
                 }
-            });
+                if (uidToNameMap[trimmedUid]) {
+                    showAlertDialog('Duplicate Entry', 'This UID already exists in the database.');
+                    return;
+                }
+
+                showPromptDialog({
+                    title: 'Add New Student',
+                    message: `Enter the name for UID: ${trimmedUid}`,
+                    onConfirm: (name) => {
+                        const trimmedName = name ? name.trim() : '';
+                        if (!trimmedName) {
+                            showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                            return;
+                        }
+                        uidToNameMap[trimmedUid] = trimmedName;
+                        if (isOnline && isSignedIn) syncDatabaseToSheet();
+                        updateUI();
+                        showNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
+                    }
+                });
+            };
+
+            document.body.style.overflow = 'hidden';
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Add New Student</h3>
+        <p>Scan card or type UID.</p>
+        <div class="form-group">
+            <input type="text" id="dialog-prompt-input" class="form-control" placeholder="Scan or type UID...">
+        </div>
+        <div id="dialog-nfc-status"></div>
+        <div class="dialog-actions">
+            <button id="dialog-cancel-btn" class="btn-red">Cancel</button>
+            <button id="dialog-confirm-btn" class="btn-green">Next</button>
+        </div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const input = document.getElementById('dialog-prompt-input');
+            const confirmBtn = document.getElementById('dialog-confirm-btn');
+            const nfcStatusDiv = document.getElementById('dialog-nfc-status');
+            input.focus();
+
+            const confirmAction = () => {
+                closeDialog();
+                onConfirm(input.value);
+            };
+
+            confirmBtn.addEventListener('click', confirmAction);
+            input.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmAction(); });
+            document.getElementById('dialog-cancel-btn').addEventListener('click', closeDialog);
+
+            // --- NFC LOGIC ---
+            if (nfcSupported) {
+                nfcStatusDiv.innerHTML = `<div class="sync-status syncing" style="justify-content: center;"><i class="fa-solid fa-wifi"></i> <span>Ready to Scan...</span></div>`;
+                dialogNfcController = new AbortController();
+                const reader = new NDEFReader();
+
+                reader.scan({ signal: dialogNfcController.signal }).then(() => {
+                    reader.onreading = ({ serialNumber }) => {
+                        input.value = serialNumber;
+                        playSound(true);
+                        nfcStatusDiv.innerHTML = `<div class="sync-status success" style="justify-content: center;"><i class="fas fa-check-circle"></i> <span>Card Scanned! Click Next.</span></div>`;
+                        dialogNfcController.abort(); // Stop scanning after one successful read
+                    };
+                }).catch(err => {
+                    if (err.name !== 'AbortError') {
+                        nfcStatusDiv.innerHTML = `<div class="sync-status error" style="justify-content: center;"><i class="fas fa-times-circle"></i> <span>NFC Error</span></div>`;
+                    }
+                });
+            } else {
+                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                if (isMobile) {
+                    nfcStatusDiv.innerHTML = `<p style="text-align:center; opacity:0.8; font-size: 0.9em;">NFC not available. <a href="https://play.google.com/store/apps/details?id=com.android.chrome" target="_blank">Use Chrome on Android</a> or type UID manually.</p>`;
+                }
+            }
         }
 
         /**
@@ -7406,9 +7463,18 @@
                 logsTbody.innerHTML = '';
 
                 if (result.length === 0) {
-                    emptyLogs.innerHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
-                                   <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>
-                                   <p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
+                    let emptyMessageHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                           <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>`;
+
+                    // Only add the specific paragraph if the user is an admin
+                    if (isAdmin) {
+                        emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
+                    } else {
+                        // Optional: Provide a different, more helpful message for students
+                        emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">There are no attendance records for you in this course.</p>`;
+                    }
+
+                    emptyLogs.innerHTML = emptyMessageHTML;
                     emptyLogs.style.display = 'block';
                 } else {
                     emptyLogs.style.display = 'none';
@@ -7785,7 +7851,7 @@
          * Start NFC scanning.
          */
         async function startScanning() {
-            if (!currentCourse || currentCourse === 'Default') {
+            if ((!currentCourse || currentCourse === 'Default') && isSignedIn) {
                 showNotification('warning', 'No Course Selected', 'Please select a course before starting a scan.');
                 return;
             }
@@ -7886,17 +7952,19 @@
             // For non-signed-in users, just show the UID and stop.
             if (!isSignedIn) {
                 lastScannedUID = serialNumber;
-                playSound(true);
-                updateAuthUI(); // This function will display the message with the UID.
+                playSound(true); // Play success sound
+                updateAuthUI(); // This will now display the message with the UID
+
+                // Use a short delay to flash the (non-existent) new row for visual feedback
                 setTimeout(() => {
-                    const firstRow = logsTbody.querySelector('tr:not(.day-separator)');
-                    if (firstRow) {
-                        firstRow.classList.add('new-item-flash');
-                        // Remove the class after the animation is done so it doesn't interfere with hover states
-                        setTimeout(() => firstRow.classList.remove('new-item-flash'), 1500);
+                    const scanBtn = document.getElementById('scan-button');
+                    if (scanBtn) {
+                        scanBtn.classList.add('new-item-flash');
+                        setTimeout(() => scanBtn.classList.remove('new-item-flash'), 1500);
                     }
-                }, 200); // Small delay to ensure the DOM has updated
-                return; // Stop here for guests.
+                }, 100);
+
+                return; // IMPORTANT: Stop the function here for guests.
             }
             // --- END FIX ---
 
