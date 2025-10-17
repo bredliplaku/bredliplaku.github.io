@@ -3087,7 +3087,7 @@
                     <div class="module-header">
                         <span class="module-title"><i class="fas fa-inbox"></i> Pending Applications</span>
                         <span id="registration-count-badge" class="info-item"
-                            style="display:none; padding: 2px 8px; margin-left: 8px; background-color: white; color: var(--warning-color); font-weight: bold; line-height: normal;"></span>
+                            style="display:none; padding: 0px 12px; border-radius:14px;"></span>
                     </div>
                     <div class="module-content">
                         <div class="table-container">
@@ -3104,12 +3104,6 @@
                                 <tbody id="registrations-tbody">
                                 </tbody>
                             </table>
-                            <div id="empty-registrations" class="empty-logs">
-                                <i class="fas fa-check-double"
-                                    style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
-                                <p style="font-size: 1.1em; margin-bottom: 5px;">No pending applications.</p>
-                                <p style="font-size: 0.9em; color: #999;">You're all caught up!</p>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -3202,7 +3196,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwQCIlcDDSJUdI19qCbJuEycQ4zspTMCOf8ZNQJUOkUj77QedMtGMqYSwMI3BSnEC30OA/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzcRdw0bd200hWEuQDB9vWFRSRNRTCe430ttukutT6qdyXjq0dP6zd9g416d8MjdXWPg/exec";
 
 
         // Discovery docs and scopes for Google API
@@ -5073,8 +5067,8 @@
                     <td>${timestamp}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
-                            <button class="btn-red btn-icon reject-btn" title="Reject"><i class="fas fa-times"></i></button>
                             <button class="btn-green btn-icon approve-btn" title="Approve"><i class="fas fa-check"></i></button>
+                            <button class="btn-red btn-icon reject-btn" title="Reject"><i class="fas fa-times"></i></button>
                         </div>
                     </td>
                 `;
@@ -5096,48 +5090,42 @@
             }
         }
 
-        // MODIFIED AND REPLACED FUNCTION
+
         /**
-         * Shows an editable dialog to approve a registration.
+         * Shows an editable dialog to approve a registration with loading feedback.
          */
         function showApproveDialog(registration) {
             document.body.style.overflow = 'hidden';
 
-            // Create dialog elements
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
 
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
 
-            // Create the editable form inside the dialog
             dialog.innerHTML = `
-        <h3 class="dialog-title">Approve Registration</h3>
+        <h3 class="dialog-title">Approve Application</h3>
         <p>Review and edit the details below before approving. The student will be notified by email.</p>
-        
         <div class="form-group">
             <label for="approve-name">Name:</label>
             <input type="text" id="approve-name" class="form-control" value="${registration.name}">
         </div>
         <div class="form-group">
             <label for="approve-uid">UID:</label>
-            <input type="text" id="approve-uid" class="form-control" value="${registration.uid}">
+            <input type="text" id="approve-uid" class="form-control" value="${registration.uid}" disabled>
         </div>
         <div class="form-group">
             <label for="approve-email">Email:</label>
             <input type="email" id="approve-email" class="form-control" value="${registration.email}">
         </div>
-
         <div class="dialog-actions">
             <button id="cancel-approve-btn" class="btn-red">Cancel</button>
-            <button id="confirm-approve-btn" class="btn-green">Approve & Send Email</button>
+            <button id="confirm-approve-btn" class="btn-green">Approve</button>
         </div>
     `;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
-
-            // --- Event Listeners for the new dialog ---
 
             const closeDialog = () => {
                 document.body.removeChild(dialogBackdrop);
@@ -5146,8 +5134,8 @@
 
             document.getElementById('cancel-approve-btn').addEventListener('click', closeDialog);
 
-            document.getElementById('confirm-approve-btn').addEventListener('click', () => {
-                // 1. Read the potentially edited values from the input fields
+            const confirmBtn = document.getElementById('confirm-approve-btn');
+            confirmBtn.addEventListener('click', () => {
                 const finalName = document.getElementById('approve-name').value.trim();
                 const finalUid = document.getElementById('approve-uid').value.trim();
                 const finalEmail = document.getElementById('approve-email').value.trim();
@@ -5157,16 +5145,19 @@
                     return;
                 }
 
-                // 2. Construct the final data object to send to the script
+                // --- ADDED: Start loading animation ---
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Approving...';
+                // ------------------------------------
+
                 const finalData = {
                     action: 'approveRegistration',
                     name: finalName,
                     uid: finalUid,
                     email: finalEmail,
-                    rowNumber: registration.rowNumber // Keep the original rowNumber to delete the correct entry
+                    rowNumber: registration.rowNumber
                 };
 
-                // 3. Send the final data to the backend (this logic is the same as before)
                 fetch(SCRIPT_URL, {
                     method: 'POST',
                     body: JSON.stringify(finalData),
@@ -5176,63 +5167,94 @@
                     .then(result => {
                         if (result.result === 'success') {
                             showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
-                            fetchAndDisplayRegistrations(); // Refresh the list
+                            fetchAndDisplayRegistrations();
+                            closeDialog(); // Close dialog only on success
                         } else {
                             throw new Error(result.message);
                         }
                     })
-                    .catch(err => showNotification('error', 'Approval Failed', err.message))
-                    .finally(() => {
-                        closeDialog(); // Close the dialog after the process is finished
+                    .catch(err => {
+                        showNotification('error', 'Approval Failed', err.message);
+                        // --- ADDED: Restore button on failure ---
+                        confirmBtn.disabled = false;
+                        confirmBtn.innerHTML = 'Approve';
+                        // ----------------------------------------
                     });
             });
         }
 
+        // MODIFIED AND REPLACED FUNCTION
         /**
-         * Shows the dialog to reject a registration.
+         * Shows a custom dialog to reject a registration with loading feedback.
          */
         function showRejectDialog(registration) {
-            const defaultMessage = `Hello ${registration.name},\n\nYour recent ID card application was rejected because the information provided may be incorrect. Please try again, ensuring all details are accurate.\n\nIf you believe this is an error, please contact the lecturer.`;
+            document.body.style.overflow = 'hidden';
 
-            showPromptDialog({
-                title: 'Reject Registration',
-                message: `Enter the reason for rejection (this will be emailed to ${registration.email}):`,
-                initialValue: defaultMessage,
-                confirmText: 'Send Rejection',
-                onConfirm: (message) => {
-                    if (!message.trim()) {
-                        showAlertDialog('Invalid Input', 'Rejection message cannot be empty.');
-                        return;
-                    }
-                    const data = { action: 'rejectRegistration', message: message, email: registration.email, rowNumber: registration.rowNumber };
-                    fetch(SCRIPT_URL, {
-                        method: 'POST',
-                        body: JSON.stringify(data),
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    })
-                        .then(res => res.json())
-                        .then(result => {
-                            if (result.result === 'success') {
-                                showNotification('delete', 'Rejected', `Rejection email sent to ${registration.name}.`);
-                                fetchAndDisplayRegistrations(); // Refresh the list
-                            } else {
-                                throw new Error(result.message);
-                            }
-                        })
-                        .catch(err => showNotification('error', 'Rejection Failed', err.message));
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+
+            const defaultMessage = `Hello ${registration.name},\n\nYour recent ID card registration was rejected because the information provided may be incorrect. Please try again, ensuring all details are accurate.\n\nIf you believe this is an error, please contact the lecturer.`;
+
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Reject Registration</h3>
+        <p>Edit the reason for rejection below. This message will be emailed to ${registration.email}.</p>
+        <div class="form-group">
+            <textarea id="reject-message" class="form-control" rows="6">${defaultMessage}</textarea>
+        </div>
+        <div class="dialog-actions">
+            <button id="cancel-reject-btn" class="btn-orange">Cancel</button>
+            <button id="confirm-reject-btn" class="btn-red">Reject</button>
+        </div>
+    `;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+
+            document.getElementById('cancel-reject-btn').addEventListener('click', closeDialog);
+
+            const confirmBtn = document.getElementById('confirm-reject-btn');
+            confirmBtn.addEventListener('click', () => {
+                const message = document.getElementById('reject-message').value.trim();
+
+                if (!message) {
+                    showAlertDialog('Invalid Input', 'Rejection message cannot be empty.');
+                    return;
                 }
+
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rejecting...';
+
+                const data = { action: 'rejectRegistration', message: message, email: registration.email, rowNumber: registration.rowNumber };
+
+                fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                })
+                    .then(res => res.json())
+                    .then(result => {
+                        if (result.result === 'success') {
+                            showNotification('delete', 'Rejected', `Rejection email sent to ${registration.name}.`);
+                            fetchAndDisplayRegistrations();
+                            closeDialog();
+                        } else {
+                            throw new Error(result.message);
+                        }
+                    })
+                    .catch(err => {
+                        showNotification('error', 'Rejection Failed', err.message);
+                        confirmBtn.disabled = false;
+                        confirmBtn.innerHTML = 'Reject';
+                    });
             });
-            // Make the input a textarea for better editing
-            const promptInput = document.getElementById('dialog-prompt-input');
-            if (promptInput) {
-                const textarea = document.createElement('textarea');
-                textarea.id = promptInput.id;
-                textarea.className = 'form-control';
-                textarea.value = promptInput.value;
-                textarea.rows = 5;
-                promptInput.parentNode.replaceChild(textarea, promptInput);
-                textarea.focus();
-            }
         }
 
         /**
