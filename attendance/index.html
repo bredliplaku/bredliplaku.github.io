@@ -2972,7 +2972,12 @@
                     <i class="fa-brands fa-nfc-symbol"></i> Scanner
                 </div>
                 <div class="tab admin-only" data-tab="database-tab">
-                    <i class="fa-solid fa-folder-tree"></i>&nbsp; Database
+                    <i class="fa-solid fa-list-ol"></i>&nbsp; Database
+                </div>
+                <div class="tab admin-only" data-tab="registrations-tab">
+                    <i class="fa-solid fa-envelope"></i>&nbsp; Registrations <span id="registration-count-badge"
+                        class="info-item"
+                        style="display:none; padding: 2px 8px; margin-left: 8px; background-color: var(--danger-color); line-height: normal;"></span>
                 </div>
             </div>
         </div>
@@ -3109,6 +3114,40 @@
                 </div>
             </div>
         </div>
+
+        <div id="registrations-tab" class="tab-content">
+            <div class="module" style="margin-top:20px">
+                <div class="module-header">
+                    <span class="module-title"><i class="fas fa-inbox"></i> Pending Registrations</span>
+                    <button id="refresh-registrations-btn" class="btn-blue btn-icon" title="Refresh List"><i
+                            class="fas fa-sync-alt"></i></button>
+                </div>
+                <div class="module-content">
+                    <div class="table-container">
+                        <table class="database-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th class="uid-column">UID</th>
+                                    <th>Email</th>
+                                    <th>Timestamp</th>
+                                    <th class="actions-header">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="registrations-tbody">
+                            </tbody>
+                        </table>
+                        <div id="empty-registrations" class="empty-logs">
+                            <i class="fas fa-check-double"
+                                style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                            <p style="font-size: 1.1em; margin-bottom: 5px;">No pending registrations.</p>
+                            <p style="font-size: 0.9em; color: #999;">You're all caught up!</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <footer class="footer">
             <div class="social-links">
                 <a href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank" rel="noopener noreferrer"><i
@@ -3487,6 +3526,19 @@
             const loginBtn = document.getElementById('login-btn');
             const logoutBtn = document.getElementById('logout-btn');
             const dbSortSelect = document.getElementById('db-sort-select');
+
+            const registrationsTab = document.querySelector('.tab[data-tab="registrations-tab"]');
+            if (registrationsTab) {
+                registrationsTab.addEventListener('click', () => {
+                    // Fetch data every time the tab is clicked to ensure it's up-to-date
+                    fetchAndDisplayRegistrations();
+                });
+            }
+            // Listener for the refresh button
+            const refreshBtn = document.getElementById('refresh-registrations-btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', fetchAndDisplayRegistrations);
+            }
 
             const registerUidBtn = document.getElementById('register-uid-btn');
             if (registerUidBtn) registerUidBtn.addEventListener('click', showRegisterUIDDialog);
@@ -4882,13 +4934,14 @@
                 if (!uid || !currentUser) return;
 
                 // Make sure this is your latest Apps Script URL
-                const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyu0TA6Hb9CpaZKwZ6ZMEJeVzB97WtC7jiCVzoFtkwWWGrkX-X_UHztMOFKUmefaC_kyA/exec";
+                const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwQCIlcDDSJUdI19qCbJuEycQ4zspTMCOf8ZNQJUOkUj77QedMtGMqYSwMI3BSnEC30OA/exec";
 
                 const submitBtn = document.getElementById('submit-register-btn');
                 submitBtn.disabled = true;
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
 
                 const submitData = {
+                    action: "submitRegistration", // <-- ADD THIS LINE
                     name: currentUser.name,
                     email: currentUser.email,
                     uid: uid
@@ -4926,6 +4979,141 @@
             });
 
             document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
+        }
+
+        /**
+ * Fetches pending registrations from the Apps Script and displays them.
+ */
+        async function fetchAndDisplayRegistrations() {
+            const tbody = document.getElementById('registrations-tbody');
+            const emptyMessage = document.getElementById('empty-registrations');
+            const refreshBtnIcon = document.querySelector('#refresh-registrations-btn i');
+            const badge = document.getElementById('registration-count-badge');
+
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
+            emptyMessage.style.display = 'none';
+            if (refreshBtnIcon) refreshBtnIcon.classList.add('fa-spin');
+
+            try {
+                const response = await fetch(`${SCRIPT_URL}?action=getRegistrations`);
+                const registrations = await response.json();
+
+                tbody.innerHTML = ''; // Clear loading message
+
+                if (registrations.length > 0) {
+                    badge.textContent = registrations.length;
+                    badge.style.display = 'inline-block';
+                    registrations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
+
+                    registrations.forEach(reg => {
+                        const row = document.createElement('tr');
+                        const timestamp = new Date(reg.timestamp).toLocaleString();
+
+                        row.innerHTML = `
+                    <td>${reg.name}</td>
+                    <td class="uid-column">${reg.uid}</td>
+                    <td>${reg.email}</td>
+                    <td>${timestamp}</td>
+                    <td class="actions-cell">
+                        <div class="actions-cell-content">
+                            <button class="btn-red btn-icon reject-btn" title="Reject"><i class="fas fa-times"></i></button>
+                            <button class="btn-green btn-icon approve-btn" title="Approve"><i class="fas fa-check"></i></button>
+                        </div>
+                    </td>
+                `;
+
+                        row.querySelector('.approve-btn').addEventListener('click', () => showApproveDialog(reg));
+                        row.querySelector('.reject-btn').addEventListener('click', () => showRejectDialog(reg));
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    emptyMessage.style.display = 'block';
+                    badge.style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error("Error fetching registrations:", error);
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--danger-color);">Failed to load registrations.</td></tr>';
+            } finally {
+                if (refreshBtnIcon) refreshBtnIcon.classList.remove('fa-spin');
+            }
+        }
+
+        /**
+         * Shows the dialog to confirm approval of a registration.
+         */
+        function showApproveDialog(registration) {
+            showConfirmationDialog({
+                title: 'Approve Registration?',
+                message: `Are you sure you want to approve this registration?<br><br><strong>Name:</strong> ${registration.name}<br><strong>UID:</strong> ${registration.uid}`,
+                confirmText: 'Approve',
+                isDestructive: false,
+                onConfirm: () => {
+                    const data = { action: 'approveRegistration', ...registration };
+                    fetch(SCRIPT_URL, {
+                        method: 'POST',
+                        body: JSON.stringify(data),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    })
+                        .then(res => res.json())
+                        .then(result => {
+                            if (result.result === 'success') {
+                                showNotification('success', 'Approved!', `${registration.name} has been added to the database.`);
+                                fetchAndDisplayRegistrations(); // Refresh the list
+                            } else {
+                                throw new Error(result.message);
+                            }
+                        })
+                        .catch(err => showNotification('error', 'Approval Failed', err.message));
+                }
+            });
+        }
+
+        /**
+         * Shows the dialog to reject a registration.
+         */
+        function showRejectDialog(registration) {
+            const defaultMessage = `Hello ${registration.name},\n\nYour recent ID card registration was rejected because the information provided may be incorrect. Please try again, ensuring all details are accurate.\n\nIf you believe this is an error, please contact the lecturer.`;
+
+            showPromptDialog({
+                title: 'Reject Registration',
+                message: `Enter the reason for rejection (this will be emailed to ${registration.email}):`,
+                initialValue: defaultMessage,
+                confirmText: 'Send Rejection',
+                onConfirm: (message) => {
+                    if (!message.trim()) {
+                        showAlertDialog('Invalid Input', 'Rejection message cannot be empty.');
+                        return;
+                    }
+                    const data = { action: 'rejectRegistration', message: message, email: registration.email, rowNumber: registration.rowNumber };
+                    fetch(SCRIPT_URL, {
+                        method: 'POST',
+                        body: JSON.stringify(data),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    })
+                        .then(res => res.json())
+                        .then(result => {
+                            if (result.result === 'success') {
+                                showNotification('delete', 'Rejected', `Rejection email sent to ${registration.name}.`);
+                                fetchAndDisplayRegistrations(); // Refresh the list
+                            } else {
+                                throw new Error(result.message);
+                            }
+                        })
+                        .catch(err => showNotification('error', 'Rejection Failed', err.message));
+                }
+            });
+            // Make the input a textarea for better editing
+            const promptInput = document.getElementById('dialog-prompt-input');
+            if (promptInput) {
+                const textarea = document.createElement('textarea');
+                textarea.id = promptInput.id;
+                textarea.className = 'form-control';
+                textarea.value = promptInput.value;
+                textarea.rows = 5;
+                promptInput.parentNode.replaceChild(textarea, promptInput);
+                textarea.focus();
+            }
         }
 
         /**
