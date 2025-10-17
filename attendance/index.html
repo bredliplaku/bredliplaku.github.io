@@ -2109,6 +2109,7 @@
         .course-button.btn-orange {
             color: var(--warning-color);
             border-color: transparent;
+            background-color: var(--card-background);
         }
 
         .course-button.btn-orange.active,
@@ -3076,28 +3077,17 @@
 
         <!-- Database Tab -->
         <div id="database-tab" class="tab-content">
-            <div id="db-nav-container" class="course-buttons-container admin-only">
-                <div id="db-view-all-btn" class="course-button active">
-                    <i class="fas fa-users"></i>&nbsp; All Students
-                </div>
-                <div id="db-view-pending-btn" class="course-button btn-orange">
-                    <i class="fas fa-inbox"></i>&nbsp; Pending Registrations
-                    <span id="registration-count-badge" class="info-item"
-                        style="display:none; padding: 2px 8px; margin-left: 8px; background-color: white; color: var(--warning-color); font-weight: bold; line-height: normal;"></span>
-                </div>
-            </div>
-
             <div id="all-students-view">
                 <div class="module" style="margin-top:20px">
                 </div>
             </div>
 
-            <div id="pending-registrations-view" style="display: none;">
+            <div id="pending-registrations-view">
                 <div class="module" style="margin-top:20px">
                     <div class="module-header">
-                        <span class="module-title"><i class="fas fa-inbox"></i> Pending Registrations</span>
-                        <button id="refresh-registrations-btn" class="btn-blue btn-icon" title="Refresh List"><i
-                                class="fas fa-sync-alt"></i></button>
+                        <span class="module-title"><i class="fas fa-inbox"></i> Pending Applications</span>
+                        <span id="registration-count-badge" class="info-item"
+                            style="display:none; padding: 2px 8px; margin-left: 8px; background-color: white; color: var(--warning-color); font-weight: bold; line-height: normal;"></span>
                     </div>
                     <div class="module-content">
                         <div class="table-container">
@@ -3117,7 +3107,7 @@
                             <div id="empty-registrations" class="empty-logs">
                                 <i class="fas fa-check-double"
                                     style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
-                                <p style="font-size: 1.1em; margin-bottom: 5px;">No pending registrations.</p>
+                                <p style="font-size: 1.1em; margin-bottom: 5px;">No pending applications.</p>
                                 <p style="font-size: 0.9em; color: #999;">You're all caught up!</p>
                             </div>
                         </div>
@@ -3126,7 +3116,7 @@
             </div>
             <div class="module" style="margin-top:20px">
                 <div class="module-header">
-                    <span class="module-title"><i class="fa-solid fa-folder-tree"></i> UID Database</span>
+                    <span class="module-title"><i class="fa-solid fa-list-ol"></i> UID Database</span>
                 </div>
                 <div class="module-content">
                     <div class="filter-container">
@@ -3575,12 +3565,6 @@
                     fetchAndDisplayRegistrations(); // Fetch fresh data
                     updateDatabaseTabView();
                 });
-            }
-
-            // Listener for the refresh button
-            const refreshBtn = document.getElementById('refresh-registrations-btn');
-            if (refreshBtn) {
-                refreshBtn.addEventListener('click', fetchAndDisplayRegistrations);
             }
 
             const registerUidBtn = document.getElementById('register-uid-btn');
@@ -5022,7 +5006,7 @@
                     .then(data => {
                         // The script responded. Check if it was a success.
                         if (data.result === 'success') {
-                            showNotification('success', 'Submission Sent!', 'Your ID registration has been sent for approval.');
+                            showNotification('success', 'Submission Sent!', 'Your Student ID Card application has been sent for approval.');
                             closeDialog();
                         } else {
                             // The script responded with an error.
@@ -5044,34 +5028,44 @@
             document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
         }
 
+
         /**
- * Fetches pending registrations from the Apps Script and displays them.
- */
+         * Fetches pending registrations from the Apps Script and displays them.
+         * Hides the entire module if there are no pending registrations.
+         */
         async function fetchAndDisplayRegistrations() {
             const tbody = document.getElementById('registrations-tbody');
-            const emptyMessage = document.getElementById('empty-registrations');
-            const refreshBtnIcon = document.querySelector('#refresh-registrations-btn i');
+            // Get the entire module container div
+            const pendingView = document.getElementById('pending-registrations-view');
             const badge = document.getElementById('registration-count-badge');
 
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
-            emptyMessage.style.display = 'none';
-            if (refreshBtnIcon) refreshBtnIcon.classList.add('fa-spin');
+            // Don't do anything if the element doesn't exist
+            if (!pendingView) return;
+
+            // Show a temporary loading state only if the view is already visible
+            if (window.getComputedStyle(pendingView).display !== 'none') {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
+            }
 
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=getRegistrations`);
                 const registrations = await response.json();
 
-                tbody.innerHTML = ''; // Clear loading message
-
+                // **KEY LOGIC**: Check if there are any registrations
                 if (registrations.length > 0) {
-                    badge.textContent = registrations.length;
-                    badge.style.display = 'inline-block';
-                    registrations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
+                    // 1. If there are registrations, make sure the module is visible
+                    pendingView.style.display = 'block';
+                    tbody.innerHTML = ''; // Clear loading state
 
+                    // Update the badge
+                    badge.textContent = registrations.length;
+                    badge.style.display = 'inline-block'; // Or your preferred display style
+
+                    // Sort and display the rows as before
+                    registrations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                     registrations.forEach(reg => {
                         const row = document.createElement('tr');
                         const timestamp = new Date(reg.timestamp).toLocaleString();
-
                         row.innerHTML = `
                     <td>${reg.name}</td>
                     <td class="uid-column">${reg.uid}</td>
@@ -5084,51 +5078,113 @@
                         </div>
                     </td>
                 `;
-
                         row.querySelector('.approve-btn').addEventListener('click', () => showApproveDialog(reg));
                         row.querySelector('.reject-btn').addEventListener('click', () => showRejectDialog(reg));
                         tbody.appendChild(row);
                     });
                 } else {
-                    emptyMessage.style.display = 'block';
+                    // 2. If the list is empty, hide the entire module
+                    pendingView.style.display = 'none';
                     badge.style.display = 'none';
                 }
 
             } catch (error) {
                 console.error("Error fetching registrations:", error);
                 tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--danger-color);">Failed to load registrations.</td></tr>';
-            } finally {
-                if (refreshBtnIcon) refreshBtnIcon.classList.remove('fa-spin');
+                // Make sure the module is visible so the user can see the error message
+                pendingView.style.display = 'block';
             }
         }
 
+        // MODIFIED AND REPLACED FUNCTION
         /**
-         * Shows the dialog to confirm approval of a registration.
+         * Shows an editable dialog to approve a registration.
          */
         function showApproveDialog(registration) {
-            showConfirmationDialog({
-                title: 'Approve Registration?',
-                message: `Are you sure you want to approve this registration?<br><br><strong>Name:</strong> ${registration.name}<br><strong>UID:</strong> ${registration.uid}`,
-                confirmText: 'Approve',
-                isDestructive: false,
-                onConfirm: () => {
-                    const data = { action: 'approveRegistration', ...registration };
-                    fetch(SCRIPT_URL, {
-                        method: 'POST',
-                        body: JSON.stringify(data),
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    })
-                        .then(res => res.json())
-                        .then(result => {
-                            if (result.result === 'success') {
-                                showNotification('success', 'Approved!', `${registration.name} has been added to the database.`);
-                                fetchAndDisplayRegistrations(); // Refresh the list
-                            } else {
-                                throw new Error(result.message);
-                            }
-                        })
-                        .catch(err => showNotification('error', 'Approval Failed', err.message));
+            document.body.style.overflow = 'hidden';
+
+            // Create dialog elements
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+
+            // Create the editable form inside the dialog
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Approve Registration</h3>
+        <p>Review and edit the details below before approving. The student will be notified by email.</p>
+        
+        <div class="form-group">
+            <label for="approve-name">Name:</label>
+            <input type="text" id="approve-name" class="form-control" value="${registration.name}">
+        </div>
+        <div class="form-group">
+            <label for="approve-uid">UID:</label>
+            <input type="text" id="approve-uid" class="form-control" value="${registration.uid}">
+        </div>
+        <div class="form-group">
+            <label for="approve-email">Email:</label>
+            <input type="email" id="approve-email" class="form-control" value="${registration.email}">
+        </div>
+
+        <div class="dialog-actions">
+            <button id="cancel-approve-btn" class="btn-red">Cancel</button>
+            <button id="confirm-approve-btn" class="btn-green">Approve & Send Email</button>
+        </div>
+    `;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            // --- Event Listeners for the new dialog ---
+
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+
+            document.getElementById('cancel-approve-btn').addEventListener('click', closeDialog);
+
+            document.getElementById('confirm-approve-btn').addEventListener('click', () => {
+                // 1. Read the potentially edited values from the input fields
+                const finalName = document.getElementById('approve-name').value.trim();
+                const finalUid = document.getElementById('approve-uid').value.trim();
+                const finalEmail = document.getElementById('approve-email').value.trim();
+
+                if (!finalName || !finalUid || !finalEmail) {
+                    showAlertDialog('Invalid Input', 'All fields must be filled out.');
+                    return;
                 }
+
+                // 2. Construct the final data object to send to the script
+                const finalData = {
+                    action: 'approveRegistration',
+                    name: finalName,
+                    uid: finalUid,
+                    email: finalEmail,
+                    rowNumber: registration.rowNumber // Keep the original rowNumber to delete the correct entry
+                };
+
+                // 3. Send the final data to the backend (this logic is the same as before)
+                fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(finalData),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                })
+                    .then(res => res.json())
+                    .then(result => {
+                        if (result.result === 'success') {
+                            showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
+                            fetchAndDisplayRegistrations(); // Refresh the list
+                        } else {
+                            throw new Error(result.message);
+                        }
+                    })
+                    .catch(err => showNotification('error', 'Approval Failed', err.message))
+                    .finally(() => {
+                        closeDialog(); // Close the dialog after the process is finished
+                    });
             });
         }
 
@@ -5136,7 +5192,7 @@
          * Shows the dialog to reject a registration.
          */
         function showRejectDialog(registration) {
-            const defaultMessage = `Hello ${registration.name},\n\nYour recent ID card registration was rejected because the information provided may be incorrect. Please try again, ensuring all details are accurate.\n\nIf you believe this is an error, please contact the lecturer.`;
+            const defaultMessage = `Hello ${registration.name},\n\nYour recent ID card application was rejected because the information provided may be incorrect. Please try again, ensuring all details are accurate.\n\nIf you believe this is an error, please contact the lecturer.`;
 
             showPromptDialog({
                 title: 'Reject Registration',
