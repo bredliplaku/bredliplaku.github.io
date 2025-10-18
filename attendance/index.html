@@ -2547,28 +2547,31 @@
             }
 
             .notification-close {
-                background-color: transparent;
+                background: none;
                 border: none;
-                color: #999;
-                /* A neutral grey */
+                padding: 0;
+                margin: 0;
                 font-size: 1.4em;
                 line-height: 1;
                 cursor: pointer;
-                padding: 0 5px;
-                margin-left: 10px;
-                opacity: 0.5;
-                /* Make it subtle by default */
-                transition: opacity 0.2s ease-out, color 0.2s ease-out;
+                color: #999;
+                opacity: 0.6;
+                transition: opacity 0.2s ease-out, color 0.2s ease-out, transform 0.2s ease-out;
             }
 
             .in-page-notification:hover .notification-close {
                 opacity: 1;
-                /* Make it fully visible when hovering over the notification */
+                /* Make it fully visible when hovering over the notification itself */
             }
 
             .notification-close:hover {
                 color: #333;
                 /* Darken the 'X' on hover */
+                transform: scale(1.1);
+            }
+
+            .notification-close:active {
+                transform: scale(0.9);
             }
 
             /* Dark mode adjustments */
@@ -3185,17 +3188,15 @@
         let currentCourse = ''; // Currently selected course
         let availableCourses = []; // Will be populated from spreadsheet
         let isOnline = navigator.onLine;
-        let isSyncing = false;
         let isInitializing = true;
         let isChangingCourses = false;
         let pendingNotifications = [];
         let criticalErrorsOnly = true;
         let lastScannedUID = null;
         let excusedUIDs = new Set();
-        let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
+        let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database', 'logs']);
         let cooldownUIDs = new Set();
         let nfcAbortController = null;
-        let initialisedCourses = new Set();
         let avatarClickCount = 0;
         let lastAvatarClickTime = 0;
         let currentDbView = 'all';
@@ -3212,8 +3213,6 @@
         let activeRequests = new Map(); // Track active requests per course
         let studentLogCache = {};
         let currentRequestId = 0; // Global request counter
-        let databaseLoadPromise = null;
-        let databaseResolve = null;
 
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -3617,7 +3616,6 @@
             if (addEntryBtn) addEntryBtn.addEventListener('click', showAddEntryDialog);
             if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportDatabaseToExcel);
             if (clearDbBtn) clearDbBtn.addEventListener('click', clearDatabase);
-            if (syncBtn) syncBtn.addEventListener('click', syncData);
             if (loginBtn) {
                 // Use direct event listener without arrow function to ensure proper 'this' binding
                 loginBtn.addEventListener('click', handleAuthClick);
@@ -3670,12 +3668,11 @@
             const loadingIndicator = document.getElementById('app-loading');
             const mainContainer = document.getElementById('main-container');
 
-            // Start fading out the loader
             if (loadingIndicator) {
                 loadingIndicator.classList.add('hidden');
             }
 
-            // After the fade-out is complete (500ms), hide the loader and show the content.
+            // This timeout waits for the skeleton loader to fade out.
             setTimeout(() => {
                 if (loadingIndicator) {
                     loadingIndicator.style.display = 'none';
@@ -3683,16 +3680,22 @@
                 if (mainContainer) {
                     mainContainer.classList.remove('content-hidden');
                 }
-                // Re-enable scrolling
                 document.body.classList.remove('is-loading');
 
+                // This is the main UI update call that sets up most of the page.
                 updateUI();
 
-            }, 500); // This MUST match the CSS transition duration
+                // After the main UI has been drawn, we force one final, specific
+                // re-render of the logs list. This ensures that even if a race
+                // condition occurred, the logs for the initially selected course
+                // are guaranteed to be displayed correctly.
+                setTimeout(updateLogsList, 50); // A tiny delay to let the browser render first.
+                // --- END OF FIX ---
 
-            isInitializing = false;
-            criticalErrorsOnly = false;
-            processPendingNotifications();
+                isInitializing = false;
+                criticalErrorsOnly = false;
+                processPendingNotifications();
+            }, 500); // This must match your CSS transition duration.
         }
 
         function handleRouting() {
@@ -4452,22 +4455,33 @@
                 }
             }
 
-            // This fetches the course list and database, which is needed before loading logs.
+            // Fetch the essential data (courses, database) needed to build the UI.
             await fetchInitialData();
 
-            // --- ADD THIS CRUCIAL LOGIC ---
-            // After initial data is ready, load the detailed logs based on user role.
+            // After the user's status is known, load the detailed logs.
             if (isSignedIn) {
+                let logLoadingPromise;
                 if (isAdmin) {
-                    await loadAllCourseDataFromServer(); // For admins
-                    fetchAndDisplayRegistrations();      // Fetch pending registrations for admins
+                    logLoadingPromise = loadAllCourseDataFromServer().then(() => {
+                        fetchAndDisplayRegistrations();
+                    });
                 } else {
-                    await loadAllCourseLogsForStudent(); // For students
+                    logLoadingPromise = loadAllCourseLogsForStudent();
                 }
-            }
-            // --- END OF ADDED LOGIC ---
 
-            updateAuthUI();
+                // Wait for the log loading to complete before removing the 'logs' task.
+                logLoadingPromise.finally(() => {
+                    loadingTasks.delete('logs');
+                    checkLoadingCompletion();
+                });
+
+            } else {
+                // If the user isn't signed in, there are no logs to load.
+                loadingTasks.delete('logs');
+                checkLoadingCompletion();
+            }
+
+            updateAuthUI(); // This can run concurrently.
         }
 
         /**
@@ -5081,13 +5095,18 @@
          * Helper function to smoothly refresh both admin lists.
          */
         function refreshAdminViews() {
-            // Refresh pending registrations list
             fetchAndDisplayRegistrations();
 
-            // Fetch the latest database and then update the table
-            fetchDatabaseFromSheet().then(() => {
-                updateDatabaseList();
-            });
+            fetch(`${SCRIPT_URL}?action=getDatabase`)
+                .then(res => res.json())
+                .then(dbMap => {
+                    databaseMap = dbMap;
+                    updateDatabaseList();
+                })
+                .catch(error => {
+                    console.error("Failed to refresh database view:", error);
+                    showNotification('error', 'Refresh Failed', 'Could not update the database list.');
+                });
         }
 
         /**
@@ -5255,11 +5274,10 @@
                 isSignedIn = false;
                 isAdmin = false;
                 currentUser = null;
-                // The current course and its data remain in memory for scanning.
                 updateAuthUI();
                 showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refresh to end the session.`);
             } else {
-                // --- STANDARD SIGN-OUT for students OR admins not scanning ---
+                // --- STANDARD SIGN-OUT ---
                 console.log('User signing out. Reloading for a clean state.');
                 localStorage.removeItem('gapi_token');
                 localStorage.removeItem('last_active_course');
@@ -5584,82 +5602,6 @@
                 syncStatus.className = 'sync-status waiting';
             }
         }
-
-        /**
-         * Sync data with Google Sheets.
-         * Fetches and updates both database and logs.
-         */
-        async function syncData() {
-            if (!isOnline || !isSignedIn || isSyncing) {
-                return;
-            }
-
-            isSyncing = true;
-
-            // Show syncing indicator
-            const syncIcon = syncBtn.querySelector('i');
-            if (syncIcon) {
-                syncIcon.classList.add('fa-spin');
-            }
-            syncBtn.disabled = true;
-
-            try {
-                // First sync database to get up-to-date UID-name mappings
-                try {
-                    await fetchDatabaseFromSheet();
-                } catch (dbError) {
-                    console.error('Database sync error:', dbError);
-                    // Continue with logs sync even if database sync fails
-                }
-
-                // Fetch course info data
-                try {
-                    await fetchCourseInfo();
-                } catch (infoError) {
-                    console.error('Course info sync error:', infoError);
-                    // Continue with logs sync even if course info sync fails
-                }
-
-                // Then sync logs if a course is selected
-                if (currentCourse) {
-                    await syncLogsWithSheet();
-                } else if (availableCourses.length > 0) {
-                    currentCourse = availableCourses[0];
-                    await fetchLogsFromSheet(currentCourse); // Correctly pass the currentCourse
-                }
-
-                // Clear the pending changes flag after successful sync
-                pendingChanges = false;
-                lastSyncTime = Date.now();
-
-                // Update the sync status to show success
-                const now = new Date();
-                const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                updateSyncStatus(`Synced ${time}`, "success");
-
-                // Hide success indication after a few seconds
-                setTimeout(() => {
-                    if (!pendingChanges) {
-                        updateSyncStatus(isOnline ? "Online" : "Offline", isOnline ? "online" : "offline");
-                    }
-                }, 3000);
-
-            } catch (error) {
-                console.error('Sync error:', error);
-                updateSyncStatus("Sync failed", "error");
-                showNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
-            } finally {
-                isSyncing = false;
-
-                if (syncIcon) {
-                    syncIcon.classList.remove('fa-spin');
-                }
-
-                syncBtn.disabled = !isSignedIn || !isOnline;
-                updateUI();
-            }
-        }
-
 
         function updatePageTitle() {
             const titleElement = document.querySelector('h1');
