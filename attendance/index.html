@@ -4451,7 +4451,22 @@
                     isAdmin = false;
                 }
             }
+
+            // This fetches the course list and database, which is needed before loading logs.
             await fetchInitialData();
+
+            // --- ADD THIS CRUCIAL LOGIC ---
+            // After initial data is ready, load the detailed logs based on user role.
+            if (isSignedIn) {
+                if (isAdmin) {
+                    await loadAllCourseDataFromServer(); // For admins
+                    fetchAndDisplayRegistrations();      // Fetch pending registrations for admins
+                } else {
+                    await loadAllCourseLogsForStudent(); // For students
+                }
+            }
+            // --- END OF ADDED LOGIC ---
+
             updateAuthUI();
         }
 
@@ -5233,7 +5248,7 @@
 
         // REPLACEMENT FUNCTION
         function handleSignoutClick() {
-            if (isAdmin) {
+            if (isAdmin && isScanning) {
                 // --- LECTURER MODE LOGIC ---
                 console.log('Entering Lecturer Mode (locking session).');
                 localStorage.removeItem('gapi_token');
@@ -5241,13 +5256,11 @@
                 isAdmin = false;
                 currentUser = null;
                 // The current course and its data remain in memory for scanning.
-                updateAuthUI(); // Updates only the auth-related UI parts.
+                updateAuthUI();
                 showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refresh to end the session.`);
-
             } else {
-                // --- STANDARD STUDENT SIGN-OUT ---
-                console.log('Student signing out. Reloading for a clean state.');
-                // For students, the simplest and cleanest way to sign out is to clear the token and reload.
+                // --- STANDARD SIGN-OUT for students OR admins not scanning ---
+                console.log('User signing out. Reloading for a clean state.');
                 localStorage.removeItem('gapi_token');
                 localStorage.removeItem('last_active_course');
                 window.location.reload();
@@ -5295,6 +5308,13 @@
             document.getElementById('course-buttons-container').style.display = isSignedIn ? 'flex' : 'none';
 
             document.body.classList.toggle('is-admin', isAdmin);
+            if (isSignedIn && currentUser) {
+                // Populate user info in the header
+                const userName = document.getElementById('user-name');
+                const userAvatar = document.getElementById('user-avatar');
+                if (userName) userName.textContent = currentUser.name;
+                if (userAvatar) userAvatar.src = currentUser.picture;
+            }
 
             setupClearDataButton();
 
@@ -7819,6 +7839,7 @@
                 tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com', // This Client ID stays
                     scope: 'openid email profile', // Only need identity scopes
+                    ux_mode: 'redirect',
                     callback: (tokenResponse) => {
                         if (tokenResponse && tokenResponse.access_token) {
                             fetchUserInfoWithToken(tokenResponse.access_token).then(() => {
