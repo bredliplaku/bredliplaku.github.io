@@ -2022,7 +2022,6 @@
             padding-right: 14px;
         }
 
-        /* ADD THIS CSS */
         #pending-registrations-view {
             /* Base styles for the container */
             overflow: hidden;
@@ -2031,7 +2030,6 @@
                 margin-top 0.5s ease-in-out,
                 padding 0.5s ease-in-out;
             max-height: 1000px;
-            /* Set a large max-height to allow it to be visible */
             opacity: 1;
         }
 
@@ -3117,11 +3115,6 @@
 
         <!-- Database Tab -->
         <div id="database-tab" class="tab-content">
-            <div id="all-students-view">
-                <div class="module" style="margin-top:20px">
-                </div>
-            </div>
-
             <div id="pending-registrations-view">
                 <div class="module" style="margin-top:20px">
                     <div class="module-header">
@@ -3185,6 +3178,7 @@
                                     </th>
                                     <th class="sortable uid-column" data-sort="uid">UID <i
                                             class="sort-icon fas fa-sort"></i></th>
+                                    <th class="email-column">E-mail</th>
                                     <th class="admin-only actions-header" style="display: none;">Actions</th>
                                 </tr>
                             </thead>
@@ -3236,7 +3230,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzcRdw0bd200hWEuQDB9vWFRSRNRTCe430ttukutT6qdyXjq0dP6zd9g416d8MjdXWPg/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyEqAyoe954FHEleCaJ7Qmc4Od8VHvQcNrnmmW4SqbJLII8rib7DC-EryvXG2DdDUr_1Q/exec";
 
 
         // Discovery docs and scopes for Google API
@@ -3249,7 +3243,7 @@
         let nfcReader = null;
         let filter = '';
         let dbFilter = '';
-        let uidToNameMap = {}; // Map UIDs to names
+        let databaseMap = {}; // Map UIDs to {name, email} objects
         let currentSort = localStorage.getItem('logs_sort') || 'date-desc';
         let currentDbSort = localStorage.getItem('db_sort') || 'name-asc';
         let soundEnabled = true; // Sound effects enabled by default
@@ -3885,29 +3879,19 @@
          * Export database to Excel file.
          */
         function exportDatabaseToExcel() {
-            const entries = Object.entries(uidToNameMap);
+            const entries = Object.entries(databaseMap);
+            if (entries.length === 0) return showNotification('warning', 'Export Failed', 'Database is empty.');
 
-            if (entries.length === 0) {
-                showNotification('warning', 'Export Failed', 'No database entries to export');
-                return;
-            }
-
-            // Create worksheet data
-            const wsData = [["Name", "UID"]]; // header
-
-            entries.sort((a, b) => a[1].localeCompare(b[1])).forEach(([uid, name]) => {
-                wsData.push([name, uid]);
+            const wsData = [["Name", "UID", "E-mail"]]; // new header
+            entries.sort((a, b) => a[1].name.localeCompare(b[1].name)).forEach(([uid, data]) => {
+                wsData.push([data.name, uid, data.email || '']);
             });
 
-            // Create worksheet
             const worksheet = XLSX.utils.aoa_to_sheet(wsData);
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, "Database");
-
-            // Generate Excel file
             XLSX.writeFile(workbook, "uid_database.xlsx");
-
-            showNotification('success', 'Export Complete', 'Database exported to Excel file');
+            showNotification('success', 'Export Complete', 'Database exported to Excel file.');
         }
 
         /**
@@ -4296,12 +4280,21 @@
                     let section = sectionTypeGroup.querySelector('.active')?.dataset.value || 'ALL';
                     const sectionChar = sectionCharGroup.querySelector('.active')?.dataset.value;
                     if (section !== 'ALL' && sectionChar) { section = `${section} ${sectionChar}`; }
+
+                    // ## CHANGE IS HERE: Convert databaseMap to a simple name map ##
+                    const nameMapForExport = Object.entries(databaseMap).reduce((acc, [uid, data]) => {
+                        acc[uid] = data.name;
+                        return acc;
+                    }, {});
+
                     const data = {
                         parameters: { week: weekSelect.value, hours: customHoursInput.value, category: categoryGroup.querySelector('.active')?.dataset.value || defaultCategory, date: dateInput.value, topic: dialog.querySelector('#export-topic').value, course: currentCourse || 'Default', section: section },
                         options: { markMissingAsAbsent: dialog.querySelector('#mark-missing-option').checked, markExemptedAsAbsent: dialog.querySelector('#mark-exempted-option').checked },
-                        attendance: {}, nameMap: { ...uidToNameMap }
+                        attendance: {},
+                        // ## CHANGE IS HERE: Use the new, converted map ##
+                        nameMap: nameMapForExport
                     };
-                    // Get the logs for the currently selected course from our new data structure.
+
                     const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
 
                     if (logsForCurrentCourse.length > 0) {
@@ -4309,7 +4302,6 @@
                         const selectedDate = new Date(data.parameters.date); selectedDate.setHours(0, 0, 0, 0);
                         const nextDay = new Date(selectedDate); nextDay.setDate(nextDay.getDate() + 1);
 
-                        // Iterate over the CORRECT logs array.
                         logsForCurrentCourse.forEach(log => {
                             const logDate = new Date(log.timestamp);
                             if (logDate >= selectedDate && logDate < nextDay) {
@@ -5964,7 +5956,7 @@
                 coursesToDisplay = availableCourses.filter(course => {
                     const logsForCourse = studentLogCache[course] || [];
                     return logsForCourse.some(log => {
-                        const logOwnerName = uidToNameMap[log.uid] || '';
+                        const logOwnerName = databaseMap[log.uid]?.name || '';
                         return normalizeName(logOwnerName) === studentNameNormalised;
                     });
                 });
@@ -6165,69 +6157,40 @@
         /**
 * Fetch database entries from Google Sheet with format detection
 */
+        // REPLACED FUNCTION
         async function fetchDatabaseFromSheet() {
             if (!databaseLoadPromise) {
                 databaseLoadPromise = new Promise(resolve => { databaseResolve = resolve; });
             }
-
             try {
-                // First detect the format
-                const formatInfo = await detectAndMigrateDatabaseFormat();
-                console.log('Database format info:', formatInfo);
-
-                // Get all data
                 const response = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:E' // Get extra columns in case of weird format
+                    range: 'Database!A2:D' // Read up to column D
                 });
-
                 const rows = response.result.values || [];
-                const sheetMappings = {};
-                let detectedFormat = null;
-
-                // Process rows based on detected or inferred format
-                rows.forEach((row, index) => {
-                    let name, uid;
-                    // This logic is now simplified and no longer looks for column D
-                    if (row.length >= 3 && !isNaN(parseInt(row[0]))) { // index-name-uid format
-                        name = row[1];
-                        uid = row[2];
-                    } else if (row.length >= 2) { // fallback name-uid
-                        name = row[0];
-                        uid = row[1];
-                    }
-
+                const newDbMap = {};
+                rows.forEach(row => {
+                    const [index, name, uid, email] = row;
                     if (name && uid) {
-                        name = String(name).trim();
-                        uid = String(uid).trim();
-                        if (name.length > 0 && uid.length > 0) {
-                            sheetMappings[uid] = name;
-                        }
+                        newDbMap[String(uid).trim()] = {
+                            name: String(name).trim(),
+                            email: email ? String(email).trim() : '' // Handle empty email
+                        };
                     }
                 });
-
-                uidToNameMap = sheetMappings;
+                databaseMap = newDbMap;
                 updateDatabaseStatus();
                 updateDatabaseList();
-                console.log(`Loaded ${Object.keys(uidToNameMap).length} entries from database sheet`);
-
-                // If format needs migration and user is admin, offer to fix it
-                if (formatInfo.needsMigration && isAdmin && Object.keys(sheetMappings).length > 0) {
-                    showNotification('warning', 'Database Format Issue',
-                        'The database sheet format is non-standard. Click Sync to fix it.');
-                }
-
+                console.log(`Loaded ${Object.keys(databaseMap).length} entries from database sheet`);
             } catch (error) {
                 console.error('Error fetching database:', error);
-                if (!isInitializing) { // Condition is now simpler
+                if (!isInitializing) {
                     showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
                 }
-                // This 'catch' block is now resilient and will not freeze the app.
-
             } finally {
                 if (databaseResolve) {
                     databaseResolve();
-                    databaseResolve = null; // Prevent re-resolving
+                    databaseResolve = null;
                 }
                 loadingTasks.delete('database');
                 checkLoadingCompletion();
@@ -6614,101 +6577,32 @@
         * Sync database to Google Sheets with format standardization
         */
         async function syncDatabaseToSheet() {
-            if (!isSignedIn || !isAdmin || !isOnline) {
-                console.warn('Database sync aborted: Not signed in as admin or not online.');
-                return;
-            }
-
+            if (!isSignedIn || !isAdmin || !isOnline) return;
             try {
-                const entries = Object.entries(uidToNameMap);
-
-                // Sort by name for consistency
-                entries.sort((a, b) => a[1].localeCompare(b[1]));
-
-                // ALWAYS format data as [Index, Name, UID]
-                const sheetData = entries.map(([uid, name], index) => [
-                    index + 1, // Index
-                    name, // Name
-                    uid // UID
-                ]);
-
-                // Clear the entire sheet first to remove any extra columns or old data
-                await gapi.client.sheets.spreadsheets.values.clear({
-                    spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A:Z' // Clear all columns
-                });
-
-                // Write standardized headers
+                const entries = Object.entries(databaseMap);
+                entries.sort((a, b) => a[1].name.localeCompare(b[1].name));
+                // Format data as [Index, Name, UID, Email]
+                const sheetData = entries.map(([uid, data], index) => [index + 1, data.name, uid, data.email || '']);
+                await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: DATABASE_SPREADSHEET_ID, range: 'Database!A:D' });
                 await gapi.client.sheets.spreadsheets.values.update({
                     spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A1:C1',
+                    range: 'Database!A1:D1',
                     valueInputOption: 'RAW',
-                    resource: {
-                        values: [
-                            ['Index', 'Name', 'UID']
-                        ]
-                    }
+                    resource: { values: [['Index', 'Name', 'UID', 'E-mail']] }
                 });
-
-                // Write data if there are entries
                 if (sheetData.length > 0) {
                     await gapi.client.sheets.spreadsheets.values.update({
                         spreadsheetId: DATABASE_SPREADSHEET_ID,
-                        range: 'Database!A2:C',
+                        range: 'Database!A2:D',
                         valueInputOption: 'RAW',
-                        resource: {
-                            values: sheetData
-                        }
+                        resource: { values: sheetData }
                     });
                 }
-
-                // Format the sheet for better readability
-                const requests = [{
-                    repeatCell: {
-                        range: {
-                            sheetId: 0, // Assuming Database is the first sheet
-                            startRowIndex: 0,
-                            endRowIndex: 1
-                        },
-                        cell: {
-                            userEnteredFormat: {
-                                backgroundColor: {
-                                    red: 0.93,
-                                    green: 0.93,
-                                    blue: 0.93
-                                },
-                                textFormat: {
-                                    bold: true
-                                }
-                            }
-                        },
-                        fields: "userEnteredFormat(backgroundColor,textFormat)"
-                    }
-                }, {
-                    autoResizeDimensions: {
-                        dimensions: {
-                            sheetId: 0,
-                            dimension: "COLUMNS",
-                            startIndex: 0,
-                            endIndex: 3
-                        }
-                    }
-                }];
-
-                await gapi.client.sheets.spreadsheets.batchUpdate({
-                    spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    resource: {
-                        requests
-                    }
-                });
-
-
-                console.log(`Successfully synced ${entries.length} database entries to sheet with standardized format`);
-                showNotification('success', 'Database Synced', `${entries.length} entries synced with standardized format`);
-
+                console.log(`Successfully synced ${entries.length} database entries.`);
+                showNotification('success', 'Database Synced', `${entries.length} entries synced.`);
             } catch (error) {
                 console.error('Error syncing database:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync database with Google Sheets');
+                showNotification('error', 'Sync Error', 'Failed to sync database.');
                 throw error;
             }
         }
@@ -6810,103 +6704,46 @@
          */
         function showAddEntryDialog() {
             if (!isAdmin) return;
+            showPromptDialog({
+                title: 'Add New Student',
+                message: 'Enter the UID for the new student.',
+                onConfirm: (uid) => {
+                    const trimmedUid = uid ? uid.trim() : '';
+                    if (!trimmedUid) return showAlertDialog('Invalid Input', 'UID cannot be empty.');
+                    if (databaseMap[trimmedUid]) return showAlertDialog('Duplicate Entry', 'This UID already exists.');
 
-            let dialogNfcController = null; // To control the NFC scan
+                    // Now ask for Name and Email in a custom dialog
+                    const dialogBackdrop = document.createElement('div');
+                    dialogBackdrop.className = 'dialog-backdrop';
+                    const dialog = document.createElement('div');
+                    dialog.className = 'dialog';
+                    dialog.innerHTML = `
+                <h3 class="dialog-title">Enter Details</h3>
+                <p>Enter the name and optional e-mail for UID: ${trimmedUid}</p>
+                <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control"></div>
+                <div class="form-group"><label for="add-email">E-mail:</label><input type="email" id="add-email" class="form-control" placeholder="Optional"></div>
+                <div class="dialog-actions">
+                    <button id="cancel-add-btn" class="btn-red">Cancel</button>
+                    <button id="confirm-add-btn" class="btn-green">Add</button>
+                </div>`;
+                    dialogBackdrop.appendChild(dialog);
+                    document.body.appendChild(dialogBackdrop);
 
-            const closeDialog = () => {
-                if (dialogNfcController) dialogNfcController.abort();
-                const backdrop = document.querySelector('.dialog-backdrop');
-                if (backdrop) document.body.removeChild(backdrop);
-                document.body.style.overflow = '';
-            };
+                    const close = () => document.body.removeChild(dialogBackdrop);
+                    document.getElementById('cancel-add-btn').addEventListener('click', close);
+                    document.getElementById('confirm-add-btn').addEventListener('click', () => {
+                        const name = document.getElementById('add-name').value.trim();
+                        const email = document.getElementById('add-email').value.trim();
+                        if (!name) return showAlertDialog('Invalid Input', 'Name cannot be empty.');
 
-            const onConfirm = (uid) => {
-                const trimmedUid = uid ? uid.trim() : '';
-                if (!trimmedUid) {
-                    showAlertDialog('Invalid Input', 'UID cannot be empty.');
-                    return;
-                }
-                if (uidToNameMap[trimmedUid]) {
-                    showAlertDialog('Duplicate Entry', 'This UID already exists in the database.');
-                    return;
-                }
-
-                showPromptDialog({
-                    title: 'Add New Student',
-                    message: `Enter the name for UID: ${trimmedUid}`,
-                    onConfirm: (name) => {
-                        const trimmedName = name ? name.trim() : '';
-                        if (!trimmedName) {
-                            showAlertDialog('Invalid Input', 'Name cannot be empty.');
-                            return;
-                        }
-                        uidToNameMap[trimmedUid] = trimmedName;
-                        if (isOnline && isSignedIn) syncDatabaseToSheet();
+                        databaseMap[trimmedUid] = { name, email };
+                        if (isOnline) syncDatabaseToSheet();
                         updateUI();
-                        showNotification('success', 'Entry Added', `Added ${trimmedName} (${trimmedUid}) to the database.`);
-                    }
-                });
-            };
-
-            document.body.style.overflow = 'hidden';
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            dialog.innerHTML = `
-        <h3 class="dialog-title">Add New Student</h3>
-        <p>Scan card or type UID.</p>
-        <div class="form-group">
-            <input type="text" id="dialog-prompt-input" class="form-control" placeholder="Type UID...">
-        </div>
-        <div id="dialog-nfc-status"></div>
-        <div class="dialog-actions">
-            <button id="dialog-cancel-btn" class="btn-red">Cancel</button>
-            <button id="dialog-confirm-btn" class="btn-green">Next</button>
-        </div>`;
-
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-
-            const input = document.getElementById('dialog-prompt-input');
-            const confirmBtn = document.getElementById('dialog-confirm-btn');
-            const nfcStatusDiv = document.getElementById('dialog-nfc-status');
-            input.focus();
-
-            const confirmAction = () => {
-                closeDialog();
-                onConfirm(input.value);
-            };
-
-            confirmBtn.addEventListener('click', confirmAction);
-            input.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmAction(); });
-            document.getElementById('dialog-cancel-btn').addEventListener('click', closeDialog);
-
-            // --- NFC LOGIC ---
-            if (nfcSupported) {
-                nfcStatusDiv.innerHTML = `<div class="sync-status syncing" style="justify-content: center; padding: 30px 0; font-size: 1em; color: var(--primary-color);"><i class="fa-solid fa-wifi"></i> <span>Ready to Scan...</span></div>`;
-                dialogNfcController = new AbortController();
-                const reader = new NDEFReader();
-
-                reader.scan({ signal: dialogNfcController.signal }).then(() => {
-                    reader.onreading = ({ serialNumber }) => {
-                        input.value = serialNumber;
-                        playSound(true);
-                        nfcStatusDiv.innerHTML = `<div class="sync-status success" style="justify-content: center; padding: 30px 0; font-size: 1em; color: var(--success-color);"><i class="fas fa-check-circle"></i> <span>Card Scanned!</span></div>`;
-                        dialogNfcController.abort(); // Stop scanning after one successful read
-                    };
-                }).catch(err => {
-                    if (err.name !== 'AbortError') {
-                        nfcStatusDiv.innerHTML = `<div class="sync-status error" style="justify-content: center; padding: 30px 0; font-size: 1em; color: var(--danger-color);"></i> <span>Couldn't scan the card. Please make sure NFC is turned on and try again.</span></div>`;
-                    }
-                });
-            } else {
-                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                if (isMobile) {
-                    nfcStatusDiv.innerHTML = `<p style="text-align:center; opacity:0.8; font-size: 1em; padding: 30px 0;">NFC scanning isn't supported on this device or browser... <a href="https://play.google.com/store/apps/details?id=com.android.chrome" target="_blank">Use Chrome on Android</a> or type UID manually.</p>`;
+                        showNotification('success', 'Entry Added', `Added ${name} to the database.`);
+                        close();
+                    });
                 }
-            }
+            });
         }
 
         /**
@@ -6914,30 +6751,37 @@
          * @param {string} uid - The UID of the entry to edit.
          */
         function editDatabaseEntry(uid) {
-            if (!isAdmin) return;
-            const currentName = uidToNameMap[uid] || '';
+            if (!isAdmin || !databaseMap[uid]) return;
+            const entry = databaseMap[uid];
 
-            showPromptDialog({
-                title: 'Edit Student',
-                message: `Enter a new name for UID: ${uid}`,
-                initialValue: currentName,
-                onConfirm: (newName) => {
-                    const trimmed = newName ? newName.trim() : '';
-                    if (!trimmed) {
-                        showAlertDialog('Invalid Input', 'Name cannot be empty.');
-                        return;
-                    }
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Edit Student</h3>
+        <p>Editing details for UID: ${uid}</p>
+        <div class="form-group"><label for="edit-name">Name*:</label><input type="text" id="edit-name" class="form-control" value="${entry.name}"></div>
+        <div class="form-group"><label for="edit-email">E-mail:</label><input type="email" id="edit-email" class="form-control" value="${entry.email || ''}"></div>
+        <div class="dialog-actions">
+            <button id="cancel-edit-btn" class="btn-red">Cancel</button>
+            <button id="confirm-edit-btn" class="btn-green">Save Changes</button>
+        </div>`;
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
 
-                    uidToNameMap[uid] = trimmed;
+            const close = () => document.body.removeChild(dialogBackdrop);
+            document.getElementById('cancel-edit-btn').addEventListener('click', close);
+            document.getElementById('confirm-edit-btn').addEventListener('click', () => {
+                const newName = document.getElementById('edit-name').value.trim();
+                const newEmail = document.getElementById('edit-email').value.trim();
+                if (!newName) return showAlertDialog('Invalid Input', 'Name cannot be empty.');
 
-                    // Sync to sheet if online
-                    if (isOnline && isSignedIn) {
-                        syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-                    }
-
-                    updateUI();
-                    showNotification('success', 'Entry Updated', `Updated ${uid} to ${trimmed} in the database.`);
-                }
+                databaseMap[uid] = { name: newName, email: newEmail };
+                if (isOnline) syncDatabaseToSheet();
+                updateUI();
+                showNotification('success', 'Entry Updated', `Updated details for ${newName}.`);
+                close();
             });
         }
 
@@ -6947,7 +6791,7 @@
          */
         function deleteDatabaseEntry(uid) {
             if (!isAdmin) return;
-            const name = uidToNameMap[uid];
+            const name = databaseMap[uid]?.name;
             if (!name) return;
 
             showConfirmationDialog({
@@ -6956,7 +6800,7 @@
                 confirmText: 'Delete',
                 isDestructive: true,
                 onConfirm: () => {
-                    delete uidToNameMap[uid];
+                    delete databaseMap[uid];
                     if (isOnline && isSignedIn) {
                         syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
                     }
@@ -7199,7 +7043,7 @@
                 confirmText: 'Delete',
                 isDestructive: true,
                 onConfirm: () => {
-                    uidToNameMap = {};
+                    databaseMap = {};
                     // Sync to sheet if online
                     if (isOnline && isSignedIn) {
                         syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
@@ -7231,7 +7075,7 @@
             const now = new Date();
             const formattedDate = now.toISOString().split('T')[0];
             const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5);
-            const sortedEntries = Object.entries(uidToNameMap).sort((a, b) => a[1].localeCompare(b[1]));
+            const sortedEntries = Object.entries(databaseMap).sort((a, b) => a[1].name.localeCompare(b[1].name));
 
             dialog.innerHTML = `
     <h3 class="dialog-title">Add Manual Log Entry</h3>
@@ -7262,9 +7106,9 @@
             const dataList = dialog.querySelector('#student-list');
 
             // Populate the datalist with all students
-            sortedEntries.forEach(([uid, name]) => {
+            sortedEntries.forEach(([uid, data]) => { // Changed 'name' to 'data'
                 const option = document.createElement('option');
-                option.value = name;
+                option.value = data.name; // Use data.name
                 option.dataset.uid = uid; // Store the UID on the option
                 dataList.appendChild(option);
             });
@@ -7318,7 +7162,7 @@
                     syncLogsWithSheet();
                 }
 
-                const name = uidToNameMap[selectedUid] || 'Unknown';
+                const name = databaseMap[selectedUid]?.name || 'Unknown';
                 showNotification('success', 'Manual Entry Added', `Added attendance for ${name}.`);
                 closeDialog();
             });
@@ -7488,7 +7332,11 @@
                     return;
                 }
 
-                uidToNameMap[group.uid] = newName;
+                if (databaseMap[group.uid]) {
+                    databaseMap[group.uid].name = newName;
+                } else {
+                    databaseMap[group.uid] = { name: newName, email: '' };
+                }
 
                 const logsForCurrentCourse = courseData[currentCourse].logs;
                 const [year, month, day] = newDateStr.split('-').map(Number);
@@ -7659,63 +7507,44 @@
          */
         function handleExcelFile(event) {
             if (!isAdmin) return;
-
             const file = event.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
-
             reader.onload = function (e) {
                 try {
                     const data = new Uint8Array(e.target.result);
                     const workbook = XLSX.read(data, { type: 'array' });
-
-                    // Get the first sheet
                     const firstSheetName = workbook.SheetNames[0];
                     const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Read as array of arrays
 
-                    // Convert to JSON
-                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-                    // Extract UID-name mappings
                     const excelMappings = {};
-
-                    jsonData.forEach(row => {
-                        // Get first two columns (name and UID)
-                        const keys = Object.keys(row);
-
-                        if (keys.length >= 2) {
-                            const name = row[keys[0]];
-                            const uid = String(row[keys[1]]);
+                    // Skip header row (index 0)
+                    for (let i = 1; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (row && row.length >= 2) {
+                            const name = row[0];
+                            const uid = String(row[1]);
+                            const email = row[2] || ''; // Read email from 3rd column, default to empty
 
                             if (name && uid) {
-                                excelMappings[uid] = name;
+                                excelMappings[uid.trim()] = { name: String(name).trim(), email: String(email).trim() };
                             }
                         }
-                    });
-
-                    const excelCount = Object.keys(excelMappings).length;
-
-                    if (excelCount === 0) {
-                        showNotification('error', 'Import Failed', 'Could not find name and UID data in the expected columns.');
-                        return;
                     }
 
-                    // Show import dialog
+                    const excelCount = Object.keys(excelMappings).length;
+                    if (excelCount === 0) {
+                        return showNotification('error', 'Import Failed', 'Could not find Name and UID data in the first two columns.');
+                    }
                     showDatabaseImportDialog(excelMappings);
                 } catch (error) {
                     console.error('Excel import error:', error);
                     showNotification('error', 'Import Failed', 'Could not process the Excel file.');
                 }
             };
-
-            reader.onerror = function () {
-                showNotification('error', 'Import Failed', 'Failed to read the Excel file.');
-            };
-
             reader.readAsArrayBuffer(file);
-
-            // Reset the file input
             event.target.value = '';
         }
 
@@ -7726,61 +7555,43 @@
         function showDatabaseImportDialog(excelMappings) {
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
-
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
 
             dialog.innerHTML = `
-	<h3 class="dialog-title">Import UID Database</h3>
-	<p>Found ${Object.keys(excelMappings).length} entries in the Excel file.</p>
-	<p>How would you like to import them?</p>
-	<div class="dialog-actions">
-		<button id="merge-db-btn" class="btn-blue">Merge</button>
-		<button id="replace-db-btn" class="btn-blue">Replace</button>
-		<button id="cancel-db-import-btn" class="btn-red">Cancel</button>
-	</div>
-`;
-
+        <h3 class="dialog-title">Import UID Database</h3>
+        <p>Found ${Object.keys(excelMappings).length} entries in the Excel file. How would you like to import them?</p>
+        <div class="dialog-actions">
+            <button id="merge-db-btn" class="btn-blue">Merge</button>
+            <button id="replace-db-btn" class="btn-orange">Replace</button>
+            <button id="cancel-db-import-btn" class="btn-red">Cancel</button>
+        </div>
+    `;
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // Merge option
             document.getElementById('merge-db-btn').addEventListener('click', () => {
-                // Add new mappings without overwriting existing ones
                 let newCount = 0;
-
-                for (const [uid, name] of Object.entries(excelMappings)) {
-                    if (!uidToNameMap[uid]) {
-                        uidToNameMap[uid] = name;
+                for (const [uid, data] of Object.entries(excelMappings)) {
+                    if (!databaseMap[uid]) {
+                        databaseMap[uid] = data; // Add the {name, email} object
                         newCount++;
                     }
                 }
-
-                // Sync to sheet if online
-                if (isOnline && isSignedIn) {
-                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-                }
-
+                if (isOnline) syncDatabaseToSheet();
                 updateUI();
-                showNotification('success', 'Database Merged', `Added ${newCount} new entries to the database.`);
+                showNotification('success', 'Database Merged', `Added ${newCount} new entries.`);
                 document.body.removeChild(dialogBackdrop);
             });
 
-            // Replace option
             document.getElementById('replace-db-btn').addEventListener('click', () => {
-                uidToNameMap = { ...excelMappings };
-
-                // Sync to sheet if online
-                if (isOnline && isSignedIn) {
-                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-                }
-
+                databaseMap = { ...excelMappings }; // Replace with the new map structure
+                if (isOnline) syncDatabaseToSheet();
                 updateUI();
-                showNotification('success', 'Database Replaced', `Database now contains ${Object.keys(excelMappings).length} entries from Excel.`);
+                showNotification('success', 'Database Replaced', `Database now contains ${Object.keys(excelMappings).length} entries.`);
                 document.body.removeChild(dialogBackdrop);
             });
 
-            // Cancel import
             document.getElementById('cancel-db-import-btn').addEventListener('click', () => {
                 document.body.removeChild(dialogBackdrop);
             });
@@ -7979,7 +7790,6 @@
         }
 
         /**
- * REFACTORED: Update the logs list based on the currently selected course.
  * This version uses data-attributes for event delegation and no longer creates listeners in a loop.
  */
         function updateLogsList() {
@@ -7995,7 +7805,6 @@
                 if (!currentCourse) {
                     logsTbody.innerHTML = '';
                     filteredCount.textContent = '0';
-                    // Use the improved empty state message
                     emptyLogs.innerHTML = `<i class="fas fa-hand-pointer" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
                                    <p style="font-size: 1.1em; margin-bottom: 5px;">Please select a course.</p>
                                    <p style="font-size: 0.9em; color: #999;">Choose a course above to view its attendance history.</p>`;
@@ -8009,7 +7818,7 @@
                 if (isSignedIn && !isAdmin && currentUser) {
                     const studentNameNormalised = normalizeName(currentUser.name);
                     logsToDisplay = currentCourseLogs.filter(log => {
-                        const logOwnerName = uidToNameMap[log.uid] || '';
+                        const logOwnerName = databaseMap[log.uid]?.name || '';
                         const logOwnerNameNormalised = normalizeName(logOwnerName);
                         return logOwnerNameNormalised === studentNameNormalised;
                     });
@@ -8026,13 +7835,12 @@
                     const uid = log.uid;
                     const key = `${date}_${uid}`; // This key uniquely identifies a student on a specific day.
                     if (!grouped[key]) {
-                        // IMPORTANT: We store the 'key' inside the group object itself.
                         grouped[key] = {
                             key: key,
                             date,
                             dateObj: new Date(year, month - 1, day),
                             uid,
-                            name: uidToNameMap[uid] || 'Unknown',
+                            name: databaseMap[uid]?.name || 'Unknown',
                             originalLogs: []
                         };
                     }
@@ -8073,16 +7881,12 @@
 
                 if (result.length === 0) {
                     let emptyMessageHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
-                           <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>`;
-
-                    // Only add the specific paragraph if the user is an admin
+                                   <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>`;
                     if (isAdmin) {
                         emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
                     } else {
-                        // Optional: Provide a different, more helpful message for students
                         emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">There are no attendance records for you in this course.</p>`;
                     }
-
                     emptyLogs.innerHTML = emptyMessageHTML;
                     emptyLogs.style.display = 'block';
                 } else {
@@ -8114,20 +7918,14 @@
                             eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Add to EIS';
                             eisBtn.title = 'Add to EIS for this day';
                             eisBtn.setAttribute('aria-label', `Add attendance for ${group.date} to EIS`);
-                            eisBtn.onclick = (e) => {
-                                e.stopPropagation();
-                                showDirectEisExportDialog(dateForButton);
-                            };
+                            eisBtn.onclick = (e) => { e.stopPropagation(); showDirectEisExportDialog(dateForButton); };
                             buttonContainer.appendChild(eisBtn);
                             const bulkAddBtn = document.createElement('button');
                             bulkAddBtn.className = 'btn-green btn-icon';
                             bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
                             bulkAddBtn.title = 'Add +1 Hour to All Students on This Day';
                             bulkAddBtn.setAttribute('aria-label', `Add a plus one hour log to all students on ${group.date}`);
-                            bulkAddBtn.onclick = (e) => {
-                                e.stopPropagation();
-                                addPlusOneHourToDay(dateForButton);
-                            };
+                            bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
                             buttonContainer.appendChild(bulkAddBtn);
                             flexWrapper.appendChild(buttonContainer);
                             separatorCell.appendChild(flexWrapper);
@@ -8140,7 +7938,6 @@
                     row.dataset.key = group.key;
                     if (group.name === 'Unknown') row.classList.add('unknown-row');
 
-                    // --- The rest of the function creates the cells as before ---
                     const nameCell = document.createElement('td');
                     nameCell.className = 'name-cell name-column';
                     nameCell.textContent = group.name;
@@ -8163,17 +7960,13 @@
                     group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
                         const timeTag = document.createElement('span');
                         timeTag.className = 'time-tag';
-                        // MODIFIED CODE
                         if (log.manual === true || log.manual === 'true') {
                             timeTag.classList.add('manual', 'excused');
                             timeTag.addEventListener('click', (e) => {
                                 e.stopPropagation();
-
-                                // Check if the current non-admin user is viewing their own log
                                 if (!isAdmin && currentUser && normalizeName(group.name) === normalizeName(currentUser.name)) {
                                     showNotification('warning', 'Excused Absence', 'You have been excused for this hour.');
                                 } else {
-                                    // Default message for admins or other cases
                                     showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
                                 }
                             });
@@ -8226,10 +8019,9 @@
                     logsTbody.appendChild(row);
                 });
 
-                // This removes the 'reloading' class, triggering the fade-in animation.
                 tableContainer.classList.remove('reloading');
                 if (isChangingCourses) {
-                    isChangingCourses = false; // Disarm the animation for the next update.
+                    isChangingCourses = false;
                 }
             }, 150);
         }
@@ -8304,7 +8096,7 @@
                 onConfirm: (name) => {
                     if (name && name.trim()) {
                         const trimmedName = name.trim();
-                        uidToNameMap[uid] = trimmedName;
+                        databaseMap[uid] = { name: trimmedName, email: '' }; // Add with empty email
                         if (isOnline && isSignedIn) {
                             syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
                         }
@@ -8319,83 +8111,40 @@
          * Update the database list in the UI.
          */
         function updateDatabaseList() {
-            const databaseTbody = document.getElementById('database-tbody');
-            if (!databaseTbody) {
-                console.warn('database-tbody element not found, skipping render.');
-                return;
-            }
-
-            // Filter database entries
-            const entries = Object.entries(uidToNameMap)
-                .filter(([uid, name]) => {
-                    if (!dbFilter) return true;
-                    return (
-                        uid.toLowerCase().includes(dbFilter) ||
-                        name.toLowerCase().includes(dbFilter)
-                    );
-                })
-
-            const [field, direction] = currentDbSort.split('-');
-            const sortMultiplier = direction === 'asc' ? 1 : -1;
-
-            entries.sort((a, b) => {
-                // a and b are [uid, name] arrays
-                const valA = field === 'name' ? a[1] : a[0]; // a[1] is name, a[0] is uid
-                const valB = field === 'name' ? b[1] : b[0]; // b[1] is name, b[0] is uid
-                return sortMultiplier * valA.localeCompare(valB);
+            const entries = Object.entries(databaseMap).filter(([uid, data]) => {
+                if (!dbFilter) return true;
+                return (uid.toLowerCase().includes(dbFilter) ||
+                    data.name.toLowerCase().includes(dbFilter) ||
+                    (data.email && data.email.toLowerCase().includes(dbFilter)));
             });
 
-            // Update entry count
-            dbEntryCount.textContent = Object.keys(uidToNameMap).length;
+            // Sorting logic remains similar but accesses data.name
+            entries.sort((a, b) => {
+                const [field, direction] = currentDbSort.split('-');
+                const multiplier = direction === 'asc' ? 1 : -1;
+                const valA = field === 'name' ? a[1].name : a[0];
+                const valB = field === 'name' ? b[1].name : b[0];
+                return multiplier * valA.localeCompare(valB);
+            });
 
-            // Show/hide empty message
-            emptyDatabase.style.display = Object.keys(uidToNameMap).length > 0 ? 'none' : 'block';
-
-            // Clear table
+            dbEntryCount.textContent = Object.keys(databaseMap).length;
+            emptyDatabase.style.display = Object.keys(databaseMap).length > 0 ? 'none' : 'block';
             databaseTbody.innerHTML = '';
-
-            // Add entries to table
-            entries.forEach(([uid, name]) => {
+            entries.forEach(([uid, data]) => {
                 const row = document.createElement('tr');
-                const nameCell = document.createElement('td');
-                nameCell.className = 'name-cell';
-                nameCell.textContent = name;
-
-                // UID cell
-                const uidCell = document.createElement('td');
-                uidCell.className = 'uid-cell';
-                uidCell.textContent = uid;
-
-                row.appendChild(nameCell);
-                row.appendChild(uidCell);
-
-                // Actions cell (admin only)
-                if (isAdmin) {
-                    const actionsCell = document.createElement('td');
-                    actionsCell.className = 'actions-cell admin-only';
-
-                    const actionsWrapper = document.createElement('div'); // Create the wrapper
-                    actionsWrapper.className = 'actions-cell-content';
-
-                    const editBtn = document.createElement('button');
-                    editBtn.className = 'btn-blue btn-icon';
-                    editBtn.title = 'Edit';
-                    editBtn.innerHTML = '<i class="fa-solid fa-pencil"></i>';
-                    editBtn.addEventListener('click', (e) => { e.stopPropagation(); editDatabaseEntry(uid); });
-
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'btn-red btn-icon';
-                    deleteBtn.title = 'Delete';
-                    deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
-                    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteDatabaseEntry(uid); });
-
-                    actionsWrapper.appendChild(editBtn); // Append to wrapper
-                    actionsWrapper.appendChild(deleteBtn); // Append to wrapper
-
-                    actionsCell.appendChild(actionsWrapper); // Add wrapper to cell
-                    row.appendChild(actionsCell);
-                }
-
+                row.innerHTML = `
+            <td class="name-cell">${data.name}</td>
+            <td class="uid-cell">${data.uid}</td>
+            <td class="email-cell">${data.email || ''}</td>
+            <td class="actions-cell admin-only">
+                <div class="actions-cell-content">
+                    <button class="btn-blue btn-icon edit-db-btn" title="Edit"><i class="fa-solid fa-pencil"></i></button>
+                    <button class="btn-red btn-icon delete-db-btn" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
+                </div>
+            </td>
+        `;
+                row.querySelector('.edit-db-btn').addEventListener('click', () => editDatabaseEntry(uid));
+                row.querySelector('.delete-db-btn').addEventListener('click', () => deleteDatabaseEntry(uid));
                 databaseTbody.appendChild(row);
             });
         }
@@ -8404,12 +8153,12 @@
          * Update database status indicator.
          */
         function updateDatabaseStatus() {
-            const count = Object.keys(uidToNameMap).length;
+            const count = Object.keys(databaseMap).length;
             databaseStatus.textContent = count > 0 ? `${count} entries` : 'Not loaded';
         }
 
         /**
-         * CORRECTED: Update the entire UI.
+         Update the entire UI.
          */
         async function updateUI() {
             await databaseLoadPromise;
@@ -8452,8 +8201,8 @@
 
             if (isAdmin) {
                 // Admin-specific UI updates
-                clearDbBtn.disabled = Object.keys(uidToNameMap).length === 0;
-                exportExcelBtn.disabled = Object.keys(uidToNameMap).length === 0;
+                clearDbBtn.disabled = Object.keys(databaseMap).length === 0;
+                exportExcelBtn.disabled = Object.keys(databaseMap).length === 0;
             }
 
             updateScanButtons();
@@ -8644,7 +8393,7 @@
             saveCourseToLocalStorage(currentCourse); // Save the updated course data.
             updateUI();
 
-            const name = uidToNameMap[serialNumber] || 'Unknown';
+            const name = databaseMap[serialNumber]?.name || 'Unknown';
             const isMobile = window.innerWidth <= 700;
 
             if (isMobile) {
@@ -8902,7 +8651,8 @@
                     const logsForCourse = studentLogCache[course] || [];
                     // Check if at least one log in this course belongs to the student
                     return logsForCourse.some(log => {
-                        const logOwnerName = uidToNameMap[log.uid] || '';
+                        // ## FIX IS HERE ##
+                        const logOwnerName = databaseMap[log.uid]?.name || '';
                         return normalizeName(logOwnerName) === studentNameNormalised;
                     });
                 });
