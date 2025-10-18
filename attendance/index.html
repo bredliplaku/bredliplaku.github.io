@@ -2740,10 +2740,6 @@
             overflow: hidden;
         }
 
-        body.is-loading .container {
-            visibility: hidden;
-        }
-
         @media (prefers-reduced-motion: reduce) {
 
             *,
@@ -4687,22 +4683,53 @@
 
         async function fetchInitialData() {
             try {
-                // ... (the existing Promise.all code stays the same)
-            } catch (error) {
-                // ... (the existing catch block stays the same)
-            } finally {
-                // --- ADD THIS LOGIC BLOCK ---
+                // This helper function adds robust error checking to every server call.
+                const robustFetch = async (url, action) => {
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch ${action}: Server responded with status ${response.status}`);
+                    }
+                    // Try to parse the response as JSON. If it fails, the script likely sent an error page.
+                    try {
+                        return await response.json();
+                    } catch (e) {
+                        console.error(`Error parsing JSON for action: ${action}`, await response.text());
+                        throw new Error(`Failed to fetch ${action}: Server sent an invalid response.`);
+                    }
+                };
+
+                // Fetch all critical data concurrently. If any of these fail, the entire block will fail.
+                const [courses, dbMap, courseInfo] = await Promise.all([
+                    robustFetch(`${SCRIPT_URL}?action=getAvailableCourses`, 'Courses'),
+                    robustFetch(`${SCRIPT_URL}?action=getDatabase`, 'Database'),
+                    robustFetch(`${SCRIPT_URL}?action=getCourseInfo`, 'Course Info')
+                ]);
+
+                // If we reach this point, all data was fetched successfully.
+                availableCourses = courses;
+                databaseMap = dbMap;
+                window.courseInfoMap = courseInfo;
+
+                // Restore intended course after login, if it exists.
                 const intendedCourse = localStorage.getItem('intended_course_after_login');
                 if (intendedCourse && availableCourses.includes(intendedCourse)) {
                     currentCourse = intendedCourse;
-                    localStorage.removeItem('intended_course_after_login'); // Clean up the item
+                    localStorage.removeItem('intended_course_after_login');
                 }
-                // -----------------------------
 
-                loadingTasks.delete('courses');
-                loadingTasks.delete('database');
-                checkLoadingCompletion();
+            } catch (error) {
+                console.error("CRITICAL LOAD FAILURE:", error);
+                // By not deleting the tasks, we prevent the app from showing an empty screen.
+                // The skeleton loader will remain visible with an error message.
+                showNotification('error', 'Critical Data Error', `Could not load core data from the server. The application cannot start. Details: ${error.message}`);
+                // Stop the function here.
+                return;
             }
+
+            // This code only runs if the 'try' block was 100% successful.
+            loadingTasks.delete('courses');
+            loadingTasks.delete('database');
+            checkLoadingCompletion();
         }
 
         function showRegisterUIDDialog() {
