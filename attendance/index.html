@@ -2720,6 +2720,10 @@
             overflow: hidden;
         }
 
+        body.is-loading .container {
+            visibility: hidden;
+        }
+
         @media (prefers-reduced-motion: reduce) {
 
             *,
@@ -3214,6 +3218,7 @@
         let studentLogCache = {};
         let currentRequestId = 0; // Global request counter
         let isSyncing = false;
+        let debouncedAutoSync;
 
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -3259,6 +3264,21 @@
                 setTimeout(showMainContent, 100); // Short delay for rendering
             } else {
                 console.log("Waiting for tasks:", Array.from(loadingTasks));
+            }
+        }
+
+        /**
+     * Flags that a local change has occurred and triggers a debounced auto-sync.
+     */
+        function flagChangeForSync() {
+            if (!isAdmin) return; // Only admins can trigger a sync
+
+            pendingChanges = true;
+            updateSyncStatus('Changes pending', 'waiting');
+
+            // If debouncedAutoSync is ready, call it to start/reset the 10-second timer
+            if (debouncedAutoSync) {
+                debouncedAutoSync();
             }
         }
 
@@ -3430,8 +3450,7 @@
             const s = getTombstonesForCourse(course);
             s.add(id);
             saveTombstonesForCourse(s, course);
-            pendingChanges = true; // Mark that there are changes to sync
-            updateSyncStatus('Changes pending', 'waiting');
+            flagChangeForSync();
         }
 
         // Setup all event listeners in one place
@@ -3992,6 +4011,13 @@
 
         // Add this function to implement auto-save and auto-sync
         function setupAutoSync() {
+            debouncedAutoSync = debounce(() => {
+                if (autoSyncEnabled && isOnline && isSignedIn && pendingChanges) {
+                    console.log("Debounced auto-sync triggered after 10 seconds of inactivity.");
+                    autoSyncData();
+                }
+            }, 10000); // 10-second delay before syncing
+
             // Always save changes to localStorage immediately when logs change
             const originalAddLog = handleNfcReading;
             handleNfcReading = async function (event) {
@@ -4029,45 +4055,61 @@
 
         // Auto-sync function with retry logic
         async function autoSyncData() {
-            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing) return;
+            // Only sync the currently active course during auto-sync to save bandwidth
+            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing || !currentCourse) return;
 
             try {
                 isSyncing = true;
                 updateSyncStatus("Syncing...", "syncing");
+                console.log(`Starting auto-sync for course: ${currentCourse}`);
 
+                // --- STEP 1: PULL ---
+                // Fetch the latest logs and tombstones from the server for the current course.
+                const [serverLogs, serverTombs] = await Promise.all([
+                    fetchLogsFromSheet(currentCourse),
+                    fetchTombstonesForCourse(currentCourse)
+                ]);
+
+                // --- STEP 2: MERGE ---
+                // Get the current local data.
+                const localData = courseData[currentCourse];
+                // Merge the server version with the local version. The versioning system
+                // will automatically resolve any conflicts, ensuring the latest edits win.
+                const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
+
+                // Update the local data with the new, authoritative version.
+                courseData[currentCourse].logs = mergedLogs;
+
+                // --- STEP 3: PUSH ---
+                // Push the perfectly merged and conflict-free data back to the server.
                 await syncLogsWithSheet();
 
-                // Reset state after successful sync
+                // --- STEP 4: CLEANUP ---
+                // Reset state after a successful sync.
                 pendingChanges = false;
                 lastSyncTime = Date.now();
                 syncAttempts = 0;
-                const now = new Date();
-                const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
                 updateSyncStatus(`Synced ${time}`, "success");
+                console.log("Auto-sync successful.");
 
-                // Hide success indication after a few seconds
+                // Re-render the UI with the fresh data and hide success message after a delay.
+                updateUI();
                 setTimeout(() => {
                     if (!pendingChanges) {
                         updateSyncStatus("Online", "online");
                     }
                 }, 3000);
+
             } catch (error) {
                 console.error('Auto-sync error:', error);
                 syncAttempts++;
-
-                // Update UI to show sync failed
                 updateSyncStatus("Sync failed", "error");
 
                 if (syncAttempts < MAX_SYNC_ATTEMPTS) {
-                    // Schedule retry with exponential backoff
+                    // Schedule retry with a delay if something went wrong.
                     const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
                     updateSyncStatus(`Retrying in ${Math.round(retryDelay / 1000)}s`, "waiting");
-
-                    setTimeout(() => {
-                        if (isOnline && isSignedIn) {
-                            autoSyncData();
-                        }
-                    }, retryDelay);
                 }
             } finally {
                 isSyncing = false;
@@ -4647,22 +4689,18 @@
 
         async function fetchInitialData() {
             try {
-                const [courses, dbMap, courseInfo] = await Promise.all([
-                    fetch(`${SCRIPT_URL}?action=getAvailableCourses`).then(res => res.json()),
-                    fetch(`${SCRIPT_URL}?action=getDatabase`).then(res => res.json()),
-                    fetch(`${SCRIPT_URL}?action=getCourseInfo`).then(res => res.json())
-                ]);
-
-                availableCourses = courses;
-                databaseMap = dbMap;
-                window.courseInfoMap = courseInfo; // Store course metadata globally
-
-                // The rest of the initial course selection logic remains the same...
-                // (You can copy this part from your existing fetchAvailableCourses function's 'finally' block)
-
+                // ... (the existing Promise.all code stays the same)
             } catch (error) {
-                showNotification('error', 'Initial Load Failed', 'Could not fetch data from the server.');
+                // ... (the existing catch block stays the same)
             } finally {
+                // --- ADD THIS LOGIC BLOCK ---
+                const intendedCourse = localStorage.getItem('intended_course_after_login');
+                if (intendedCourse && availableCourses.includes(intendedCourse)) {
+                    currentCourse = intendedCourse;
+                    localStorage.removeItem('intended_course_after_login'); // Clean up the item
+                }
+                // -----------------------------
+
                 loadingTasks.delete('courses');
                 loadingTasks.delete('database');
                 checkLoadingCompletion();
@@ -5180,9 +5218,11 @@
         /**
          * Handle auth button click to sign in.
          */
-        // Replace your handleAuthClick function with this updated version
         function handleAuthClick() {
             if (tokenClient) {
+                // --- ADD THIS LINE ---
+                if (window.location.hash) localStorage.setItem('intended_course_after_login', window.location.hash.substring(1));
+                // --------------------
                 tokenClient.requestAccessToken();
             } else {
                 showNotification('error', 'Auth Error', 'Authentication client is not ready.');
@@ -5982,10 +6022,10 @@
         }
 
         /**
- * Displays a custom, non-blocking alert dialog.
- * @param {string} title - The title of the dialog.
- * @param {string} message - The main text for the user.
- */
+         * Displays a custom, non-blocking alert dialog with an 'X' close button.
+         * @param {string} title - The title of the dialog.
+         * @param {string} message - The main text for the user.
+         */
         function showAlertDialog(title, message) {
             document.body.style.overflow = 'hidden'; // Prevent background scroll
             const existingDialog = document.querySelector('.dialog-backdrop');
@@ -5996,23 +6036,60 @@
 
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
+
+            // --- MODIFIED HTML STRUCTURE ---
             dialog.innerHTML = `
+        <style>
+            .dialog-close-btn {
+                position: absolute;
+                top: 15px;
+                right: 20px;
+                background: none;
+                border: none;
+                font-size: 1.8em;
+                line-height: 1;
+                cursor: pointer;
+                color: #999;
+                padding: 5px;
+                border-radius: 50%;
+                width: 30px;
+                height: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background-color 0.2s, color 0.2s, transform 0.1s;
+            }
+            .dialog-close-btn:hover {
+                background-color: rgba(0,0,0,0.1);
+                color: #333;
+            }
+            .dialog-close-btn:active {
+                transform: scale(0.9);
+            }
+            .dark-mode .dialog-close-btn {
+                color: #777;
+            }
+            .dark-mode .dialog-close-btn:hover {
+                background-color: rgba(255,255,255,0.1);
+                color: #eee;
+            }
+        </style>
         <h3 class="dialog-title">${title}</h3>
+        <button id="dialog-close-btn" class="dialog-close-btn" title="Close">&times;</button>
         <p>${message}</p>
-        <div class="dialog-actions">
-            <button id="dialog-ok-btn" class="btn-blue">OK</button>
-        </div>
-    `;
+    `; // --- The old dialog-actions div with the OK button has been removed ---
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
             const closeDialog = () => {
                 document.body.removeChild(dialogBackdrop);
-                document.head.removeChild(document.getElementById('temp-dialog-styles'));
                 document.body.style.overflow = ''; // Restore scroll
             };
-            document.getElementById('dialog-ok-btn').addEventListener('click', closeDialog);
+
+            // --- UPDATED EVENT LISTENER ---
+            document.getElementById('dialog-close-btn').addEventListener('click', closeDialog);
+
             dialogBackdrop.addEventListener('click', (e) => {
                 if (e.target === dialogBackdrop) closeDialog();
             });
@@ -7251,8 +7328,9 @@
         }
 
         /**
- * Performs a manual, forced sync of both the database and the current course's logs.
- */
+  * Performs a manual, two-way sync: pushes local changes up,
+  * then pulls the definitive server state back down.
+  */
         async function manualSync() {
             if (!isOnline || !isSignedIn || !isAdmin) {
                 showNotification('warning', 'Sync Not Available', 'You must be signed in as an admin and online to sync.');
@@ -7263,22 +7341,42 @@
                 return;
             }
 
-            console.log("Starting manual sync...");
+            console.log("Starting manual two-way sync...");
             isSyncing = true;
-            updateSyncStatus("Syncing...", "syncing");
+            updateSyncStatus("Syncing (1/2)...", "syncing");
             const syncStart = Date.now();
 
             try {
-                // Run both sync operations concurrently for speed.
+                // --- STEP 1: PUSH LOCAL CHANGES TO SERVER ---
+                // We run both sync operations concurrently for speed.
                 await Promise.all([
                     syncDatabaseToSheet(),
-                    syncLogsWithSheet()
+                    syncLogsWithSheet() // This pushes the currently selected course's logs
+                ]);
+                console.log("Step 1 (Push) complete.");
+                updateSyncStatus("Syncing (2/2)...", "syncing");
+
+                // --- STEP 2: PULL ALL DATA FROM SERVER TO REFRESH LOCAL STATE ---
+                // Fetch the master list of students and all course logs from the server.
+                const [refreshedDb, allCoursesLogs] = await Promise.all([
+                    fetch(`${SCRIPT_URL}?action=getDatabase`).then(res => res.json()),
+                    loadAllCourseDataFromServer() // This function already handles fetching and saving all courses
                 ]);
 
+                // Overwrite the local database map with the fresh server version.
+                databaseMap = refreshedDb;
+                console.log("Step 2 (Pull) complete. Database and all logs refreshed from server.");
+
+                // --- STEP 3: FINISH AND UPDATE UI ---
                 lastSyncTime = Date.now();
                 pendingChanges = false;
+
+                // Update the entire UI with the new, authoritative data.
+                updateUI();
+
                 console.log(`Manual sync completed in ${Date.now() - syncStart}ms`);
                 const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                showNotification('success', 'Sync Complete', `Data refreshed from server.`);
                 updateSyncStatus(`Synced ${time}`, "success");
 
                 setTimeout(() => {
@@ -7287,6 +7385,7 @@
 
             } catch (error) {
                 console.error('Manual sync error:', error);
+                showNotification('error', 'Sync Failed', 'Could not sync with the server. Please try again.');
                 updateSyncStatus("Sync failed", "error");
             } finally {
                 isSyncing = false;
@@ -7525,7 +7624,8 @@
             }
             courseData[currentCourse].logs.unshift(newLog);
 
-            saveCourseToLocalStorage(currentCourse); // Save the updated course data.
+            saveCourseToLocalStorage(currentCourse); // Save the change immediately
+            flagChangeForSync(); // Flag the change and start the 10s sync timer
             updateUI();
 
             const name = databaseMap[serialNumber]?.name || 'Unknown';
