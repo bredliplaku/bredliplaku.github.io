@@ -3213,6 +3213,7 @@
         let activeRequests = new Map(); // Track active requests per course
         let studentLogCache = {};
         let currentRequestId = 0; // Global request counter
+        let isSyncing = false;
 
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -3943,7 +3944,7 @@
 
                 // Only trigger sync on short press
                 if (!isLongPress) {
-                    syncData();
+                    manualSync();
                 }
             });
 
@@ -3981,7 +3982,7 @@
 
                 // Only trigger sync on short touch
                 if (!isLongPress) {
-                    syncData();
+                    manualSync();
                 }
 
                 // Prevent additional click events
@@ -5441,10 +5442,10 @@
 
             // Update sync button visibility (admin only)
             const syncBtn = document.getElementById('sync-btn');
-if (syncBtn) {
-    syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
-    syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
-}
+            if (syncBtn) {
+                syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+                syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
+            }
 
             // Update empty logs message for signed-in users
             const emptyLogs = document.getElementById('empty-logs');
@@ -7250,10 +7251,52 @@ if (syncBtn) {
         }
 
         /**
+ * Performs a manual, forced sync of both the database and the current course's logs.
+ */
+        async function manualSync() {
+            if (!isOnline || !isSignedIn || !isAdmin) {
+                showNotification('warning', 'Sync Not Available', 'You must be signed in as an admin and online to sync.');
+                return;
+            }
+            if (isSyncing) {
+                showNotification('info', 'Sync in Progress', 'A sync operation is already underway.');
+                return;
+            }
+
+            console.log("Starting manual sync...");
+            isSyncing = true;
+            updateSyncStatus("Syncing...", "syncing");
+            const syncStart = Date.now();
+
+            try {
+                // Run both sync operations concurrently for speed.
+                await Promise.all([
+                    syncDatabaseToSheet(),
+                    syncLogsWithSheet()
+                ]);
+
+                lastSyncTime = Date.now();
+                pendingChanges = false;
+                console.log(`Manual sync completed in ${Date.now() - syncStart}ms`);
+                const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                updateSyncStatus(`Synced ${time}`, "success");
+
+                setTimeout(() => {
+                    if (!pendingChanges) updateSyncStatus("Online", "online");
+                }, 3000);
+
+            } catch (error) {
+                console.error('Manual sync error:', error);
+                updateSyncStatus("Sync failed", "error");
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        /**
          Update the entire UI.
          */
         async function updateUI() {
-            await databaseLoadPromise;
             updateLogsList();
             updateDatabaseList();
             updateDatabaseStatus();
