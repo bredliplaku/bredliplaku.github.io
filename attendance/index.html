@@ -795,45 +795,6 @@
             margin-top: 5px;
         }
 
-        #notification-container {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 10000;
-            max-width: 300px;
-        }
-
-        .notification {
-            margin-bottom: 10px;
-            /* Reduced margin so new notifications don’t push content far down */
-        }
-
-        .notification-close {
-            background: none;
-            border: none;
-            border-radius: 0;
-            box-shadow: none;
-            cursor: pointer;
-            font-size: 18px;
-            color: inherit;
-            opacity: 0.7;
-            padding: 0;
-            margin-left: 8px;
-            transition: none;
-            width: auto;
-            height: auto;
-            display: inline-block;
-            pointer-events: auto;
-            /* Make only the close button clickable */
-        }
-
-        .notification-close:hover {
-            opacity: 1;
-            background: none;
-            color: inherit;
-            box-shadow: none;
-        }
-
         .in-page-notifications {
             position: fixed;
             bottom: 20px;
@@ -1412,22 +1373,6 @@
         #logout-btn.btn-icon i {
             font-size: 0.85em;
             /* Slightly reduce the icon size */
-        }
-
-        .action-icon {
-            cursor: pointer;
-            padding: 5px;
-            margin: 0 3px;
-            color: var(--primary-color);
-            transition: color 0.3s, transform 0.3s;
-        }
-
-        .action-icon.edit-icon:hover {
-            color: var(--info-color);
-        }
-
-        .action-icon.delete-icon:hover {
-            color: var(--danger-color);
         }
 
         .empty-logs {
@@ -2109,22 +2054,6 @@
             animation: subtle-pulse 2s infinite;
         }
 
-        .course-select {
-            min-width: 100px;
-            padding: 5px 10px;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 10px;
-            font-size: 0.9em;
-            background-color: rgba(255, 255, 255, 0.1);
-            color: white;
-            text-align: center;
-        }
-
-        .course-select option {
-            background-color: #fff;
-            color: #333;
-        }
-
         .course-button.btn-orange {
             color: var(--warning-color);
             border-color: transparent;
@@ -2178,11 +2107,6 @@
         .dark-mode .not-signed-in-message {
             background-color: rgba(92, 107, 192, 0.15);
             color: #e0e0e0;
-        }
-
-        .dark-mode .course-select option {
-            background-color: var(--card-background);
-            color: var(--text-color);
         }
 
         .dark-mode .logs-table tr.day-separator {
@@ -3275,8 +3199,6 @@
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
         const tabContents = document.querySelectorAll('.tab-content');
-        const startScanBtn = document.getElementById('start-scan-btn');
-        const stopScanBtn = document.getElementById('stop-scan-btn');
         const importExcelBtn = document.getElementById('import-excel-btn');
         const excelInput = document.getElementById('excel-input');
         const filterInput = document.getElementById('filter-input');
@@ -3556,7 +3478,6 @@
             const exportExcelBtn = document.getElementById('export-excel-btn');
             const clearDbBtn = document.getElementById('clear-db-btn');
             const syncBtn = document.getElementById('sync-btn');
-            const courseSelect = document.getElementById('course-select');
             const loginBtn = document.getElementById('login-btn');
             const logoutBtn = document.getElementById('logout-btn');
             const dbSortSelect = document.getElementById('db-sort-select');
@@ -5528,48 +5449,23 @@
         // REPLACEMENT FUNCTION
         function handleSignoutClick() {
             if (isAdmin) {
-                // --- LECTURER MODE LOGIC (FOR ADMINS ONLY) ---
-                console.log('Entering Lector Mode (locking session).');
-
-                // Save the current state of logs to localStorage to keep them for the session.
-                saveCourseToLocalStorage(currentCourse);
-
-                // Remove the Google token. A page refresh will require a new sign-in.
+                // --- LECTURER MODE LOGIC ---
+                console.log('Entering Lecturer Mode (locking session).');
                 localStorage.removeItem('gapi_token');
-
-                // Reset ONLY the authentication flags in JavaScript memory.
                 isSignedIn = false;
                 isAdmin = false;
                 currentUser = null;
-
-                // CRITICAL: Do NOT clear 'currentCourse' or 'logs' to keep scanning active.
-
-                // Update ONLY the authentication part of the UI (hides user info, shows sign-in button).
-                updateAuthUI();
-
-                showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refreshing the page will end the session.`);
+                // The current course and its data remain in memory for scanning.
+                updateAuthUI(); // Updates only the auth-related UI parts.
+                showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refresh to end the session.`);
 
             } else {
-                // --- STANDARD SIGN-OUT LOGIC (FOR STUDENTS) ---
-                console.log('Student signing out.');
-
-                // 1. Remove the Google token.
+                // --- STANDARD STUDENT SIGN-OUT ---
+                console.log('Student signing out. Reloading for a clean state.');
+                // For students, the simplest and cleanest way to sign out is to clear the token and reload.
                 localStorage.removeItem('gapi_token');
-
-                // 2. Clear all sensitive state variables from memory.
-                isSignedIn = false;
-                isAdmin = false;
-                currentUser = null;
-                logs = [];
-                currentCourse = '';
-                studentLogCache = {}; // Clear the student's cached data.
-
-                // 3. Clear the last active course from local storage so it doesn't try to reload.
                 localStorage.removeItem('last_active_course');
-
-                // 4. Update the entire UI to reflect the clean, signed-out state.
-                updateAuthUI();
-                updateUI(); // This will clear the logs table.
+                window.location.reload();
             }
         }
 
@@ -5599,33 +5495,6 @@
             }
         }
 
-        // Create a visual indicator for pending changes
-        function createPendingBadge() {
-            const syncContainer = document.querySelector('.sync-container');
-            const badge = document.createElement('div');
-            badge.id = 'pending-changes-badge';
-            badge.style.display = 'inline-block';
-            badge.style.backgroundColor = '#fb8c00';
-            badge.style.color = 'white';
-            badge.style.borderRadius = '50%';
-            badge.style.width = '10px';
-            badge.style.height = '10px';
-            badge.style.marginLeft = '5px';
-            badge.title = 'Pending changes to sync';
-
-            if (syncContainer) {
-                syncContainer.appendChild(badge);
-            }
-
-            return badge;
-        }
-
-        // Mark changes as pending whenever we add/edit logs
-        function markChangesPending() {
-            pendingChanges = true;
-            updateSyncStatus("Changes pending", "waiting");
-        }
-
         function updateAuthUI() {
             if (loadingTasks.has('auth')) {
                 loadingTasks.delete('auth');
@@ -5637,6 +5506,8 @@
             if (appHeader) {
                 appHeader.style.display = isSignedIn ? 'block' : 'none';
             }
+
+            document.getElementById('course-buttons-container').style.display = isSignedIn ? 'flex' : 'none';
 
             document.body.classList.toggle('is-admin', isAdmin);
 
@@ -5681,29 +5552,6 @@
 
             if (directEisExportBtn) {
                 directEisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
-            }
-
-            // Handle scan buttons based on NFC support and user status
-            const startScanBtn = document.getElementById('start-scan-btn');
-            const stopScanBtn = document.getElementById('stop-scan-btn');
-
-            if (startScanBtn && stopScanBtn) {
-                // Only show scan buttons if NFC is supported
-                if (nfcSupported) {
-                    // For non-signed in users OR admin users
-                    if (!isSignedIn || (isSignedIn && isAdmin)) {
-                        startScanBtn.style.display = isScanning ? 'none' : 'flex';
-                        stopScanBtn.style.display = isScanning ? 'flex' : 'none';
-                    } else {
-                        // For signed-in non-admin users
-                        startScanBtn.style.display = 'none';
-                        stopScanBtn.style.display = 'none';
-                    }
-                } else {
-                    // NFC not supported - hide buttons regardless of user type
-                    startScanBtn.style.display = 'none';
-                    stopScanBtn.style.display = 'none';
-                }
             }
 
             // Handle guest mode UI
@@ -5786,58 +5634,6 @@
                     emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
                 }
             }
-        }
-
-        /**
-         * Update authentication-dependent UI elements.
-         * Show/hide elements based on sign-in status and admin privileges.
-         */
-        function updateSortOptions(showName, showDate) {
-            // Clear existing options
-            while (sortSelect.options.length > 0) {
-                sortSelect.remove(0);
-            }
-
-            // Date options are always available
-            const dateDescOption = document.createElement('option');
-            dateDescOption.value = 'date-desc';
-            dateDescOption.textContent = 'Date (Newest First)';
-            sortSelect.appendChild(dateDescOption);
-
-            const dateAscOption = document.createElement('option');
-            dateAscOption.value = 'date-asc';
-            dateAscOption.textContent = 'Date (Oldest First)';
-            sortSelect.appendChild(dateAscOption);
-
-            // Add name options only if specified and admin
-            if (showName && isAdmin) {
-                const nameAscOption = document.createElement('option');
-                nameAscOption.value = 'name-asc';
-                nameAscOption.textContent = 'Name (A-Z)';
-                sortSelect.appendChild(nameAscOption);
-
-                const nameDescOption = document.createElement('option');
-                nameDescOption.value = 'name-desc';
-                nameDescOption.textContent = 'Name (Z-A)';
-                sortSelect.appendChild(nameDescOption);
-            }
-
-            // Add UID options only for admin
-            if (isAdmin) {
-                const uidAscOption = document.createElement('option');
-                uidAscOption.value = 'uid-asc';
-                uidAscOption.textContent = 'UID (A-Z)';
-                sortSelect.appendChild(uidAscOption);
-
-                const uidDescOption = document.createElement('option');
-                uidDescOption.value = 'uid-desc';
-                uidDescOption.textContent = 'UID (Z-A)';
-                sortSelect.appendChild(uidDescOption);
-            }
-
-            // Set default sort
-            sortSelect.value = 'date-desc';
-            currentSort = 'date-desc';
         }
 
         /**
@@ -6149,51 +5945,6 @@
             }
         }
 
-        /**
-         * Detect the format of the database sheet and migrate if needed
-         */
-        async function detectAndMigrateDatabaseFormat() {
-            try {
-                // First, check the headers to understand the format
-                const headerResponse = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A1:E1' // Check up to 5 columns to be safe
-                });
-
-                const headers = headerResponse.result.values ? headerResponse.result.values[0] : [];
-                console.log('Database headers detected:', headers);
-
-                // Determine format based on headers
-                let format = 'unknown';
-                let needsMigration = false;
-
-                if (headers.length === 0) {
-                    // No headers - need to add them
-                    format = 'empty';
-                    needsMigration = true;
-                } else if (headers.length === 2 &&
-                    (headers[0].toLowerCase().includes('name') || headers[0].toLowerCase().includes('uid'))) {
-                    // Old 2-column format: [Name, UID] or [UID, Name]
-                    format = 'legacy-2col';
-                    needsMigration = true;
-                } else if (headers.length === 3 &&
-                    headers[0].toLowerCase().includes('index') &&
-                    headers[1].toLowerCase().includes('name') &&
-                    headers[2].toLowerCase().includes('uid')) {
-                    // Correct format: [Index, Name, UID]
-                    format = 'correct';
-                } else {
-                    // Unknown format
-                    console.warn('Unknown database format:', headers);
-                    needsMigration = true;
-                }
-
-                return { format, headers, needsMigration };
-            } catch (error) {
-                console.error('Error detecting database format:', error);
-                throw error;
-            }
-        }
 
         /**
 * Fetch database entries from Google Sheet with format detection
@@ -7514,33 +7265,6 @@
             });
         }
 
-        /**
-         * CORRECTED: Deletes a single log entry and syncs the changes.
-         */
-        function deleteLogEntry(logId) {
-            if (!isAdmin) return; // Only admins can delete.
-
-            // FIX: Filter the logs of the currently active course.
-            const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
-            courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== logId);
-
-            saveCourseToLocalStorage(currentCourse); // Save the change locally.
-
-            if (isOnline && isSignedIn) {
-                syncLogsWithSheet()
-                    .then(() => {
-                        showNotification('delete', 'Log Deleted', 'Successfully removed the log.');
-                        updateUI();
-                    })
-                    .catch(err => {
-                        console.error('Error deleting log:', err);
-                        showNotification('error', 'Delete Error', 'Failed to sync the deletion.');
-                    });
-            } else {
-                // If offline, just update the UI. The change is saved and will sync later.
-                updateUI();
-            }
-        }
 
         /**
          * Handle file selection for Excel import.
