@@ -3214,7 +3214,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyEqAyoe954FHEleCaJ7Qmc4Od8VHvQcNrnmmW4SqbJLII8rib7DC-EryvXG2DdDUr_1Q/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxK0T6yzJNna-KinzaVGSE6asAnGrRk3eDkZS0qVq4QyYgQaHkJ0SQXJjDsTzQxenlmsw/exec";
 
 
         // Discovery docs and scopes for Google API
@@ -5075,8 +5075,8 @@
                     <td>${timestamp}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
-                            <button class="btn-red btn-icon reject-btn" title="Reject"><i class="fas fa-times"></i></button>
                             <button class="btn-green btn-icon approve-btn" title="Approve"><i class="fas fa-check"></i></button>
+                            <button class="btn-red btn-icon reject-btn" title="Reject"><i class="fas fa-times"></i></button>
                         </div>
                     </td>
                 `;
@@ -5102,19 +5102,17 @@
          * Shows an editable dialog to approve a registration with loading feedback.
          */
         function showApproveDialog(registration) {
-            // Show immediate feedback to the user
-            showNotification('info', 'Processing...', `Checking registration for ${registration.name}.`, 2000);
+            showNotification('info', 'Processing...', `Checking application for ${registration.name}.`, 2000);
 
             const checkData = {
                 action: 'approveRegistration',
-                approvalMode: 'check', // Tell the script to check for duplicates first
+                approvalMode: 'check',
                 name: registration.name,
                 uid: registration.uid,
                 email: registration.email,
                 rowNumber: registration.rowNumber
             };
 
-            // Send the check request to the script immediately
             fetch(SCRIPT_URL, {
                 method: 'POST',
                 body: JSON.stringify(checkData),
@@ -5123,19 +5121,103 @@
                 .then(res => res.json())
                 .then(response => {
                     if (response.result === 'warning' && response.status === 'duplicate_found') {
-                        // Duplicates found! Show the special warning dialog directly.
+                        // Path 1: Duplicates were found. Show the advanced duplicate dialog.
                         showDuplicateWarningDialog(checkData, response.duplicates);
-                    } else if (response.result === 'success') {
-                        // No duplicates, approval was processed directly by the script.
-                        showNotification('success', 'Approved!', `${checkData.name} has been added to the database.`);
-                        refreshAdminViews(); // Refresh both lists
+                    } else if (response.result === 'success' && response.status === 'no_duplicate') {
+                        // Path 2: No duplicates. Show the final review/approval dialog.
+                        showFinalApprovalDialog(registration);
                     } else {
                         throw new Error(response.message || 'An unknown error occurred during check.');
                     }
                 })
                 .catch(err => {
-                    showNotification('error', 'Approval Failed', err.message);
+                    showNotification('error', 'Check Failed', err.message);
                 });
+        }
+
+        /**
+         * Step 2: Shows the final editable approval dialog for non-duplicate entries.
+         */
+        function showFinalApprovalDialog(registration) {
+            document.body.style.overflow = 'hidden';
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Approve Application</h3>
+        <p>Please review and confirm the details below.</p>
+        <div class="form-group">
+            <label for="approve-name">Name:</label>
+            <input type="text" id="approve-name" class="form-control" value="${registration.name}">
+        </div>
+        <div class="form-group">
+            <label for="approve-uid">UID:</label>
+            <input type="text" id="approve-uid" class="form-control" value="${registration.uid}" disabled>
+        </div>
+        <div class="form-group">
+            <label for="approve-email">Email:</label>
+            <input type="email" id="approve-email" class="form-control" value="${registration.email}">
+        </div>
+        <div class="dialog-actions">
+            <button id="cancel-approve-btn" class="btn-red">Cancel</button>
+            <button id="confirm-approve-btn" class="btn-green">Approve</button>
+        </div>
+    `;
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+
+            document.getElementById('cancel-approve-btn').addEventListener('click', closeDialog);
+
+            const confirmBtn = document.getElementById('confirm-approve-btn');
+            confirmBtn.addEventListener('click', () => {
+                const finalName = document.getElementById('approve-name').value.trim();
+                const finalUid = document.getElementById('approve-uid').value.trim();
+                const finalEmail = document.getElementById('approve-email').value.trim();
+
+                if (!finalName || !finalUid) {
+                    return showAlertDialog('Invalid Input', 'Name and UID are required.');
+                }
+
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Approving...';
+
+                const finalData = {
+                    action: 'approveRegistration',
+                    approvalMode: 'final_approve', // Use the new mode for final approval
+                    name: finalName,
+                    uid: finalUid,
+                    email: finalEmail,
+                    rowNumber: registration.rowNumber
+                };
+
+                fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(finalData),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                })
+                    .then(res => res.json())
+                    .then(result => {
+                        if (result.result === 'success') {
+                            showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
+                            refreshAdminViews();
+                            closeDialog();
+                        } else {
+                            throw new Error(result.message);
+                        }
+                    })
+                    .catch(err => {
+                        showNotification('error', 'Approval Failed', err.message);
+                        confirmBtn.disabled = false;
+                        confirmBtn.innerHTML = 'Approve';
+                    });
+            });
         }
 
         /**
@@ -5174,9 +5256,9 @@
         </div>
 
         <div class="dialog-actions">
-            <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
+            <button id="cancel-duplicate-btn" class="btn-orange">Cancel</button>
             <button id="reject-duplicate-btn" class="btn-red">Reject</button>
-            <button id="replace-btn" class="btn-blue">Replace</button>
+            <button id="replace-btn" class="btn-green">Replace</button>
             <button id="add-anyway-btn" class="btn-green">Add Anyway</button>
         </div>
     `;
@@ -5283,14 +5365,14 @@
             const defaultMessage = `Dear ${registration.name},\nI hope this e-mail finds you well.\n\nI am writing to inform you that your application for your Student ID Card has been rejected. This is typically because the information provided was incorrect or incomplete.\n\nPlease submit your registration again, ensuring all details are correct.\n\nBest,\nBredli`;
 
             dialog.innerHTML = `
-        <h3 class="dialog-title">Reject Registration</h3>
+        <h3 class="dialog-title">Reject Application</h3>
         <p>Edit the reason for rejection below. This message will be emailed to ${registration.email}.</p>
         <div class="form-group">
             <textarea id="reject-message" class="form-control" rows="10">${defaultMessage}</textarea>
         </div>
         <div class="dialog-actions">
-            <button id="cancel-reject-btn" class="btn-blue">Cancel</button>
-            <button id="confirm-reject-btn" class="btn-orange">Reject</button>
+            <button id="cancel-reject-btn" class="btn-orange">Cancel</button>
+            <button id="confirm-reject-btn" class="btn-red">Reject</button>
         </div>
     `;
 
@@ -5551,7 +5633,11 @@
             }
             console.log('Updating Auth UI - isSignedIn:', isSignedIn, 'isAdmin:', isAdmin);
 
-            // Add class to body to trigger CSS display rules
+            const appHeader = document.querySelector('.app-header');
+            if (appHeader) {
+                appHeader.style.display = isSignedIn ? 'block' : 'none';
+            }
+
             document.body.classList.toggle('is-admin', isAdmin);
 
             setupClearDataButton();
@@ -7753,7 +7839,6 @@
                 tableContainer.classList.add('reloading');
             }
 
-            // The main data source is now the courseData object for the current course.
             const currentCourseLogs = getLogsForCurrentUser();
 
             setTimeout(() => {
@@ -7770,12 +7855,26 @@
 
                 let logsToDisplay = currentCourseLogs;
 
+                // ## CHANGE IS HERE: Updated filtering logic for students ##
                 if (isSignedIn && !isAdmin && currentUser) {
                     const studentNameNormalised = normalizeName(currentUser.name);
+                    const studentEmailNormalised = normalizeName(currentUser.email);
+
                     logsToDisplay = currentCourseLogs.filter(log => {
-                        const logOwnerName = databaseMap[log.uid]?.name || '';
-                        const logOwnerNameNormalised = normalizeName(logOwnerName);
-                        return logOwnerNameNormalised === studentNameNormalised;
+                        const dbEntry = databaseMap[log.uid];
+                        // If the log's UID isn't in the database, it can't belong to the current user.
+                        if (!dbEntry) {
+                            return false;
+                        }
+
+                        // Check 1: Does the name from the database match the signed-in user's name?
+                        const nameMatches = normalizeName(dbEntry.name) === studentNameNormalised;
+
+                        // Check 2: Does the e-mail from the database match the signed-in user's e-mail?
+                        const emailMatches = dbEntry.email ? (normalizeName(dbEntry.email) === studentEmailNormalised) : false;
+
+                        // Show the log if EITHER the name OR the e-mail matches.
+                        return nameMatches || emailMatches;
                     });
                 }
 
@@ -7788,7 +7887,7 @@
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
                     const uid = log.uid;
-                    const key = `${date}_${uid}`; // This key uniquely identifies a student on a specific day.
+                    const key = `${date}_${uid}`;
                     if (!grouped[key]) {
                         grouped[key] = {
                             key: key,
