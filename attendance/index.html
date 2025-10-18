@@ -2022,6 +2022,46 @@
             padding-right: 14px;
         }
 
+        /* ADD THIS CSS */
+        #pending-registrations-view {
+            /* Base styles for the container */
+            overflow: hidden;
+            transition: max-height 0.5s ease-in-out,
+                opacity 0.5s ease-in-out,
+                margin-top 0.5s ease-in-out,
+                padding 0.5s ease-in-out;
+            max-height: 1000px;
+            /* Set a large max-height to allow it to be visible */
+            opacity: 1;
+        }
+
+        #pending-registrations-view.is-hidden {
+            /* Styles when the container is hidden */
+            max-height: 0;
+            opacity: 0;
+            margin-top: 0;
+            padding: 0;
+        }
+
+        /* Styles for the duplicate warning dialog */
+        .duplicate-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .duplicate-info-grid h4 {
+            margin: 0 0 10px 0;
+            font-size: 1.1em;
+        }
+
+        .dark-mode .duplicate-info-grid {
+            border-top-color: #444;
+        }
+
         /* Auth styles */
         .auth-container {
             display: flex;
@@ -5029,33 +5069,25 @@
          */
         async function fetchAndDisplayRegistrations() {
             const tbody = document.getElementById('registrations-tbody');
-            // Get the entire module container div
             const pendingView = document.getElementById('pending-registrations-view');
             const badge = document.getElementById('registration-count-badge');
 
-            // Don't do anything if the element doesn't exist
             if (!pendingView) return;
 
-            // Show a temporary loading state only if the view is already visible
-            if (window.getComputedStyle(pendingView).display !== 'none') {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
-            }
+            // Show a temporary loading state
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
 
             try {
                 const response = await fetch(`${SCRIPT_URL}?action=getRegistrations`);
                 const registrations = await response.json();
+                tbody.innerHTML = ''; // Clear loading state
 
-                // **KEY LOGIC**: Check if there are any registrations
                 if (registrations.length > 0) {
-                    // 1. If there are registrations, make sure the module is visible
-                    pendingView.style.display = 'block';
-                    tbody.innerHTML = ''; // Clear loading state
-
-                    // Update the badge
+                    // If there are registrations, remove the 'is-hidden' class to show the module
+                    pendingView.classList.remove('is-hidden');
                     badge.textContent = registrations.length;
-                    badge.style.display = 'inline-block'; // Or your preferred display style
+                    badge.style.display = 'inline-block';
 
-                    // Sort and display the rows as before
                     registrations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                     registrations.forEach(reg => {
                         const row = document.createElement('tr');
@@ -5067,8 +5099,8 @@
                     <td>${timestamp}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
-                            <button class="btn-green btn-icon approve-btn" title="Approve"><i class="fas fa-check"></i></button>
                             <button class="btn-red btn-icon reject-btn" title="Reject"><i class="fas fa-times"></i></button>
+                            <button class="btn-green btn-icon approve-btn" title="Approve"><i class="fas fa-check"></i></button>
                         </div>
                     </td>
                 `;
@@ -5077,16 +5109,15 @@
                         tbody.appendChild(row);
                     });
                 } else {
-                    // 2. If the list is empty, hide the entire module
-                    pendingView.style.display = 'none';
+                    // If the list is empty, add the 'is-hidden' class to hide the module smoothly
+                    pendingView.classList.add('is-hidden');
                     badge.style.display = 'none';
                 }
-
             } catch (error) {
                 console.error("Error fetching registrations:", error);
                 tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--danger-color);">Failed to load registrations.</td></tr>';
                 // Make sure the module is visible so the user can see the error message
-                pendingView.style.display = 'block';
+                pendingView.classList.remove('is-hidden');
             }
         }
 
@@ -5096,16 +5127,14 @@
          */
         function showApproveDialog(registration) {
             document.body.style.overflow = 'hidden';
-
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
-
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Approve Application</h3>
-        <p>Review and edit the details below before approving. The student will be notified by email.</p>
+        <p>Review and edit the details below before approving. The system will check for duplicates.</p>
         <div class="form-group">
             <label for="approve-name">Name:</label>
             <input type="text" id="approve-name" class="form-control" value="${registration.name}">
@@ -5126,12 +5155,7 @@
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
-
-            const closeDialog = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = '';
-            };
-
+            const closeDialog = () => document.body.removeChild(dialogBackdrop);
             document.getElementById('cancel-approve-btn').addEventListener('click', closeDialog);
 
             const confirmBtn = document.getElementById('confirm-approve-btn');
@@ -5145,13 +5169,12 @@
                     return;
                 }
 
-                // --- ADDED: Start loading animation ---
                 confirmBtn.disabled = true;
-                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Approving...';
-                // ------------------------------------
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
 
-                const finalData = {
+                const checkData = {
                     action: 'approveRegistration',
+                    approvalMode: 'check',
                     name: finalName,
                     uid: finalUid,
                     email: finalEmail,
@@ -5160,32 +5183,146 @@
 
                 fetch(SCRIPT_URL, {
                     method: 'POST',
-                    body: JSON.stringify(finalData),
+                    body: JSON.stringify(checkData),
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 })
                     .then(res => res.json())
-                    .then(result => {
-                        if (result.result === 'success') {
-                            showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
-                            fetchAndDisplayRegistrations();
-                            closeDialog(); // Close dialog only on success
+                    .then(response => {
+                        closeDialog();
+                        if (response.result === 'warning' && response.status === 'duplicate_found') {
+                            showDuplicateWarningDialog(checkData, response.duplicates);
+                        } else if (response.result === 'success') {
+                            showNotification('success', 'Approved!', `${checkData.name} has been added to the database.`);
+                            refreshAdminViews();
                         } else {
-                            throw new Error(result.message);
+                            throw new Error(response.message || 'An unknown error occurred.');
                         }
                     })
                     .catch(err => {
-                        showNotification('error', 'Approval Failed', err.message);
-                        // --- ADDED: Restore button on failure ---
+                        showNotification('error', 'Check Failed', err.message);
                         confirmBtn.disabled = false;
                         confirmBtn.innerHTML = 'Approve';
-                        // ----------------------------------------
                     });
             });
         }
 
-        // MODIFIED AND REPLACED FUNCTION
         /**
-         * Shows a custom dialog to reject a registration with loading feedback.
+ * Creates the special dialog for handling duplicate registrations.
+ */
+        function showDuplicateWarningDialog(newData, duplicates) {
+            const existing = duplicates[0]; // Show the first duplicate found
+
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+
+            dialog.innerHTML = `
+        <h3 class="dialog-title" style="color: var(--warning-color);"><i class="fas fa-exclamation-triangle"></i> Duplicate Entry Found</h3>
+        <p>This registration matches an existing entry in your database. Please review the data and choose an action.</p>
+        
+        <div class="duplicate-info-grid">
+            <div class="existing-data">
+                <h4>Existing Data</h4>
+                <div class="form-group"><label>Name:</label><input class="form-control" value="${existing.name}" disabled></div>
+                <div class="form-group"><label>UID:</label><input class="form-control" value="${existing.uid}" disabled></div>
+                <div class="form-group"><label>Email:</label><input class="form-control" value="${existing.email}" disabled></div>
+            </div>
+            <div class="new-data">
+                <h4>New Application</h4>
+                <div class="form-group"><label>Name:</label><input type="text" id="final-name" class="form-control" value="${newData.name}"></div>
+                <div class="form-group"><label>UID:</label><input type="text" id="final-uid" class="form-control" value="${newData.uid}" disabled></div>
+                <div class="form-group"><label>Email:</label><input type="email" id="final-email" class="form-control" value="${newData.email}"></div>
+            </div>
+        </div>
+
+        <div class="dialog-actions">
+            <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
+            <button id="add-anyway-btn" class="btn-green">Add Anyway</button>
+            <button id="replace-btn" class="btn-orange">Replace</button>
+        </div>
+    `;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+
+            document.getElementById('cancel-duplicate-btn').addEventListener('click', closeDialog);
+
+            document.getElementById('replace-btn').addEventListener('click', (e) => {
+                const button = e.currentTarget;
+                const finalData = {
+                    ...newData, // Contains original rowNumber
+                    name: document.getElementById('final-name').value.trim(),
+                    email: document.getElementById('final-email').value.trim(),
+                    duplicateRowIndex: existing.rowIndex // Tell the script which row to update
+                };
+                resolveDuplicateOnServer('replace', finalData, button, closeDialog);
+            });
+
+            document.getElementById('add-anyway-btn').addEventListener('click', (e) => {
+                const button = e.currentTarget;
+                const finalData = {
+                    ...newData,
+                    name: document.getElementById('final-name').value.trim(),
+                    email: document.getElementById('final-email').value.trim()
+                };
+                resolveDuplicateOnServer('add_anyway', finalData, button, closeDialog);
+            });
+        }
+
+        /**
+         * Sends the final resolution (replace or add) to the server.
+         */
+        function resolveDuplicateOnServer(resolution, data, button, closeDialogCallback) {
+            button.disabled = true;
+            button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Processing...`;
+
+            const payload = {
+                ...data,
+                action: 'approveRegistration',
+                approvalMode: resolution // 'replace' or 'add_anyway'
+            };
+
+            fetch(SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            })
+                .then(res => res.json())
+                .then(result => {
+                    if (result.result === 'success') {
+                        showNotification('success', 'Action Complete', `Registration for ${data.name} has been processed.`);
+                        refreshAdminViews();
+                        closeDialogCallback();
+                    } else {
+                        throw new Error(result.message);
+                    }
+                })
+                .catch(err => {
+                    showNotification('error', 'Action Failed', err.message);
+                    button.disabled = false;
+                    button.innerHTML = resolution === 'replace' ? 'Replace' : 'Add Anyway';
+                });
+        }
+
+        /**
+         * Helper function to smoothly refresh both admin lists.
+         */
+        function refreshAdminViews() {
+            // Refresh pending registrations list
+            fetchAndDisplayRegistrations();
+
+            // Fetch the latest database and then update the table
+            fetchDatabaseFromSheet().then(() => {
+                updateDatabaseList();
+            });
+        }
+
+        /**
+         * Shows a custom dialog to reject a registration with a refined default message.
          */
         function showRejectDialog(registration) {
             document.body.style.overflow = 'hidden';
@@ -5196,17 +5333,17 @@
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
 
-            const defaultMessage = `Hello ${registration.name},\n\nYour recent ID card registration was rejected because the information provided may be incorrect. Please try again, ensuring all details are accurate.\n\nIf you believe this is an error, please contact the lecturer.`;
+            const defaultMessage = `Dear ${registration.name},\nI hope this e-mail finds you well.\n\nI am writing to inform you that your application for your Student ID Card has been rejected. This is typically because the information provided was incorrect or incomplete.\n\nPlease submit your registration again, ensuring all details are correct.\n\nBest,\nBredli`;
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Reject Registration</h3>
         <p>Edit the reason for rejection below. This message will be emailed to ${registration.email}.</p>
         <div class="form-group">
-            <textarea id="reject-message" class="form-control" rows="6">${defaultMessage}</textarea>
+            <textarea id="reject-message" class="form-control" rows="10">${defaultMessage}</textarea>
         </div>
         <div class="dialog-actions">
-            <button id="cancel-reject-btn" class="btn-orange">Cancel</button>
-            <button id="confirm-reject-btn" class="btn-red">Reject</button>
+            <button id="cancel-reject-btn" class="btn-blue">Cancel</button>
+            <button id="confirm-reject-btn" class="btn-orange">Reject</button>
         </div>
     `;
 
@@ -5223,17 +5360,13 @@
             const confirmBtn = document.getElementById('confirm-reject-btn');
             confirmBtn.addEventListener('click', () => {
                 const message = document.getElementById('reject-message').value.trim();
-
                 if (!message) {
                     showAlertDialog('Invalid Input', 'Rejection message cannot be empty.');
                     return;
                 }
-
                 confirmBtn.disabled = true;
                 confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rejecting...';
-
                 const data = { action: 'rejectRegistration', message: message, email: registration.email, rowNumber: registration.rowNumber };
-
                 fetch(SCRIPT_URL, {
                     method: 'POST',
                     body: JSON.stringify(data),
@@ -5245,9 +5378,7 @@
                             showNotification('delete', 'Rejected', `Rejection email sent to ${registration.name}.`);
                             fetchAndDisplayRegistrations();
                             closeDialog();
-                        } else {
-                            throw new Error(result.message);
-                        }
+                        } else { throw new Error(result.message); }
                     })
                     .catch(err => {
                         showNotification('error', 'Rejection Failed', err.message);
