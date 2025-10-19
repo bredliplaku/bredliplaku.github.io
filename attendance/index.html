@@ -400,7 +400,7 @@
             align-items: center;
             justify-content: center;
             line-height: 1;
-            min-width: 40px;
+            min-width: 80px;
             user-select: none;
         }
 
@@ -1179,13 +1179,13 @@
         }
 
         .uid-badge:first-child {
-            border-top-left-radius: 14px;
-            border-bottom-left-radius: 14px;
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
         }
 
         .uid-badge:last-child {
-            border-top-right-radius: 14px;
-            border-bottom-right-radius: 14px;
+            border-top-right-radius: 8px;
+            border-bottom-right-radius: 8px;
         }
 
         .name-cell {
@@ -1653,7 +1653,10 @@
             display: flex;
             align-items: center;
             gap: 15px;
-            margin-bottom: 15px;
+            margin-bottom: 5px;
+            /* Reduced base margin */
+            flex-wrap: wrap;
+            /* This is the key change to allow wrapping */
         }
 
         .dialog .form-group label {
@@ -1684,10 +1687,13 @@
         .error-message {
             color: var(--danger-color);
             font-size: 0.85em;
-            margin-top: 5px;
-            display: block;
-            width: 100%;
-            text-align: right;
+            margin-top: 3px;
+            /* Add a left margin equal to the label's width + gap */
+            margin-left: 95px;
+            flex-basis: 100%;
+            /* Force the error to take a full new line */
+            text-align: left;
+            /* Align text to the left */
         }
 
         .dialog .form-group .form-control {
@@ -4928,7 +4934,7 @@
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Scan Your Student ID Card</h3>
-        <p>Your details will be sent to the lecturer for approval.</p>
+        <div class="dialog-content"><p>Your details will be sent to the lecturer for approval.</p>
         <div class="form-group"><label>Name:</label><input class="form-control" value="${currentUser.name}" disabled></div>
         <div class="form-group"><label>Email:</label><input class="form-control" value="${currentUser.email}" disabled></div>
         <div class="form-group">
@@ -4936,7 +4942,7 @@
             <input type="text" id="register-uid-input" class="form-control" placeholder="AB:CD:12:34">
         </div>
         <div id="nfc-status-container"></div>
-        <div class="dialog-actions">
+        </div><div class="dialog-actions">
             <button id="cancel-register-btn" class="btn-red">Cancel</button>
             <button id="submit-register-btn" class="btn-green" disabled>Submit</button>
         </div>`;
@@ -5142,7 +5148,7 @@
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Approve Application</h3>
-        <p>Please review and confirm the details below.</p>
+        <div class="dialog-content"><p>Please review and confirm the details below.</p>
         <div class="form-group">
             <label for="approve-name">Name:</label>
             <input type="text" id="approve-name" class="form-control" value="${registration.name}">
@@ -5155,7 +5161,7 @@
             <label for="approve-email">Email:</label>
             <input type="email" id="approve-email" class="form-control" value="${registration.email}">
         </div>
-        <div class="dialog-actions">
+        </div> <div class="dialog-actions">
             <button id="cancel-approve-btn" class="btn-red">Cancel</button>
             <button id="confirm-approve-btn" class="btn-green">Approve</button>
         </div>
@@ -5172,22 +5178,35 @@
 
             const confirmBtn = document.getElementById('confirm-approve-btn');
             confirmBtn.addEventListener('click', () => {
-                const finalName = document.getElementById('approve-name').value.trim();
-                const finalUid = document.getElementById('approve-uid').value.trim();
-                const finalEmail = document.getElementById('approve-email').value.trim();
+                const nameInput = document.getElementById('approve-name');
+                const emailInput = document.getElementById('approve-email');
 
-                if (!finalName || !finalUid) {
-                    return showAlertDialog('Invalid Input', 'Name and UID are required.');
+                clearInputError(nameInput);
+                clearInputError(emailInput);
+
+                const finalName = nameInput.value.trim();
+                const finalEmail = emailInput.value.trim();
+                let isValid = true;
+
+                if (finalName === '') {
+                    showInputError(nameInput, 'Name is required.');
+                    isValid = false;
                 }
+                if (!isValidEmail(finalEmail)) {
+                    showInputError(emailInput, 'A valid email is required.');
+                    isValid = false;
+                }
+
+                if (!isValid) return;
 
                 confirmBtn.disabled = true;
                 confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Approving...';
 
                 const finalData = {
                     action: 'approveRegistration',
-                    approvalMode: 'final_approve', // Use the new mode for final approval
+                    approvalMode: 'final_approve',
                     name: finalName,
-                    uid: finalUid,
+                    uid: registration.uid,
                     email: finalEmail,
                     rowNumber: registration.rowNumber
                 };
@@ -5232,7 +5251,7 @@
             // The 'duplicate-info-grid' class has been removed to stack elements vertically
             dialog.innerHTML = `
         <h3 class="dialog-title" style="color: var(--warning-color);"><i class="fas fa-exclamation-triangle"></i> Duplicate Entry Found</h3>
-        <p>This application matches an existing database entry. Please review and choose an action.</p>
+        <div class="dialog-content"><p>This application matches an existing database entry. Please review and choose an action.</p>
         
         <div>
             <div class="existing-data">
@@ -5250,7 +5269,7 @@
             </div>
         </div>
 
-        <div class="dialog-actions">
+        </div><div class="dialog-actions">
             <button id="cancel-duplicate-btn" class="btn-orange">Cancel</button>
             <button id="reject-duplicate-btn" class="btn-red">Reject</button>
             <button id="replace-btn" class="btn-green">Replace</button>
@@ -5277,12 +5296,15 @@
 
             document.getElementById('replace-btn').addEventListener('click', (e) => {
                 const button = e.currentTarget;
-                const finalName = document.getElementById('final-name').value.trim();
-                const finalEmail = document.getElementById('final-email').value.trim();
+                const finalEmailInput = document.getElementById('final-email');
+                clearInputError(finalEmailInput);
 
-                // VALIDATION ADDED HERE
+                const finalName = document.getElementById('final-name').value.trim();
+                const finalEmail = finalEmailInput.value.trim();
+
                 if (!isValidEmail(finalEmail)) {
-                    return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                    showInputError(finalEmailInput, 'A valid email is required.');
+                    return;
                 }
 
                 const finalData = {
@@ -5296,12 +5318,15 @@
 
             document.getElementById('add-anyway-btn').addEventListener('click', (e) => {
                 const button = e.currentTarget;
-                const finalName = document.getElementById('final-name').value.trim();
-                const finalEmail = document.getElementById('final-email').value.trim();
+                const finalEmailInput = document.getElementById('final-email');
+                clearInputError(finalEmailInput);
 
-                // VALIDATION ADDED HERE
+                const finalName = document.getElementById('final-name').value.trim();
+                const finalEmail = finalEmailInput.value.trim();
+
                 if (!isValidEmail(finalEmail)) {
-                    return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                    showInputError(finalEmailInput, 'A valid email is required.');
+                    return;
                 }
 
                 const finalData = {
@@ -5377,11 +5402,11 @@
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Reject Application</h3>
-        <p>Edit the reason for rejection below. This message will be emailed to ${registration.email}.</p>
+        <div class="dialog-content"><p>Edit the reason for rejection below. This message will be emailed to ${registration.email}.</p>
         <div class="form-group">
             <textarea id="reject-message" class="form-control" rows="10">${defaultMessage}</textarea>
         </div>
-        <div class="dialog-actions">
+        </div><div class="dialog-actions">
             <button id="cancel-reject-btn" class="btn-orange">Cancel</button>
             <button id="confirm-reject-btn" class="btn-red">Reject</button>
         </div>
@@ -5399,11 +5424,15 @@
 
             const confirmBtn = document.getElementById('confirm-reject-btn');
             confirmBtn.addEventListener('click', () => {
-                const message = document.getElementById('reject-message').value.trim();
+                const messageTextarea = document.getElementById('reject-message');
+                clearInputError(messageTextarea);
+
+                const message = messageTextarea.value.trim();
                 if (!message) {
-                    showAlertDialog('Invalid Input', 'Rejection message cannot be empty.');
+                    showInputError(messageTextarea, 'Rejection message cannot be empty.');
                     return;
                 }
+
                 confirmBtn.disabled = true;
                 confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rejecting...';
                 const data = { action: 'rejectRegistration', message: message, email: registration.email, rowNumber: registration.rowNumber };
@@ -5487,7 +5516,7 @@
  * @param {HTMLElement} statusContainer The div where status messages will be shown.
  * @returns {AbortController | null} The controller to stop the scan, or null if not supported.
  */
-        function startNfcForInputDialog(inputElement, statusContainer) {
+        function startNfcForInputDialog(inputElement, statusContainer, scanButton) {
             if (!nfcSupported) {
                 if (/Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
                     statusContainer.innerHTML = `<p style="text-align:center; font-size: 0.9em; opacity: 0.8;">NFC scanning requires Chrome on Android.</p>`;
@@ -5505,7 +5534,19 @@
                     inputElement.value = serialNumber;
                     playSound(true);
                     statusContainer.innerHTML = `<div class="sync-status success" style="justify-content: center; padding: 15px 0; font-size: 1em;"><i class="fas fa-check-circle"></i> <span>Card Scanned!</span></div>`;
-                    nfcController.abort(); // Stop scanning after one successful read
+
+                    // --- NEW LOGIC ---
+                    if (scanButton) {
+                        scanButton.disabled = true; // Deactivate the button
+                        scanButton.innerHTML = '<i class="fas fa-check"></i>'; // Show a checkmark
+                    }
+                    // Fade out the status message after 2.5 seconds
+                    setTimeout(() => {
+                        statusContainer.innerHTML = '';
+                    }, 2500);
+                    // --- END NEW LOGIC ---
+
+                    nfcController.abort();
                 };
             }).catch(err => {
                 if (err.name !== 'AbortError') {
@@ -6685,7 +6726,7 @@
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Add New Student</h3>
-        <p>Enter the details for the new database entry.</p>
+        <div class="dialog-content"><p>Enter the details for the new database entry.</p>
         <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control" placeholder="Student's Full Name"></div>
         <div class="form-group"><label for="add-email">E-mail*:</label><input type="email" id="add-email" class="form-control" placeholder="nsurname00@epoka.edu.al"></div>
         <div class="form-group">
@@ -6694,7 +6735,7 @@
             ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
         </div>
         <div id="nfc-status-container" style="margin-top:10px;"></div>
-        <div class="dialog-actions">
+        </div><div class="dialog-actions">
             <button id="cancel-add-btn" class="btn-red">Cancel</button>
             <button id="confirm-add-btn" class="btn-green">Add Student</button>
         </div>`;
@@ -6727,7 +6768,6 @@
                 const emailInput = document.getElementById('add-email');
                 const uidInput = document.getElementById('add-uid');
 
-                // Clear previous errors
                 clearInputError(nameInput);
                 clearInputError(emailInput);
                 clearInputError(uidInput);
@@ -6750,18 +6790,39 @@
                     isValid = false;
                 }
 
-                if (!isValid) return; // Stop if any validation failed
+                if (!isValid) return;
 
-                const isDuplicate = Object.values(databaseMap).some(student => student.uids.includes(uid));
-                if (isDuplicate) {
-                    showInputError(uidInput, 'This UID is already assigned.');
-                    return;
+                // --- START OF NEW MERGE LOGIC ---
+                let merged = false;
+                for (const [dbKey, studentData] of Object.entries(databaseMap)) {
+                    // Find a match based on case-insensitive name and email
+                    if (studentData.name.toLowerCase() === name.toLowerCase() && studentData.email.toLowerCase() === email.toLowerCase()) {
+                        if (studentData.uids.includes(uid)) {
+                            showInputError(uidInput, 'This UID is already assigned to this student.');
+                            return; // Stop execution
+                        }
+                        // Match found! Append the new UID.
+                        databaseMap[dbKey].uids.push(uid);
+                        merged = true;
+                        showNotification('success', 'UID Merged', `Added new UID to existing record for ${name}.`);
+                        break; // Exit the loop
+                    }
                 }
 
-                const existingKeys = Object.keys(databaseMap).map(Number);
-                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+                // If no merge happened, create a new entry as before
+                if (!merged) {
+                    const isDuplicate = Object.values(databaseMap).some(student => student.uids.includes(uid));
+                    if (isDuplicate) {
+                        showInputError(uidInput, 'This UID is already assigned to another student.');
+                        return;
+                    }
 
-                databaseMap[newDbKey] = { name, email, uids: [uid] };
+                    const existingKeys = Object.keys(databaseMap).map(Number);
+                    const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+
+                    databaseMap[newDbKey] = { name, email, uids: [uid] };
+                    showNotification('success', 'Entry Added', `Added ${name} to the database.`);
+                }
 
                 if (isOnline) syncDatabaseToSheet();
                 updateUI();
@@ -6780,23 +6841,23 @@
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             const entry = databaseMap[dbKey];
-            let nfcController = null; // To manage the NFC scan session
+            let activeNfcSession = { controller: null, button: null };
 
             dialog.innerHTML = `
-        <h3 class="dialog-title">Edit Student</h3>
-        <p>Manage details for ${entry.name}</p>
+    <h3 class="dialog-title">Edit Student</h3>
+    <div class="dialog-content">  <p>Manage details for ${entry.name}</p>
         <div class="form-group"><label for="edit-name">Name*:</label><input type="text" id="edit-name" class="form-control" placeholder="Student's Full Name" value="${entry.name}"></div>
         <div class="form-group"><label for="edit-email">E-mail*:</label><input type="email" id="edit-email" class="form-control" placeholder="nsurname00@epoka.edu.al" value="${entry.email || ''}"></div>
         <hr>
         <div id="uid-list-container"></div>
-        <div style="display: flex; justify-content: flex-end; margin-top: 5px;">
+        <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
              <button id="add-new-uid-row-btn" class="btn-blue btn-sm">Add UID</button>
         </div>
         <div id="nfc-status-container" style="margin-top:10px;"></div>
-        <div class="dialog-actions">
-            <button id="cancel-edit-btn" class="btn-red">Cancel</button>
-            <button id="confirm-edit-btn" class="btn-green">Save Changes</button>
-        </div>`;
+    </div> <div class="dialog-actions">
+        <button id="cancel-edit-btn" class="btn-red">Cancel</button>
+        <button id="confirm-edit-btn" class="btn-green">Save Changes</button>
+    </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
@@ -6807,29 +6868,40 @@
             const createUidRow = (uidValue = '') => {
                 const uidGroup = document.createElement('div');
                 uidGroup.className = 'form-group';
-                uidGroup.style.marginBottom = '5px';
+                uidGroup.style.marginBottom = '15px'; // Increased margin
                 uidGroup.innerHTML = `
             <label>UID:</label>
-            <input type="text" class="form-control uid-input" value="${uidValue}" placeholder="AB:CD:12:34">
+            <input type="text" class="form-control uid-input" value="${uidValue}" placeholder="Type or scan...">
             ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
             <button class="btn-red btn-icon btn-sm remove-uid-btn" title="Remove UID"><i class="fas fa-minus"></i></button>
         `;
                 uidListContainer.appendChild(uidGroup);
 
-                uidGroup.querySelector('.remove-uid-btn').addEventListener('click', () => {
-                    if (uidListContainer.querySelectorAll('.form-group').length > 1) {
-                        uidGroup.remove();
-                    } else {
-                        showNotification('warning', 'Cannot Remove', 'At least one UID field is required.');
-                    }
-                });
+                uidGroup.querySelector('.remove-uid-btn').addEventListener('click', () => { /* ... remove logic ... */ });
 
                 const scanBtn = uidGroup.querySelector('.scan-uid-btn');
                 if (scanBtn) {
                     scanBtn.addEventListener('click', () => {
-                        if (nfcController) nfcController.abort(); // Stop any previous scan
                         const inputTarget = uidGroup.querySelector('.uid-input');
-                        nfcController = startNfcForInputDialog(inputTarget, nfcStatusContainer);
+
+                        // --- NEW TOGGLE LOGIC ---
+                        if (activeNfcSession.button === scanBtn) {
+                            // If clicking the already active button, stop the scan.
+                            if (activeNfcSession.controller) activeNfcSession.controller.abort();
+                            activeNfcSession = { controller: null, button: null };
+                            scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i>';
+                            nfcStatusContainer.innerHTML = '';
+                        } else {
+                            // If another scan is active, stop it first.
+                            if (activeNfcSession.controller) {
+                                activeNfcSession.controller.abort();
+                                activeNfcSession.button.innerHTML = '<i class="fa-solid fa-wifi"></i>';
+                            }
+                            // Start a new scan.
+                            scanBtn.innerHTML = '<i class="fas fa-times"></i>'; // Show a 'stop' icon
+                            const controller = startNfcForInputDialog(inputTarget, nfcStatusContainer, scanBtn);
+                            activeNfcSession = { controller, button: scanBtn };
+                        }
                     });
                 }
             };
@@ -6840,7 +6912,7 @@
             dialog.querySelector('#add-new-uid-row-btn').addEventListener('click', () => createUidRow());
 
             const closeDialog = () => {
-                if (nfcController) nfcController.abort(); // IMPORTANT: Stop scanning when dialog closes
+                if (activeNfcSession.controller) activeNfcSession.controller.abort();
                 if (document.body.contains(dialogBackdrop)) document.body.removeChild(dialogBackdrop);
                 document.body.style.overflow = '';
             };
@@ -7002,8 +7074,8 @@
             dialog.className = 'dialog';
             dialog.innerHTML = `
         <h3 class="dialog-title">${title}</h3>
-        <p>${message}</p>
-        <div class="dialog-actions">
+        <div class="dialog-content"><p>${message}</p>
+        </div><div class="dialog-actions">
             <button id="dialog-ok-btn" class="btn-blue">OK</button>
         </div>
     `;
@@ -7041,11 +7113,11 @@
             dialog.className = 'dialog';
             dialog.innerHTML = `
         <h3 class="dialog-title">${title}</h3>
-        <p>${message}</p>
+        <div class="dialog-content"><p>${message}</p>
         <div class="form-group">
             <input type="text" id="dialog-prompt-input" class="form-control" value="${initialValue}">
         </div>
-        <div class="dialog-actions">
+        </div><div class="dialog-actions">
             <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
             <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
         </div>
@@ -7105,8 +7177,8 @@
             dialog.className = 'dialog';
             dialog.innerHTML = `
                 <h3 class="dialog-title">${title}</h3>
-                <p>${message}</p>
-                <div class="dialog-actions">
+                <div class="dialog-content"><p>${message}</p>
+                </div><div class="dialog-actions">
                     <button id="dialog-cancel-btn" class="${cancelBtnClass}">${cancelText}</button>
                     <button id="dialog-confirm-btn" class="${confirmBtnClass}">${confirmText}</button>
                 </div>`;
@@ -7186,7 +7258,7 @@
 
             dialog.innerHTML = `
     <h3 class="dialog-title">Add Manual Log Entry</h3>
-        <div class="form-group">
+        <div class="dialog-content"> <div class="form-group">
             <label for="manual-name-search">Student:</label>
             <input type="text" id="manual-name-search" class="form-control" placeholder="Search by name or UID..." autocomplete="off">
         </div>
@@ -7202,7 +7274,7 @@
             <label for="manual-time">Time:</label>
             <input type="time" id="manual-time" class="form-control" value="${formattedTime}">
         </div>
-        <div class="dialog-actions">
+        </div> <div class="dialog-actions">
             <button id="cancel-manual-btn" class="btn-red">Cancel</button>
             <button id="save-manual-log-btn" class="btn-green">Add Entry</button>
         </div>`;
@@ -7242,12 +7314,15 @@
             };
 
             document.getElementById('save-manual-log-btn').addEventListener('click', () => {
-                const selectedUid = selectMenu.value; // Get value from the select menu
+                const searchInput = document.getElementById('manual-name-search'); // Target for the error message
+                clearInputError(searchInput);
+
+                const selectedUid = selectMenu.value;
                 const manualDate = document.getElementById('manual-date').value;
                 const manualTime = document.getElementById('manual-time').value;
 
-                if (!selectedUid || !manualDate || !manualTime) {
-                    showAlertDialog('Invalid Input', 'Please select a student and fill out all fields.');
+                if (!selectedUid) {
+                    showInputError(searchInput, 'You must select a student from the list.');
                     return;
                 }
 
@@ -7328,7 +7403,7 @@
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Edit Log Entry</h3>
-        <div class="form-group">
+        <div class="dialog-content"><div class="form-group">
             <label for="edit-name">Name:</label>
             <input type="text" id="edit-name" class="form-control" value="${group.name}" disabled>
         </div>
@@ -7346,7 +7421,7 @@
     <button id="delete-all-logs-btn" class="btn-red btn-sm">Delete All</button>
 </div>
 <div id="timestamp-container">${timestampFields}</div>
-<div class="dialog-actions">
+</div><div class="dialog-actions">
     <button id="cancel-edit-log-btn" class="btn-red">Cancel</button>
     <button id="save-edit-log-btn" class="btn-green">Save Changes</button>
 </div>`;
@@ -7440,12 +7515,16 @@
             });
 
             document.getElementById('save-edit-log-btn').addEventListener('click', () => {
-                const newName = document.getElementById('edit-name').value.trim();
+                const nameInput = document.getElementById('edit-name'); // Target the input element
                 const newDateStr = document.getElementById('edit-date').value;
 
-                if (!newName) {
-                    showAlertDialog('Invalid Input', 'Name cannot be empty.');
-                    return;
+                clearInputError(nameInput); // Clear any previous error on this field
+
+                const newName = nameInput.value.trim();
+
+                if (newName === '') {
+                    showInputError(nameInput, 'Name cannot be empty.');
+                    return; // Stop the function
                 }
 
                 if (databaseMap[group.uid]) {
@@ -7649,8 +7728,8 @@
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Import UID Database</h3>
-        <p>Found ${Object.keys(excelMappings).length} entries in the Excel file. How would you like to import them?</p>
-        <div class="dialog-actions">
+        <div class="dialog-content"><p>Found ${Object.keys(excelMappings).length} entries in the Excel file. How would you like to import them?</p>
+        </div><div class="dialog-actions">
             <button id="merge-db-btn" class="btn-blue">Merge</button>
             <button id="replace-db-btn" class="btn-orange">Replace</button>
             <button id="cancel-db-import-btn" class="btn-red">Cancel</button>
@@ -7768,8 +7847,8 @@
 
             dialog.innerHTML = `
 	<h3 class="dialog-title">Import Logs</h3>
-	<p>Imported ${importedLogs.length} log entries. How would you like to proceed?</p>
-	<div class="dialog-actions">
+	<div class="dialog-content"><p>Imported ${importedLogs.length} log entries. How would you like to proceed?</p>
+	</div><div class="dialog-actions">
 		<button id="merge-logs-btn" class="btn-blue">Merge with Existing</button>
 		<button id="replace-logs-btn" class="btn-red">Replace All</button>
 		<button id="cancel-import-btn">Cancel</button>
@@ -7903,25 +7982,14 @@
 
                 let logsToDisplay = currentCourseLogs;
 
-                // ## CHANGE IS HERE: Updated filtering logic for students ##
                 if (isSignedIn && !isAdmin && currentUser) {
                     const studentNameNormalised = normalizeName(currentUser.name);
                     const studentEmailNormalised = normalizeName(currentUser.email);
-
                     logsToDisplay = currentCourseLogs.filter(log => {
                         const dbEntry = databaseMap[log.uid];
-                        // If the log's UID isn't in the database, it can't belong to the current user.
-                        if (!dbEntry) {
-                            return false;
-                        }
-
-                        // Check 1: Does the name from the database match the signed-in user's name?
+                        if (!dbEntry) return false;
                         const nameMatches = normalizeName(dbEntry.name) === studentNameNormalised;
-
-                        // Check 2: Does the e-mail from the database match the signed-in user's e-mail?
                         const emailMatches = dbEntry.email ? (normalizeName(dbEntry.email) === studentEmailNormalised) : false;
-
-                        // Show the log if EITHER the name OR the e-mail matches.
                         return nameMatches || emailMatches;
                     });
                 }
@@ -7931,45 +7999,52 @@
                     const dateObj = new Date(log.timestamp);
                     if (isNaN(dateObj.getTime())) return;
 
-                    // --- START OF NEW LOGIC ---
+                    // --- START OF FIX ---
                     const scannedUid = log.uid;
-                    const dbKey = uidToPrimaryUidMap[scannedUid]; // Look up the student's unique key
-                    const groupIdentifier = dbKey || scannedUid; // Group by the key if found, otherwise by the raw UID
-                    const name = dbKey ? databaseMap[dbKey]?.name : 'Unknown'; // Get name using the key
-                    // --- END OF NEW LOGIC ---
+                    const dbKey = uidToPrimaryUidMap[scannedUid];
+                    const groupIdentifier = dbKey || scannedUid;
+
+                    const studentData = dbKey ? databaseMap[dbKey] : null;
+                    const name = studentData ? studentData.name : 'Unknown';
+                    // This is the key change: get the actual UIDs for display.
+                    const uidsForDisplay = studentData ? studentData.uids : [scannedUid];
+                    // --- END OF FIX ---
 
                     const day = String(dateObj.getDate()).padStart(2, '0');
                     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
 
-                    const key = `${date}_${groupIdentifier}`; // Use the new group identifier
+                    const key = `${date}_${groupIdentifier}`;
 
                     if (!grouped[key]) {
                         grouped[key] = {
                             key: key,
                             date,
                             dateObj: new Date(year, month - 1, day),
-                            uid: groupIdentifier, // Store the identifier
-                            name: name, // Use the resolved name
+                            uid: groupIdentifier, // Still use the index for grouping
+                            name: name,
+                            uidsForDisplay: uidsForDisplay, // Store the real UIDs for the UI
                             originalLogs: []
                         };
                     }
                     grouped[key].originalLogs.push(log);
                 });
+
                 let result = Object.values(grouped);
 
                 if (filter) {
                     result = result.filter(group => {
                         const name = group.name || '';
-                        const uid = group.uid || '';
+                        // Filter by any of the student's UIDs
+                        const uidMatch = group.uidsForDisplay.some(uid => uid.toLowerCase().includes(filter));
                         const date = group.date || '';
                         const hasMatchingTime = group.originalLogs.some(log => {
                             const timeObj = new Date(log.timestamp);
                             const timeStr = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
                             return timeStr.includes(filter);
                         });
-                        return name.toLowerCase().includes(filter) || uid.toLowerCase().includes(filter) || date.includes(filter) || hasMatchingTime;
+                        return name.toLowerCase().includes(filter) || uidMatch || date.includes(filter) || hasMatchingTime;
                     });
                 }
 
@@ -7984,7 +8059,7 @@
                         return dateCompare !== 0 ? dateCompare : a.name.localeCompare(b.name);
                     }
                     if (field === 'name') return sortMultiplier * a.name.localeCompare(b.name);
-                    if (field === 'uid') return sortMultiplier * a.uid.localeCompare(b.uid);
+                    if (field === 'uid') return sortMultiplier * (a.uidsForDisplay[0] || '').localeCompare(b.uidsForDisplay[0] || ''); // Sort by first UID
                     return 0;
                 });
 
@@ -8057,7 +8132,8 @@
                     if (isAdmin) {
                         const uidCell = document.createElement('td');
                         uidCell.className = 'uid-cell uid-column admin-only';
-                        uidCell.textContent = group.uid;
+                        const uidBadges = group.uidsForDisplay.map(uid => `<span class="uid-badge">${uid}</span>`).join(' ');
+                        uidCell.innerHTML = uidBadges;
                         row.appendChild(uidCell);
                     }
 
@@ -8209,7 +8285,7 @@
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Add to Database</h3>
-        <p>Enter the details for the student with this UID.</p>
+        <div class="dialog-content"><p>Enter the details for the student with this UID.</p>
         <div class="form-group">
             <label>UID:</label>
             <input type="text" class="form-control" placeholder="AB:CD:12:34" value="${uid}" disabled>
@@ -8222,7 +8298,7 @@
             <label for="add-log-email">E-mail*:</label>
             <input type="email" id="add-log-email" class="form-control" placeholder="nsurname00@epoka.edu.al">
         </div>
-        <div class="dialog-actions">
+        </div> <div class="dialog-actions">
             <button id="cancel-add-log-btn" class="btn-red">Cancel</button>
             <button id="confirm-add-log-btn" class="btn-green">Add Student</button>
         </div>`;
