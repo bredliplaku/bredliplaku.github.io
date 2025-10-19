@@ -1676,6 +1676,20 @@
             transition: border-color 0.3s, box-shadow 0.3s;
         }
 
+        .form-control.is-invalid {
+            border-color: var(--danger-color) !important;
+            box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.2) !important;
+        }
+
+        .error-message {
+            color: var(--danger-color);
+            font-size: 0.85em;
+            margin-top: 5px;
+            display: block;
+            width: 100%;
+            text-align: right;
+        }
+
         .dialog .form-group .form-control {
             flex-grow: 1;
             /* Allows inputs to fill the remaining space */
@@ -2646,8 +2660,6 @@
                 /* Make text readable */
             }
 
-
-
             /* Smaller Notifications */
             .in-page-notifications {
                 width: 90%;
@@ -2734,12 +2746,6 @@
             .sync-container,
             .auth-container {
                 margin-bottom: 0;
-            }
-
-            .dialog-backdrop {
-                /* This ensures it's always a flex container, centering its child */
-                display: flex;
-                align-items: center;
             }
 
             /* Hide user name on mobile */
@@ -5544,6 +5550,42 @@
         }
 
         /**
+         * Displays an error message for a specific input field.
+         * @param {HTMLInputElement} inputElement The input field to validate.
+         * @param {string} message The error message to display.
+         */
+        function showInputError(inputElement, message) {
+            inputElement.classList.add('is-invalid');
+            const formGroup = inputElement.closest('.form-group');
+            if (formGroup) {
+                // Remove any existing error message to prevent duplicates
+                const existingError = formGroup.querySelector('.error-message');
+                if (existingError) existingError.remove();
+
+                const errorElement = document.createElement('div');
+                errorElement.className = 'error-message';
+                errorElement.textContent = message;
+                // Insert after the input field's container if it exists, otherwise just in the group
+                (inputElement.parentElement.classList.contains('number-input-container') ? inputElement.parentElement : inputElement).after(errorElement);
+            }
+        }
+
+        /**
+         * Clears any validation error from a specific input field.
+         * @param {HTMLInputElement} inputElement The input field to clear.
+         */
+        function clearInputError(inputElement) {
+            inputElement.classList.remove('is-invalid');
+            const formGroup = inputElement.closest('.form-group');
+            if (formGroup) {
+                const errorElement = formGroup.querySelector('.error-message');
+                if (errorElement) {
+                    errorElement.remove();
+                }
+            }
+        }
+
+        /**
          * Get a suggested date for attendance export
          * @param {Object} metadata - Course metadata
          * @returns {string} Date string in YYYY-MM-DD format
@@ -6644,8 +6686,8 @@
             dialog.innerHTML = `
         <h3 class="dialog-title">Add New Student</h3>
         <p>Enter the details for the new database entry.</p>
-        <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control"></div>
-        <div class="form-group"><label for="add-email">E-mail*:</label><input type="email" id="add-email" class="form-control"></div>
+        <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control" placeholder="Student's Full Name"></div>
+        <div class="form-group"><label for="add-email">E-mail*:</label><input type="email" id="add-email" class="form-control" placeholder="nsurname00@epoka.edu.al"></div>
         <div class="form-group">
             <label>UID*:</label>
             <input type="text" id="add-uid" class="form-control" placeholder="AB:CD:12:34">
@@ -6681,18 +6723,41 @@
 
             document.getElementById('cancel-add-btn').addEventListener('click', close);
             document.getElementById('confirm-add-btn').addEventListener('click', () => {
-                const name = document.getElementById('add-name').value.trim();
-                const email = document.getElementById('add-email').value.trim();
-                const uid = document.getElementById('add-uid').value.trim();
+                const nameInput = document.getElementById('add-name');
+                const emailInput = document.getElementById('add-email');
+                const uidInput = document.getElementById('add-uid');
 
-                if (!name) return showAlertDialog('Invalid Input', 'Name cannot be empty.');
-                if (!isValidEmail(email)) return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
-                if (!uid) return showAlertDialog('Invalid Input', 'UID cannot be empty.');
+                // Clear previous errors
+                clearInputError(nameInput);
+                clearInputError(emailInput);
+                clearInputError(uidInput);
+
+                const name = nameInput.value.trim();
+                const email = emailInput.value.trim();
+                const uid = uidInput.value.trim();
+                let isValid = true;
+
+                if (name === '') {
+                    showInputError(nameInput, 'Name is required.');
+                    isValid = false;
+                }
+                if (!isValidEmail(email)) {
+                    showInputError(emailInput, 'A valid email is required.');
+                    isValid = false;
+                }
+                if (uid === '') {
+                    showInputError(uidInput, 'UID is required.');
+                    isValid = false;
+                }
+
+                if (!isValid) return; // Stop if any validation failed
 
                 const isDuplicate = Object.values(databaseMap).some(student => student.uids.includes(uid));
-                if (isDuplicate) return showAlertDialog('Duplicate Entry', 'This UID is already assigned to another student.');
+                if (isDuplicate) {
+                    showInputError(uidInput, 'This UID is already assigned.');
+                    return;
+                }
 
-                // Find the highest existing index and add 1 to create a new unique key.
                 const existingKeys = Object.keys(databaseMap).map(Number);
                 const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
 
@@ -6720,12 +6785,12 @@
             dialog.innerHTML = `
         <h3 class="dialog-title">Edit Student</h3>
         <p>Manage details for ${entry.name}</p>
-        <div class="form-group"><label for="edit-name">Name*:</label><input type="text" id="edit-name" class="form-control" value="${entry.name}"></div>
-        <div class="form-group"><label for="edit-email">E-mail*:</label><input type="email" id="edit-email" class="form-control" value="${entry.email || ''}"></div>
+        <div class="form-group"><label for="edit-name">Name*:</label><input type="text" id="edit-name" class="form-control" placeholder="Student's Full Name" value="${entry.name}"></div>
+        <div class="form-group"><label for="edit-email">E-mail*:</label><input type="email" id="edit-email" class="form-control" placeholder="nsurname00@epoka.edu.al" value="${entry.email || ''}"></div>
         <hr>
         <div id="uid-list-container"></div>
         <div style="display: flex; justify-content: flex-end; margin-top: 5px;">
-             <button id="add-new-uid-row-btn" class="btn-blue btn-sm">Add UID Field</button>
+             <button id="add-new-uid-row-btn" class="btn-blue btn-sm">Add UID</button>
         </div>
         <div id="nfc-status-container" style="margin-top:10px;"></div>
         <div class="dialog-actions">
@@ -6782,19 +6847,37 @@
 
             document.getElementById('cancel-edit-btn').addEventListener('click', closeDialog);
             document.getElementById('confirm-edit-btn').addEventListener('click', () => {
-                const newName = document.getElementById('edit-name').value.trim();
-                const newEmail = document.getElementById('edit-email').value.trim();
+                const nameInput = document.getElementById('edit-name');
+                const emailInput = document.getElementById('edit-email');
+                const uidInputs = Array.from(dialog.querySelectorAll('.uid-input'));
 
-                if (!newName) return showAlertDialog('Invalid Input', 'Name cannot be empty.');
-                if (!isValidEmail(newEmail)) return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                // Clear previous errors
+                clearInputError(nameInput);
+                clearInputError(emailInput);
+                uidInputs.forEach(clearInputError);
 
-                const updatedUids = Array.from(dialog.querySelectorAll('.uid-input'))
-                    .map(input => input.value.trim())
-                    .filter(Boolean); // Filter out any empty strings
+                const newName = nameInput.value.trim();
+                const newEmail = emailInput.value.trim();
+                let isValid = true;
 
-                if (updatedUids.length === 0) return showAlertDialog('Invalid Input', 'At least one UID is required.');
+                if (newName === '') {
+                    showInputError(nameInput, 'Name is required.');
+                    isValid = false;
+                }
+                if (!isValidEmail(newEmail)) {
+                    showInputError(emailInput, 'A valid email is required.');
+                    isValid = false;
+                }
 
-                databaseMap[dbKey] = { name: newName, email: newEmail, uids: updatedUids };
+                const updatedUids = uidInputs.map(input => input.value.trim());
+                if (updatedUids.some(uid => uid === '')) {
+                    showInputError(uidInputs.find(input => input.value.trim() === ''), 'UID fields cannot be empty.');
+                    isValid = false;
+                }
+
+                if (!isValid) return;
+
+                databaseMap[dbKey] = { name: newName, email: newEmail, uids: updatedUids.filter(Boolean) };
 
                 if (isOnline) syncDatabaseToSheet();
                 updateUI();
@@ -6929,10 +7012,13 @@
             document.body.appendChild(dialogBackdrop);
 
             const closeDialog = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.head.removeChild(document.getElementById('temp-dialog-styles'));
-                document.body.style.overflow = ''; // Restore scroll
+                // This line assumes 'dialogBackdrop' is available in the function's scope.
+                if (document.body.contains(dialogBackdrop)) {
+                    document.body.removeChild(dialogBackdrop);
+                }
+                document.body.style.overflow = ''; // Restore background scrolling
             };
+
             document.getElementById('dialog-ok-btn').addEventListener('click', closeDialog);
             dialogBackdrop.addEventListener('click', (e) => {
                 if (e.target === dialogBackdrop) closeDialog();
@@ -6944,7 +7030,7 @@
        * @param {object} options - The options for the dialog.
        */
         function showPromptDialog({ title, message, initialValue = '', confirmText = 'Confirm', cancelText = 'Cancel', onConfirm }) {
-            document.body.style.overflow = 'hidden'; // Prevent background scroll
+            document.body.style.overflow = 'hidden';
             const existingDialog = document.querySelector('.dialog-backdrop');
             if (existingDialog) existingDialog.remove();
 
@@ -6975,8 +7061,11 @@
             input.select();
 
             const closeDialog = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = ''; // Restore scroll
+                // This line assumes 'dialogBackdrop' is available in the function's scope.
+                if (document.body.contains(dialogBackdrop)) {
+                    document.body.removeChild(dialogBackdrop);
+                }
+                document.body.style.overflow = ''; // Restore background scrolling
             };
 
             const confirmAction = () => {
@@ -7029,10 +7118,11 @@
             const cancelBtn = document.getElementById('dialog-cancel-btn');
 
             const closeDialog = () => {
+                // This line assumes 'dialogBackdrop' is available in the function's scope.
                 if (document.body.contains(dialogBackdrop)) {
                     document.body.removeChild(dialogBackdrop);
                 }
-                document.body.style.overflow = '';
+                document.body.style.overflow = ''; // Restore background scrolling
             };
 
             confirmBtn.addEventListener('click', () => {
@@ -8110,21 +8200,75 @@
          */
         function showAddEntryFromLog(uid) {
             if (!isAdmin) return;
+            document.body.style.overflow = 'hidden';
 
-            showPromptDialog({
-                title: 'Add New Student',
-                message: `Enter name for unknown UID:\n<strong>${uid}</strong>`,
-                onConfirm: (name) => {
-                    if (name && name.trim()) {
-                        const trimmedName = name.trim();
-                        databaseMap[uid] = { name: trimmedName, email: '' }; // Add with empty email
-                        if (isOnline && isSignedIn) {
-                            syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
-                        }
-                        updateUI();
-                        showNotification('success', 'Entry Added', `Added ${trimmedName} (${uid}) to the database.`);
-                    }
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Add to Database</h3>
+        <p>Enter the details for the student with this UID.</p>
+        <div class="form-group">
+            <label>UID:</label>
+            <input type="text" class="form-control" placeholder="AB:CD:12:34" value="${uid}" disabled>
+        </div>
+        <div class="form-group">
+            <label for="add-log-name">Name*:</label>
+            <input type="text" id="add-log-name" class="form-control" placeholder="Student's Full Name">
+        </div>
+        <div class="form-group">
+            <label for="add-log-email">E-mail*:</label>
+            <input type="email" id="add-log-email" class="form-control" placeholder="nsurname00@epoka.edu.al">
+        </div>
+        <div class="dialog-actions">
+            <button id="cancel-add-log-btn" class="btn-red">Cancel</button>
+            <button id="confirm-add-log-btn" class="btn-green">Add Student</button>
+        </div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const nameInput = dialog.querySelector('#add-log-name');
+            const emailInput = dialog.querySelector('#add-log-email');
+
+            const closeDialog = () => {
+                if (document.body.contains(dialogBackdrop)) document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+
+            dialog.querySelector('#cancel-add-log-btn').addEventListener('click', closeDialog);
+            dialog.querySelector('#confirm-add-log-btn').addEventListener('click', () => {
+                clearInputError(nameInput);
+                clearInputError(emailInput);
+
+                const name = nameInput.value.trim();
+                const email = emailInput.value.trim();
+                let isValid = true;
+
+                if (name === '') {
+                    showInputError(nameInput, 'Name is required.');
+                    isValid = false;
                 }
+                if (!isValidEmail(email)) {
+                    showInputError(emailInput, 'A valid email is required.');
+                    isValid = false;
+                }
+
+                if (!isValid) return;
+
+                const existingKeys = Object.keys(databaseMap).map(Number);
+                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+
+                databaseMap[newDbKey] = { name: name, email: email, uids: [uid] };
+
+                if (isOnline && isSignedIn) {
+                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                }
+                updateUI();
+                showNotification('success', 'Entry Added', `Added ${name} (${uid}) to the database.`);
+                closeDialog();
             });
         }
 
