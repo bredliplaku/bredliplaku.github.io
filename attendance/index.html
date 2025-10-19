@@ -390,8 +390,7 @@
         }
 
         .uid-badge {
-            background-color: #e0e0e0;
-            /* A neutral grey */
+            background-color: #e0e0e0cc;
             color: #333;
             border-radius: 4px;
             padding: 8px 5px;
@@ -1170,10 +1169,23 @@
             background-color: #f9f9f9;
         }
 
-        .uid-cell {
-            font-family: monospace;
-            font-weight: 500;
-            text-align: center;
+        .database-table td.uid-cell {
+            text-align: left;
+            /* Align badges to the left */
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+            /* This adds space between badges */
+        }
+
+        .uid-badge:first-child {
+            border-top-left-radius: 14px;
+            border-bottom-left-radius: 14px;
+        }
+
+        .uid-badge:last-child {
+            border-top-right-radius: 14px;
+            border-bottom-right-radius: 14px;
         }
 
         .name-cell {
@@ -4915,7 +4927,7 @@
         <div class="form-group"><label>Email:</label><input class="form-control" value="${currentUser.email}" disabled></div>
         <div class="form-group">
             <label for="register-uid-input">UID:</label>
-            <input type="text" id="register-uid-input" class="form-control" placeholder="Scan card or type manually...">
+            <input type="text" id="register-uid-input" class="form-control" placeholder="AB:CD:12:34">
         </div>
         <div id="nfc-status-container"></div>
         <div class="dialog-actions">
@@ -5461,6 +5473,41 @@
 
             // No metadata found
             return null;
+        }
+
+        /**
+ * Starts an NFC reader to populate a given input field.
+ * @param {HTMLInputElement} inputElement The input field to fill with the scanned UID.
+ * @param {HTMLElement} statusContainer The div where status messages will be shown.
+ * @returns {AbortController | null} The controller to stop the scan, or null if not supported.
+ */
+        function startNfcForInputDialog(inputElement, statusContainer) {
+            if (!nfcSupported) {
+                if (/Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                    statusContainer.innerHTML = `<p style="text-align:center; font-size: 0.9em; opacity: 0.8;">NFC scanning requires Chrome on Android.</p>`;
+                }
+                return null;
+            }
+
+            statusContainer.innerHTML = `<div class="sync-status syncing" style="justify-content: center; padding: 15px 0; font-size: 1em;"><i class="fa-solid fa-wifi"></i> <span>Ready to Scan...</span></div>`;
+
+            const nfcController = new AbortController();
+            const reader = new NDEFReader();
+
+            reader.scan({ signal: nfcController.signal }).then(() => {
+                reader.onreading = ({ serialNumber }) => {
+                    inputElement.value = serialNumber;
+                    playSound(true);
+                    statusContainer.innerHTML = `<div class="sync-status success" style="justify-content: center; padding: 15px 0; font-size: 1em;"><i class="fas fa-check-circle"></i> <span>Card Scanned!</span></div>`;
+                    nfcController.abort(); // Stop scanning after one successful read
+                };
+            }).catch(err => {
+                if (err.name !== 'AbortError') {
+                    statusContainer.innerHTML = `<div class="sync-status error" style="justify-content: center; padding: 15px 0; font-size: 1em;"><i class="fas fa-times-circle"></i> <span>Scan failed. Is NFC on?</span></div>`;
+                }
+            });
+
+            return nfcController;
         }
 
         /**
@@ -6585,58 +6632,79 @@
          */
         function showAddEntryDialog() {
             if (!isAdmin) return;
-            showPromptDialog({
-                title: 'Add New Student',
-                message: 'Enter the UID for the new student.',
-                onConfirm: (uid) => {
-                    const trimmedUid = uid ? uid.trim() : '';
-                    if (!trimmedUid) return showAlertDialog('Invalid Input', 'UID cannot be empty.');
-                    if (databaseMap[trimmedUid]) return showAlertDialog('Duplicate Entry', 'This UID already exists.');
 
-                    // Now ask for Name and Email in a custom dialog
-                    const dialogBackdrop = document.createElement('div');
-                    dialogBackdrop.className = 'dialog-backdrop';
-                    const dialog = document.createElement('div');
-                    dialog.className = 'dialog';
-                    dialog.innerHTML = `
-                <h3 class="dialog-title">Enter Details</h3>
-                <p>Enter the name and optional e-mail for UID: ${trimmedUid}</p>
-                <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control"></div>
-                <div class="form-group"><label for="add-email">E-mail:</label><input type="email" id="add-email" class="form-control" placeholder="Optional"></div>
-                <div class="dialog-actions">
-                    <button id="cancel-add-btn" class="btn-red">Cancel</button>
-                    <button id="confirm-add-btn" class="btn-green">Add</button>
-                </div>`;
-                    dialogBackdrop.appendChild(dialog);
-                    document.body.appendChild(dialogBackdrop);
+            document.body.style.overflow = 'hidden';
 
-                    const close = () => document.body.removeChild(dialogBackdrop);
-                    document.getElementById('cancel-add-btn').addEventListener('click', close);
-                    document.getElementById('confirm-add-btn').addEventListener('click', () => {
-                        const name = document.getElementById('add-name').value.trim();
-                        const email = document.getElementById('add-email').value.trim();
-                        if (!name) {
-                            return showAlertDialog('Invalid Input', 'Name cannot be empty.');
-                        }
-                        // VALIDATION ADDED HERE
-                        if (!isValidEmail(email)) {
-                            return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
-                        }
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            let nfcController = null;
 
-                        databaseMap[trimmedUid] = { name, email, uids: [trimmedUid] }; // Also add uids array
-                        if (isOnline) syncDatabaseToSheet();
-                        updateUI();
-                        showNotification('success', 'Entry Added', `Added ${name} to the database.`);
-                        close();
-                    });
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Add New Student</h3>
+        <p>Enter the details for the new database entry.</p>
+        <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control"></div>
+        <div class="form-group"><label for="add-email">E-mail*:</label><input type="email" id="add-email" class="form-control"></div>
+        <div class="form-group">
+            <label>UID*:</label>
+            <input type="text" id="add-uid" class="form-control" placeholder="AB:CD:12:34">
+            ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
+        </div>
+        <div id="nfc-status-container" style="margin-top:10px;"></div>
+        <div class="dialog-actions">
+            <button id="cancel-add-btn" class="btn-red">Cancel</button>
+            <button id="confirm-add-btn" class="btn-green">Add Student</button>
+        </div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const close = () => {
+                if (nfcController) nfcController.abort();
+                if (document.body.contains(dialogBackdrop)) {
+                    document.body.removeChild(dialogBackdrop);
                 }
+                document.body.style.overflow = '';
+            };
+
+            const uidInput = dialog.querySelector('#add-uid');
+            const nfcStatusContainer = dialog.querySelector('#nfc-status-container');
+            const scanBtn = dialog.querySelector('.scan-uid-btn');
+
+            if (scanBtn) {
+                scanBtn.addEventListener('click', () => {
+                    if (nfcController) nfcController.abort();
+                    nfcController = startNfcForInputDialog(uidInput, nfcStatusContainer);
+                });
+            }
+
+            document.getElementById('cancel-add-btn').addEventListener('click', close);
+            document.getElementById('confirm-add-btn').addEventListener('click', () => {
+                const name = document.getElementById('add-name').value.trim();
+                const email = document.getElementById('add-email').value.trim();
+                const uid = document.getElementById('add-uid').value.trim();
+
+                if (!name) return showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                if (!isValidEmail(email)) return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                if (!uid) return showAlertDialog('Invalid Input', 'UID cannot be empty.');
+
+                const isDuplicate = Object.values(databaseMap).some(student => student.uids.includes(uid));
+                if (isDuplicate) return showAlertDialog('Duplicate Entry', 'This UID is already assigned to another student.');
+
+                // Find the highest existing index and add 1 to create a new unique key.
+                const existingKeys = Object.keys(databaseMap).map(Number);
+                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+
+                databaseMap[newDbKey] = { name, email, uids: [uid] };
+
+                if (isOnline) syncDatabaseToSheet();
+                updateUI();
+                showNotification('success', 'Entry Added', `Added ${name} to the database.`);
+                close();
             });
         }
 
-        /**
-         * Edit database entry (change name).
-         * @param {string} uid - The UID of the entry to edit.
-         */
         function editDatabaseEntry(dbKey) {
             if (!isAdmin || !databaseMap[dbKey]) return;
 
@@ -6646,16 +6714,20 @@
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
-
             const entry = databaseMap[dbKey];
+            let nfcController = null; // To manage the NFC scan session
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Edit Student</h3>
-        <p>Editing details for ${entry.name}</p>
+        <p>Manage details for ${entry.name}</p>
         <div class="form-group"><label for="edit-name">Name*:</label><input type="text" id="edit-name" class="form-control" value="${entry.name}"></div>
         <div class="form-group"><label for="edit-email">E-mail*:</label><input type="email" id="edit-email" class="form-control" value="${entry.email || ''}"></div>
         <hr>
         <div id="uid-list-container"></div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 5px;">
+             <button id="add-new-uid-row-btn" class="btn-blue btn-sm">Add UID Field</button>
+        </div>
+        <div id="nfc-status-container" style="margin-top:10px;"></div>
         <div class="dialog-actions">
             <button id="cancel-edit-btn" class="btn-red">Cancel</button>
             <button id="confirm-edit-btn" class="btn-green">Save Changes</button>
@@ -6665,63 +6737,50 @@
             document.body.appendChild(dialogBackdrop);
 
             const uidListContainer = dialog.querySelector('#uid-list-container');
+            const nfcStatusContainer = dialog.querySelector('#nfc-status-container');
 
-            // Function to render the list of UID input fields
-            const renderUidList = () => {
-                uidListContainer.innerHTML = ''; // Clear current list
+            const createUidRow = (uidValue = '') => {
+                const uidGroup = document.createElement('div');
+                uidGroup.className = 'form-group';
+                uidGroup.style.marginBottom = '5px';
+                uidGroup.innerHTML = `
+            <label>UID:</label>
+            <input type="text" class="form-control uid-input" value="${uidValue}" placeholder="AB:CD:12:34">
+            ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
+            <button class="btn-red btn-icon btn-sm remove-uid-btn" title="Remove UID"><i class="fas fa-minus"></i></button>
+        `;
+                uidListContainer.appendChild(uidGroup);
 
-                // Get current values from inputs before re-rendering
-                const currentUidValues = Array.from(uidListContainer.querySelectorAll('.uid-input')).map(input => input.value.trim());
-                const uidsToRender = currentUidValues.length > 0 ? currentUidValues.filter(Boolean) : entry.uids;
-
-                if (uidsToRender.length === 0) uidsToRender.push(''); // Ensure at least one input exists
-
-                uidsToRender.forEach((uid, index) => {
-                    const uidGroup = document.createElement('div');
-                    uidGroup.className = 'form-group';
-                    uidGroup.style.marginBottom = '5px';
-                    uidGroup.innerHTML = `
-                <label>${index === 0 ? 'UIDs:' : ''}</label>
-                <input type="text" class="form-control uid-input" value="${uid}" placeholder="Enter Student UID...">
-                <button class="btn-green btn-icon btn-sm add-uid-btn"><i class="fas fa-plus"></i></button>
-            `;
-                    uidListContainer.appendChild(uidGroup);
+                uidGroup.querySelector('.remove-uid-btn').addEventListener('click', () => {
+                    if (uidListContainer.querySelectorAll('.form-group').length > 1) {
+                        uidGroup.remove();
+                    } else {
+                        showNotification('warning', 'Cannot Remove', 'At least one UID field is required.');
+                    }
                 });
+
+                const scanBtn = uidGroup.querySelector('.scan-uid-btn');
+                if (scanBtn) {
+                    scanBtn.addEventListener('click', () => {
+                        if (nfcController) nfcController.abort(); // Stop any previous scan
+                        const inputTarget = uidGroup.querySelector('.uid-input');
+                        nfcController = startNfcForInputDialog(inputTarget, nfcStatusContainer);
+                    });
+                }
             };
 
-            // Event delegation for the whole container
-            uidListContainer.addEventListener('click', e => {
-                if (e.target.closest('.add-uid-btn')) {
-                    const newUidGroup = document.createElement('div');
-                    newUidGroup.className = 'form-group';
-                    newUidGroup.style.marginBottom = '5px';
-                    newUidGroup.innerHTML = `
-                <label></label>
-                <input type="text" class="form-control uid-input" placeholder="Enter Student UID...">
-                <button class="btn-red btn-icon btn-sm remove-uid-btn"><i class="fas fa-minus"></i></button>
-            `;
-                    // Insert the new row after the row where the plus was clicked
-                    e.target.closest('.form-group').after(newUidGroup);
-                    newUidGroup.querySelector('input').focus();
-                }
-                if (e.target.closest('.remove-uid-btn')) {
-                    e.target.closest('.form-group').remove();
-                }
-            });
+            entry.uids.forEach(uid => createUidRow(uid));
+            if (entry.uids.length === 0) createUidRow();
 
-            // Initial render
-            renderUidList();
+            dialog.querySelector('#add-new-uid-row-btn').addEventListener('click', () => createUidRow());
 
             const closeDialog = () => {
-                if (document.body.contains(dialogBackdrop)) {
-                    document.body.removeChild(dialogBackdrop);
-                }
+                if (nfcController) nfcController.abort(); // IMPORTANT: Stop scanning when dialog closes
+                if (document.body.contains(dialogBackdrop)) document.body.removeChild(dialogBackdrop);
                 document.body.style.overflow = '';
             };
 
-            // FIX: Attach event listeners for Cancel and Save
             document.getElementById('cancel-edit-btn').addEventListener('click', closeDialog);
-
             document.getElementById('confirm-edit-btn').addEventListener('click', () => {
                 const newName = document.getElementById('edit-name').value.trim();
                 const newEmail = document.getElementById('edit-email').value.trim();
@@ -6731,11 +6790,10 @@
 
                 const updatedUids = Array.from(dialog.querySelectorAll('.uid-input'))
                     .map(input => input.value.trim())
-                    .filter(Boolean); // Filter out empty strings
+                    .filter(Boolean); // Filter out any empty strings
 
                 if (updatedUids.length === 0) return showAlertDialog('Invalid Input', 'At least one UID is required.');
 
-                // Update the entry in our main database map
                 databaseMap[dbKey] = { name: newName, email: newEmail, uids: updatedUids };
 
                 if (isOnline) syncDatabaseToSheet();
@@ -7182,7 +7240,7 @@
         <h3 class="dialog-title">Edit Log Entry</h3>
         <div class="form-group">
             <label for="edit-name">Name:</label>
-            <input type="text" id="edit-name" class="form-control" value="${group.name}">
+            <input type="text" id="edit-name" class="form-control" value="${group.name}" disabled>
         </div>
         <div class="form-group">
             <label for="edit-uid">UID:</label>
@@ -7782,19 +7840,28 @@
                 logsToDisplay.forEach(log => {
                     const dateObj = new Date(log.timestamp);
                     if (isNaN(dateObj.getTime())) return;
+
+                    // --- START OF NEW LOGIC ---
+                    const scannedUid = log.uid;
+                    const dbKey = uidToPrimaryUidMap[scannedUid]; // Look up the student's unique key
+                    const groupIdentifier = dbKey || scannedUid; // Group by the key if found, otherwise by the raw UID
+                    const name = dbKey ? databaseMap[dbKey]?.name : 'Unknown'; // Get name using the key
+                    // --- END OF NEW LOGIC ---
+
                     const day = String(dateObj.getDate()).padStart(2, '0');
                     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
-                    const uid = log.uid;
-                    const key = `${date}_${uid}`;
+
+                    const key = `${date}_${groupIdentifier}`; // Use the new group identifier
+
                     if (!grouped[key]) {
                         grouped[key] = {
                             key: key,
                             date,
                             dateObj: new Date(year, month - 1, day),
-                            uid,
-                            name: databaseMap[uid]?.name || 'Unknown',
+                            uid: groupIdentifier, // Store the identifier
+                            name: name, // Use the resolved name
                             originalLogs: []
                         };
                     }
@@ -8045,8 +8112,8 @@
             if (!isAdmin) return;
 
             showPromptDialog({
-                title: 'Add to database',
-                message: `Enter name for new database entry with UID:\n${uid}`,
+                title: 'Add New Student',
+                message: `Enter name for unknown UID:\n<strong>${uid}</strong>`,
                 onConfirm: (name) => {
                     if (name && name.trim()) {
                         const trimmedName = name.trim();
@@ -8350,7 +8417,7 @@
 
             const timestamp = new Date();
             let newLog = {
-                uid: finalUid,
+                uid: serialNumber,
                 timestamp: timestamp.getTime(),
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: false
