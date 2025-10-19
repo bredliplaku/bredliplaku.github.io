@@ -2704,10 +2704,9 @@
             }
 
             .dialog-backdrop {
+                /* This ensures it's always a flex container, centering its child */
+                display: flex;
                 align-items: center;
-                /* This centres it vertically */
-                padding-top: 0;
-                /* Remove the top padding */
             }
 
             /* Hide user name on mobile */
@@ -3119,7 +3118,7 @@
                 </div>
                 <div class="module-content">
                     <div class="filter-container">
-                        <input type="text" id="db-filter-input" class="filter-input" placeholder="Search database...">
+                        <input type="text" id="db-filter-input" class="filter-input" placeholder="Search...">
                         <select id="db-sort-select" class="sort-dropdown">
                             <option value="name-asc">Name (A-Z)</option>
                             <option value="name-desc">Name (Z-A)</option>
@@ -3205,7 +3204,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz84CEw4NrVttNudlqgUZYetJ5o39VjPGdKfW3ZW3aiENYsMc6DEzPpgE0aBbzCpn-u4g/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyw76nW_SLSP1fa-Tgeeia_rnKK3l0NxjVbFX9EFsGmLDUD8Nvu9b-3ZQlMdU0QvonYHg/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -3245,6 +3244,7 @@
         let initialPullDone = false;
         let avatarClickCount = 0;
         let lastAvatarClickTime = 0;
+        let uidToPrimaryUidMap = {}; // New map for quick UID lookups
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -4838,11 +4838,21 @@
                 const userInfo = await response.json();
                 console.log('User info fetched successfully:', userInfo.email);
 
+                const initials = (userInfo.name || userInfo.email)
+                    .split(' ')
+                    .map(n => n[0])
+                    .join('')
+                    .substring(0, 2)
+                    .toUpperCase();
+
+                const randomColor = Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+                const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=${randomColor}&color=ffffff&size=64&bold=true`;
+
                 currentUser = {
                     id: userInfo.sub,
                     name: userInfo.name || userInfo.email,
                     email: userInfo.email,
-                    picture: userInfo.picture || 'https://via.placeholder.com/32'
+                    picture: userInfo.picture || avatarUrl
                 };
 
                 // Update user info in UI
@@ -5229,10 +5239,18 @@
 
             document.getElementById('replace-btn').addEventListener('click', (e) => {
                 const button = e.currentTarget;
+                const finalName = document.getElementById('final-name').value.trim();
+                const finalEmail = document.getElementById('final-email').value.trim();
+
+                // VALIDATION ADDED HERE
+                if (!isValidEmail(finalEmail)) {
+                    return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                }
+
                 const finalData = {
                     ...newData,
-                    name: document.getElementById('final-name').value.trim(),
-                    email: document.getElementById('final-email').value.trim(),
+                    name: finalName,
+                    email: finalEmail,
                     duplicateRowIndex: existing.rowIndex
                 };
                 resolveDuplicateOnServer('replace', finalData, button, closeDialog);
@@ -5240,10 +5258,18 @@
 
             document.getElementById('add-anyway-btn').addEventListener('click', (e) => {
                 const button = e.currentTarget;
+                const finalName = document.getElementById('final-name').value.trim();
+                const finalEmail = document.getElementById('final-email').value.trim();
+
+                // VALIDATION ADDED HERE
+                if (!isValidEmail(finalEmail)) {
+                    return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                }
+
                 const finalData = {
                     ...newData,
-                    name: document.getElementById('final-name').value.trim(),
-                    email: document.getElementById('final-email').value.trim()
+                    name: finalName,
+                    email: finalEmail
                 };
                 resolveDuplicateOnServer('add_anyway', finalData, button, closeDialog);
             });
@@ -5975,7 +6001,6 @@
         /**
 * Fetch database entries from Google Sheet with format detection
 */
-        // REPLACED FUNCTION
         async function fetchDatabaseFromSheet() {
             if (!databaseLoadPromise) {
                 databaseLoadPromise = new Promise(resolve => { databaseResolve = resolve; });
@@ -5983,20 +6008,32 @@
             try {
                 const response = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:D' // Read up to column D
+                    range: 'Database!A2:D'
                 });
                 const rows = response.result.values || [];
                 const newDbMap = {};
+                const newUidMap = {}; // Temporary map for our new lookup system
+
                 rows.forEach(row => {
-                    const [index, name, uid, email] = row;
-                    if (name && uid) {
-                        newDbMap[String(uid).trim()] = {
-                            name: String(name).trim(),
-                            email: email ? String(email).trim() : '' // Handle empty email
-                        };
+                    const [index, name, uidString, email] = row;
+                    if (name && uidString) {
+                        const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
+                        if (uids.length > 0) {
+                            const primaryUid = uids[0]; // The first UID is the primary one
+                            newDbMap[primaryUid] = {
+                                name: String(name).trim(),
+                                email: email ? String(email).trim() : '',
+                                uids: uids // Store all UIDs
+                            };
+                            // Map every UID to the primary UID for fast lookups
+                            uids.forEach(uid => {
+                                newUidMap[uid] = primaryUid;
+                            });
+                        }
                     }
                 });
                 databaseMap = newDbMap;
+                uidToPrimaryUidMap = newUidMap; // Assign the new lookup map
                 updateDatabaseStatus();
                 updateDatabaseList();
                 console.log(`Loaded ${Object.keys(databaseMap).length} entries from database sheet`);
@@ -6397,10 +6434,15 @@
         async function syncDatabaseToSheet() {
             if (!isSignedIn || !isAdmin || !isOnline) return;
             try {
-                const entries = Object.entries(databaseMap);
-                entries.sort((a, b) => a[1].name.localeCompare(b[1].name));
-                // Format data as [Index, Name, UID, Email]
-                const sheetData = entries.map(([uid, data], index) => [index + 1, data.name, uid, data.email || '']);
+                // Sort by primary UID for consistent ordering
+                const entries = Object.entries(databaseMap).sort((a, b) => a[0].localeCompare(b[0]));
+
+                // Format data as [Index, Name, UID_String, Email]
+                const sheetData = entries.map(([primaryUid, data], index) => {
+                    const uidString = data.uids.join(', '); // Join the UIDs into a string
+                    return [index + 1, data.name, uidString, data.email || ''];
+                });
+
                 await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: DATABASE_SPREADSHEET_ID, range: 'Database!A:D' });
                 await gapi.client.sheets.spreadsheets.values.update({
                     spreadsheetId: DATABASE_SPREADSHEET_ID,
@@ -6552,9 +6594,15 @@
                     document.getElementById('confirm-add-btn').addEventListener('click', () => {
                         const name = document.getElementById('add-name').value.trim();
                         const email = document.getElementById('add-email').value.trim();
-                        if (!name) return showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                        if (!name) {
+                            return showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                        }
+                        // VALIDATION ADDED HERE
+                        if (!isValidEmail(email)) {
+                            return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                        }
 
-                        databaseMap[trimmedUid] = { name, email };
+                        databaseMap[trimmedUid] = { name, email, uids: [trimmedUid] }; // Also add uids array
                         if (isOnline) syncDatabaseToSheet();
                         updateUI();
                         showNotification('success', 'Entry Added', `Added ${name} to the database.`);
@@ -6568,19 +6616,39 @@
          * Edit database entry (change name).
          * @param {string} uid - The UID of the entry to edit.
          */
-        function editDatabaseEntry(uid) {
-            if (!isAdmin || !databaseMap[uid]) return;
-            const entry = databaseMap[uid];
+        function editDatabaseEntry(primaryUid) {
+            if (!isAdmin || !databaseMap[primaryUid]) return;
+            const entry = databaseMap[primaryUid];
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
+
+            let uidListHtml = '';
+            entry.uids.forEach((uid, index) => {
+                const isPrimary = index === 0;
+                uidListHtml += `
+            <div class="form-group" style="margin-bottom: 5px;">
+                <label>${isPrimary ? 'Primary UID:' : 'UID:'}</label>
+                <input type="text" class="form-control" value="${uid}" disabled>
+                ${!isPrimary ? '<button class="btn-red btn-icon btn-sm remove-uid-btn" data-uid="' + uid + '"><i class="fas fa-times"></i></button>' : ''}
+            </div>
+        `;
+            });
+
             dialog.innerHTML = `
         <h3 class="dialog-title">Edit Student</h3>
-        <p>Editing details for UID: ${uid}</p>
+        <p>Editing details for ${entry.name}</p>
         <div class="form-group"><label for="edit-name">Name*:</label><input type="text" id="edit-name" class="form-control" value="${entry.name}"></div>
         <div class="form-group"><label for="edit-email">E-mail:</label><input type="email" id="edit-email" class="form-control" value="${entry.email || ''}"></div>
+        <hr>
+        <div id="uid-list-container">${uidListHtml}</div>
+        <div class="form-group">
+            <label for="add-uid-input">New UID:</label>
+            <input type="text" id="add-uid-input" class="form-control" placeholder="AB:CD:12:34">
+            <button id="add-uid-btn" class="btn-green btn-icon btn-sm"><i class="fas fa-plus"></i></button>
+        </div>
         <div class="dialog-actions">
             <button id="cancel-edit-btn" class="btn-red">Cancel</button>
             <button id="confirm-edit-btn" class="btn-green">Save Changes</button>
@@ -6588,18 +6656,48 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            const close = () => document.body.removeChild(dialogBackdrop);
-            document.getElementById('cancel-edit-btn').addEventListener('click', close);
+            const closeDialog = () => document.body.removeChild(dialogBackdrop);
+
+            // Event listeners for remove/add UID buttons
+            dialog.querySelectorAll('.remove-uid-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const uidToRemove = e.currentTarget.dataset.uid;
+                    entry.uids = entry.uids.filter(uid => uid !== uidToRemove);
+                    // Re-render the dialog content to show the change
+                    editDatabaseEntry(primaryUid);
+                    closeDialog(); // Close the old dialog
+                });
+            });
+
+            dialog.querySelector('#add-uid-btn').addEventListener('click', () => {
+                const newUidInput = dialog.querySelector('#add-uid-input');
+                const newUid = newUidInput.value.trim();
+                if (newUid && !entry.uids.includes(newUid)) {
+                    entry.uids.push(newUid);
+                    editDatabaseEntry(primaryUid); // Re-render
+                    closeDialog();
+                } else {
+                    newUidInput.value = '';
+                }
+            });
+
+            document.getElementById('cancel-edit-btn').addEventListener('click', closeDialog);
             document.getElementById('confirm-edit-btn').addEventListener('click', () => {
                 const newName = document.getElementById('edit-name').value.trim();
                 const newEmail = document.getElementById('edit-email').value.trim();
-                if (!newName) return showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                if (!newName) {
+                    return showAlertDialog('Invalid Input', 'Name cannot be empty.');
+                }
+                // VALIDATION ADDED HERE
+                if (!isValidEmail(newEmail)) {
+                    return showAlertDialog('Invalid Input', 'Please enter a valid, non-empty email address.');
+                }
 
-                databaseMap[uid] = { name: newName, email: newEmail };
+                databaseMap[primaryUid] = { ...entry, name: newName, email: newEmail };
                 if (isOnline) syncDatabaseToSheet();
                 updateUI();
                 showNotification('success', 'Entry Updated', `Updated details for ${newName}.`);
-                close();
+                closeDialog();
             });
         }
 
@@ -6882,11 +6980,10 @@
                 return;
             }
 
-            document.body.style.overflow = 'hidden'; // Prevent background scroll
+            document.body.style.overflow = 'hidden';
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
-
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
 
@@ -6898,10 +6995,12 @@
             dialog.innerHTML = `
     <h3 class="dialog-title">Add Manual Log Entry</h3>
         <div class="form-group">
-            <label for="manual-name-search">Name:</label>
-            <input type="text" id="manual-name-search" class="form-control" list="student-list" placeholder="Search by name or UID...">
-            <datalist id="student-list"></datalist>
-            <input type="hidden" id="manual-uid">
+            <label for="manual-name-search">Student:</label>
+            <input type="text" id="manual-name-search" class="form-control" placeholder="Search by name or UID..." autocomplete="off">
+        </div>
+        <div class="form-group" style="align-items: flex-start;">
+            <label></label>
+            <select id="manual-student-select" class="form-control" size="6"></select>
         </div>
         <div class="form-group">
             <label for="manual-date">Date:</label>
@@ -6920,43 +7019,43 @@
             document.body.appendChild(dialogBackdrop);
 
             const searchInput = dialog.querySelector('#manual-name-search');
-            const uidInput = dialog.querySelector('#manual-uid');
-            const dataList = dialog.querySelector('#student-list');
+            const selectMenu = dialog.querySelector('#manual-student-select');
 
-            // Populate the datalist with all students
-            sortedEntries.forEach(([uid, data]) => { // Changed 'name' to 'data'
-                const option = document.createElement('option');
-                option.value = data.name; // Use data.name
-                option.dataset.uid = uid; // Store the UID on the option
-                dataList.appendChild(option);
-            });
+            // Helper function to populate the select menu based on a search term
+            const filterStudents = (searchTerm = '') => {
+                selectMenu.innerHTML = ''; // Clear existing options
+                const lowerCaseTerm = searchTerm.toLowerCase();
 
-            // When the user types or selects a name, find the matching UID
-            searchInput.addEventListener('input', () => {
-                let selectedUid = '';
-                const currentName = searchInput.value;
-                // Find the option in the datalist that matches the input's value
-                for (const option of dataList.options) {
-                    if (option.value === currentName) {
-                        selectedUid = option.dataset.uid;
-                        break;
+                sortedEntries.forEach(([primaryUid, data]) => {
+                    const nameMatch = data.name.toLowerCase().includes(lowerCaseTerm);
+                    const uidMatch = data.uids.some(uid => uid.toLowerCase().includes(lowerCaseTerm));
+
+                    if (nameMatch || uidMatch) {
+                        const option = document.createElement('option');
+                        option.value = primaryUid;
+                        option.textContent = `${data.name} (${data.uids[0]})`; // Show primary UID
+                        selectMenu.appendChild(option);
                     }
-                }
-                uidInput.value = selectedUid; // Update the hidden UID field
-            });
+                });
+            };
+
+            searchInput.addEventListener('input', () => filterStudents(searchInput.value));
+
+            // Populate with all students initially
+            filterStudents();
 
             const closeDialog = () => {
                 document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = ''; // Restore scroll
+                document.body.style.overflow = '';
             };
 
             document.getElementById('save-manual-log-btn').addEventListener('click', () => {
-                const selectedUid = document.getElementById('manual-uid').value;
+                const selectedUid = selectMenu.value; // Get value from the select menu
                 const manualDate = document.getElementById('manual-date').value;
                 const manualTime = document.getElementById('manual-time').value;
 
                 if (!selectedUid || !manualDate || !manualTime) {
-                    showAlertDialog('Invalid Input', 'Please select a person and fill out all fields.');
+                    showAlertDialog('Invalid Input', 'Please select a student and fill out all fields.');
                     return;
                 }
 
@@ -6968,15 +7067,11 @@
                 };
 
                 newLog = touchLogForEdit(newLog, currentUser?.email);
-
                 courseData[currentCourse].logs.unshift(newLog);
                 saveCourseToLocalStorage(currentCourse);
-
                 updateUI();
 
                 if (isOnline && isSignedIn) {
-                    // This function is now obsolete, syncData() handles everything.
-                    // appendLogToSheet(newLog); We can call a full sync instead.
                     syncLogsWithSheet();
                 }
 
@@ -6986,6 +7081,17 @@
             });
 
             document.getElementById('cancel-manual-btn').addEventListener('click', closeDialog);
+        }
+
+        /**
+         * Validates an email string.
+         * @param {string} email - The email to validate.
+         * @returns {boolean} True if the email is valid, false otherwise.
+         */
+        function isValidEmail(email) {
+            if (!email || email.trim() === '') return false; // Check if empty
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/; // Basic email format regex
+            return emailRegex.test(email);
         }
 
         /**
@@ -7915,11 +8021,13 @@
          * Update the database list in the UI.
          */
         function updateDatabaseList() {
-            const entries = Object.entries(databaseMap).filter(([uid, data]) => {
+            const entries = Object.entries(databaseMap).filter(([primaryUid, data]) => {
                 if (!dbFilter) return true;
-                return (uid.toLowerCase().includes(dbFilter) ||
-                    data.name.toLowerCase().includes(dbFilter) ||
-                    (data.email && data.email.toLowerCase().includes(dbFilter)));
+                const searchFilter = dbFilter.toLowerCase();
+                // Check name, email, and if ANY of the UIDs match the filter
+                return (data.name.toLowerCase().includes(searchFilter) ||
+                    (data.email && data.email.toLowerCase().includes(searchFilter)) ||
+                    data.uids.some(uid => uid.toLowerCase().includes(searchFilter)));
             });
 
             // Sorting logic remains similar but accesses data.name
@@ -7944,21 +8052,24 @@
             dbEntryCount.textContent = Object.keys(databaseMap).length;
             emptyDatabase.style.display = Object.keys(databaseMap).length > 0 ? 'none' : 'block';
             databaseTbody.innerHTML = '';
-            entries.forEach(([uid, data]) => {
+            entries.forEach(([primaryUid, data]) => {
                 const row = document.createElement('tr');
+                // Display UIDs as clean, space-separated tags
+                const uidBadges = data.uids.map(uid => `<span class="time-tag">${uid}</span>`).join(' ');
+
                 row.innerHTML = `
             <td class="name-cell">${data.name}</td>
-            <td class="uid-cell">${uid}</td>
+            <td class="uid-cell">${uidBadges}</td>
             <td class="email-cell">${data.email || ''}</td>
             <td class="actions-cell admin-only">
                 <div class="actions-cell-content">
-                    <button class="btn-blue btn-icon edit-db-btn" title="Edit"><i class="fa-solid fa-pencil"></i></button>
-                    <button class="btn-red btn-icon delete-db-btn" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
+                    <button class="btn-blue btn-icon edit-db-btn" data-uid="${primaryUid}" title="Edit"><i class="fa-solid fa-pencil"></i></button>
+                    <button class="btn-red btn-icon delete-db-btn" data-uid="${primaryUid}" title="Delete"><i class="fa-solid fa-trash-can"></i></button>
                 </div>
             </td>
         `;
-                row.querySelector('.edit-db-btn').addEventListener('click', () => editDatabaseEntry(uid));
-                row.querySelector('.delete-db-btn').addEventListener('click', () => deleteDatabaseEntry(uid));
+                row.querySelector('.edit-db-btn').addEventListener('click', () => editDatabaseEntry(primaryUid));
+                row.querySelector('.delete-db-btn').addEventListener('click', () => deleteDatabaseEntry(primaryUid));
                 databaseTbody.appendChild(row);
             });
         }
@@ -8129,6 +8240,12 @@
          * @param {Object} event - The NFC reading event.
          */
         async function handleNfcReading({ serialNumber }) {
+            const primaryUid = uidToPrimaryUidMap[serialNumber];
+            if (!primaryUid) {
+                // This is an unknown UID, treat it as before
+                console.log(`Scanned unknown UID: ${serialNumber}`);
+            }
+            const finalUid = primaryUid || serialNumber; // Use primary if found, otherwise the scanned one
             // For non-signed-in users, just show the UID and stop.
             if (!isSignedIn) {
                 lastScannedUID = serialNumber;
@@ -8146,7 +8263,6 @@
 
                 return; // IMPORTANT: Stop the function here for guests.
             }
-            // --- END FIX ---
 
             if (isSignedIn && !isAdmin) {
                 playSound(false);
@@ -8155,18 +8271,18 @@
             }
 
             // COOLDOWN LOGIC: Check if this card's UID was just scanned.
-            if (cooldownUIDs.has(serialNumber)) {
-                console.log(`UID ${serialNumber} is on cooldown. Scan ignored.`);
-                return; // Stop the function immediately.
+            if (cooldownUIDs.has(finalUid)) {
+                console.log(`UID ${finalUid} is on cooldown. Scan ignored.`);
+                return;
             }
 
             lastScannedUID = serialNumber;
             playSound(true); // Play the success sound immediately for quick feedback.
 
             // COOLDOWN LOGIC: Activate the cooldown for this specific card.
-            cooldownUIDs.add(serialNumber);
+            cooldownUIDs.add(finalUid);
             setTimeout(() => {
-                cooldownUIDs.delete(serialNumber); // Remove from cooldown after 1.5 seconds.
+                cooldownUIDs.delete(finalUid);
             }, 2000);
 
 
@@ -8191,7 +8307,7 @@
 
             const timestamp = new Date();
             let newLog = {
-                uid: serialNumber,
+                uid: finalUid,
                 timestamp: timestamp.getTime(),
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: false
