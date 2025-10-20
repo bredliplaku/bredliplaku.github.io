@@ -3347,7 +3347,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzvc2HjVlWcw5yUCM6sq6Fxa8OBgiRDC25cwnwFW5KtEBUkX9Kuwh0HlHPafpE4MAfWUw/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxQyaHKxPpQ1TaGljbSHlZ2OCBFBKds8zN8MMKeedN4ArtKK5hViZMA1z2ha7eeMfMrNA/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -4384,12 +4384,11 @@
 
                     if (logsForCurrentCourse.length > 0) {
                         const uidCounts = {};
-                        const selectedDate = new Date(data.parameters.date); selectedDate.setHours(0, 0, 0, 0);
-                        const nextDay = new Date(selectedDate); nextDay.setDate(nextDay.getDate() + 1);
+                        const selectedDateStr = data.parameters.date; // This is in YYYY-MM-DD format
 
                         logsForCurrentCourse.forEach(log => {
-                            const logDate = new Date(log.timestamp);
-                            if (logDate >= selectedDate && logDate < nextDay) {
+                            const logDateStr = new Date(log.timestamp).toISOString().split('T')[0];
+                            if (logDateStr === selectedDateStr) {
                                 uidCounts[log.uid] = (uidCounts[log.uid] || 0) + 1;
                             }
                         });
@@ -4740,6 +4739,12 @@
 
                                 // 2. Load all other courses in the background.
                                 setTimeout(loadRemainingCoursesInBackground, 500);
+
+                                if (pendingChanges) {
+                                    console.log("Admin session restored with pending changes. Triggering sync.");
+                                    showNotification('info', 'Syncing...', 'Syncing offline changes now.');
+                                    setTimeout(syncData, 1000);
+                                }
 
                             } else {
                                 // --- STUDENT PATH ---
@@ -6326,69 +6331,108 @@
 */
         async function fetchDatabaseFromSheet() {
             if (!databaseLoadPromise) {
-                databaseLoadPromise = new Promise(resolve => { databaseResolve = resolve; });
-            }
-            try {
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A2:D'
+                databaseLoadPromise = new Promise(resolve => {
+                    databaseResolve = resolve;
                 });
-                const rows = response.result.values || [];
-                const newDbMap = {};
-                const newUidMap = {};
+            }
 
-                rows.forEach(row => {
-                    const [index, name, uidString, email] = row;
-                    // Use the index from the sheet as the unique key
-                    const dbKey = String(index).trim();
-                    if (dbKey && name && uidString) {
-                        const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
-                        if (uids.length > 0) {
-                            newDbMap[dbKey] = {
-                                name: String(name).trim(),
-                                email: email ? String(email).trim() : '',
-                                uids: uids
-                            };
-                            // Map every UID to this database key for fast lookups
-                            uids.forEach(uid => {
-                                newUidMap[uid] = dbKey;
-                            });
+            if (isAdmin) {
+                // --- ADMIN PATH: Direct GAPI access ---
+                try {
+                    const response = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: DATABASE_SPREADSHEET_ID,
+                        range: 'Database!A2:D'
+                    });
+                    const rows = response.result.values || [];
+                    const newDbMap = {};
+                    const newUidMap = {};
+
+                    rows.forEach(row => {
+                        const [index, name, uidString, email] = row;
+                        const dbKey = String(index).trim();
+                        if (dbKey && name && uidString) {
+                            const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
+                            if (uids.length > 0) {
+                                newDbMap[dbKey] = {
+                                    name: String(name).trim(),
+                                    email: email ? String(email).trim() : '',
+                                    uids: uids
+                                };
+                                uids.forEach(uid => {
+                                    newUidMap[uid] = dbKey;
+                                });
+                            }
                         }
+                    });
+                    databaseMap = newDbMap;
+                    uidToPrimaryUidMap = newUidMap;
+                    updateDatabaseStatus();
+                    updateDatabaseList();
+                    console.log(`Loaded ${Object.keys(databaseMap).length} entries from database sheet (Admin).`);
+                } catch (error) {
+                    console.error('Error fetching database (Admin):', error);
+                    if (!isInitializing) {
+                        showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
                     }
-                });
-                databaseMap = newDbMap;
-                uidToPrimaryUidMap = newUidMap; // This is now a uid -> dbKey map
-                updateDatabaseStatus();
-                updateDatabaseList();
-                console.log(`Loaded ${Object.keys(databaseMap).length} entries from database sheet`);
-            } catch (error) {
-                console.error('Error fetching database:', error);
-                if (!isInitializing) {
-                    showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+                } finally {
+                    if (databaseResolve) {
+                        databaseResolve();
+                        databaseResolve = null;
+                    }
+                    loadingTasks.delete('database');
+                    checkLoadingCompletion();
                 }
-            } finally {
-                if (databaseResolve) {
-                    databaseResolve();
-                    databaseResolve = null;
-                }
-                loadingTasks.delete('database');
-                checkLoadingCompletion();
-            }
-        }
 
-        function updatePageTitle() {
-            const titleElement = document.querySelector('h1');
-            if (!titleElement) return;
-
-            if (currentCourse && currentCourse !== 'Default') {
-                // Format nicely - replace underscores and capitalize
-                const formattedCourse = currentCourse
-                    .replace(/_/g, ' ')
-                    .replace(/\b\w/g, l => l.toUpperCase());
-
-                titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> ${formattedCourse} Attendance`;
             } else {
-                titleElement.innerHTML = `<i class="fa-solid fa-list-check"></i> Attendance`;
+                // --- STUDENT PATH: Secure Apps Script ---
+                console.log('Fetching database via Apps Script (Student)...');
+                return new Promise((resolve) => {
+                    google.script.run
+                        .withSuccessHandler(responseJSON => {
+                            try {
+                                const rows = JSON.parse(responseJSON);
+                                const newDbMap = {},
+                                    newUidMap = {};
+                                if (Array.isArray(rows) && rows.length > 1) {
+                                    rows.slice(1).forEach(row => { // Skip header
+                                        const [index, name, uidString, email] = row;
+                                        const dbKey = String(index).trim();
+                                        if (dbKey && name && uidString) {
+                                            const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
+                                            if (uids.length > 0) {
+                                                newDbMap[dbKey] = {
+                                                    name: String(name).trim(),
+                                                    email: email ? String(email).trim() : '',
+                                                    uids
+                                                };
+                                                uids.forEach(uid => {
+                                                    newUidMap[uid] = dbKey;
+                                                });
+                                            }
+                                        }
+                                    });
+                                }
+                                databaseMap = newDbMap;
+                                uidToPrimaryUidMap = newUidMap;
+                                console.log(`Loaded ${Object.keys(databaseMap).length} entries from database (Student).`);
+                            } catch (e) {
+                                console.error("Failed to parse database from script:", e);
+                            } finally {
+                                if (databaseResolve) databaseResolve();
+                                loadingTasks.delete('database');
+                                checkLoadingCompletion();
+                                resolve();
+                            }
+                        })
+                        .withFailureHandler(err => {
+                            console.error('Error fetching database via script:', err);
+                            if (databaseResolve) databaseResolve();
+                            loadingTasks.delete('database');
+                            checkLoadingCompletion();
+                            resolve();
+                        })
+                        .getDatabase();
+                });
             }
         }
 
@@ -6415,101 +6459,111 @@
          * Fetch available courses (sheet names) from logs spreadsheet.
          */
         async function fetchAvailableCourses() {
-            try {
-                console.log('Fetching available courses from spreadsheet...');
-
-                if (!isOnline) {
-                    availableCourses = [];
-                    courseIDMap = {};
-                    sheetNameMap = {};
-                    return;
-                }
-
-                const response = await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID
-                });
-
-                const sheets = response.result.sheets || [];
-                const allSheetNames = sheets.map(sheet => sheet.properties.title);
-
-                if (allSheetNames.includes('COURSE_INFO')) {
-                    const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
-                        spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: "'COURSE_INFO'!A2:H"
-                    });
-                    const rows = codeResponse.result.values || [];
-                    if (rows.length > 0) {
-                        availableCourses = [];
-                        courseIDMap = {};
-                        sheetNameMap = {};
-                        rows.forEach(row => {
-                            if (row.length >= 1 && row[0]) {
-                                const courseDisplayName = row[0].trim();
-                                const courseID = (row.length >= 7 && row[6]) ? row[6].trim() : "";
-                                availableCourses.push(courseDisplayName);
-                                if (courseID) courseIDMap[courseDisplayName] = courseID;
-                                sheetNameMap[courseDisplayName] = courseDisplayName;
-                            }
-                        });
-                    } else {
-                        availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
-                    }
-                } else {
-                    availableCourses = allSheetNames;
-                }
-
-                if (availableCourses.length === 0) {
-                    console.warn('No courses found in spreadsheet.');
-                }
-
-            } catch (error) {
-                console.error('Error fetching courses:', error);
-                if (!isInitializing) {
-                    showNotification('warning', 'Courses Warning', 'Could not load course list from server.');
-                }
-            } finally {
-                // --- NEW & FINAL INITIALISATION LOGIC ---
-                const hashCourse = window.location.hash.replace('#', '');
-                const lastActiveCourse = localStorage.getItem('last_active_course');
-                let courseToLoad = '';
-
-                // Priority 1: Check if the URL hash is a valid, available course.
-                if (hashCourse && availableCourses.includes(hashCourse)) {
-                    courseToLoad = hashCourse;
-                    console.log(`Priority 1: Loading course from URL hash: ${courseToLoad}`);
-                }
-                // Priority 2: Fallback to local storage if the value is a valid course.
-                else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
-                    courseToLoad = lastActiveCourse;
-                    console.log(`Priority 2: Loading course from local storage: ${courseToLoad}`);
-                }
-                // Priority 3: Fallback to the very first course in the list.
-                else if (availableCourses.length > 0) {
-                    courseToLoad = availableCourses[0];
-                    console.log(`Priority 3: Loading first available course: ${courseToLoad}`);
-                }
-
-                // Set the currentCourse variable immediately.
-                currentCourse = courseToLoad;
-
-                // Update the URL hash to be consistent with the final decision.
-                // Using replaceState prevents adding to browser history.
-                if (history.replaceState) {
-                    history.replaceState(null, null, '#' + courseToLoad);
-                } else {
-                    window.location.hash = courseToLoad;
-                }
-
-                // Now, draw the buttons and load the data for the determined course.
-                populateCourseDropdown();
-
-                if (courseToLoad) {
-                    handleCourseChange(courseToLoad);
-                }
-                // --- END OF LOGIC ---
-
+            if (!isOnline) {
+                // If offline, default to an empty list and exit.
+                availableCourses = [];
+                courseIDMap = {};
+                sheetNameMap = {};
                 loadingTasks.delete('courses');
                 checkLoadingCompletion();
+                return;
+            }
+
+            if (isAdmin) {
+                // --- ADMIN PATH: Direct GAPI access ---
+                try {
+                    console.log('Fetching available courses from spreadsheet (Admin)...');
+                    const response = await gapi.client.sheets.spreadsheets.get({
+                        spreadsheetId: LOGS_SPREADSHEET_ID
+                    });
+                    const sheets = response.result.sheets || [];
+                    const allSheetNames = sheets.map(sheet => sheet.properties.title);
+
+                    if (allSheetNames.includes('COURSE_INFO')) {
+                        const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
+                            spreadsheetId: LOGS_SPREADSHEET_ID,
+                            range: "'COURSE_INFO'!A2:H"
+                        });
+                        const rows = codeResponse.result.values || [];
+                        if (rows.length > 0) {
+                            availableCourses = [];
+                            courseIDMap = {};
+                            sheetNameMap = {};
+                            rows.forEach(row => {
+                                if (row.length >= 1 && row[0]) {
+                                    const courseDisplayName = row[0].trim();
+                                    const courseID = (row.length >= 7 && row[6]) ? row[6].trim() : "";
+                                    availableCourses.push(courseDisplayName);
+                                    if (courseID) courseIDMap[courseDisplayName] = courseID;
+                                    sheetNameMap[courseDisplayName] = courseDisplayName;
+                                }
+                            });
+                        } else {
+                            availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
+                        }
+                    } else {
+                        availableCourses = allSheetNames;
+                    }
+                    if (availableCourses.length === 0) {
+                        console.warn('No courses found in spreadsheet.');
+                    }
+                } catch (error) {
+                    console.error('Error fetching courses:', error);
+                    if (!isInitializing) {
+                        showNotification('warning', 'Courses Warning', 'Could not load course list from server.');
+                    }
+                } finally {
+                    const hashCourse = window.location.hash.replace('#', '');
+                    const lastActiveCourse = localStorage.getItem('last_active_course');
+                    let courseToLoad = '';
+                    if (hashCourse && availableCourses.includes(hashCourse)) {
+                        courseToLoad = hashCourse;
+                    } else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
+                        courseToLoad = lastActiveCourse;
+                    } else if (availableCourses.length > 0) {
+                        courseToLoad = availableCourses[0];
+                    }
+                    currentCourse = courseToLoad;
+                    if (history.replaceState) {
+                        history.replaceState(null, null, '#' + courseToLoad);
+                    } else {
+                        window.location.hash = courseToLoad;
+                    }
+                    populateCourseDropdown();
+                    if (courseToLoad) {
+                        handleCourseChange(courseToLoad);
+                    }
+                    loadingTasks.delete('courses');
+                    checkLoadingCompletion();
+                }
+
+            } else {
+                // --- STUDENT PATH: Secure Apps Script ---
+                console.log('Fetching available courses via Apps Script (Student)...');
+                return new Promise((resolve) => {
+                    google.script.run
+                        .withSuccessHandler(responseJSON => {
+                            try {
+                                const data = JSON.parse(responseJSON);
+                                availableCourses = data.error ? [] : data;
+                            } catch (e) {
+                                console.error("Failed to parse courses from script:", e);
+                                availableCourses = [];
+                            } finally {
+                                loadingTasks.delete('courses');
+                                checkLoadingCompletion();
+                                resolve();
+                            }
+                        })
+                        .withFailureHandler(err => {
+                            console.error('Error fetching courses via script:', err);
+                            availableCourses = [];
+                            loadingTasks.delete('courses');
+                            checkLoadingCompletion();
+                            resolve();
+                        })
+                        .getAvailableCourses();
+                });
             }
         }
 
@@ -8792,7 +8846,7 @@
             // Handle non-signed-in users. This includes true guests and admins in Lecturer Mode.
             if (!isSignedIn) {
                 // Check if we are in Lecturer Mode (a course is active and its data is loaded)
-                const isLecturerMode = currentCourse && courseData[currentCourse];
+                const isLecturerMode = Object.keys(courseData).length > 0;
 
                 if (!isLecturerMode) {
                     // This is a TRUE GUEST. Just show them their UID and stop.
