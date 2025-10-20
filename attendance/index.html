@@ -419,6 +419,7 @@
         .uid-button-group {
             display: flex;
             gap: 5px;
+            flex-shrink: 0;
         }
 
         /* ===== Course button styles ===== */
@@ -3512,7 +3513,7 @@
             newDate.setHours(newDate.getHours() + 1);
 
             let newLog = {
-                uid: group.uidsForDisplay[0],
+                uid: group.originalLogs[0]?.uid,
                 timestamp: newDate.getTime(),
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: true
@@ -5380,7 +5381,10 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            const closeDialog = () => { /* ... existing closeDialog logic ... */ };
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
             const addAnywayBtn = document.getElementById('add-anyway-btn');
             const replaceBtn = document.getElementById('replace-btn');
             const actionControls = dialog.querySelectorAll('[data-field="name"], [data-field="email"], #uid-action-select');
@@ -5410,7 +5414,20 @@
                 button.disabled = true;
                 button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
                 const payload = { ...newData, action: 'approveRegistration', approvalMode: 'add_new_separate' };
-                fetch(`${SCRIPT_URL}?timestamp=${Date.now()}`, { /* ... fetch logic ... */ });
+
+                fetch(SCRIPT_URL, {
+                    method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                }).then(res => res.json()).then(result => {
+                    if (result.result === 'success') {
+                        showNotification('success', 'Action Complete', `Registration for ${newData.name} has been processed.`);
+                        refreshAdminViews();
+                        closeDialog();
+                    } else { throw new Error(result.message); }
+                }).catch(err => {
+                    showNotification('error', 'Action Failed', err.message);
+                    button.disabled = false;
+                    button.innerHTML = 'Add as Separate';
+                });
             });
 
             // "Replace Selected" button listener
@@ -5420,12 +5437,11 @@
                 const emailCheck = dialog.querySelector('#replace-email-check');
                 const uidSelect = dialog.querySelector('#uid-action-select');
 
-                // Construct the specific update payload for the server
                 const updates = {};
                 if (nameCheck && nameCheck.checked) updates.name = newData.name;
                 if (emailCheck && emailCheck.checked) updates.email = newData.email;
                 if (uidSelect && uidSelect.value !== 'none') {
-                    updates.uid_action = uidSelect.value; // 'merge' or 'replace'
+                    updates.uid_action = uidSelect.value;
                 }
 
                 const payload = {
@@ -5433,12 +5449,13 @@
                     action: 'approveRegistration',
                     approvalMode: 'custom_replace',
                     duplicateRowIndex: existing.rowIndex,
-                    updates: updates // Send the specific actions to perform
+                    updates: updates
                 };
 
                 button.disabled = true;
                 button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Replacing...`;
-                fetch(`${SCRIPT_URL}?timestamp=${Date.now()}`, {
+
+                fetch(SCRIPT_URL, {
                     method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 }).then(res => res.json()).then(result => {
                     if (result.result === 'success') {
@@ -5451,36 +5468,6 @@
                     button.disabled = false;
                     button.innerHTML = 'Replace Selected';
                 });
-            });
-        }
-
-        /**
-         * Sends the final resolution (replace or add) to the server.
-         */
-        function resolveDuplicateOnServer(resolution, data, button, closeDialogCallback) {
-            button.disabled = true;
-            button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
-
-            const payload = { ...data, action: 'approveRegistration', approvalMode: resolution };
-
-            fetch(SCRIPT_URL, {
-                method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            }).then(res => res.json()).then(result => {
-                if (result.result === 'success') {
-                    showNotification('success', 'Action Complete', `Registration for ${data.name} has been processed.`);
-                    refreshAdminViews();
-                    closeDialogCallback();
-                } else { throw new Error(result.message); }
-            }).catch(err => {
-                showNotification('error', 'Action Failed', err.message);
-                button.disabled = false;
-                // Restore original button text
-                switch (resolution) {
-                    case 'force_replace_by_uid': button.innerHTML = 'Replace'; break;
-                    case 'merge_uid': button.innerHTML = 'Merge UIDs'; break;
-                    case 'replace_entry': button.innerHTML = 'Replace'; break;
-                    case 'add_new_separate': button.innerHTML = 'Add Anyway'; break;
-                }
             });
         }
 
@@ -5637,6 +5624,7 @@
                 return null;
             }
 
+            statusContainer.style.minHeight = '48px';
             statusContainer.innerHTML = `<div class="sync-status syncing" style="justify-content: center; padding: 15px 0; font-size: 1em;"><i class="fa-solid fa-wifi"></i> <span>Ready to Scan...</span></div>`;
 
             const nfcController = new AbortController();
@@ -5656,7 +5644,8 @@
                     // Fade out the status message after 2.5 seconds
                     setTimeout(() => {
                         statusContainer.innerHTML = '';
-                    }, 2500);
+                        statusContainer.style.minHeight = '0';
+                    }, 2000);
                     // --- END NEW LOGIC ---
 
                     nfcController.abort();
@@ -6860,7 +6849,7 @@
                     ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
                 </div>
                 </div>
-            <div id="nfc-status-container" style="margin-top:10px; min-height: 48px;"></div>
+            <div id="nfc-status-container" style="margin-top:10px;"></div>
         </div>
         <div class="dialog-actions">
             <button id="cancel-add-btn" class="btn-red">Cancel</button>
@@ -7734,7 +7723,7 @@
                     const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
 
                     let newLog = {
-                        uid: group.uidsForDisplay[0],
+                        uid: group.originalLogs[0]?.uid,
                         timestamp: newTimestampObj.getTime(),
                         id: Date.now() + Math.random().toString(36).substr(2, 9),
                         manual: true // All newly added times are manual
@@ -8083,7 +8072,7 @@
             newDate.setHours(newDate.getHours() + 1);
 
             let newLog = {
-                uid: group.uidsForDisplay[0],
+                uid: group.originalLogs[0]?.uid,
                 timestamp: newDate.getTime(),
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: true
