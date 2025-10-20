@@ -3537,7 +3537,7 @@
             // 4. Add the new logs and update everything.
             if (newLogsToAdd.length > 0) {
                 courseData[currentCourse].logs.unshift(...newLogsToAdd);
-                saveCourseToLocalStorage(currentCourse);
+                saveAndMarkChanges(currentCourse);
                 updateUI();
                 if (isOnline && isSignedIn) syncLogsWithSheet();
                 showNotification('success', 'Bulk Add Complete', `Added a new timestamp for ${newLogsToAdd.length} students on ${dateStr}.`);
@@ -3571,8 +3571,7 @@
             // FIX: Add log to the correct course data array
             courseData[currentCourse].logs.unshift(newLog);
 
-            // FIX: Use the correct local storage function
-            saveCourseToLocalStorage(currentCourse);
+            saveAndMarkChanges(currentCourse);
 
             updateUI();
 
@@ -3607,12 +3606,7 @@
             // Add the ID to the in-memory tombstone set.
             courseData[course].tombstones.add(id);
 
-            // Persist the entire course object (logs and the updated tombstones) to local storage.
-            saveCourseToLocalStorage(course);
-
-            // Mark that there are pending changes to be synced to the server.
-            pendingChanges = true;
-            updateSyncStatus('Changes pending', 'waiting');
+            saveAndMarkChanges(course);
         }
 
         // Setup all event listeners in one place
@@ -6685,6 +6679,15 @@
             return Array.from(byId.values()).sort((a, b) => b.timestamp - a.timestamp);
         }
 
+        /**
+ * NEW: Centralized function to save course data and flag it for auto-sync.
+ */
+        function saveAndMarkChanges(courseName) {
+            saveCourseToLocalStorage(courseName);
+            pendingChanges = true;
+            updateSyncStatus('Changes pending', 'waiting');
+        }
+
         // Helper function to convert a timestamp to a local ISO-like string (without timezone info)
         function convertTimestampToLocalISOString(timestamp) {
             const date = new Date(timestamp);
@@ -6749,7 +6752,7 @@
 
                 console.log(`Successfully completed tombstone-aware sync for ${currentCourse}.`);
                 currentData.tombstones.clear();
-                saveCourseToLocalStorage(currentCourse);
+                saveAndMarkChanges(currentCourse);
 
             } catch (error) {
                 console.error('Error during tombstone-aware sync:', error);
@@ -7575,7 +7578,7 @@
 
                 newLog = touchLogForEdit(newLog, currentUser?.email);
                 courseData[currentCourse].logs.unshift(newLog);
-                saveCourseToLocalStorage(currentCourse);
+                saveAndMarkChanges(currentCourse);
                 updateUI();
 
                 if (isOnline && isSignedIn) {
@@ -7748,7 +7751,7 @@
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         idsToRemove.forEach(id => addToTombstones(id));
                         courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
-                        saveCourseToLocalStorage(currentCourse);
+                        saveAndMarkChanges(currentCourse);
                         updateUI();
                         showNotification('delete', 'Entry Deleted', 'All timestamps for this entry were removed.');
                         if (isOnline && isSignedIn) syncLogsWithSheet();
@@ -7824,7 +7827,7 @@
                     courseData[currentCourse].logs.unshift(newLog);
                 });
 
-                saveCourseToLocalStorage(currentCourse);
+                saveAndMarkChanges(currentCourse);
                 if (isOnline && isSignedIn) {
                     if (group.name !== newName) {
                         syncDatabaseToSheet();
@@ -7853,7 +7856,7 @@
                 const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
                 addToTombstones(latestLog.id);
                 courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
-                saveCourseToLocalStorage(currentCourse);
+                saveAndMarkChanges(currentCourse);
                 updateUI();
                 if (isOnline && isSignedIn) syncLogsWithSheet();
             } else if (group.originalLogs.length === 1) {
@@ -7866,7 +7869,7 @@
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         idsToRemove.forEach(id => addToTombstones(id));
                         courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
-                        saveCourseToLocalStorage(currentCourse);
+                        saveAndMarkChanges(currentCourse);
                         updateUI();
                         showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} on this date were removed.`);
                         if (isOnline && isSignedIn) syncLogsWithSheet();
@@ -7891,7 +7894,7 @@
                 // Clear the logs array.
                 courseData[currentCourse].logs = [];
 
-                saveCourseToLocalStorage(currentCourse);
+                saveAndMarkChanges(currentCourse);
                 updateUI();
 
                 if (isOnline && isSignedIn) {
@@ -8095,9 +8098,9 @@
 	<h3 class="dialog-title">Import Logs</h3>
 	<div class="dialog-content"><p>Imported ${importedLogs.length} log entries. How would you like to proceed?</p>
 	</div><div class="dialog-actions">
-		<button id="merge-logs-btn" class="btn-blue">Merge with Existing</button>
-		<button id="replace-logs-btn" class="btn-red">Replace All</button>
-		<button id="cancel-import-btn">Cancel</button>
+		<button id="merge-logs-btn" class="btn-green">Merge with Existing</button>
+		<button id="replace-logs-btn" class="btn-orange">Replace All</button>
+		<button id="cancel-import-btn" class="btn-red">Cancel</button>
 	</div>
 `;
 
@@ -8151,38 +8154,6 @@
             });
         }
 
-        /**
-       * CORRECTED: Adds a new log entry one hour after the latest existing entry.
-       */
-        function addPlusOneHourLog(group) {
-            if (!isAdmin) return;
-
-            const latestTimestamp = Math.max(...group.originalLogs.map(log => log.timestamp));
-            const newDate = new Date(latestTimestamp);
-            newDate.setHours(newDate.getHours() + 1);
-
-            let newLog = {
-                uid: group.originalLogs[0]?.uid,
-                timestamp: newDate.getTime(),
-                id: Date.now() + Math.random().toString(36).substr(2, 9),
-                manual: true
-            };
-            newLog = touchLogForEdit(newLog, currentUser?.email);
-
-            // FIX: Add log to the correct course data array
-            courseData[currentCourse].logs.unshift(newLog);
-
-            // FIX: Use the correct local storage function
-            saveCourseToLocalStorage(currentCourse);
-
-            updateUI();
-
-            if (isOnline && isSignedIn && isAdmin) {
-                syncLogsWithSheet().catch(err => {
-                    console.error('Error syncing after adding +1 hour log:', err);
-                });
-            }
-        }
 
         /**
  * Creates a debounced function that delays invoking func until after wait milliseconds have elapsed
@@ -8727,10 +8698,6 @@
                 }
                 return;
             }
-            if (!currentCourse) {
-                showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
-                return;
-            }
 
             try {
                 // Create a new AbortController for this scanning session.
@@ -8820,22 +8787,29 @@
                 console.log(`Scanned unknown UID: ${serialNumber}`);
             }
             const finalUid = primaryUid || serialNumber; // Use primary if found, otherwise the scanned one
-            // For non-signed-in users, just show the UID and stop.
+            // Handle non-signed-in users. This includes true guests and admins in Lecturer Mode.
             if (!isSignedIn) {
-                lastScannedUID = serialNumber;
-                playSound(true); // Play success sound
-                updateAuthUI(); // This will now display the message with the UID
+                // Check if we are in Lecturer Mode (a course is active and its data is loaded)
+                const isLecturerMode = currentCourse && courseData[currentCourse];
 
-                // Use a short delay to flash the (non-existent) new row for visual feedback
-                setTimeout(() => {
-                    const scanBtn = document.getElementById('scan-button');
-                    if (scanBtn) {
-                        scanBtn.classList.add('new-item-flash');
-                        setTimeout(() => scanBtn.classList.remove('new-item-flash'), 1500);
-                    }
-                }, 100);
+                if (!isLecturerMode) {
+                    // This is a TRUE GUEST. Just show them their UID and stop.
+                    lastScannedUID = serialNumber;
+                    playSound(true);
+                    updateAuthUI();
 
-                return; // IMPORTANT: Stop the function here for guests.
+                    setTimeout(() => {
+                        const scanBtn = document.getElementById('scan-button');
+                        if (scanBtn) {
+                            scanBtn.classList.add('new-item-flash');
+                            setTimeout(() => scanBtn.classList.remove('new-item-flash'), 1500);
+                        }
+                    }, 100);
+
+                    return; // Stop the function for true guests.
+                }
+                // If it IS Lecturer Mode, we do NOT return. We let the code fall through
+                // to the log-saving logic below, as if the user were still an admin.
             }
 
             if (isSignedIn && !isAdmin) {
@@ -8881,7 +8855,7 @@
             }
             courseData[currentCourse].logs.unshift(newLog);
 
-            saveCourseToLocalStorage(currentCourse); // Save the updated course data.
+            saveAndMarkChanges(currentCourse); // Save the updated course data.
             updateUI();
 
             const name = databaseMap[serialNumber]?.name || 'Unknown';
