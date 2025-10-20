@@ -3336,7 +3336,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyFM1d0ILoHxcjGJzxglQ_XTWkOPosp3s9FFYdZrivE8uqErncJ8ZcPWmhw_4s14fZajQ/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzZZBSzrgJnFc_w61zY8_j5MR81q7Salm10rXYwou-tveyRO-0IuIf0a-4QLMxmyIIu/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -5216,37 +5216,55 @@
          * Shows an editable dialog to approve a registration with loading feedback.
          */
         function showApproveDialog(registration) {
-            showNotification('info', 'Processing...', `Checking application for ${registration.name}.`, 2000);
+            // --- START: NEW DUPLICATE CHECK LOGIC (MOVED FROM SERVER) ---
+            const norm = (str) => (str || '').toString().normalize("NFD").replace(/[\u00e0-\u00f6]/g, "").toLowerCase().trim();
+            const newUid = norm(registration.uid);
+            const newName = norm(registration.name);
+            const newEmail = norm(registration.email);
 
-            const checkData = {
-                action: 'approveRegistration',
-                approvalMode: 'check',
-                name: registration.name,
-                uid: registration.uid,
-                email: registration.email,
-                rowNumber: registration.rowNumber
-            };
+            let match = null;
 
-            fetch(SCRIPT_URL, {
-                method: 'POST',
-                body: JSON.stringify(checkData),
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            })
-                .then(res => res.json())
-                .then(response => {
-                    if (response.result === 'warning' && response.status === 'duplicate_found') {
-                        // Path 1: Duplicates were found. Show the advanced duplicate dialog.
-                        showDuplicateWarningDialog(checkData, response.duplicates, response.matchType);
-                    } else if (response.result === 'success' && response.status === 'no_duplicate') {
-                        // Path 2: No duplicates. Show the final review/approval dialog.
-                        showFinalApprovalDialog(registration);
-                    } else {
-                        throw new Error(response.message || 'An unknown error occurred during check.');
+            // Iterate through the local database to find a match
+            for (const [dbKey, studentData] of Object.entries(databaseMap)) {
+                const existingUids = studentData.uids.map(norm);
+                const existingName = norm(studentData.name);
+                const existingEmail = norm(studentData.email);
+
+                const duplicateData = {
+                    index: dbKey,
+                    name: studentData.name,
+                    uid: studentData.uids.join(', '),
+                    email: studentData.email || '',
+                    rowIndex: parseInt(dbKey) + 1 // Approximate rowIndex for consistency
+                };
+
+                // Priority 1: UID Match
+                if (existingUids.includes(newUid)) {
+                    match = { type: 'uid', duplicate: duplicateData };
+                    break;
+                }
+                // Priority 2: Email Match
+                if (newEmail && existingEmail && existingEmail === newEmail) {
+                    match = { type: 'email', duplicate: duplicateData };
+                    break;
+                }
+                // Priority 3: Name Match
+                if (existingName === newName) {
+                    if (!match) {
+                        match = { type: 'name', duplicate: duplicateData };
                     }
-                })
-                .catch(err => {
-                    showNotification('error', 'Check Failed', err.message);
-                });
+                }
+            }
+
+            // --- DECISION POINT ---
+            if (match) {
+                // A duplicate was found, show the interactive warning dialog
+                showDuplicateWarningDialog(registration, [match.duplicate]);
+            } else {
+                // No duplicates found, show the simple final approval dialog
+                showFinalApprovalDialog(registration);
+            }
+            // --- END: NEW DUPLICATE CHECK LOGIC ---
         }
 
         /**
