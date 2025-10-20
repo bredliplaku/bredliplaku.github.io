@@ -3347,7 +3347,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxQyaHKxPpQ1TaGljbSHlZ2OCBFBKds8zN8MMKeedN4ArtKK5hViZMA1z2ha7eeMfMrNA/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwBc9TrOHbt0rg2PlG7LiiPDv5ZpvGcvzvwbSG9sZjfedWhGH2-uJJkNneuSHbG1ENtmQ/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -4919,7 +4919,6 @@
          * Handle token response from Google OAuth.
          * @param {Object} resp - The token response object.
          */
-        // REPLACEMENT FUNCTION
         function handleTokenResponse(resp) {
             console.log('Received token response');
 
@@ -4946,17 +4945,18 @@
                     updateAuthUI();
                     showNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
 
-                    // --- NEW LOGIC START ---
-                    // After successfully signing in, check if there are any pending
-                    // changes that were made while offline/signed-out.
-                    if (isAdmin && pendingChanges) {
-                        console.log("Admin signed in with pending offline changes. Triggering immediate sync.");
-                        showNotification('info', 'Syncing...', 'Syncing offline changes now.');
-                        // Use a short delay to allow the UI to update first
-                        setTimeout(syncData, 1000);
-                    } else if (isAdmin) {
-                        const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
-                        if (logsForCurrentCourse.length > 0) {
+                    // NEW: Check for pending changes on login
+                    if (isAdmin) {
+                        const lastSaveTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`) || '0');
+                        const lastSyncTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`) || '0');
+
+                        if (lastSaveTimestamp > lastSyncTimestamp) {
+                            pendingChanges = true;
+                        }
+
+                        if (pendingChanges) {
+                            console.log("Admin signed in with pending offline changes. Triggering immediate sync.");
+                            showNotification('info', 'Syncing...', 'Syncing offline changes now.');
                             setTimeout(syncData, 1000);
                         }
                     } else {
@@ -6179,49 +6179,42 @@
         }
 
         /**
-  * Proactively fetches and caches logs for all available courses FOR A STUDENT.
-  * This now calls the secure Apps Script endpoint.
-  */
+          * Proactively fetches and caches logs for all available courses FOR A STUDENT.
+          * This now calls the secure Apps Script endpoint.
+          */
         async function loadAllCourseLogsForStudent() {
             if (isAdmin || !isOnline || !isSignedIn) return;
 
             console.log("Student signed in. Proactively loading all course logs from server...");
             studentLogCache = {}; // Clear any previous cache
 
-            // Create a list of promises, one for each course
-            const fetchPromises = availableCourses.map(course => {
-                return new Promise((resolve, reject) => {
-                    google.script.run
-                        .withSuccessHandler(responseJSON => {
-                            try {
-                                const serverLogs = JSON.parse(responseJSON);
-                                if (serverLogs.error) {
-                                    throw new Error(serverLogs.error);
-                                }
-                                if (serverLogs && serverLogs.length > 0) {
-                                    // Store the fetched logs in our in-memory cache
-                                    studentLogCache[course] = serverLogs;
-                                    console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
-                                }
-                                resolve(); // Resolve the promise on success
-                            } catch (e) {
-                                console.error(`Error processing logs for ${course}:`, e);
-                                reject(e); // Reject on error
+            const fetchPromises = availableCourses.map(course =>
+                callAppsScript('getStudentLogs', [course])
+                    .then(responseJSON => {
+                        try {
+                            const serverLogs = JSON.parse(responseJSON);
+                            if (serverLogs.error) {
+                                throw new Error(serverLogs.error);
                             }
-                        })
-                        .withFailureHandler(error => {
-                            console.error(`Failed to call Apps Script for ${course}:`, error);
-                            reject(error); // Reject on failure
-                        })
-                        .getStudentLogs(course); // Call the new function in your script
-                });
-            });
+                            if (serverLogs && serverLogs.length > 0) {
+                                studentLogCache[course] = serverLogs;
+                                console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
+                            }
+                        } catch (e) {
+                            console.error(`Error processing logs for ${course}:`, e);
+                            // Don't reject, just log the error and continue
+                        }
+                    })
+                    .catch(error => {
+                        console.error(`Failed to call Apps Script for ${course}:`, error);
+                        // Don't reject, just log the error and continue
+                    })
+            );
 
-            // Wait for all courses to finish loading
-            await Promise.all(fetchPromises.map(p => p.catch(e => e))); // Continue even if one fails
+            await Promise.all(fetchPromises);
 
             console.log("Finished pre-loading all student logs.");
-            updateUI(); // Refresh the UI to show the correct course buttons
+            updateUI();
         }
 
 
@@ -6245,7 +6238,7 @@
             // After a successful sync, we might set a "success" status.
             // This ensures that when the status is updated again, it reverts to the correct online/offline state.
             if (pendingChanges && isOnline) {
-                syncText.textContent = 'Changes pending';
+                syncText.textContent = 'Saved locally';
                 syncStatus.className = 'sync-status waiting';
             }
         }
@@ -6386,53 +6379,40 @@
             } else {
                 // --- STUDENT PATH: Secure Apps Script ---
                 console.log('Fetching database via Apps Script (Student)...');
-                return new Promise((resolve) => {
-                    google.script.run
-                        .withSuccessHandler(responseJSON => {
-                            try {
-                                const rows = JSON.parse(responseJSON);
-                                const newDbMap = {},
-                                    newUidMap = {};
-                                if (Array.isArray(rows) && rows.length > 1) {
-                                    rows.slice(1).forEach(row => { // Skip header
-                                        const [index, name, uidString, email] = row;
-                                        const dbKey = String(index).trim();
-                                        if (dbKey && name && uidString) {
-                                            const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
-                                            if (uids.length > 0) {
-                                                newDbMap[dbKey] = {
-                                                    name: String(name).trim(),
-                                                    email: email ? String(email).trim() : '',
-                                                    uids
-                                                };
-                                                uids.forEach(uid => {
-                                                    newUidMap[uid] = dbKey;
-                                                });
-                                            }
+                return callAppsScript('getDatabase')
+                    .then(responseJSON => {
+                        try {
+                            const rows = JSON.parse(responseJSON);
+                            const newDbMap = {},
+                                newUidMap = {};
+                            if (Array.isArray(rows) && rows.length > 1) {
+                                rows.slice(1).forEach(row => { // Skip header
+                                    const [index, name, uidString, email] = row;
+                                    const dbKey = String(index).trim();
+                                    if (dbKey && name && uidString) {
+                                        const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
+                                        if (uids.length > 0) {
+                                            newDbMap[dbKey] = { name: String(name).trim(), email: email ? String(email).trim() : '', uids };
+                                            uids.forEach(uid => { newUidMap[uid] = dbKey; });
                                         }
-                                    });
-                                }
-                                databaseMap = newDbMap;
-                                uidToPrimaryUidMap = newUidMap;
-                                console.log(`Loaded ${Object.keys(databaseMap).length} entries from database (Student).`);
-                            } catch (e) {
-                                console.error("Failed to parse database from script:", e);
-                            } finally {
-                                if (databaseResolve) databaseResolve();
-                                loadingTasks.delete('database');
-                                checkLoadingCompletion();
-                                resolve();
+                                    }
+                                });
                             }
-                        })
-                        .withFailureHandler(err => {
-                            console.error('Error fetching database via script:', err);
-                            if (databaseResolve) databaseResolve();
-                            loadingTasks.delete('database');
-                            checkLoadingCompletion();
-                            resolve();
-                        })
-                        .getDatabase();
-                });
+                            databaseMap = newDbMap;
+                            uidToPrimaryUidMap = newUidMap;
+                            console.log(`Loaded ${Object.keys(databaseMap).length} entries from database (Student).`);
+                        } catch (e) {
+                            console.error("Failed to parse database from script:", e);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error fetching database via script:', err);
+                    })
+                    .finally(() => {
+                        if (databaseResolve) databaseResolve();
+                        loadingTasks.delete('database');
+                        checkLoadingCompletion();
+                    });
             }
         }
 
@@ -6453,6 +6433,43 @@
                 sheetName.includes('!') ||
                 sheetName.includes('\'') ?
                 `'${sheetName}'` : sheetName;
+        }
+
+        /**
+         * A robust wrapper for calling Google Apps Script functions.
+         * Retries a few times if the `google.script.run` object is not immediately available.
+         * @param {string} functionName The name of the Apps Script function to call.
+         * @param {Array} args An array of arguments to pass to the function.
+         * @returns {Promise} A promise that resolves with the script's success response or rejects with a failure.
+         */
+        function callAppsScript(functionName, args = []) {
+            return new Promise((resolve, reject) => {
+                let attempts = 0;
+                const maxAttempts = 5;
+                const interval = 500; // 0.5 seconds between retries
+
+                function tryCall() {
+                    if (window.google && window.google.script && window.google.script.run) {
+                        // The API is ready, make the call
+                        google.script.run
+                            .withSuccessHandler(resolve)
+                            .withFailureHandler(reject)
+                        [functionName](...args);
+                    } else {
+                        // The API is not ready yet
+                        attempts++;
+                        if (attempts < maxAttempts) {
+                            console.warn(`google.script.run not ready. Retrying in ${interval}ms... (Attempt ${attempts})`);
+                            setTimeout(tryCall, interval);
+                        } else {
+                            // Max retries reached, reject the promise
+                            console.error(`Failed to execute Apps Script function '${functionName}' after ${maxAttempts} attempts.`);
+                            reject(new Error("Google Apps Script API did not load."));
+                        }
+                    }
+                }
+                tryCall(); // Start the first attempt
+            });
         }
 
         /**
@@ -6540,30 +6557,24 @@
             } else {
                 // --- STUDENT PATH: Secure Apps Script ---
                 console.log('Fetching available courses via Apps Script (Student)...');
-                return new Promise((resolve) => {
-                    google.script.run
-                        .withSuccessHandler(responseJSON => {
-                            try {
-                                const data = JSON.parse(responseJSON);
-                                availableCourses = data.error ? [] : data;
-                            } catch (e) {
-                                console.error("Failed to parse courses from script:", e);
-                                availableCourses = [];
-                            } finally {
-                                loadingTasks.delete('courses');
-                                checkLoadingCompletion();
-                                resolve();
-                            }
-                        })
-                        .withFailureHandler(err => {
-                            console.error('Error fetching courses via script:', err);
+                return callAppsScript('getAvailableCourses')
+                    .then(responseJSON => {
+                        try {
+                            const data = JSON.parse(responseJSON);
+                            availableCourses = data.error ? [] : data;
+                        } catch (e) {
+                            console.error("Failed to parse courses from script:", e);
                             availableCourses = [];
-                            loadingTasks.delete('courses');
-                            checkLoadingCompletion();
-                            resolve();
-                        })
-                        .getAvailableCourses();
-                });
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error fetching courses via script:', err);
+                        availableCourses = [];
+                    })
+                    .finally(() => {
+                        loadingTasks.delete('courses');
+                        checkLoadingCompletion();
+                    });
             }
         }
 
@@ -6741,7 +6752,7 @@
         function saveAndMarkChanges(courseName) {
             saveCourseToLocalStorage(courseName);
             pendingChanges = true;
-            updateSyncStatus('Changes pending', 'waiting');
+            updateSyncStatus('Saved locally', 'waiting');
         }
 
         // Helper function to convert a timestamp to a local ISO-like string (without timezone info)
@@ -6766,15 +6777,9 @@
             const currentData = courseData[currentCourse];
 
             try {
-                isSyncing = true;
-                updateSyncStatus("Syncing...", "syncing");
-
                 // --- A) Sync Tombstones UP to the server ---
                 if (currentData.tombstones.size > 0) {
                     const serverTombs = await fetchTombstonesForCourse(currentCourse);
-
-                    // FIX: This was incorrectly 'localTombs' and would cause an error.
-                    // It is now correctly referencing 'currentData.tombstones'.
                     const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
 
                     if (newTombsToAppend.length > 0) {
@@ -6813,8 +6818,6 @@
             } catch (error) {
                 console.error('Error during tombstone-aware sync:', error);
                 throw error; // Let the caller handle the UI notification.
-            } finally {
-                isSyncing = false;
             }
         }
 
@@ -8246,8 +8249,8 @@
                     logsTbody.innerHTML = '';
                     filteredCount.textContent = '0';
                     emptyLogs.innerHTML = `<i class="fas fa-hand-pointer" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
-                                   <p style="font-size: 1.1em; margin-bottom: 5px;">Please select a course.</p>
-                                   <p style="font-size: 0.9em; color: #999;">Choose a course above to view its attendance history.</p>`;
+                               <p style="font-size: 1.1em; margin-bottom: 5px;">Please select a course.</p>
+                               <p style="font-size: 0.9em; color: #999;">Choose a course above to view its attendance history.</p>`;
                     emptyLogs.style.display = 'block';
                     tableContainer.classList.remove('reloading');
                     return;
@@ -8259,7 +8262,10 @@
                     const studentNameNormalised = normalizeName(currentUser.name);
                     const studentEmailNormalised = normalizeName(currentUser.email);
                     logsToDisplay = currentCourseLogs.filter(log => {
-                        const dbEntry = databaseMap[log.uid];
+                        // Look up the primary UID to find the student data
+                        const dbKey = uidToPrimaryUidMap[log.uid];
+                        const dbEntry = dbKey ? databaseMap[dbKey] : null;
+
                         if (!dbEntry) return false;
                         const nameMatches = normalizeName(dbEntry.name) === studentNameNormalised;
                         const emailMatches = dbEntry.email ? (normalizeName(dbEntry.email) === studentEmailNormalised) : false;
@@ -8272,8 +8278,7 @@
                     const dateObj = new Date(log.timestamp);
                     if (isNaN(dateObj.getTime())) return;
 
-                    // --- START OF FIX ---
-                    const scannedUid = log.uid; // This is the actual UID scanned
+                    const scannedUid = log.uid; // The actual UID from the card
                     const dbKey = uidToPrimaryUidMap[scannedUid];
 
                     const studentData = dbKey ? databaseMap[dbKey] : null;
@@ -8285,6 +8290,8 @@
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
 
+                    // --- THIS IS THE REVERTED LOGIC ---
+                    // The key now uses the specific card's UID (`scannedUid`), ensuring a separate row for each card.
                     const key = `${date}_${scannedUid}`;
 
                     if (!grouped[key]) {
@@ -8292,11 +8299,9 @@
                             key: key,
                             date,
                             dateObj: new Date(year, month - 1, day),
-                            // Store the student's main index (dbKey) if known, otherwise the scanned UID
-                            studentIdentifier: dbKey || scannedUid,
+                            uid: scannedUid, // The specific UID for this group
                             name: name,
-                            // Store the specific UID for this group
-                            scannedUidForGroup: scannedUid,
+                            uidsForDisplay: uidsForDisplay, // All UIDs for the student, for context
                             originalLogs: []
                         };
                     }
@@ -8308,8 +8313,8 @@
                 if (filter) {
                     result = result.filter(group => {
                         const name = group.name || '';
-                        // Filter by any of the student's UIDs
-                        const uidMatch = group.uidsForDisplay.some(uid => uid.toLowerCase().includes(filter));
+                        // The main UID for the group is now the specific one that was scanned
+                        const uidMatch = group.uid.toLowerCase().includes(filter);
                         const date = group.date || '';
                         const hasMatchingTime = group.originalLogs.some(log => {
                             const timeObj = new Date(log.timestamp);
@@ -8331,7 +8336,7 @@
                         return dateCompare !== 0 ? dateCompare : a.name.localeCompare(b.name);
                     }
                     if (field === 'name') return sortMultiplier * a.name.localeCompare(b.name);
-                    if (field === 'uid') return sortMultiplier * (a.uidsForDisplay[0] || '').localeCompare(b.uidsForDisplay[0] || ''); // Sort by first UID
+                    if (field === 'uid') return sortMultiplier * (a.uid || '').localeCompare(b.uid || '');
                     return 0;
                 });
 
@@ -8339,7 +8344,7 @@
 
                 if (result.length === 0) {
                     let emptyMessageHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
-                                   <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>`;
+                               <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>`;
                     if (isAdmin) {
                         emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
                     } else {
@@ -8404,7 +8409,7 @@
                     if (isAdmin) {
                         const uidCell = document.createElement('td');
                         uidCell.className = 'uid-cell uid-column admin-only';
-                        uidCell.innerHTML = `<span class="uid-badge">${group.scannedUidForGroup}</span>`;
+                        uidCell.innerHTML = `<span class="uid-badge">${group.uid}</span>`;
                         row.appendChild(uidCell);
                     }
 
@@ -8443,21 +8448,21 @@
 
                         if (group.name === 'Unknown') {
                             actionsWrapper.innerHTML += `
-            <button class="btn-green btn-icon add-user-btn" title="Add to Database" aria-label="Add unknown UID ${group.uid} to database">
-                <i class="fa-solid fa-user-plus"></i>
-            </button>`;
+        <button class="btn-green btn-icon add-user-btn" title="Add to Database" aria-label="Add unknown UID ${group.uid} to database">
+            <i class="fa-solid fa-user-plus"></i>
+        </button>`;
                         }
 
                         actionsWrapper.innerHTML += `
-        <button class="btn-green btn-icon add-time-btn" title="Add +1 Hour" aria-label="Add another hour for ${group.name}">
-            <i class="fa-solid fa-plus"></i>
-        </button>
-        <button class="btn-red btn-icon delete-log-btn" title="Delete Latest Timestamp" aria-label="Delete latest timestamp for ${group.name}">
-            <i class="fa-solid fa-minus"></i>
-        </button>
-        <button class="btn-blue btn-icon edit-log-btn" title="Edit" aria-label="Edit entry for ${group.name}">
-            <i class="fa-solid fa-pencil"></i>
-        </button>`;
+    <button class="btn-green btn-icon add-time-btn" title="Add +1 Hour" aria-label="Add another hour for ${group.name}">
+        <i class="fa-solid fa-plus"></i>
+    </button>
+    <button class="btn-red btn-icon delete-log-btn" title="Delete Latest Timestamp" aria-label="Delete latest timestamp for ${group.name}">
+        <i class="fa-solid fa-minus"></i>
+    </button>
+    <button class="btn-blue btn-icon edit-log-btn" title="Edit" aria-label="Edit entry for ${group.name}">
+        <i class="fa-solid fa-pencil"></i>
+    </button>`;
 
                         actionsCell.appendChild(actionsWrapper);
                         row.appendChild(actionsCell);
@@ -8683,6 +8688,16 @@
             databaseStatus.textContent = count > 0 ? `${count} entries` : 'Not loaded';
         }
 
+        function updatePageTitle() {
+            const logsForCurrentCourse = getLogsForCurrentUser();
+            const count = logsForCurrentCourse.length;
+            if (currentCourse && currentCourse !== 'Default') {
+                document.title = `${currentCourse.replace(/_/g, ' ')} (${count}) - Attendance`;
+            } else {
+                document.title = 'Attendance';
+            }
+        }
+
         /**
          Update the entire UI.
          */
@@ -8838,59 +8853,44 @@
          */
         async function handleNfcReading({ serialNumber }) {
             const primaryUid = uidToPrimaryUidMap[serialNumber];
-            if (!primaryUid) {
-                // This is an unknown UID, treat it as before
-                console.log(`Scanned unknown UID: ${serialNumber}`);
-            }
             const finalUid = primaryUid || serialNumber; // Use primary if found, otherwise the scanned one
-            // Handle non-signed-in users. This includes true guests and admins in Lecturer Mode.
-            if (!isSignedIn) {
-                // Check if we are in Lecturer Mode (a course is active and its data is loaded)
-                const isLecturerMode = Object.keys(courseData).length > 0;
 
-                if (!isLecturerMode) {
-                    // This is a TRUE GUEST. Just show them their UID and stop.
-                    lastScannedUID = serialNumber;
-                    playSound(true);
-                    updateAuthUI();
+            // Set lastScannedUID for all scan events, regardless of mode.
+            // This is crucial for the UI update.
+            lastScannedUID = serialNumber;
 
-                    setTimeout(() => {
-                        const scanBtn = document.getElementById('scan-button');
-                        if (scanBtn) {
-                            scanBtn.classList.add('new-item-flash');
-                            setTimeout(() => scanBtn.classList.remove('new-item-flash'), 1500);
-                        }
-                    }, 100);
-
-                    return; // Stop the function for true guests.
-                }
-                // If it IS Lecturer Mode, we do NOT return. We let the code fall through
-                // to the log-saving logic below, as if the user were still an admin.
-            }
-
+            // Handle student users trying to scan
             if (isSignedIn && !isAdmin) {
                 playSound(false);
                 showNotification('error', 'Action Not Allowed', 'Only administrators can record attendance.');
                 return;
             }
 
-            // COOLDOWN LOGIC: Check if this card's UID was just scanned.
+            // Cooldown logic to prevent rapid scans
             if (cooldownUIDs.has(finalUid)) {
                 console.log(`UID ${finalUid} is on cooldown. Scan ignored.`);
                 return;
             }
-
-            lastScannedUID = serialNumber;
-            playSound(true); // Play the success sound immediately for quick feedback.
-
-            // COOLDOWN LOGIC: Activate the cooldown for this specific card.
             cooldownUIDs.add(finalUid);
             setTimeout(() => {
-                cooldownUIDs.delete(finalUid);
+                cooldownUIDs.delete(finalUid)
             }, 2000);
 
+            // Play success sound immediately
+            playSound(true);
 
-            // For signed-in users, proceed with logging.
+            // Determine if we should save the log.
+            // We save if it's an admin, OR if it's a signed-out user in "Lecturer Mode".
+            const isLecturerMode = !isSignedIn && Object.keys(courseData).length > 0;
+            const shouldSaveLog = isAdmin || isLecturerMode;
+
+            if (!shouldSaveLog) {
+                // This is a true guest. Just update the UI to show their UID and stop.
+                updateAuthUI();
+                return;
+            }
+
+            // --- Log saving logic for Admins and Lecturer Mode ---
             if (!currentCourse) {
                 showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
                 return;
@@ -8903,22 +8903,21 @@
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 manual: false
             };
-            newLog = touchLogForEdit(newLog, currentUser?.email);
+            newLog = touchLogForEdit(newLog, currentUser?.email); // currentUser will be null in lecturer mode, which is fine.
 
-            // Add the new log to the correct course's data.
             if (!courseData[currentCourse]) {
                 courseData[currentCourse] = { logs: [], tombstones: new Set() };
             }
             courseData[currentCourse].logs.unshift(newLog);
 
-            saveAndMarkChanges(currentCourse); // Save the updated course data.
+            saveAndMarkChanges(currentCourse);
             updateUI();
 
-            const name = databaseMap[serialNumber]?.name || 'Unknown';
+            // Display welcome banner/overlay
+            const name = primaryUid ? databaseMap[primaryUid]?.name : 'Unknown';
             const isMobile = window.innerWidth <= 700;
 
             if (isMobile) {
-                // Mobile: Show full-screen overlay
                 const overlay = document.getElementById('scan-announcement-overlay');
                 const nameEl = document.getElementById('scan-announcement-name');
                 if (overlay && nameEl) {
@@ -8939,7 +8938,6 @@
                     overlay.addEventListener('click', hideOverlay);
                 }
             } else {
-                // Desktop: Show welcome banner
                 let adminWelcomeMsg = document.getElementById('admin-welcome-message');
                 if (!adminWelcomeMsg) {
                     adminWelcomeMsg = document.createElement('div');
@@ -8952,7 +8950,7 @@
                 adminWelcomeMsg.setAttribute('aria-live', 'polite');
                 adminWelcomeMsg.innerHTML = `<h3><i class="fas fa-check-circle"></i> Welcome, <strong>${name}</strong>!</h3><p>Your attendance has been recorded.</p>`;
                 adminWelcomeMsg.style.animation = 'none';
-                void adminWelcomeMsg.offsetHeight; // Reflow
+                void adminWelcomeMsg.offsetHeight;
                 adminWelcomeMsg.style.animation = 'fadeIn 0.5s ease-in-out';
                 setTimeout(() => {
                     adminWelcomeMsg.style.animation = 'fadeOut 0.5s ease-in-out forwards';
