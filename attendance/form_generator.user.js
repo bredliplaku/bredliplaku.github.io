@@ -6,8 +6,8 @@
 // @author       Bredli Plaku
 // @match        https://eis.epoka.edu.al/courseattendance/*/editcl
 // @match        https://eis.epoka.edu.al/courseattendance/*/newcl
-// @updateURL    https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/mndini/form_generator.user.js
-// @downloadURL  https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/mndini/form_generator.user.js
+// @updateURL    https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/form_generator.user.js
+// @downloadURL  https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/form_generator.user.js
 // @grant        GM_addStyle
 // ==/UserScript==
 

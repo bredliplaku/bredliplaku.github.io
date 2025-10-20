@@ -3347,6 +3347,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
+        const SCRIPT_ID = '1C0JKXLo8rMjCHkkaLLM2AMjNF2y3YGSSeZQKywBD37gRO_aMId9bVUli';
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzFig9bhvaaQfJWqeTGs0-lGjIwupjCY7ta8Wrzsjc9NMzulbHZ9XaupYNtF4QvD9WtEw/exec";
 
         // Discovery docs and scopes for Google API
@@ -4364,11 +4365,12 @@
                 const createExportData = () => {
                     let section = sectionTypeGroup.querySelector('.active')?.dataset.value || 'ALL';
                     const sectionChar = sectionCharGroup.querySelector('.active')?.dataset.value;
-                    if (section !== 'ALL' && sectionChar) { section = `${section} ${sectionChar}`; }
+                    if (section !== 'ALL' && sectionChar) {
+                        section = `${section} ${sectionChar}`;
+                    }
 
-                    // ## CHANGE IS HERE: Convert databaseMap to a simple name map ##
-                    const nameMapForExport = Object.entries(databaseMap).reduce((acc, [uid, data]) => {
-                        acc[uid] = data.name;
+                    const nameMapForExport = Object.entries(databaseMap).reduce((acc, [dbKey, data]) => {
+                        acc[dbKey] = data.name; // Use the primary DB Key
                         return acc;
                     }, {});
 
@@ -4376,7 +4378,6 @@
                         parameters: { week: weekSelect.value, hours: customHoursInput.value, category: categoryGroup.querySelector('.active')?.dataset.value || defaultCategory, date: dateInput.value, topic: dialog.querySelector('#export-topic').value, course: currentCourse || 'Default', section: section },
                         options: { markMissingAsAbsent: dialog.querySelector('#mark-missing-option').checked, markExemptedAsAbsent: dialog.querySelector('#mark-exempted-option').checked },
                         attendance: {},
-                        // ## CHANGE IS HERE: Use the new, converted map ##
                         nameMap: nameMapForExport
                     };
 
@@ -4384,12 +4385,19 @@
 
                     if (logsForCurrentCourse.length > 0) {
                         const uidCounts = {};
-                        const selectedDateStr = data.parameters.date; // This is in YYYY-MM-DD format
+                        const selectedDateStr = data.parameters.date;
 
                         logsForCurrentCourse.forEach(log => {
                             const logDateStr = new Date(log.timestamp).toISOString().split('T')[0];
                             if (logDateStr === selectedDateStr) {
-                                uidCounts[log.uid] = (uidCounts[log.uid] || 0) + 1;
+
+                                // --- THIS IS THE FIX ---
+                                // Instead of using the scanned card's UID (log.uid), we find the student's
+                                // primary database key and use that for counting.
+                                const primaryStudentKey = uidToPrimaryUidMap[log.uid];
+                                if (primaryStudentKey) {
+                                    uidCounts[primaryStudentKey] = (uidCounts[primaryStudentKey] || 0) + 1;
+                                }
                             }
                         });
                         data.attendance = uidCounts;
@@ -6179,40 +6187,31 @@
         }
 
         /**
-          * Proactively fetches and caches logs for all available courses FOR A STUDENT.
-          * This now calls the secure Apps Script endpoint.
-          */
+     * Proactively fetches and caches logs for all available courses FOR A STUDENT.
+     */
         async function loadAllCourseLogsForStudent() {
             if (isAdmin || !isOnline || !isSignedIn) return;
-
             console.log("Student signed in. Proactively loading all course logs from server...");
-            studentLogCache = {}; // Clear any previous cache
+            studentLogCache = {};
 
-            const fetchPromises = availableCourses.map(course =>
-                callAppsScript('getStudentLogs', [course, LOGS_SPREADSHEET_ID])
-                    .then(responseJSON => {
-                        try {
-                            const serverLogs = JSON.parse(responseJSON);
-                            if (serverLogs.error) {
-                                throw new Error(serverLogs.error);
-                            }
-                            if (serverLogs && serverLogs.length > 0) {
-                                studentLogCache[course] = serverLogs;
-                                console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
-                            }
-                        } catch (e) {
-                            console.error(`Error processing logs for ${course}:`, e);
-                            // Don't reject, just log the error and continue
-                        }
-                    })
-                    .catch(error => {
-                        console.error(`Failed to call Apps Script for ${course}:`, error);
-                        // Don't reject, just log the error and continue
-                    })
-            );
+            const fetchPromises = availableCourses.map(async (course) => {
+                try {
+                    const data = await gapi.client.script.scripts.run({
+                        scriptId: SCRIPT_ID,
+                        resource: { function: 'getStudentLogs', parameters: [course, LOGS_SPREADSHEET_ID] }
+                    });
+                    if (data.result.error) throw new Error(data.result.error.message);
+                    const serverLogs = JSON.parse(data.result.response.result);
+                    if (serverLogs && serverLogs.length > 0) {
+                        studentLogCache[course] = serverLogs;
+                        console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
+                    }
+                } catch (err) {
+                    console.error(`Failed to call Apps Script for ${course}:`, err);
+                }
+            });
 
             await Promise.all(fetchPromises);
-
             console.log("Finished pre-loading all student logs.");
             updateUI();
         }
@@ -6320,14 +6319,42 @@
 
 
         /**
-* Fetch database entries from Google Sheet with format detection
-*/
+     * Fetch database entries from Google Sheet with format detection
+     */
         async function fetchDatabaseFromSheet() {
             if (!databaseLoadPromise) {
-                databaseLoadPromise = new Promise(resolve => {
-                    databaseResolve = resolve;
-                });
+                databaseLoadPromise = new Promise(resolve => { databaseResolve = resolve; });
             }
+
+            const processDbData = (data) => {
+                try {
+                    if (data.error) throw new Error(data.error.message);
+                    const rows = JSON.parse(data.response.result);
+                    const newDbMap = {}, newUidMap = {};
+                    if (Array.isArray(rows) && rows.length > 1) {
+                        rows.slice(1).forEach(row => {
+                            const [index, name, uidString, email] = row;
+                            const dbKey = String(index).trim();
+                            if (dbKey && name && uidString) {
+                                const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
+                                if (uids.length > 0) {
+                                    newDbMap[dbKey] = { name: String(name).trim(), email: email ? String(email).trim() : '', uids };
+                                    uids.forEach(uid => { newUidMap[uid] = dbKey; });
+                                }
+                            }
+                        });
+                    }
+                    databaseMap = newDbMap;
+                    uidToPrimaryUidMap = newUidMap;
+                    console.log(`Loaded ${Object.keys(databaseMap).length} entries from database (Student).`);
+                } catch (e) {
+                    console.error("Failed to parse database from script:", e);
+                } finally {
+                    if (databaseResolve) databaseResolve();
+                    loadingTasks.delete('database');
+                    checkLoadingCompletion();
+                }
+            };
 
             if (isAdmin) {
                 // --- ADMIN PATH: Direct GAPI access ---
@@ -6377,42 +6404,20 @@
                 }
 
             } else {
-                // --- STUDENT PATH: Secure Apps Script ---
-                console.log('Fetching database via Apps Script (Student)...');
-                return callAppsScript('getDatabase')
-                    .then(responseJSON => {
-                        try {
-                            const rows = JSON.parse(responseJSON);
-                            const newDbMap = {},
-                                newUidMap = {};
-                            if (Array.isArray(rows) && rows.length > 1) {
-                                rows.slice(1).forEach(row => { // Skip header
-                                    const [index, name, uidString, email] = row;
-                                    const dbKey = String(index).trim();
-                                    if (dbKey && name && uidString) {
-                                        const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
-                                        if (uids.length > 0) {
-                                            newDbMap[dbKey] = { name: String(name).trim(), email: email ? String(email).trim() : '', uids };
-                                            uids.forEach(uid => { newUidMap[uid] = dbKey; });
-                                        }
-                                    }
-                                });
-                            }
-                            databaseMap = newDbMap;
-                            uidToPrimaryUidMap = newUidMap;
-                            console.log(`Loaded ${Object.keys(databaseMap).length} entries from database (Student).`);
-                        } catch (e) {
-                            console.error("Failed to parse database from script:", e);
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Error fetching database via script:', err);
-                    })
-                    .finally(() => {
-                        if (databaseResolve) databaseResolve();
-                        loadingTasks.delete('database');
-                        checkLoadingCompletion();
+                // --- STUDENT PATH: Correct API Call ---
+                console.log('Fetching database via Apps Script API (Student)...');
+                try {
+                    const data = await gapi.client.script.scripts.run({
+                        scriptId: SCRIPT_ID,
+                        resource: { function: 'getDatabase' }
                     });
+                    processDbData(data.result);
+                } catch (err) {
+                    console.error('Error fetching database via API:', err);
+                    if (databaseResolve) databaseResolve();
+                    loadingTasks.delete('database');
+                    checkLoadingCompletion();
+                }
             }
         }
 
@@ -6435,56 +6440,31 @@
                 `'${sheetName}'` : sheetName;
         }
 
-        /**
-         * A robust wrapper for calling Google Apps Script functions.
-         * Retries a few times if the `google.script.run` object is not immediately available.
-         * @param {string} functionName The name of the Apps Script function to call.
-         * @param {Array} args An array of arguments to pass to the function.
-         * @returns {Promise} A promise that resolves with the script's success response or rejects with a failure.
-         */
-        function callAppsScript(functionName, args = []) {
-            return new Promise((resolve, reject) => {
-                let attempts = 0;
-                const maxAttempts = 5;
-                const interval = 500; // 0.5 seconds between retries
-
-                function tryCall() {
-                    if (window.google && window.google.script && window.google.script.run) {
-                        // The API is ready, make the call
-                        google.script.run
-                            .withSuccessHandler(resolve)
-                            .withFailureHandler(reject)
-                        [functionName](...args);
-                    } else {
-                        // The API is not ready yet
-                        attempts++;
-                        if (attempts < maxAttempts) {
-                            console.warn(`google.script.run not ready. Retrying in ${interval}ms... (Attempt ${attempts})`);
-                            setTimeout(tryCall, interval);
-                        } else {
-                            // Max retries reached, reject the promise
-                            console.error(`Failed to execute Apps Script function '${functionName}' after ${maxAttempts} attempts.`);
-                            reject(new Error("Google Apps Script API did not load."));
-                        }
-                    }
-                }
-                tryCall(); // Start the first attempt
-            });
-        }
 
         /**
-         * Fetch available courses (sheet names) from logs spreadsheet.
-         */
+     * Fetch available courses (sheet names) from logs spreadsheet.
+     */
         async function fetchAvailableCourses() {
             if (!isOnline) {
-                // If offline, default to an empty list and exit.
                 availableCourses = [];
-                courseIDMap = {};
-                sheetNameMap = {};
                 loadingTasks.delete('courses');
                 checkLoadingCompletion();
                 return;
             }
+
+            const loadAndProcess = (data) => {
+                try {
+                    if (data.error) throw new Error(data.error.message);
+                    const result = JSON.parse(data.response.result);
+                    availableCourses = result.error ? [] : result;
+                } catch (e) {
+                    console.error("Failed to parse courses:", e);
+                    availableCourses = [];
+                } finally {
+                    loadingTasks.delete('courses');
+                    checkLoadingCompletion();
+                }
+            };
 
             if (isAdmin) {
                 // --- ADMIN PATH: Direct GAPI access ---
@@ -6555,26 +6535,20 @@
                 }
 
             } else {
-                // --- STUDENT PATH: Secure Apps Script ---
-                console.log('Fetching available courses via Apps Script (Student)...');
-                return callAppsScript('getAvailableCourses', [LOGS_SPREADSHEET_ID])
-                    .then(responseJSON => {
-                        try {
-                            const data = JSON.parse(responseJSON);
-                            availableCourses = data.error ? [] : data;
-                        } catch (e) {
-                            console.error("Failed to parse courses from script:", e);
-                            availableCourses = [];
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Error fetching courses via script:', err);
-                        availableCourses = [];
-                    })
-                    .finally(() => {
-                        loadingTasks.delete('courses');
-                        checkLoadingCompletion();
+                // --- STUDENT PATH: Correct API Call ---
+                console.log('Fetching available courses via Apps Script API (Student)...');
+                try {
+                    const data = await gapi.client.script.scripts.run({
+                        scriptId: SCRIPT_ID,
+                        resource: { function: 'getAvailableCourses', parameters: [LOGS_SPREADSHEET_ID] }
                     });
+                    loadAndProcess(data.result);
+                } catch (err) {
+                    console.error('Error fetching courses via API:', err);
+                    availableCourses = [];
+                    loadingTasks.delete('courses');
+                    checkLoadingCompletion();
+                }
             }
         }
 
