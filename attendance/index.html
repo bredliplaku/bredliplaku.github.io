@@ -426,6 +426,10 @@
             flex-shrink: 0;
         }
 
+        .dialog .form-group.uid-edit-row {
+            flex-wrap: nowrap;
+        }
+
         /* ===== Course button styles ===== */
         .course-buttons-container {
             display: flex;
@@ -3579,18 +3583,6 @@
             }
         }
 
-        function tombstoneKey(course) {
-            return `${TOMBSTONES_STORAGE_KEY}_${course || 'UNKNOWN'}`;
-        }
-
-        function getTombstonesForCourse(course = currentCourse) {
-            try {
-                return new Set(JSON.parse(localStorage.getItem(tombstoneKey(course)) || '[]'));
-            } catch {
-                return new Set();
-            }
-        }
-
         /**
          * NEW: Gets the correct log array based on whether the user is an admin or a student.
          * @returns {Array} The array of logs for the current course and user.
@@ -3607,15 +3599,19 @@
             }
         }
 
-        function saveTombstonesForCourse(set, course = currentCourse) {
-            localStorage.setItem(tombstoneKey(course), JSON.stringify([...set]));
-        }
-
         function addToTombstones(id, course = currentCourse) {
-            const s = getTombstonesForCourse(course);
-            s.add(id);
-            saveTombstonesForCourse(s, course);
-            pendingChanges = true; // Mark that there are changes to sync
+            // Ensure the data structure for the course exists.
+            if (!courseData[course]) {
+                courseData[course] = { logs: [], tombstones: new Set() };
+            }
+            // Add the ID to the in-memory tombstone set.
+            courseData[course].tombstones.add(id);
+
+            // Persist the entire course object (logs and the updated tombstones) to local storage.
+            saveCourseToLocalStorage(course);
+
+            // Mark that there are pending changes to be synced to the server.
+            pendingChanges = true;
             updateSyncStatus('Changes pending', 'waiting');
         }
 
@@ -4739,10 +4735,19 @@
                                         loadCourseFromLocalStorage(currentCourse)
                                     ]);
 
-                                    if (!courseData[currentCourse]) courseData[currentCourse] = { logs: [], tombstones: new Set() };
+                                    // Combine all known tombstones (from local storage and the server).
+                                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
 
-                                    const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
-                                    courseData[currentCourse].logs = mergedLogs;
+                                    // Merge logs using the complete, combined set of tombstones.
+                                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
+                                    // Initialise the course data with the correctly merged logs and all tombstones.
+                                    courseData[currentCourse] = {
+                                        logs: mergedLogs,
+                                        tombstones: allTombstones // This persists the combined tombstones in memory.
+                                    };
+
+                                    // Save the fully merged state back to local storage for this session.
                                     saveCourseToLocalStorage(currentCourse);
                                 }
 
@@ -4845,17 +4850,19 @@
                         loadCourseFromLocalStorage(courseName) // New local storage function
                     ]);
 
-                    // Initialise the data structure for this course.
+                    // Combine all known tombstones (from local storage and the server).
+                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
+
+                    // Merge logs using the complete, combined set of tombstones.
+                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
+                    // Initialise the course data with the correctly merged logs and all tombstones.
                     courseData[courseName] = {
-                        logs: [],
-                        tombstones: new Set(),
+                        logs: mergedLogs,
+                        tombstones: allTombstones // This persists the combined tombstones in memory.
                     };
 
-                    // Merge server data with any locally stored data.
-                    const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
-                    courseData[courseName].logs = mergedLogs;
-
-                    // Save the merged result back to local storage for offline use.
+                    // Save the fully merged state back to local storage for this session.
                     saveCourseToLocalStorage(courseName);
 
                 } catch (error) {
@@ -6638,7 +6645,7 @@
         function mergeLogs(serverLogs, localLogs, localTombstones = new Set(), serverTombstones = new Set()) {
             serverLogs = Array.isArray(serverLogs) ? serverLogs : [];
             localLogs = Array.isArray(localLogs) ? localLogs : [];
-            const deleted = new Set([...localTombstones, ...serverTombstones]);
+            const deleted = deletedIds; // Use the provided combined set directly
 
             const norm = (l) => {
                 if (!l || !l.id) return null;
@@ -6948,6 +6955,7 @@
                         activeNfcSession = { controller: null, button: null };
                         scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i>';
                         nfcStatusContainer.innerHTML = '';
+                        nfcStatusContainer.style.minHeight = '0';
                     } else {
                         // If another scan is active, stop it first.
                         if (activeNfcSession.controller) {
@@ -7067,7 +7075,7 @@
 
             const createUidRow = (uidValue = '') => {
                 const uidGroup = document.createElement('div');
-                uidGroup.className = 'form-group';
+                uidGroup.className = 'form-group uid-edit-row';
                 uidGroup.style.marginBottom = '15px'; // Increased margin
                 uidGroup.innerHTML = `
     <label>UID:</label>
@@ -7097,6 +7105,7 @@
                             activeNfcSession = { controller: null, button: null };
                             scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i>';
                             nfcStatusContainer.innerHTML = '';
+                            nfcStatusContainer.style.minHeight = '0';
                         } else {
                             // If another scan is active, stop it first.
                             if (activeNfcSession.controller) {
@@ -8450,11 +8459,21 @@
                         loadCourseFromLocalStorage(courseName)
                     ]);
 
-                    if (!courseData[courseName]) courseData[courseName] = { logs: [], tombstones: new Set() };
-                    const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
-                    courseData[courseName].logs = mergedLogs;
+                    // Combine all known tombstones (from local storage and the server).
+                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
 
+                    // Merge logs using the complete, combined set of tombstones.
+                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
+                    // Initialise the course data with the correctly merged logs and all tombstones.
+                    courseData[courseName] = {
+                        logs: mergedLogs,
+                        tombstones: allTombstones // This persists the combined tombstones in memory.
+                    };
+
+                    // Save the fully merged state back to local storage for this session.
                     saveCourseToLocalStorage(courseName);
+
                 } catch (error) {
                     console.error(`Failed to load background data for course: ${courseName}`, error);
                     // Fall back to local data on error
