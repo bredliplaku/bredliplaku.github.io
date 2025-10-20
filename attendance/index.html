@@ -827,6 +827,45 @@
             margin-top: 5px;
         }
 
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            /* Column for data, column for action */
+            gap: 15px;
+            align-items: center;
+        }
+
+        .field-action {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 5px;
+            font-size: 0.9em;
+        }
+
+        .field-action label {
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .field-action input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .field-action select {
+            padding: 5px 8px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+        }
+
+        .dark-mode .field-action select {
+            background-color: #333;
+            border-color: #555;
+            color: #f0f0f0;
+        }
+
         .in-page-notifications {
             position: fixed;
             bottom: 20px;
@@ -3259,7 +3298,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw1uW-oSC_nkKBaKDOgpwPEG4e-PyZw3bO4Acqql9yJKKPJr2I58ABzdmHjTjZIGIsMcQ/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyceGHb4QIPnUIM0OeREIfMaX32TfBvKLpdODH14rOaKQwqE3Vp1oNlp4latSM-4lKUXA/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -5275,7 +5314,7 @@
         /**
  * Creates the special dialog for handling duplicate registrations.
  */
-        function showDuplicateWarningDialog(newData, duplicates, matchType) {
+        function showDuplicateWarningDialog(newData, duplicates) {
             document.body.style.overflow = 'hidden';
             const existing = duplicates[0];
             const dialogBackdrop = document.createElement('div');
@@ -5285,81 +5324,134 @@
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
-            let title = '';
-            let message = '';
-            let buttonsHTML = '';
+            // --- Core comparison logic ---
+            const norm = (str) => (str || '').toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+            const isNameMatch = norm(newData.name) === norm(existing.name);
+            const isEmailMatch = norm(newData.email) === norm(existing.email);
+            const existingUids = (existing.uid || '').toString().split(',').map(norm);
+            const isUidMatch = existingUids.includes(norm(newData.uid));
 
-            // Dynamically set title, message, and buttons based on matchType
-            if (matchType === 'uid') {
-                title = 'UID Already Exists';
-                message = 'This UID is already assigned to a student. You can replace the existing student\'s information with this new application.';
-                buttonsHTML = `
-            <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
-            <button id="force-replace-btn" class="btn-orange">Replace</button>
-        `;
-            } else if (matchType === 'email') {
-                title = 'Email Already Exists';
-                message = `This email is already in the database for "${existing.name}". Would you like to merge this new UID with their existing record?`;
-                buttonsHTML = `
-            <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
-            <button id="merge-btn" class="btn-green">Merge UIDs</button>
-        `;
-            } else { // 'name'
-                title = 'Similar Name Found';
-                message = `A student named "${existing.name}" already exists but with a different email. Are they the same person?`;
-                buttonsHTML = `
-            <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
-            <button id="replace-btn" class="btn-orange">Replace</button>
-            <button id="add-anyway-btn" class="btn-green">Add Anyway</button>
-        `;
-            }
+            // --- Dynamic HTML for checkboxes ---
+            const nameActionHTML = isNameMatch ? '<span style="opacity: 0.6;">(Names match)</span>' :
+                `<div class="field-action"><label for="replace-name-check">Replace</label><input type="checkbox" id="replace-name-check" data-field="name"></div>`;
+
+            const emailActionHTML = isEmailMatch ? '<span style="opacity: 0.6;">(Emails match)</span>' :
+                `<div class="field-action"><label for="replace-email-check">Replace</label><input type="checkbox" id="replace-email-check" data-field="email"></div>`;
+
+            const uidActionHTML = isUidMatch ? '<span style="opacity: 0.6;">(UID exists)</span>' :
+                `<div class="field-action">
+            <select id="uid-action-select" class="form-control">
+                <option value="none" selected>Do Nothing</option>
+                <option value="merge">Merge UID</option>
+                <option value="replace">Replace All UIDs</option>
+            </select>
+        </div>`;
 
             dialog.innerHTML = `
-        <h3 class="dialog-title" style="color: var(--warning-color);"><i class="fas fa-exclamation-triangle"></i> ${title}</h3>
+        <h3 class="dialog-title" style="color: var(--warning-color);"><i class="fas fa-exclamation-triangle"></i> Similar Entry Found</h3>
         <div class="dialog-content">
-            <p>${message}</p>
-            <div class="existing-data">
-                <h4>Existing Data</h4>
-                <div class="form-group"><label>Name:</label><input class="form-control" value="${existing.name}" disabled></div>
-                <div class="form-group"><label>UID(s):</label><input class="form-control" value="${existing.uid}" disabled></div>
-                <div class="form-group"><label>Email:</label><input class="form-control" value="${existing.email || 'N/A'}" disabled></div>
-            </div>
+            <p>An entry with similar data already exists. Please review and choose an action.</p>
+            
+            <h4>Existing Data</h4>
+            <div class="form-group"><label>Name:</label><input class="form-control" value="${existing.name}" disabled></div>
+            <div class="form-group"><label>UID(s):</label><input class="form-control" value="${existing.uid}" disabled></div>
+            <div class="form-group"><label>Email:</label><input class="form-control" value="${existing.email || 'N/A'}" disabled></div>
+            
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-            <div class="new-data">
-                <h4>New Application</h4>
-                <div class="form-group"><label>Name:</label><input type="text" id="final-name" class="form-control" value="${newData.name}"></div>
-                <div class="form-group"><label>UID:</label><input type="text" id="final-uid" class="form-control" value="${newData.uid}" disabled></div>
-                <div class="form-group"><label>Email:</label><input type="email" id="final-email" class="form-control" value="${newData.email}"></div>
+            
+            <h4>New Application & Actions</h4>
+            <div class="comparison-grid">
+                <div class="form-group" style="margin: 0;"><label>Name:</label><input class="form-control" value="${newData.name}" disabled></div>
+                ${nameActionHTML}
+                
+                <div class="form-group" style="margin: 0;"><label>Email:</label><input class="form-control" value="${newData.email}" disabled></div>
+                ${emailActionHTML}
+                
+                <div class="form-group" style="margin: 0;"><label>UID:</label><input class="form-control" value="${newData.uid}" disabled></div>
+                ${uidActionHTML}
             </div>
         </div>
-        <div class="dialog-actions">${buttonsHTML}</div>`;
+        <div class="dialog-actions">
+            <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
+            <button id="add-anyway-btn" class="btn-green">Add as Separate</button>
+            <button id="replace-btn" class="btn-orange">Replace Selected</button>
+        </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            const closeDialog = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = '';
+            const closeDialog = () => { /* ... existing closeDialog logic ... */ };
+            const addAnywayBtn = document.getElementById('add-anyway-btn');
+            const replaceBtn = document.getElementById('replace-btn');
+            const actionControls = dialog.querySelectorAll('[data-field="name"], [data-field="email"], #uid-action-select');
+
+            // Function to manage button states
+            const updateButtonStates = () => {
+                const nameCheck = dialog.querySelector('#replace-name-check');
+                const emailCheck = dialog.querySelector('#replace-email-check');
+                const uidSelect = dialog.querySelector('#uid-action-select');
+
+                const isAnyActionSelected = (nameCheck && nameCheck.checked) ||
+                    (emailCheck && emailCheck.checked) ||
+                    (uidSelect && uidSelect.value !== 'none');
+
+                addAnywayBtn.disabled = isAnyActionSelected;
+                replaceBtn.disabled = !isAnyActionSelected;
             };
+
+            // Attach listeners and initialize states
+            actionControls.forEach(control => control.addEventListener('change', updateButtonStates));
+            updateButtonStates(); // Set initial state
             document.getElementById('cancel-duplicate-btn').addEventListener('click', closeDialog);
 
-            // Attach listeners based on which buttons were created
-            const forceReplaceBtn = document.getElementById('force-replace-btn');
-            const mergeBtn = document.getElementById('merge-btn');
-            const replaceBtn = document.getElementById('replace-btn');
-            const addAnywayBtn = document.getElementById('add-anyway-btn');
-
-            const getFinalData = () => ({
-                ...newData,
-                name: document.getElementById('final-name').value.trim(),
-                email: document.getElementById('final-email').value.trim(),
-                duplicateRowIndex: existing.rowIndex
+            // "Add as Separate" button listener
+            addAnywayBtn.addEventListener('click', (e) => {
+                const button = e.currentTarget;
+                button.disabled = true;
+                button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
+                const payload = { ...newData, action: 'approveRegistration', approvalMode: 'add_new_separate' };
+                fetch(`${SCRIPT_URL}?timestamp=${Date.now()}`, { /* ... fetch logic ... */ });
             });
 
-            if (forceReplaceBtn) forceReplaceBtn.addEventListener('click', (e) => resolveDuplicateOnServer('force_replace_by_uid', getFinalData(), e.currentTarget, closeDialog));
-            if (mergeBtn) mergeBtn.addEventListener('click', (e) => resolveDuplicateOnServer('merge_uid', getFinalData(), e.currentTarget, closeDialog));
-            if (replaceBtn) replaceBtn.addEventListener('click', (e) => resolveDuplicateOnServer('replace_entry', getFinalData(), e.currentTarget, closeDialog));
-            if (addAnywayBtn) addAnywayBtn.addEventListener('click', (e) => resolveDuplicateOnServer('add_new_separate', getFinalData(), e.currentTarget, closeDialog));
+            // "Replace Selected" button listener
+            replaceBtn.addEventListener('click', (e) => {
+                const button = e.currentTarget;
+                const nameCheck = dialog.querySelector('#replace-name-check');
+                const emailCheck = dialog.querySelector('#replace-email-check');
+                const uidSelect = dialog.querySelector('#uid-action-select');
+
+                // Construct the specific update payload for the server
+                const updates = {};
+                if (nameCheck && nameCheck.checked) updates.name = newData.name;
+                if (emailCheck && emailCheck.checked) updates.email = newData.email;
+                if (uidSelect && uidSelect.value !== 'none') {
+                    updates.uid_action = uidSelect.value; // 'merge' or 'replace'
+                }
+
+                const payload = {
+                    ...newData,
+                    action: 'approveRegistration',
+                    approvalMode: 'custom_replace',
+                    duplicateRowIndex: existing.rowIndex,
+                    updates: updates // Send the specific actions to perform
+                };
+
+                button.disabled = true;
+                button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Replacing...`;
+                fetch(`${SCRIPT_URL}?timestamp=${Date.now()}`, {
+                    method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                }).then(res => res.json()).then(result => {
+                    if (result.result === 'success') {
+                        showNotification('success', 'Action Complete', 'The entry has been updated.');
+                        refreshAdminViews();
+                        closeDialog();
+                    } else { throw new Error(result.message); }
+                }).catch(err => {
+                    showNotification('error', 'Action Failed', err.message);
+                    button.disabled = false;
+                    button.innerHTML = 'Replace Selected';
+                });
+            });
         }
 
         /**
