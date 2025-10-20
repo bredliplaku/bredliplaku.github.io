@@ -3347,7 +3347,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyNBmxKiOL_Zw-rlexYZ-ambNsey46Lv_7YRm9T2dwnfQ5igEiA6iy7YLlVv408OzHL3g/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzvc2HjVlWcw5yUCM6sq6Fxa8OBgiRDC25cwnwFW5KtEBUkX9Kuwh0HlHPafpE4MAfWUw/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -4720,44 +4720,32 @@
 
                             // --- PERFORMANCE OPTIMIZATION ---
                             if (isAdmin) {
+                                // --- ADMIN PATH ---
+                                // Admins load everything directly using gapi for full control.
+                                console.log("Admin detected. Loading all data directly...");
+
                                 // 1. Load the CURRENT active course first for a fast startup.
                                 if (currentCourse) {
-                                    console.log(`Prioritizing data load for active course: ${currentCourse}`);
                                     const [serverLogs, serverTombs, localData] = await Promise.all([
-                                        fetchLogsFromSheet(currentCourse),
+                                        fetchLogsFromSheet(currentCourse), // Uses the original gapi function
                                         fetchTombstonesForCourse(currentCourse),
                                         loadCourseFromLocalStorage(currentCourse)
                                     ]);
 
-                                    // Combine all known tombstones (from local storage and the server).
                                     const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-
-                                    // Merge logs using the complete, combined set of tombstones.
                                     const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
-
-                                    // Initialise the course data with the correctly merged logs and all tombstones.
-                                    courseData[currentCourse] = {
-                                        logs: mergedLogs,
-                                        tombstones: allTombstones // This persists the combined tombstones in memory.
-                                    };
-
-                                    // Save the fully merged state back to local storage for this session.
+                                    courseData[currentCourse] = { logs: mergedLogs, tombstones: allTombstones };
                                     saveCourseToLocalStorage(currentCourse);
                                 }
 
-                                // 2. Now that the app is responsive, load all other courses in the background.
-                                // Use setTimeout to ensure it doesn't block the initial UI render/sync.
+                                // 2. Load all other courses in the background.
                                 setTimeout(loadRemainingCoursesInBackground, 500);
 
                             } else {
-                                // Student path remains the same
-                                if (isAdmin) {
-                                    // For admins, load all data with merge capabilities.
-                                    await loadAllCourseDataFromServer();
-                                } else {
-                                    // For students, load server data into their specific cache.
-                                    await loadAllCourseLogsForStudent();
-                                }
+                                // --- STUDENT PATH ---
+                                // Students load ONLY their own logs via the secure Apps Script.
+                                console.log("Student detected. Loading logs via secure gateway...");
+                                await loadAllCourseLogsForStudent(); // Uses the new, secure Apps Script function
                             }
 
                         } catch (e) {
@@ -6186,32 +6174,46 @@
         }
 
         /**
- * Proactively fetches and caches logs for all available courses.
- * This is intended to be run for non-admin students upon sign-in.
- */
+  * Proactively fetches and caches logs for all available courses FOR A STUDENT.
+  * This now calls the secure Apps Script endpoint.
+  */
         async function loadAllCourseLogsForStudent() {
             if (isAdmin || !isOnline || !isSignedIn) return;
 
             console.log("Student signed in. Proactively loading all course logs from server...");
             studentLogCache = {}; // Clear any previous cache
-            const fetchPromises = [];
 
-            for (const course of availableCourses) {
-                const promise = fetchLogsFromSheet(course)
-                    .then(serverLogs => {
-                        if (serverLogs && serverLogs.length > 0) {
-                            // Store the fetched logs in our in-memory cache
-                            studentLogCache[course] = serverLogs;
-                            console.log(`Fetched and cached ${serverLogs.length} logs for ${course} in memory.`);
-                        }
-                    })
-                    .catch(err => {
-                        console.error(`Failed to pre-fetch logs for ${course}:`, err);
-                    });
-                fetchPromises.push(promise);
-            }
+            // Create a list of promises, one for each course
+            const fetchPromises = availableCourses.map(course => {
+                return new Promise((resolve, reject) => {
+                    google.script.run
+                        .withSuccessHandler(responseJSON => {
+                            try {
+                                const serverLogs = JSON.parse(responseJSON);
+                                if (serverLogs.error) {
+                                    throw new Error(serverLogs.error);
+                                }
+                                if (serverLogs && serverLogs.length > 0) {
+                                    // Store the fetched logs in our in-memory cache
+                                    studentLogCache[course] = serverLogs;
+                                    console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
+                                }
+                                resolve(); // Resolve the promise on success
+                            } catch (e) {
+                                console.error(`Error processing logs for ${course}:`, e);
+                                reject(e); // Reject on error
+                            }
+                        })
+                        .withFailureHandler(error => {
+                            console.error(`Failed to call Apps Script for ${course}:`, error);
+                            reject(error); // Reject on failure
+                        })
+                        .getStudentLogs(course); // Call the new function in your script
+                });
+            });
 
-            await Promise.all(fetchPromises);
+            // Wait for all courses to finish loading
+            await Promise.all(fetchPromises.map(p => p.catch(e => e))); // Continue even if one fails
 
             console.log("Finished pre-loading all student logs.");
             updateUI(); // Refresh the UI to show the correct course buttons
