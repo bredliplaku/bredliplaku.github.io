@@ -410,6 +410,11 @@
             color: #f0f0f0;
         }
 
+        .uid-button-group {
+            display: flex;
+            gap: 5px;
+        }
+
         /* ===== Course button styles ===== */
         .course-buttons-container {
             display: flex;
@@ -3604,46 +3609,52 @@
             }
 
             logsTbody.addEventListener('click', (event) => {
-                // Find the closest parent row of whatever was clicked
                 const targetRow = event.target.closest('tr[data-key]');
-                if (!targetRow) return; // Exit if the click wasn't on a valid log row
+                if (!targetRow) return;
 
-                // Get the unique key from the row
                 const key = targetRow.dataset.key;
 
-                // Re-create the grouped data to find the specific group object for this key
+                // Re-calculate the specific group data for the clicked row to ensure it's always correct
                 const logsForCurrentCourse = getLogsForCurrentUser();
                 const grouped = {};
                 logsForCurrentCourse.forEach(log => {
                     const dateObj = new Date(log.timestamp);
                     if (isNaN(dateObj.getTime())) return;
+                    const scannedUid = log.uid;
+                    const dbKey = uidToPrimaryUidMap[scannedUid];
+                    const groupIdentifier = dbKey || scannedUid;
+
+                    const studentData = dbKey ? databaseMap[dbKey] : null;
+                    const name = studentData ? studentData.name : 'Unknown';
+                    const uidsForDisplay = studentData ? studentData.uids : [scannedUid];
+
                     const day = String(dateObj.getDate()).padStart(2, '0');
                     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
-                    const groupKey = `${date}_${log.uid}`;
+                    const groupKey = `${date}_${groupIdentifier}`;
+
                     if (!grouped[groupKey]) {
-                        grouped[groupKey] = { key: groupKey, date, dateObj, uid: log.uid, name: databaseMap[log.uid]?.name || 'Unknown', originalLogs: [] };
+                        grouped[groupKey] = { key: groupKey, date, dateObj, uid: groupIdentifier, name: name, uidsForDisplay: uidsForDisplay, originalLogs: [] };
                     }
                     grouped[groupKey].originalLogs.push(log);
                 });
+
                 const group = grouped[key];
+                if (!group) {
+                    console.error("Could not find group data for key:", key);
+                    return;
+                }
 
-                if (!group) return; // Exit if we couldn't find the group data for some reason
-
-                // Now, check which button inside the row was clicked
-                const addUserBtn = event.target.closest('.btn-green i.fa-user-plus');
-                const addTimeBtn = event.target.closest('.btn-green i.fa-plus');
-                const deleteBtn = event.target.closest('.btn-red');
-                const editBtn = event.target.closest('.btn-blue');
-
-                if (addUserBtn) {
-                    showAddEntryFromLog(group.uid);
-                } else if (addTimeBtn) {
+                // Use reliable class-based detection for button clicks
+                if (event.target.closest('.add-user-btn')) {
+                    // Use the first display UID which is the actual scanned UID for unknown users
+                    showAddEntryFromLog(group.uidsForDisplay[0]);
+                } else if (event.target.closest('.add-time-btn')) {
                     addPlusOneHourLog(group);
-                } else if (deleteBtn) {
+                } else if (event.target.closest('.delete-log-btn')) {
                     confirmDeleteLog(group);
-                } else if (editBtn) {
+                } else if (event.target.closest('.edit-log-btn')) {
                     showEditLogDialog(group);
                 }
             });
@@ -6716,20 +6727,28 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
-            let nfcController = null;
+
+            // --- START: NEW LOGIC ---
+            // State tracker for the NFC scan session
+            let activeNfcSession = { controller: null, button: null };
+            // --- END: NEW LOGIC ---
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Add New Student</h3>
-        <div class="dialog-content"><p>Enter the details for the new database entry.</p>
-        <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control" placeholder="Student's Full Name"></div>
-        <div class="form-group"><label for="add-email">Email*:</label><input type="email" id="add-email" class="form-control" placeholder="nsurname00@epoka.edu.al"></div>
-        <div class="form-group">
-            <label>UID*:</label>
-            <input type="text" id="add-uid" class="form-control" placeholder="AB:CD:12:34">
-            ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
+        <div class="dialog-content">
+            <p>Enter the details for the new database entry.</p>
+            <div class="form-group"><label for="add-name">Name*:</label><input type="text" id="add-name" class="form-control" placeholder="Student's Full Name"></div>
+            <div class="form-group"><label for="add-email">E-mail*:</label><input type="email" id="add-email" class="form-control" placeholder="nsurname00@epoka.edu.al"></div>
+            <div class="form-group">
+                <label>UID*:</label>
+                <input type="text" id="add-uid" class="form-control" placeholder="Type or scan...">
+                <div class="uid-button-group">
+                    ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
+                </div>
+                </div>
+            <div id="nfc-status-container" style="margin-top:10px; min-height: 48px;"></div>
         </div>
-        <div id="nfc-status-container" style="margin-top:10px;"></div>
-        </div><div class="dialog-actions">
+        <div class="dialog-actions">
             <button id="cancel-add-btn" class="btn-red">Cancel</button>
             <button id="confirm-add-btn" class="btn-green">Add Student</button>
         </div>`;
@@ -6738,7 +6757,10 @@
             document.body.appendChild(dialogBackdrop);
 
             const close = () => {
-                if (nfcController) nfcController.abort();
+                // --- START: NEW LOGIC ---
+                // Ensure any active scan is stopped when the dialog closes
+                if (activeNfcSession.controller) activeNfcSession.controller.abort();
+                // --- END: NEW LOGIC ---
                 if (document.body.contains(dialogBackdrop)) {
                     document.body.removeChild(dialogBackdrop);
                 }
@@ -6750,13 +6772,33 @@
             const scanBtn = dialog.querySelector('.scan-uid-btn');
 
             if (scanBtn) {
+                // --- START: NEW ADVANCED NFC LOGIC ---
                 scanBtn.addEventListener('click', () => {
-                    if (nfcController) nfcController.abort();
-                    nfcController = startNfcForInputDialog(uidInput, nfcStatusContainer);
+                    // Check if the clicked button is already the active one
+                    if (activeNfcSession.button === scanBtn) {
+                        // If so, treat it as a "stop" button
+                        if (activeNfcSession.controller) activeNfcSession.controller.abort();
+                        activeNfcSession = { controller: null, button: null };
+                        scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i>';
+                        nfcStatusContainer.innerHTML = '';
+                    } else {
+                        // If another scan is active, stop it first.
+                        if (activeNfcSession.controller) {
+                            activeNfcSession.controller.abort();
+                            activeNfcSession.button.innerHTML = '<i class="fa-solid fa-wifi"></i>';
+                        }
+                        // Start a new scan for this button
+                        scanBtn.innerHTML = '<i class="fas fa-times"></i>'; // Show a 'stop' icon
+                        const controller = startNfcForInputDialog(uidInput, nfcStatusContainer, scanBtn);
+                        activeNfcSession = { controller, button: scanBtn };
+                    }
                 });
+                // --- END: NEW ADVANCED NFC LOGIC ---
             }
 
             document.getElementById('cancel-add-btn').addEventListener('click', close);
+
+            // Your existing save logic is preserved below
             document.getElementById('confirm-add-btn').addEventListener('click', () => {
                 const nameInput = document.getElementById('add-name');
                 const emailInput = document.getElementById('add-email');
@@ -6786,24 +6828,20 @@
 
                 if (!isValid) return;
 
-                // --- START OF NEW MERGE LOGIC ---
                 let merged = false;
                 for (const [dbKey, studentData] of Object.entries(databaseMap)) {
-                    // Find a match based on case-insensitive name and email
                     if (studentData.name.toLowerCase() === name.toLowerCase() && studentData.email.toLowerCase() === email.toLowerCase()) {
                         if (studentData.uids.includes(uid)) {
                             showInputError(uidInput, 'This UID is already assigned to this student.');
-                            return; // Stop execution
+                            return;
                         }
-                        // Match found! Append the new UID.
                         databaseMap[dbKey].uids.push(uid);
                         merged = true;
                         showNotification('success', 'UID Merged', `Added new UID to existing record for ${name}.`);
-                        break; // Exit the loop
+                        break;
                     }
                 }
 
-                // If no merge happened, create a new entry as before
                 if (!merged) {
                     const isDuplicate = Object.values(databaseMap).some(student => student.uids.includes(uid));
                     if (isDuplicate) {
@@ -6865,11 +6903,11 @@
                 uidGroup.className = 'form-group';
                 uidGroup.style.marginBottom = '15px'; // Increased margin
                 uidGroup.innerHTML = `
-                    <label>UID:</label>
-                    <input type="text" class="form-control uid-input" value="${uidValue}" placeholder="Type or scan...">
-                    ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
-                    <button class="btn-red btn-icon btn-sm remove-uid-btn" title="Remove UID"><i class="fas fa-minus"></i></button>
-                `;
+    <label>UID:</label>
+    <input type="text" class="form-control uid-input" value="${uidValue}" placeholder="Type or scan...">
+    <div class="uid-button-group"> ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
+        <button class="btn-red btn-icon btn-sm remove-uid-btn" title="Remove UID"><i class="fas fa-minus"></i></button>
+    </div> `;
                 uidListContainer.appendChild(uidGroup);
 
                 uidGroup.querySelector('.remove-uid-btn').addEventListener('click', () => {
@@ -7305,7 +7343,7 @@
 
                     if (nameMatch || uidMatch) {
                         const option = document.createElement('option');
-                        option.value = primaryUid;
+                        option.value = data.uids[0];
                         option.textContent = `${data.name} (${data.uids[0]})`; // Show primary UID
                         selectMenu.appendChild(option);
                     }
