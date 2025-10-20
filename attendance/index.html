@@ -2574,6 +2574,43 @@
 
         /* Responsive adjustments */
         @media (max-width: 768px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+                /* Stack columns vertically */
+                gap: 5px;
+                /* Reduce gap */
+            }
+
+            .comparison-grid .form-group {
+                margin-bottom: 0;
+                /* Remove bottom margin from inner form group */
+            }
+
+            .comparison-grid .field-action {
+                justify-content: flex-start;
+                /* Align checkbox/select to the left */
+                margin-top: 5px;
+                /* Add space above the action */
+                margin-bottom: 10px;
+                /* Add space below the action */
+                padding-left: 95px;
+                /* Indent action to align below input */
+            }
+
+            /* Ensure labels inside the grid align left */
+            .comparison-grid .form-group label {
+                text-align: left;
+                flex-basis: auto;
+                /* Allow label width to be natural */
+                margin-right: 10px;
+                /* Add some space between label and input */
+            }
+
+            /* Adjust input alignment if needed */
+            .comparison-grid .form-group input {
+                flex-grow: 1;
+            }
+
 
             .day-separator-actions .eis-day-btn,
             .day-separator-actions .btn-green {
@@ -3299,7 +3336,7 @@
         const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyceGHb4QIPnUIM0OeREIfMaX32TfBvKLpdODH14rOaKQwqE3Vp1oNlp4latSM-4lKUXA/exec";
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyFM1d0ILoHxcjGJzxglQ_XTWkOPosp3s9FFYdZrivE8uqErncJ8ZcPWmhw_4s14fZajQ/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -5360,7 +5397,7 @@
             
             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
             
-            <h4>New Application & Actions</h4>
+            <h4>New Application</h4>
             <div class="comparison-grid">
                 <div class="form-group" style="margin: 0;"><label>Name:</label><input class="form-control" value="${newData.name}" disabled></div>
                 ${nameActionHTML}
@@ -5374,8 +5411,8 @@
         </div>
         <div class="dialog-actions">
             <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
-            <button id="add-anyway-btn" class="btn-green">Add as Separate</button>
-            <button id="replace-btn" class="btn-orange">Replace Selected</button>
+            <button id="add-anyway-btn" class="btn-orange">Add as Separate</button>
+            <button id="replace-btn" class="btn-green">Apply Changes</button>
         </div>`;
 
             dialogBackdrop.appendChild(dialog);
@@ -7398,17 +7435,34 @@
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
+            // Add accessibility roles
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
             const now = new Date();
             const formattedDate = now.toISOString().split('T')[0];
             const formattedTime = now.toTimeString().split(' ')[0].substring(0, 5);
-            const sortedEntries = Object.entries(databaseMap).sort((a, b) => a[1].name.localeCompare(b[1].name));
+
+            // --- START: MODIFIED LIST GENERATION ---
+            const studentOptionsList = [];
+            Object.entries(databaseMap).forEach(([dbKey, data]) => {
+                // Create an entry for each UID the student has
+                data.uids.forEach(uid => {
+                    studentOptionsList.push({
+                        name: data.name,
+                        uid: uid,
+                        display: `${data.name} (${uid})` // Text to show in the dropdown
+                    });
+                });
+            });
+            // Sort the combined list alphabetically by the display text
+            studentOptionsList.sort((a, b) => a.display.localeCompare(b.display));
+            // --- END: MODIFIED LIST GENERATION ---
 
             dialog.innerHTML = `
     <h3 class="dialog-title">Add Manual Log Entry</h3>
-        <div class="dialog-content"> <div class="form-group">
+    <div class="dialog-content">
+        <div class="form-group">
             <label for="manual-name-search">Student:</label>
             <input type="text" id="manual-name-search" class="form-control" placeholder="Search by name or UID..." autocomplete="off">
         </div>
@@ -7424,10 +7478,11 @@
             <label for="manual-time">Time:</label>
             <input type="time" id="manual-time" class="form-control" value="${formattedTime}">
         </div>
-        </div> <div class="dialog-actions">
-            <button id="cancel-manual-btn" class="btn-red">Cancel</button>
-            <button id="save-manual-log-btn" class="btn-green">Add Entry</button>
-        </div>`;
+    </div>
+    <div class="dialog-actions">
+        <button id="cancel-manual-btn" class="btn-red">Cancel</button>
+        <button id="save-manual-log-btn" class="btn-green">Add Entry</button>
+    </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
@@ -7435,27 +7490,23 @@
             const searchInput = dialog.querySelector('#manual-name-search');
             const selectMenu = dialog.querySelector('#manual-student-select');
 
-            // Helper function to populate the select menu based on a search term
             const filterStudents = (searchTerm = '') => {
-                selectMenu.innerHTML = ''; // Clear existing options
+                selectMenu.innerHTML = '';
                 const lowerCaseTerm = searchTerm.toLowerCase();
 
-                sortedEntries.forEach(([primaryUid, data]) => {
-                    const nameMatch = data.name.toLowerCase().includes(lowerCaseTerm);
-                    const uidMatch = data.uids.some(uid => uid.toLowerCase().includes(lowerCaseTerm));
-
-                    if (nameMatch || uidMatch) {
+                studentOptionsList.forEach(student => {
+                    // Check if the search term matches the display text (Name + UID)
+                    if (student.display.toLowerCase().includes(lowerCaseTerm)) {
                         const option = document.createElement('option');
-                        option.value = data.uids[0];
-                        option.textContent = `${data.name} (${data.uids[0]})`; // Show primary UID
+                        // The value of the option should be the specific UID
+                        option.value = student.uid;
+                        option.textContent = student.display;
                         selectMenu.appendChild(option);
                     }
                 });
             };
 
             searchInput.addEventListener('input', () => filterStudents(searchInput.value));
-
-            // Populate with all students initially
             filterStudents();
 
             const closeDialog = () => {
@@ -7464,7 +7515,7 @@
             };
 
             document.getElementById('save-manual-log-btn').addEventListener('click', () => {
-                const searchInput = document.getElementById('manual-name-search'); // Target for the error message
+                const searchInput = document.getElementById('manual-name-search');
                 clearInputError(searchInput);
 
                 const selectedUid = selectMenu.value;
@@ -8156,31 +8207,30 @@
                     if (isNaN(dateObj.getTime())) return;
 
                     // --- START OF FIX ---
-                    const scannedUid = log.uid;
+                    const scannedUid = log.uid; // This is the actual UID scanned
                     const dbKey = uidToPrimaryUidMap[scannedUid];
-                    const groupIdentifier = dbKey || scannedUid;
 
                     const studentData = dbKey ? databaseMap[dbKey] : null;
                     const name = studentData ? studentData.name : 'Unknown';
-                    // This is the key change: get the actual UIDs for display.
                     const uidsForDisplay = studentData ? studentData.uids : [scannedUid];
-                    // --- END OF FIX ---
 
                     const day = String(dateObj.getDate()).padStart(2, '0');
                     const month = String(dateObj.getMonth() + 1).padStart(2, '0');
                     const year = dateObj.getFullYear();
                     const date = `${day}-${month}-${year}`;
 
-                    const key = `${date}_${groupIdentifier}`;
+                    const key = `${date}_${scannedUid}`;
 
                     if (!grouped[key]) {
                         grouped[key] = {
                             key: key,
                             date,
                             dateObj: new Date(year, month - 1, day),
-                            uid: groupIdentifier, // Still use the index for grouping
+                            // Store the student's main index (dbKey) if known, otherwise the scanned UID
+                            studentIdentifier: dbKey || scannedUid,
                             name: name,
-                            uidsForDisplay: uidsForDisplay, // Store the real UIDs for the UI
+                            // Store the specific UID for this group
+                            scannedUidForGroup: scannedUid,
                             originalLogs: []
                         };
                     }
@@ -8288,9 +8338,7 @@
                     if (isAdmin) {
                         const uidCell = document.createElement('td');
                         uidCell.className = 'uid-cell uid-column admin-only';
-                        // This is the fix: It gets the actual UID from the first log entry of the day.
-                        const scannedUidForDisplay = group.originalLogs[0]?.uid || group.uidsForDisplay[0];
-                        uidCell.innerHTML = `<span class="uid-badge">${scannedUidForDisplay}</span>`;
+                        uidCell.innerHTML = `<span class="uid-badge">${group.scannedUidForGroup}</span>`;
                         row.appendChild(uidCell);
                     }
 
