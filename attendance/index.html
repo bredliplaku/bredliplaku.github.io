@@ -3344,11 +3344,9 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
-        const DATABASE_SPREADSHEET_ID = '1jgVSIOQFJv4qiILiT1j33Lr6igp0IhEkIWDg_yQUn8c';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
         const SCRIPT_ID = '1C0JKXLo8rMjCHkkaLLM2AMjNF2y3YGSSeZQKywBD37gRO_aMId9bVUli';
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzFig9bhvaaQfJWqeTGs0-lGjIwupjCY7ta8Wrzsjc9NMzulbHZ9XaupYNtF4QvD9WtEw/exec";
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -5130,34 +5128,27 @@
                 };
 
                 // Use fetch to send the data and wait for a real response
-                fetch(SCRIPT_URL, {
-                    method: 'POST',
-                    body: JSON.stringify(submitData),
-                    headers: {
-                        'Content-Type': 'text/plain;charset=utf-8', // Use text/plain for this Apps Script method
-                    },
-                })
-                    .then(response => response.json()) // Wait for the server's response
-                    .then(data => {
-                        // The script responded. Check if it was a success.
-                        if (data.result === 'success') {
-                            showNotification('success', 'Submission Sent!', 'Your Student ID Card application has been sent for approval.');
-                            closeDialog();
-                        } else {
-                            // The script responded with an error.
-                            console.error('Script Error:', data.message);
-                            showNotification('error', 'Submission Failed', 'The server reported an error. Please try again.');
-                            submitBtn.disabled = false; // Re-enable the button
-                            submitBtn.innerHTML = 'Submit';
-                        }
-                    })
-                    .catch(error => {
-                        // A network error occurred (e.g., user is offline).
-                        console.error('Network Error:', error);
-                        showNotification('error', 'Submission Failed', 'A network error occurred. Please check your connection.');
-                        submitBtn.disabled = false; // Re-enable the button
+                gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: { function: 'handleNewSubmission', parameters: [submitData] }
+                }).then(function (resp) {
+                    const data = resp.result.response.result;
+                    if (data && data.result === 'success') {
+                        showNotification('success', 'Submission Sent!', 'Your Student ID Card application has been sent for approval.');
+                        closeDialog();
+                    } else {
+                        const errorMessage = (data && data.message) ? data.message : "An unknown error occurred.";
+                        console.error('Script Error:', errorMessage);
+                        showNotification('error', 'Submission Failed', errorMessage);
+                        submitBtn.disabled = false;
                         submitBtn.innerHTML = 'Submit';
-                    });
+                    }
+                }).catch(err => {
+                    console.error('API Error:', err);
+                    showNotification('error', 'Submission Failed', 'A network error occurred. Please check your connection.');
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = 'Submit';
+                });
             });
 
             document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
@@ -5179,11 +5170,21 @@
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
 
             try {
-                const response = await fetch(`${SCRIPT_URL}?action=getRegistrations`);
-                const registrations = await response.json();
-                tbody.innerHTML = ''; // Clear loading state
+                if (!currentCourse) return;
+                const resp = await gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: {
+                        function: 'getPendingRegistrations',
+                        parameters: [LOGS_SPREADSHEET_ID, currentCourse],
+                    }
+                });
 
-                if (registrations.length > 0) {
+                if (resp.result.error) throw new Error(resp.result.error.message);
+
+                const registrations = resp.result.response.result;
+                tbody.innerHTML = '';
+
+                if (registrations && registrations.length > 0) {
                     // If there are registrations, remove the 'is-hidden' class to show the module
                     pendingView.classList.remove('is-hidden');
                     badge.textContent = registrations.length;
@@ -5210,14 +5211,12 @@
                         tbody.appendChild(row);
                     });
                 } else {
-                    // If the list is empty, add the 'is-hidden' class to hide the module smoothly
                     pendingView.classList.add('is-hidden');
                     badge.style.display = 'none';
                 }
             } catch (error) {
                 console.error("Error fetching registrations:", error);
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--danger-color);">Failed to load registrations.</td></tr>';
-                // Make sure the module is visible so the user can see the error message
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--danger-color);">${error.message}</td></tr>`;
                 pendingView.classList.remove('is-hidden');
             }
         }
@@ -5355,26 +5354,28 @@
                     rowNumber: registration.rowNumber
                 };
 
-                fetch(SCRIPT_URL, {
-                    method: 'POST',
-                    body: JSON.stringify(finalData),
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                })
-                    .then(res => res.json())
-                    .then(result => {
-                        if (result.result === 'success') {
-                            showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
-                            refreshAdminViews();
-                            closeDialog();
-                        } else {
-                            throw new Error(result.message);
-                        }
-                    })
-                    .catch(err => {
-                        showNotification('error', 'Approval Failed', err.message);
-                        confirmBtn.disabled = false;
-                        confirmBtn.innerHTML = 'Approve';
-                    });
+                if (!currentCourse) return;
+                gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: {
+                        function: 'approveRegistration',
+                        // --- ADD parameters ARRAY ---
+                        parameters: [finalData, LOGS_SPREADSHEET_ID, currentCourse],
+                    }
+                }).then(function (resp) {
+                    const result = resp.result.response.result;
+                    if (result && result.result === 'success') {
+                        showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
+                        refreshAdminViews();
+                        closeDialog();
+                    } else {
+                        throw new Error(result ? result.message : 'Approval failed.');
+                    }
+                }).catch(err => {
+                    showNotification('error', 'Approval Failed', err.message);
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = 'Approve';
+                });
             });
         }
 
@@ -5479,16 +5480,22 @@
                 const button = e.currentTarget;
                 button.disabled = true;
                 button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
-                const payload = { ...newData, action: 'approveRegistration', approvalMode: 'add_new_separate' };
+                const payload = { ...newData, approvalMode: 'add_new_separate' };
 
-                fetch(SCRIPT_URL, {
-                    method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                }).then(res => res.json()).then(result => {
-                    if (result.result === 'success') {
+                if (!currentCourse) return;
+                gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: {
+                        function: 'approveRegistration',
+                        parameters: [payload, LOGS_SPREADSHEET_ID, currentCourse],
+                    }
+                }).then(function (resp) {
+                    const result = resp.result.response.result;
+                    if (result && result.result === 'success') {
                         showNotification('success', 'Action Complete', `Registration for ${newData.name} has been processed.`);
                         refreshAdminViews();
                         closeDialog();
-                    } else { throw new Error(result.message); }
+                    } else { throw new Error(result ? result.message : 'Action failed'); }
                 }).catch(err => {
                     showNotification('error', 'Action Failed', err.message);
                     button.disabled = false;
@@ -5521,14 +5528,19 @@
                 button.disabled = true;
                 button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Replacing...`;
 
-                fetch(SCRIPT_URL, {
-                    method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                }).then(res => res.json()).then(result => {
-                    if (result.result === 'success') {
+                gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: {
+                        function: 'approveRegistration',
+                        parameters: [payload, LOGS_SPREADSHEET_ID, currentCourse],
+                    }
+                }).then(function (resp) {
+                    const result = resp.result.response.result;
+                    if (result && result.result === 'success') {
                         showNotification('success', 'Action Complete', 'The entry has been updated.');
                         refreshAdminViews();
                         closeDialog();
-                    } else { throw new Error(result.message); }
+                    } else { throw new Error(result ? result.message : 'Action failed'); }
                 }).catch(err => {
                     showNotification('error', 'Action Failed', err.message);
                     button.disabled = false;
@@ -5601,25 +5613,27 @@
 
                 confirmBtn.disabled = true;
                 confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Rejecting...';
-                const data = { action: 'rejectRegistration', message: message, email: registration.email, rowNumber: registration.rowNumber };
-                fetch(SCRIPT_URL, {
-                    method: 'POST',
-                    body: JSON.stringify(data),
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                })
-                    .then(res => res.json())
-                    .then(result => {
-                        if (result.result === 'success') {
-                            showNotification('success', 'Rejected', `Rejection email sent to ${registration.name}.`);
-                            fetchAndDisplayRegistrations();
-                            closeDialog();
-                        } else { throw new Error(result.message); }
-                    })
-                    .catch(err => {
-                        showNotification('error', 'Rejection Failed', err.message);
-                        confirmBtn.disabled = false;
-                        confirmBtn.innerHTML = 'Reject';
-                    });
+                const data = { message: message, email: registration.email, rowNumber: registration.rowNumber, name: registration.name };
+
+                if (!currentCourse) return;
+                gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: {
+                        function: 'rejectRegistration',
+                        parameters: [data, LOGS_SPREADSHEET_ID, currentCourse],
+                    }
+                }).then(function (resp) {
+                    const result = resp.result.response.result;
+                    if (result && result.result === 'success') {
+                        showNotification('success', 'Rejected', `Rejection email sent to ${registration.name}.`);
+                        fetchAndDisplayRegistrations();
+                        closeDialog();
+                    } else { throw new Error(result ? result.message : 'Rejection failed.'); }
+                }).catch(err => {
+                    showNotification('error', 'Rejection Failed', err.message);
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = 'Reject';
+                });
             });
         }
 
@@ -6326,17 +6340,22 @@
                 databaseLoadPromise = new Promise(resolve => { databaseResolve = resolve; });
             }
 
-            const processDbData = (data) => {
+            // This function now handles processing the raw sheet data returned by the script
+            const processDbData = (rawData) => {
                 try {
-                    if (data.error) throw new Error(data.error.message);
-                    const rows = JSON.parse(data.response.result);
+                    if (!Array.isArray(rawData)) { // Check if the script returned an error object
+                        if (rawData && rawData.result === 'error') throw new Error(rawData.message);
+                        throw new Error("Invalid data format received from script.");
+                    }
                     const newDbMap = {}, newUidMap = {};
-                    if (Array.isArray(rows) && rows.length > 1) {
-                        rows.slice(1).forEach(row => {
+                    if (rawData.length > 1) { // Check if there's data beyond the header
+                        rawData.slice(1).forEach(row => { // Skip header row
                             const [index, name, uidString, email] = row;
-                            const dbKey = String(index).trim();
-                            if (dbKey && name && uidString) {
-                                const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
+                            // Use index as the primary key IF it's a valid number, otherwise skip
+                            const dbKey = (index !== null && index !== undefined && !isNaN(parseInt(index))) ? String(parseInt(index)).trim() : null;
+
+                            if (dbKey && name && uidString) { // Ensure key, name, and UIDs exist
+                                const uids = String(uidString).split(',').map(s => s.trim()).filter(Boolean);
                                 if (uids.length > 0) {
                                     newDbMap[dbKey] = { name: String(name).trim(), email: email ? String(email).trim() : '', uids };
                                     uids.forEach(uid => { newUidMap[uid] = dbKey; });
@@ -6346,78 +6365,37 @@
                     }
                     databaseMap = newDbMap;
                     uidToPrimaryUidMap = newUidMap;
-                    console.log(`Loaded ${Object.keys(databaseMap).length} entries from database (Student).`);
+                    console.log(`Loaded ${Object.keys(databaseMap).length} entries from database.`);
+
                 } catch (e) {
                     console.error("Failed to parse database from script:", e);
+                    // Optionally show a notification
+                    showNotification('error', 'Database Error', `Failed to load database: ${e.message}`);
                 } finally {
-                    if (databaseResolve) databaseResolve();
+                    if (databaseResolve) databaseResolve(); // Resolve the main promise
                     loadingTasks.delete('database');
                     checkLoadingCompletion();
+                    // Update UI elements dependent on the database
+                    updateDatabaseStatus();
+                    updateDatabaseList();
                 }
             };
 
-            if (isAdmin) {
-                // --- ADMIN PATH: Direct GAPI access ---
-                try {
-                    const response = await gapi.client.sheets.spreadsheets.values.get({
-                        spreadsheetId: DATABASE_SPREADSHEET_ID,
-                        range: 'Database!A2:D'
-                    });
-                    const rows = response.result.values || [];
-                    const newDbMap = {};
-                    const newUidMap = {};
-
-                    rows.forEach(row => {
-                        const [index, name, uidString, email] = row;
-                        const dbKey = String(index).trim();
-                        if (dbKey && name && uidString) {
-                            const uids = uidString.split(',').map(s => s.trim()).filter(Boolean);
-                            if (uids.length > 0) {
-                                newDbMap[dbKey] = {
-                                    name: String(name).trim(),
-                                    email: email ? String(email).trim() : '',
-                                    uids: uids
-                                };
-                                uids.forEach(uid => {
-                                    newUidMap[uid] = dbKey;
-                                });
-                            }
-                        }
-                    });
-                    databaseMap = newDbMap;
-                    uidToPrimaryUidMap = newUidMap;
-                    updateDatabaseStatus();
-                    updateDatabaseList();
-                    console.log(`Loaded ${Object.keys(databaseMap).length} entries from database sheet (Admin).`);
-                } catch (error) {
-                    console.error('Error fetching database (Admin):', error);
-                    if (!isInitializing) {
-                        showNotification('error', 'Database Error', 'Failed to fetch database from Google Sheets');
+            // --- Call the script's getDatabase function for BOTH admins and students ---
+            console.log('Fetching database via Apps Script API...');
+            try {
+                const resp = await gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: {
+                        function: 'getDatabase',
                     }
-                } finally {
-                    if (databaseResolve) {
-                        databaseResolve();
-                        databaseResolve = null;
-                    }
-                    loadingTasks.delete('database');
-                    checkLoadingCompletion();
-                }
-
-            } else {
-                // --- STUDENT PATH: Correct API Call ---
-                console.log('Fetching database via Apps Script API (Student)...');
-                try {
-                    const data = await gapi.client.script.scripts.run({
-                        scriptId: SCRIPT_ID,
-                        resource: { function: 'getDatabase' }
-                    });
-                    processDbData(data.result);
-                } catch (err) {
-                    console.error('Error fetching database via API:', err);
-                    if (databaseResolve) databaseResolve();
-                    loadingTasks.delete('database');
-                    checkLoadingCompletion();
-                }
+                });
+                if (resp.result.error) throw new Error(resp.result.error.message);
+                // Pass the raw data array returned by the script
+                processDbData(resp.result.response.result);
+            } catch (err) {
+                console.error('Error fetching database via API:', err);
+                processDbData({ result: "error", message: err.message }); // Process the error state
             }
         }
 
@@ -6796,40 +6774,43 @@
         }
 
         /**
-        * Sync database to Google Sheets with format standardization
-        */
+     * Syncs the current frontend databaseMap UP to the Google Sheet via Apps Script.
+     * ONLY callable by admins.
+     */
         async function syncDatabaseToSheet() {
-            if (!isSignedIn || !isAdmin || !isOnline) return;
+            // Add checks for admin status, online status, and current course context
+            if (!isAdmin || !isOnline || !currentCourse) {
+                console.log("SyncDatabaseToSheet: Skipping sync (not admin, offline, or no course selected).");
+                return;
+            }
+
+            console.log("Syncing frontend databaseMap to Google Sheet via Apps Script...");
+            showNotification('info', 'Syncing Database...', 'Please wait.');
+
             try {
-                // Sort by primary UID for consistent ordering
-                const entries = Object.entries(databaseMap).sort((a, b) => a[0].localeCompare(b[0]));
-
-                // Format data as [Index, Name, UID_String, Email]
-                const sheetData = entries.map(([primaryUid, data], index) => {
-                    const uidString = data.uids.join(', '); // Join the UIDs into a string
-                    return [index + 1, data.name, uidString, data.email || ''];
+                const resp = await gapi.client.script.scripts.run({
+                    scriptId: SCRIPT_ID,
+                    resource: {
+                        function: 'syncDatabase_Admin',
+                        // Pass the current databaseMap, Logs ID, and course name for context
+                        parameters: [databaseMap, LOGS_SPREADSHEET_ID, currentCourse],
+                    }
                 });
 
-                await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: DATABASE_SPREADSHEET_ID, range: 'Database!A:D' });
-                await gapi.client.sheets.spreadsheets.values.update({
-                    spreadsheetId: DATABASE_SPREADSHEET_ID,
-                    range: 'Database!A1:D1',
-                    valueInputOption: 'RAW',
-                    resource: { values: [['Index', 'Name', 'UID', 'Email']] }
-                });
-                if (sheetData.length > 0) {
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: DATABASE_SPREADSHEET_ID,
-                        range: 'Database!A2:D',
-                        valueInputOption: 'RAW',
-                        resource: { values: sheetData }
-                    });
+                if (resp.result.error) throw new Error(resp.result.error.message);
+
+                const resultData = resp.result.response.result;
+                if (resultData && resultData.result === 'success') {
+                    console.log(`Successfully synced ${resultData.count} database entries via script.`);
+                    showNotification('success', 'Database Synced', `${resultData.count} entries synced.`);
+                } else {
+                    throw new Error(resultData ? resultData.message : 'Unknown error during database sync.');
                 }
-                console.log(`Successfully synced ${entries.length} database entries.`);
-                showNotification('success', 'Database Synced', `${entries.length} entries synced.`);
+
             } catch (error) {
-                console.error('Error syncing database:', error);
-                showNotification('error', 'Sync Error', 'Failed to sync database.');
+                console.error('Error syncing database via script:', error);
+                showNotification('error', 'Database Sync Error', `Failed to sync database: ${error.message}`);
+                // Rethrow the error if needed by calling functions
                 throw error;
             }
         }
