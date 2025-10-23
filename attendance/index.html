@@ -3342,14 +3342,13 @@
         // Config
         const ADMIN_EMAILS = ['bplaku@epoka.edu.al']; // Add any admin emails here
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
-        const API_KEY = 'AIzaSyD295FTtMHvXxZablRf0f-FR-IQ2dQRPQE';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const SCRIPT_ID = '1C0JKXLo8rMjCHkkaLLM2AMjNF2y3YGSSeZQKywBD37gRO_aMId9bVUli';
+        const WEB_APP_URL = 'https://script.google.com/a/macros/epoka.edu.al/s/AKfycbz_JXdL6jwDuWVcjBhLTlxG2-aqRY2epp29S3xoWsTyuv2COyAd2g1XUQrL8qY6dd_OKg/exec';
 
         // Discovery docs and scopes for Google API
-        const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4", "https://script.googleapis.com/$discovery/rest?version=v1"];
+        const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
 
         // App state
         let courseData = {};
@@ -3440,7 +3439,7 @@
         const userContainer = document.getElementById('user-container');
         const userName = document.getElementById('user-name');
         const userAvatar = document.getElementById('user-avatar');
-        const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/script.projects";
+        const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
         function checkLoadingCompletion() {
             if (loadingTasks.size === 0) {
@@ -4697,7 +4696,6 @@
 
             gapi.load('client', () => {
                 gapi.client.init({
-                    apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS
                 }).then(async () => {
                     console.log('GAPI client initialized successfully.');
@@ -5129,27 +5127,24 @@
                 };
 
                 // Use fetch to send the data and wait for a real response
-                gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: { function: 'handleNewSubmission', parameters: [submitData] }
-                }).then(function (resp) {
-                    const data = resp.result.response.result;
-                    if (data && data.result === 'success') {
-                        showNotification('success', 'Submission Sent!', 'Your Student ID Card application has been sent for approval.');
-                        closeDialog();
-                    } else {
-                        const errorMessage = (data && data.message) ? data.message : "An unknown error occurred.";
-                        console.error('Script Error:', errorMessage);
-                        showNotification('error', 'Submission Failed', errorMessage);
+                callWebApp('submitRegistration', submitData, 'POST')
+                    .then(data => { // 'data' is already the parsed result from ContentService
+                        if (data && data.result === 'success') {
+                            showNotification('success', 'Submission Sent!', 'Your Student ID Card application has been sent for approval.');
+                            closeDialog();
+                        } else {
+                            const errorMessage = (data && data.message) ? data.message : "An unknown error occurred.";
+                            console.error('Script Error:', errorMessage);
+                            showNotification('error', 'Submission Failed', errorMessage);
+                            submitBtn.disabled = false;
+                            submitBtn.innerHTML = 'Submit';
+                        }
+                    }).catch(err => {
+                        console.error('API Error:', err);
+                        showNotification('error', 'Submission Failed', `A network error occurred: ${err.message}`);
                         submitBtn.disabled = false;
                         submitBtn.innerHTML = 'Submit';
-                    }
-                }).catch(err => {
-                    console.error('API Error:', err);
-                    showNotification('error', 'Submission Failed', 'A network error occurred. Please check your connection.');
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = 'Submit';
-                });
+                    });
             });
 
             document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
@@ -5172,17 +5167,9 @@
 
             try {
                 if (!currentCourse) return;
-                const resp = await gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: {
-                        function: 'getPendingRegistrations',
-                        parameters: [LOGS_SPREADSHEET_ID, currentCourse],
-                    }
-                });
+                // Parameters are now sent in the payload object for GET
+                const registrations = await callWebApp('getPendingRegistrations', {}, 'GET');
 
-                if (resp.result.error) throw new Error(resp.result.error.message);
-
-                const registrations = resp.result.response.result;
                 tbody.innerHTML = '';
 
                 if (registrations && registrations.length > 0) {
@@ -5356,27 +5343,20 @@
                 };
 
                 if (!currentCourse) return;
-                gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: {
-                        function: 'approveRegistration',
-                        // --- ADD parameters ARRAY ---
-                        parameters: [finalData, LOGS_SPREADSHEET_ID, currentCourse],
-                    }
-                }).then(function (resp) {
-                    const result = resp.result.response.result;
-                    if (result && result.result === 'success') {
-                        showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
-                        refreshAdminViews();
-                        closeDialog();
-                    } else {
-                        throw new Error(result ? result.message : 'Approval failed.');
-                    }
-                }).catch(err => {
-                    showNotification('error', 'Approval Failed', err.message);
-                    confirmBtn.disabled = false;
-                    confirmBtn.innerHTML = 'Approve';
-                });
+                callWebApp('approveRegistration', finalData, 'POST')
+                    .then(result => { // 'result' is the direct response from the script
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
+                            refreshAdminViews();
+                            closeDialog();
+                        } else {
+                            throw new Error(result ? result.message : 'Approval failed.');
+                        }
+                    }).catch(err => {
+                        showNotification('error', 'Approval Failed', err.message);
+                        confirmBtn.disabled = false;
+                        confirmBtn.innerHTML = 'Approve';
+                    });
             });
         }
 
@@ -5484,24 +5464,18 @@
                 const payload = { ...newData, approvalMode: 'add_new_separate' };
 
                 if (!currentCourse) return;
-                gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: {
-                        function: 'approveRegistration',
-                        parameters: [payload, LOGS_SPREADSHEET_ID, currentCourse],
-                    }
-                }).then(function (resp) {
-                    const result = resp.result.response.result;
-                    if (result && result.result === 'success') {
-                        showNotification('success', 'Action Complete', `Registration for ${newData.name} has been processed.`);
-                        refreshAdminViews();
-                        closeDialog();
-                    } else { throw new Error(result ? result.message : 'Action failed'); }
-                }).catch(err => {
-                    showNotification('error', 'Action Failed', err.message);
-                    button.disabled = false;
-                    button.innerHTML = 'Add as Separate';
-                });
+                callWebApp('approveRegistration', payload, 'POST')
+                    .then(result => {
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Action Complete', `Registration for ${newData.name} has been processed.`);
+                            refreshAdminViews();
+                            closeDialog();
+                        } else { throw new Error(result ? result.message : 'Action failed'); }
+                    }).catch(err => {
+                        showNotification('error', 'Action Failed', err.message);
+                        button.disabled = false;
+                        button.innerHTML = 'Add as Separate';
+                    });
             });
 
             // "Replace Selected" button listener
@@ -5529,24 +5503,18 @@
                 button.disabled = true;
                 button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Replacing...`;
 
-                gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: {
-                        function: 'approveRegistration',
-                        parameters: [payload, LOGS_SPREADSHEET_ID, currentCourse],
-                    }
-                }).then(function (resp) {
-                    const result = resp.result.response.result;
-                    if (result && result.result === 'success') {
-                        showNotification('success', 'Action Complete', 'The entry has been updated.');
-                        refreshAdminViews();
-                        closeDialog();
-                    } else { throw new Error(result ? result.message : 'Action failed'); }
-                }).catch(err => {
-                    showNotification('error', 'Action Failed', err.message);
-                    button.disabled = false;
-                    button.innerHTML = 'Replace Selected';
-                });
+                callWebApp('approveRegistration', payload, 'POST')
+                    .then(result => {
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Action Complete', 'The entry has been updated.');
+                            refreshAdminViews();
+                            closeDialog();
+                        } else { throw new Error(result ? result.message : 'Action failed'); }
+                    }).catch(err => {
+                        showNotification('error', 'Action Failed', err.message);
+                        button.disabled = false;
+                        button.innerHTML = 'Replace Selected';
+                    });
             });
         }
 
@@ -5617,25 +5585,97 @@
                 const data = { message: message, email: registration.email, rowNumber: registration.rowNumber, name: registration.name };
 
                 if (!currentCourse) return;
-                gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: {
-                        function: 'rejectRegistration',
-                        parameters: [data, LOGS_SPREADSHEET_ID, currentCourse],
-                    }
-                }).then(function (resp) {
-                    const result = resp.result.response.result;
-                    if (result && result.result === 'success') {
-                        showNotification('success', 'Rejected', `Rejection email sent to ${registration.name}.`);
-                        fetchAndDisplayRegistrations();
-                        closeDialog();
-                    } else { throw new Error(result ? result.message : 'Rejection failed.'); }
-                }).catch(err => {
-                    showNotification('error', 'Rejection Failed', err.message);
-                    confirmBtn.disabled = false;
-                    confirmBtn.innerHTML = 'Reject';
-                });
+                callWebApp('rejectRegistration', data, 'POST')
+                    .then(result => {
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Rejected', `Rejection email sent to ${registration.name}.`);
+                            fetchAndDisplayRegistrations();
+                            closeDialog();
+                        } else { throw new Error(result ? result.message : 'Rejection failed.'); }
+                    }).catch(err => {
+                        showNotification('error', 'Rejection Failed', err.message);
+                        confirmBtn.disabled = false;
+                        confirmBtn.innerHTML = 'Reject';
+                    });
             });
+        }
+
+        async function callWebApp(action, payload = {}, method = 'GET') {
+            const token = gapi.client.getToken()?.access_token;
+            if (!token) {
+                // Handle case where user might be signed out or token expired mid-session
+                handleSignoutClick(); // Force re-login or go to lecturer mode
+                throw new Error("User not signed in or token expired.");
+            }
+
+            let url = WEB_APP_URL;
+            const options = {
+                method: method,
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    // Add Content-Type only for POST requests
+                },
+                redirect: 'follow', // Follow redirects from Apps Script
+            };
+
+            // Add context parameters needed by Apps Script (especially for admin checks)
+            // Send LOGS_SPREADSHEET_ID and currentCourse in the payload for both GET and POST
+            payload.logsSpreadsheetId = LOGS_SPREADSHEET_ID;
+            payload.courseName = currentCourse || ''; // Send current course context
+
+            if (method === 'GET') {
+                // Add action and payload as query parameters
+                const params = new URLSearchParams(payload);
+                params.append('action', action); // Add action parameter for doGet routing
+                url += '?' + params.toString();
+            } else { // POST
+                options.headers['Content-Type'] = 'application/json';
+                // Add action to payload and send in body for doPost routing
+                payload.action = action;
+                options.body = JSON.stringify(payload);
+            }
+
+            try {
+                const response = await fetch(url, options);
+
+                // Check for non-OK HTTP responses (like 401 Unauthorized, 500 Server Error)
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! status: ${response.status}`;
+                    try {
+                        // Try to parse error details from Apps Script response
+                        const errorData = await response.json();
+                        if (errorData && errorData.message) {
+                            errorMsg = errorData.message;
+                        } else if (response.status === 401 || response.status === 403) {
+                            errorMsg = 'Authorization Error. Your session might have expired.';
+                            // Trigger re-auth flow immediately if unauthorized
+                            handleSignoutClick(); // Force re-login or lecturer mode
+                        }
+                    } catch (e) { /* Ignore parsing error if response is not JSON */ }
+                    throw new Error(errorMsg);
+                }
+
+                const data = await response.json();
+
+                // Check for application-level errors returned within the JSON by Apps Script
+                // (e.g., { result: "error", message: "..." })
+                if (data && data.result === 'error') {
+                    throw new Error(data.message || 'Script execution failed.');
+                }
+
+                return data; // Return the parsed JSON data (the actual result from your Apps Script function)
+
+            } catch (error) {
+                console.error(`Error calling Web App action "${action}":`, error);
+                // Handle specific errors like token expiration
+                if (error.message.includes('401') || error.message.includes('token expired') || error.message.includes('Authorization Error')) {
+                    handleSignoutClick(); // Force re-login or lecturer mode
+                    showNotification('error', 'Session Expired', 'Please sign in again.');
+                } else {
+                    showNotification('error', 'Network Error', `Could not reach server: ${error.message}`);
+                }
+                throw error; // Re-throw the error for the calling function to handle UI updates
+            }
         }
 
         /**
@@ -5653,7 +5693,7 @@
             console.log('Using redirect URI:', redirectUri);
 
             // Create Google OAuth URL with scopes
-            const scopes = encodeURIComponent(SCOPES.replace(' ', ' openid '));
+            const scopes = encodeURIComponent('openid ' + SCOPES);
             const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
                 `client_id=${CLIENT_ID}&` +
                 `redirect_uri=${encodeURIComponent(redirectUri)}&` +
@@ -6211,12 +6251,9 @@
 
             const fetchPromises = availableCourses.map(async (course) => {
                 try {
-                    const data = await gapi.client.script.scripts.run({
-                        scriptId: SCRIPT_ID,
-                        resource: { function: 'getStudentLogs', parameters: [course, LOGS_SPREADSHEET_ID] }
-                    });
-                    if (data.result.error) throw new Error(data.result.error.message);
-                    const serverLogs = JSON.parse(data.result.response.result);
+                    // Call the Web App using GET, parameters go in payload
+                    const serverLogs = await callWebApp('getStudentLogs', { courseName: course }, 'GET');
+                    // No need to parse JSON, callWebApp already does it
                     if (serverLogs && serverLogs.length > 0) {
                         studentLogCache[course] = serverLogs;
                         console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
@@ -6386,15 +6423,10 @@
             // --- Call the script's getDatabase function for BOTH admins and students ---
             console.log('Fetching database via Apps Script API...');
             try {
-                const resp = await gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: {
-                        function: 'getDatabase',
-                    }
-                });
-                if (resp.result.error) throw new Error(resp.result.error.message);
-                // Pass the raw data array returned by the script
-                processDbData(resp.result.response.result);
+                // Call the generic fetch function for GET, no payload needed
+                const rawData = await callWebApp('getDatabase', {}, 'GET');
+                // Pass the raw data array returned by the web app
+                processDbData(rawData);
             } catch (err) {
                 console.error('Error fetching database via API:', err);
                 processDbData({ result: "error", message: err.message }); // Process the error state
@@ -6518,11 +6550,10 @@
                 // --- STUDENT PATH: Correct API Call ---
                 console.log('Fetching available courses via Apps Script API (Student)...');
                 try {
-                    const data = await gapi.client.script.scripts.run({
-                        scriptId: SCRIPT_ID,
-                        resource: { function: 'getAvailableCourses', parameters: [LOGS_SPREADSHEET_ID] }
-                    });
-                    loadAndProcess(data.result);
+                    // Call the Web App using GET, parameters go in payload
+                    const resultData = await callWebApp('getAvailableCourses', {}, 'GET');
+                    // `callWebApp` returns the parsed JSON directly, simulate the old structure for loadAndProcess
+                    loadAndProcess({ response: { result: JSON.stringify(resultData) } });
                 } catch (err) {
                     console.error('Error fetching courses via API:', err);
                     availableCourses = [];
@@ -6790,18 +6821,9 @@
             showNotification('info', 'Syncing Database...', 'Please wait.');
 
             try {
-                const resp = await gapi.client.script.scripts.run({
-                    scriptId: SCRIPT_ID,
-                    resource: {
-                        function: 'syncDatabase_Admin',
-                        // Pass the current databaseMap, Logs ID, and course name for context
-                        parameters: [databaseMap, LOGS_SPREADSHEET_ID, currentCourse],
-                    }
-                });
-
-                if (resp.result.error) throw new Error(resp.result.error.message);
-
-                const resultData = resp.result.response.result;
+                // Call the Web App using POST, parameters go in payload
+                const resultData = await callWebApp('syncDatabase_Admin', { databaseData: databaseMap }, 'POST');
+                // No need for resp.result..., callWebApp returns the data directly
                 if (resultData && resultData.result === 'success') {
                     console.log(`Successfully synced ${resultData.count} database entries via script.`);
                     showNotification('success', 'Database Synced', `${resultData.count} entries synced.`);
