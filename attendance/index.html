@@ -3340,12 +3340,14 @@
 
     <script>
         // Config
-        const ADMIN_EMAILS = ['bplaku@epoka.edu.al']; // Add any admin emails here
+        let isAdmin = false;
+        let isGlobalAdmin = false;
+        let adminCourses = [];
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzN1kiZeOWt8Af8fSGp9xJ7lS8REFzDKrTHqnDDYxZpfjyOvoazPRB1FO8PYOUj6CB3xw/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyR9Ho9qa_O2G8d4LV5ZioM_-7myH-5zVEt7CX2OYEcjMCk7JH-2VhG2taW9gPqX0oftg/exec';
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -3362,7 +3364,6 @@
         let currentSort = localStorage.getItem('logs_sort') || 'date-desc';
         let currentDbSort = localStorage.getItem('db_sort') || 'name-asc';
         let soundEnabled = true; // Sound effects enabled by default
-        let isAdmin = false; // Current user is admin
         let isSignedIn = false; // User is signed in
         let currentUser = null; // Current user info
         let tokenClient = null; // Google OAuth token client
@@ -3450,6 +3451,37 @@
             }
         }
 
+        /**
+ * Check admin status from server
+ */
+        async function checkAdminStatus() {
+            try {
+                const result = await callWebApp('checkAdminStatus', {}, 'GET');
+
+                isAdmin = result.isAdmin;
+                isGlobalAdmin = result.isGlobalAdmin;
+                adminCourses = result.courses;
+
+                console.log('Admin status:', {
+                    isAdmin,
+                    isGlobalAdmin,
+                    courses: adminCourses
+                });
+
+                return result;
+            } catch (error) {
+                console.error('Error checking admin status:', error);
+                return { isAdmin: false, courses: [] };
+            }
+        }
+
+        /**
+         * Check if user is admin for specific course
+         */
+        function isAdminForCourse(courseName) {
+            if (isGlobalAdmin) return true; // Global admins have access to all
+            return adminCourses.includes(courseName);
+        }
 
         /**
          * NEW: Finds and removes all data related to this app from localStorage.
@@ -3588,7 +3620,7 @@
         function getLogsForCurrentUser() {
             if (!currentCourse) return []; // No course selected, return empty.
 
-            if (isAdmin) {
+            if (isAdminForCourse(currentCourse)) {
                 // Admins use the main, fully-featured courseData object.
                 return courseData[currentCourse]?.logs || [];
             } else {
@@ -4710,19 +4742,20 @@
                             gapi.client.setToken(JSON.parse(savedToken));
                             isSignedIn = true;
                             await fetchUserInfo();
-                            isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                            const adminStatus = await checkAdminStatus();
+                            isAdmin = adminStatus.isAdmin;
                             await Promise.all([
                                 fetchAvailableCourses(), // This sets 'currentCourse'
                                 fetchDatabaseFromSheet()
                             ]);
 
-                            if (isAdmin) {
+                            if (isAdminForCourse(currentCourse)) {
                                 // Now fetch registrations AFTER currentCourse is set
                                 fetchAndDisplayRegistrations();
                             }
 
                             // --- PERFORMANCE OPTIMIZATION ---
-                            if (isAdmin) {
+                            if (isAdminForCourse(currentCourse)) {
                                 // --- ADMIN PATH ---
                                 // Admins load everything directly using gapi for full control.
                                 console.log("Admin detected. Loading all data directly...");
@@ -4804,7 +4837,7 @@
             const existingBtn = document.getElementById('clear-cache-btn');
             if (existingBtn) existingBtn.remove();
 
-            if (isAdmin) {
+            if (isAdminForCourse(currentCourse)) {
                 const clearButton = document.createElement('button');
                 clearButton.id = 'clear-cache-btn';
                 clearButton.className = 'btn-red btn-icon';
@@ -4943,8 +4976,10 @@
                 localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
                 isSignedIn = true;
 
-                fetchUserInfo().then(() => {
-                    isAdmin = currentUser && ADMIN_EMAILS.includes(currentUser.email);
+                fetchUserInfo().then(async () => {  // ← Added "async"
+                    const adminStatus = await checkAdminStatus();
+                    isAdmin = adminStatus.isAdmin;
+
                     console.log('User is admin:', isAdmin);
                     updateAuthUI();
                     showNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
@@ -5166,6 +5201,11 @@
 
             try {
                 if (!currentCourse) return;
+                if (!isAdminForCourse(currentCourse)) {
+                    console.log('Not admin for', currentCourse);
+                    pendingView.classList.add('is-hidden');
+                    return;
+                }
                 // Parameters are now sent in the payload object for GET
                 const registrations = await callWebApp('getPendingRegistrations', {}, 'GET');
 
@@ -5849,7 +5889,7 @@
 
         // REPLACEMENT FUNCTION
         function handleSignoutClick() {
-            if (isAdmin) {
+            if (isAdminForCourse(currentCourse)) {
                 // --- LECTURER MODE LOGIC ---
                 console.log('Entering Lecturer Mode (locking session).');
                 localStorage.removeItem('gapi_token');
@@ -6450,7 +6490,7 @@
                 }
             };
 
-            if (isAdmin) {
+            if (isAdminForCourse(currentCourse)) {
                 // --- ADMIN PATH: Direct GAPI access ---
                 try {
                     console.log('Fetching available courses from spreadsheet (Admin)...');
@@ -8296,7 +8336,7 @@
                 if (result.length === 0) {
                     let emptyMessageHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
                                <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>`;
-                    if (isAdmin) {
+                    if (isAdminForCourse(currentCourse)) {
                         emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
                     } else {
                         emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">There are no attendance records for you in this course.</p>`;
@@ -8357,7 +8397,7 @@
                     nameCell.textContent = group.name;
                     row.appendChild(nameCell);
 
-                    if (isAdmin) {
+                    if (isAdminForCourse(currentCourse)) {
                         const uidCell = document.createElement('td');
                         uidCell.className = 'uid-cell uid-column admin-only';
                         uidCell.innerHTML = `<span class="uid-badge">${group.uid}</span>`;
@@ -8391,7 +8431,7 @@
                     });
                     row.appendChild(timesCell);
 
-                    if (isAdmin) {
+                    if (isAdminForCourse(currentCourse)) {
                         const actionsCell = document.createElement('td');
                         actionsCell.className = 'actions-cell admin-only';
                         const actionsWrapper = document.createElement('div');
@@ -8691,7 +8731,7 @@
             exportBtn.disabled = logsForCurrentCourse.length === 0;
             clearBtn.disabled = logsForCurrentCourse.length === 0;
 
-            if (isAdmin) {
+            if (isAdminForCourse(currentCourse)) {
                 // Admin-specific UI updates
                 clearDbBtn.disabled = Object.keys(databaseMap).length === 0;
                 exportExcelBtn.disabled = Object.keys(databaseMap).length === 0;
