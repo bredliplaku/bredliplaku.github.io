@@ -2161,6 +2161,27 @@
             width: 30px;
             height: 30px;
             border-radius: 50%;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .user-avatar:active {
+            transform: scale(0.95);
+        }
+
+        /* Smooth transitions for clear-cache button */
+        #clear-cache-btn {
+            opacity: 0;
+            transform: scale(0.8);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+            /* Prevent clicks when hidden */
+        }
+
+        #clear-cache-btn.visible {
+            opacity: 1;
+            transform: scale(1);
+            pointer-events: auto;
+            /* Enable clicks when visible */
         }
 
         .sync-auth-container {
@@ -3358,6 +3379,7 @@
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
         const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzumAp5h9aDOms0KTwOkBLDgyor4KNSkCdLSxRpBPKwgiKAti03L8qvNdkwO5dQ4XCAgQ/exec';
 
+        // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
         const ADMIN_EMAILS = [];
 
@@ -3816,8 +3838,8 @@
                     if (avatarClickCount === 5) {
                         const clearCacheBtn = document.getElementById('clear-cache-btn');
                         if (clearCacheBtn) {
-                            // Reveal the hidden button
-                            clearCacheBtn.style.display = 'inline-block';
+                            // Smoothly reveal the hidden button
+                            clearCacheBtn.classList.add('visible');
                             showNotification('info', 'Cache Button Unlocked', 'The clear cache button is now visible.');
                         }
                         avatarClickCount = 0; // Reset after activation
@@ -4856,8 +4878,8 @@
                 clearButton.title = 'Clear Cache and Refresh';
                 clearButton.innerHTML = '<i class="fa-solid fa-bomb"></i>';
 
-                // Hide the button by default
-                clearButton.style.display = 'none';
+                // Button starts hidden with CSS opacity: 0 and transform: scale(0.8)
+                // No need to set display: none, the CSS handles it
 
                 clearButton.addEventListener('click', () => {
                     // Call the function directly without a confirmation dialog
@@ -6266,11 +6288,37 @@
 
             if (!isAdmin && currentUser) {
                 const studentNameNormalised = normalizeName(currentUser.name);
+                const studentEmail = currentUser.email ? currentUser.email.toLowerCase() : '';
+
                 coursesToDisplay = availableCourses.filter(course => {
                     const logsForCourse = studentLogCache[course] || [];
+
+                    // If no logs cached for this course, include it (student might have logs but cache failed)
+                    if (logsForCourse.length === 0) {
+                        return true; // Show the course, let the backend filter it
+                    }
+
+                    // Check if at least one log in this course belongs to the student
                     return logsForCourse.some(log => {
+                        // Try multiple matching strategies for robustness
+
+                        // Strategy 1: Match by UID in database
                         const logOwnerName = databaseMap[log.uid]?.name || '';
-                        return normalizeName(logOwnerName) === studentNameNormalised;
+                        if (logOwnerName && normalizeName(logOwnerName) === studentNameNormalised) {
+                            return true;
+                        }
+
+                        // Strategy 2: Match by email if available in log
+                        if (log.email && studentEmail && log.email.toLowerCase() === studentEmail) {
+                            return true;
+                        }
+
+                        // Strategy 3: Match by name if stored directly in log
+                        if (log.name && normalizeName(log.name) === studentNameNormalised) {
+                            return true;
+                        }
+
+                        return false;
                     });
                 });
             }
@@ -6525,7 +6573,9 @@
                 }
             };
 
-            if (isAdminForCourse(currentCourse)) {
+            // FIX: Check isAdmin instead of isAdminForCourse(currentCourse) 
+            // because currentCourse might not be set yet at this point
+            if (isAdmin) {
                 // --- ADMIN PATH: Direct GAPI access ---
                 try {
                     console.log('Fetching available courses from spreadsheet (Admin)...');
@@ -9192,15 +9242,41 @@
             // For students, filter courses based on the in-memory cache.
             if (!isAdmin && currentUser) {
                 const studentNameNormalised = normalizeName(currentUser.name);
+                const studentEmail = currentUser.email ? currentUser.email.toLowerCase() : '';
+
                 coursesToDisplay = availableCourses.filter(course => {
                     const logsForCourse = studentLogCache[course] || [];
+
+                    // If no logs cached for this course, include it (student might have logs but cache failed)
+                    if (logsForCourse.length === 0) {
+                        return true; // Show the course, let the backend filter it
+                    }
+
                     // Check if at least one log in this course belongs to the student
                     return logsForCourse.some(log => {
-                        // ## FIX IS HERE ##
+                        // Try multiple matching strategies for robustness
+
+                        // Strategy 1: Match by UID in database
                         const logOwnerName = databaseMap[log.uid]?.name || '';
-                        return normalizeName(logOwnerName) === studentNameNormalised;
+                        if (logOwnerName && normalizeName(logOwnerName) === studentNameNormalised) {
+                            return true;
+                        }
+
+                        // Strategy 2: Match by email if available in log
+                        if (log.email && studentEmail && log.email.toLowerCase() === studentEmail) {
+                            return true;
+                        }
+
+                        // Strategy 3: Match by name if stored directly in log
+                        if (log.name && normalizeName(log.name) === studentNameNormalised) {
+                            return true;
+                        }
+
+                        return false;
                     });
                 });
+
+                console.log(`Student course filtering: ${coursesToDisplay.length} of ${availableCourses.length} courses shown`);
             }
 
             coursesToDisplay.forEach(course => {
