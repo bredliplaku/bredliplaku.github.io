@@ -3358,9 +3358,8 @@
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
         const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzumAp5h9aDOms0KTwOkBLDgyor4KNSkCdLSxRpBPKwgiKAti03L8qvNdkwO5dQ4XCAgQ/exec';
 
-        if (typeof ADMIN_EMAILS === 'undefined') {
-            const ADMIN_EMAILS = ['bplaku@epoka.edu.al'];
-        }
+        // This is just a fallback that won't actually be used
+        const ADMIN_EMAILS = [];
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -3673,16 +3672,16 @@
                         return;
                     }
 
-                    // --- START OF NEW LOGIC ---
                     // Hide or show the course buttons based on the selected tab
+                    // This is now more explicit and runs before tab switching
                     if (courseButtons) {
                         if (tabId === 'database-tab') {
                             courseButtons.style.display = 'none';
                         } else {
-                            courseButtons.style.display = 'flex'; // Restore its default display
+                            // Only show course buttons if user is signed in
+                            courseButtons.style.display = isSignedIn ? 'flex' : 'none';
                         }
                     }
-                    // --- END OF NEW LOGIC ---
 
                     // Update the active state on the tab buttons
                     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -4233,7 +4232,7 @@
 
             try {
                 isSyncing = true;
-                updateSyncStatus("Syncing...", "syncing");
+                updateSyncStatus("Auto-syncing...", "syncing");
 
                 await syncLogsWithSheet();
 
@@ -4243,7 +4242,7 @@
                 syncAttempts = 0;
                 const now = new Date();
                 const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                updateSyncStatus(`Synced ${time}`, "success");
+                updateSyncStatus(`Auto-synced ${time}`, "success");
 
                 // Hide success indication after a few seconds
                 setTimeout(() => {
@@ -4256,12 +4255,12 @@
                 syncAttempts++;
 
                 // Update UI to show sync failed
-                updateSyncStatus("Sync failed", "error");
+                updateSyncStatus("Auto-sync failed", "error");
 
                 if (syncAttempts < MAX_SYNC_ATTEMPTS) {
                     // Schedule retry with exponential backoff
                     const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
-                    updateSyncStatus(`Retrying in ${Math.round(retryDelay / 1000)}s`, "waiting");
+                    updateSyncStatus(`Retry in ${Math.round(retryDelay / 1000)}s`, "waiting");
 
                     setTimeout(() => {
                         if (isOnline && isSignedIn) {
@@ -5909,6 +5908,29 @@
                 isSignedIn = false;
                 isAdmin = false;
                 currentUser = null;
+
+                // Switch to scanner tab if currently on database tab
+                const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+                const scannerTab = document.querySelector('.tab[data-tab="scanner-tab"]');
+                const databaseTabContent = document.getElementById('database-tab');
+                const scannerTabContent = document.getElementById('scanner-tab');
+                const courseButtons = document.getElementById('course-buttons-container');
+
+                // If on database tab, switch to scanner tab
+                if (databaseTabContent && databaseTabContent.classList.contains('active')) {
+                    // Hide database tab content
+                    databaseTabContent.classList.remove('active');
+                    // Show scanner tab content
+                    if (scannerTabContent) scannerTabContent.classList.add('active');
+
+                    // Update tab buttons
+                    if (databaseTab) databaseTab.classList.remove('active');
+                    if (scannerTab) scannerTab.classList.add('active');
+
+                    // Show course buttons since we're back on scanner tab
+                    if (courseButtons) courseButtons.style.display = 'flex';
+                }
+
                 // The current course and its data remain in memory for scanning.
                 updateAuthUI(); // Updates only the auth-related UI parts.
                 showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refresh to end the session.`);
@@ -6314,7 +6336,7 @@
             // After a successful sync, we might set a "success" status.
             // This ensures that when the status is updated again, it reverts to the correct online/offline state.
             if (pendingChanges && isOnline) {
-                syncText.textContent = 'Saved locally';
+                syncText.textContent = autoSyncEnabled ? 'Pending auto-sync' : 'Pending sync';
                 syncStatus.className = 'sync-status waiting';
             }
         }
@@ -6369,7 +6391,7 @@
                 // Update the sync status to show success
                 const now = new Date();
                 const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                updateSyncStatus(`Synced ${time}`, "success");
+                updateSyncStatus(`Manually synced ${time}`, "success");
 
                 // Hide success indication after a few seconds
                 setTimeout(() => {
@@ -6762,7 +6784,7 @@
         function saveAndMarkChanges(courseName) {
             saveCourseToLocalStorage(courseName);
             pendingChanges = true;
-            updateSyncStatus('Saved locally', 'waiting');
+            updateSyncStatus(autoSyncEnabled ? 'Pending auto-sync' : 'Pending sync', 'waiting');
         }
 
         // Helper function to convert a timestamp to a local ISO-like string (without timezone info)
