@@ -2168,21 +2168,20 @@
             transform: scale(0.95);
         }
 
-        /* Smooth transitions for clear-cache button */
-        #clear-cache-btn {
-            opacity: 0;
-            transform: scale(0.8);
-            transition: opacity 0.3s ease, transform 0.3s ease;
-            pointer-events: none;
-            /* Prevent clicks when hidden */
+        /* Style for when avatar transforms into button */
+        .user-avatar-button {
+            width: 30px !important;
+            height: 30px !important;
+            border-radius: 50% !important;
+            padding: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            font-size: 14px !important;
+            min-width: unset !important;
         }
 
-        #clear-cache-btn.visible {
-            opacity: 1;
-            transform: scale(1);
-            pointer-events: auto;
-            /* Enable clicks when visible */
-        }
+        /* Remove old clear-cache button styles since we're not using them */
 
         .sync-auth-container {
             display: flex;
@@ -3377,7 +3376,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzumAp5h9aDOms0KTwOkBLDgyor4KNSkCdLSxRpBPKwgiKAti03L8qvNdkwO5dQ4XCAgQ/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyR9Ho9qa_O2G8d4LV5ZioM_-7myH-5zVEt7CX2OYEcjMCk7JH-2VhG2taW9gPqX0oftg/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -3654,9 +3653,14 @@
         function getLogsForCurrentUser() {
             if (!currentCourse) return []; // No course selected, return empty.
 
-            if (isAdminForCourse(currentCourse)) {
-                // Admins use the main, fully-featured courseData object.
+            if (isGlobalAdmin) {
+                // Global admins use the main, fully-featured courseData object with direct GAPI access.
                 return courseData[currentCourse]?.logs || [];
+            } else if (isAdmin && !isGlobalAdmin) {
+                // Course-specific admins: they don't have direct spreadsheet access
+                // For now, return empty until backend endpoints are added
+                console.warn('Course-specific admin cannot load logs without direct spreadsheet access');
+                return [];
             } else {
                 // Students use the simple, server-only cache.
                 return studentLogCache[currentCourse] || [];
@@ -3836,11 +3840,26 @@
                     avatarClickCount++;
 
                     if (avatarClickCount === 5) {
-                        const clearCacheBtn = document.getElementById('clear-cache-btn');
-                        if (clearCacheBtn) {
-                            // Smoothly reveal the hidden button
-                            clearCacheBtn.classList.add('visible');
-                            showNotification('info', 'Cache Button Unlocked', 'The clear cache button is now visible.');
+                        // Transform the avatar into a clear cache button
+                        const userInfo = document.querySelector('.user-info');
+                        const userName = document.getElementById('user-name');
+
+                        if (userInfo && userAvatar) {
+                            // Create a button to replace the avatar
+                            const clearButton = document.createElement('button');
+                            clearButton.id = 'clear-cache-btn-avatar';
+                            clearButton.className = 'btn-red btn-icon user-avatar-button';
+                            clearButton.title = 'Clear Cache and Refresh';
+                            clearButton.innerHTML = '<i class="fa-solid fa-bomb"></i>';
+
+                            clearButton.addEventListener('click', () => {
+                                clearAllAppData();
+                            });
+
+                            // Replace avatar with button
+                            userAvatar.parentNode.replaceChild(clearButton, userAvatar);
+
+                            showNotification('info', 'Cache Button Unlocked', 'Click the bomb icon to clear cache.');
                         }
                         avatarClickCount = 0; // Reset after activation
                     }
@@ -4863,31 +4882,9 @@
          * The button is created hidden and revealed via another action.
          */
         function setupClearDataButton() {
-            const userInfo = document.querySelector('.user-info');
-            const logoutBtn = document.getElementById('logout-btn');
-            if (!userInfo || !logoutBtn) return;
-
-            // Remove any old button to prevent duplicates
-            const existingBtn = document.getElementById('clear-cache-btn');
-            if (existingBtn) existingBtn.remove();
-
-            if (isAdminForCourse(currentCourse)) {
-                const clearButton = document.createElement('button');
-                clearButton.id = 'clear-cache-btn';
-                clearButton.className = 'btn-red btn-icon';
-                clearButton.title = 'Clear Cache and Refresh';
-                clearButton.innerHTML = '<i class="fa-solid fa-bomb"></i>';
-
-                // Button starts hidden with CSS opacity: 0 and transform: scale(0.8)
-                // No need to set display: none, the CSS handles it
-
-                clearButton.addEventListener('click', () => {
-                    // Call the function directly without a confirmation dialog
-                    clearAllAppData();
-                });
-
-                userInfo.insertBefore(clearButton, logoutBtn);
-            }
+            // This function no longer creates a separate button
+            // The avatar itself will transform into the clear button on 5 clicks
+            // Nothing to do here anymore
         }
 
         /**
@@ -6573,12 +6570,12 @@
                 }
             };
 
-            // FIX: Check isAdmin instead of isAdminForCourse(currentCourse) 
-            // because currentCourse might not be set yet at this point
-            if (isAdmin) {
-                // --- ADMIN PATH: Direct GAPI access ---
+            // FIX: Only global admins (spreadsheet owners) should use direct GAPI access
+            // Course-specific admins need direct spreadsheet access or Apps Script endpoints
+            if (isGlobalAdmin) {
+                // --- GLOBAL ADMIN PATH: Direct GAPI access ---
                 try {
-                    console.log('Fetching available courses from spreadsheet (Admin)...');
+                    console.log('Fetching available courses from spreadsheet (Global Admin)...');
                     const response = await gapi.client.sheets.spreadsheets.get({
                         spreadsheetId: LOGS_SPREADSHEET_ID
                     });
@@ -6643,8 +6640,43 @@
                     checkLoadingCompletion();
                 }
 
+            } else if (isAdmin && !isGlobalAdmin) {
+                // --- COURSE-SPECIFIC ADMIN PATH ---
+                // These admins don't have direct spreadsheet access
+                console.log('Course-specific admin detected. Showing admin courses...');
+
+                try {
+                    // Use the courses from checkAdminStatus
+                    availableCourses = adminCourses || [];
+
+                    if (availableCourses.length === 0) {
+                        showNotification('warning', 'No Courses', 'No courses assigned to your admin account.');
+                    } else {
+                        showNotification('info', 'Limited Access', 'You can view your assigned courses. For full admin features, contact the spreadsheet owner to grant you direct access.');
+                    }
+
+                    const courseToLoad = availableCourses[0] || '';
+                    currentCourse = courseToLoad;
+                    if (history.replaceState) {
+                        history.replaceState(null, null, '#' + courseToLoad);
+                    } else {
+                        window.location.hash = courseToLoad;
+                    }
+                    populateCourseDropdown();
+                    if (courseToLoad) {
+                        handleCourseChange(courseToLoad);
+                    }
+                } catch (err) {
+                    console.error('Error setting up course-specific admin:', err);
+                    showNotification('error', 'Access Error', 'Could not load courses. Contact the spreadsheet owner for access.');
+                    availableCourses = [];
+                } finally {
+                    loadingTasks.delete('courses');
+                    checkLoadingCompletion();
+                }
+
             } else {
-                // --- STUDENT PATH: Correct API Call ---
+                // --- STUDENT PATH: Apps Script API ---
                 console.log('Fetching available courses via Apps Script API (Student)...');
                 try {
                     // Call the Web App using GET, parameters go in payload
@@ -8332,22 +8364,13 @@
                     return;
                 }
 
+                // For students, the logs are already filtered by the backend
+                // No need to filter again - this was causing empty tables!
                 let logsToDisplay = currentCourseLogs;
 
-                if (isSignedIn && !isAdmin && currentUser) {
-                    const studentNameNormalised = normalizeName(currentUser.name);
-                    const studentEmailNormalised = normalizeName(currentUser.email);
-                    logsToDisplay = currentCourseLogs.filter(log => {
-                        // Look up the primary UID to find the student data
-                        const dbKey = uidToPrimaryUidMap[log.uid];
-                        const dbEntry = dbKey ? databaseMap[dbKey] : null;
-
-                        if (!dbEntry) return false;
-                        const nameMatches = normalizeName(dbEntry.name) === studentNameNormalised;
-                        const emailMatches = dbEntry.email ? (normalizeName(dbEntry.email) === studentEmailNormalised) : false;
-                        return nameMatches || emailMatches;
-                    });
-                }
+                // Only apply additional filtering for admins
+                // Students' logs are already filtered on the server by getStudentLogs
+                // (The backend matches logs by the student's UIDs from the database)
 
                 const grouped = {};
                 logsToDisplay.forEach(log => {
