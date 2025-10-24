@@ -3345,7 +3345,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/a/macros/epoka.edu.al/s/AKfycbzxpQL8kgu-G-lolilz9aN3V7-YO878a3_0BHbvcEn1N7FgWMLV3mifljCi7-Fq26miJg/exec';
+        const WEB_APP_URL = 'https://script.google.com/a/macros/epoka.edu.al/s/AKfycbxddldhp6o76FvCZW9jfdCMRJFo2hXufvKvb6el48Rf8F4uLUFVM4U5wC9LihnBtS3BUw/exec';
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -5600,13 +5600,6 @@
             });
         }
 
-        /**
-     * Calls the Google Apps Script Web App using gapi.client.request.
-     * @param {string} action - The 'action' parameter for doGet/doPost.
-     * @param {object} payload - Data payload (used for POST body or GET query params).
-     * @param {string} method - 'GET' or 'POST'.
-     * @returns {Promise<object>} - A promise that resolves with the parsed JSON result from the script.
-     */
         async function callWebApp(action, payload = {}, method = 'GET') {
             const token = gapi.client.getToken()?.access_token;
             if (!token) {
@@ -5617,41 +5610,34 @@
             let url = WEB_APP_URL;
             const options = {
                 method: method,
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
                 redirect: 'follow',
+                // NO 'Authorization' HEADER
             };
 
+            // Add context parameters needed by Apps Script
             payload.logsSpreadsheetId = LOGS_SPREADSHEET_ID;
             payload.courseName = currentCourse || '';
+
+            // --- THIS IS THE KEY CHANGE ---
+            // Pass the token as a parameter instead of a header
+            payload.access_token = token;
 
             if (method === 'GET') {
                 const params = new URLSearchParams(payload);
                 params.append('action', action);
                 url += '?' + params.toString();
             } else { // POST
-                options.headers['Content-Type'] = 'application/json';
+                options.headers = { 'Content-Type': 'application/json' };
                 payload.action = action;
                 options.body = JSON.stringify(payload);
             }
 
             try {
-                console.log(`Calling Web App (${method}) action: "${action}" via fetch with payload:`, payload); // Added log
+                console.log(`Calling Web App (${method}) action: "${action}" via fetch...`);
                 const response = await fetch(url, options);
 
                 if (!response.ok) {
-                    let errorMsg = `HTTP error! status: ${response.status}`;
-                    try {
-                        const errorData = await response.json(); // Try to get error from body
-                        if (errorData && errorData.message) {
-                            errorMsg = errorData.message;
-                        } else if (response.status === 401 || response.status === 403) {
-                            errorMsg = 'Authorization Error. Your session might have expired.';
-                            handleSignoutClick(); // Force re-auth
-                        }
-                    } catch (e) { /* Ignore parsing error */ }
-                    throw new Error(errorMsg);
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
@@ -5659,21 +5645,11 @@
                 if (data && data.result === 'error') {
                     throw new Error(data.message || 'Script execution failed.');
                 }
-                console.log(`Web App action "${action}" successful.`); // Added log
                 return data;
 
             } catch (error) {
                 console.error(`Error calling Web App action "${action}" via fetch:`, error);
-                if (error.message.includes('401') || error.message.includes('token expired') || error.message.includes('Authorization Error')) {
-                    handleSignoutClick();
-                    showNotification('error', 'Session Expired', 'Please sign in again.');
-                } else if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-                    // This specific error often indicates a CORS or network issue
-                    showNotification('error', 'Network Error', `Could not reach server (Fetch Error). Check CORS settings or network.`);
-                }
-                else {
-                    showNotification('error', 'Network Error', `Could not reach server: ${error.message}`);
-                }
+                // Re-throw for other functions to handle
                 throw error;
             }
         }
