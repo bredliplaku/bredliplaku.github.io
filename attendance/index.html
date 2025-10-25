@@ -4746,31 +4746,14 @@
   * Helper function that your existing initGoogleApi() is trying to call
   */
         function gapiLoaded() {
-            return new Promise((resolve, reject) => {
-                // If gapi is not loaded yet, wait for it
-                if (typeof gapi === 'undefined') {
-                    setTimeout(() => {
-                        gapiLoaded().then(resolve).catch(reject);
-                    }, 100);
-                    return;
+            return new Promise((resolve) => {
+                // If gapi is already loaded and ready, resolve immediately
+                if (typeof gapi !== 'undefined') {
+                    resolve();
+                } else {
+                    // Wait a bit and try again
+                    setTimeout(() => resolve(), 100);
                 }
-
-                // Now load the client library
-                gapi.load('client', {
-                    callback: () => {
-                        console.log('gapi.client loaded successfully');
-                        resolve();
-                    },
-                    onerror: (error) => {
-                        console.error('Error loading gapi.client:', error);
-                        reject(error);
-                    },
-                    timeout: 5000,
-                    ontimeout: () => {
-                        console.error('gapi.client load timeout');
-                        reject(new Error('gapi.client load timeout'));
-                    }
-                });
             });
         }
 
@@ -4787,52 +4770,6 @@
                     setTimeout(() => resolve(), 100);
                 }
             });
-        }
-
-        /**
-         * Attempt to restore authentication token from localStorage
-         */
-        async function attemptTokenRestore() {
-            console.log('Attempting to restore token from localStorage...');
-
-            try {
-                const storedToken = localStorage.getItem('gapi_token');
-
-                if (!storedToken) {
-                    console.log('No stored token found');
-                    return false;
-                }
-
-                const tokenObj = JSON.parse(storedToken);
-
-                if (!tokenObj || !tokenObj.access_token) {
-                    console.log('Invalid token format in storage');
-                    localStorage.removeItem('gapi_token');
-                    return false;
-                }
-
-                // Set the token in gapi client
-                gapi.client.setToken(tokenObj);
-                console.log('Token set from localStorage');
-
-                // Validate the token by making a test request
-                try {
-                    await gapi.client.request({
-                        path: 'https://www.googleapis.com/oauth2/v3/userinfo'
-                    });
-                    console.log('Token is valid');
-                    return true;
-                } catch (error) {
-                    console.log('Stored token is invalid or expired');
-                    localStorage.removeItem('gapi_token');
-                    gapi.client.setToken(null);
-                    return false;
-                }
-            } catch (error) {
-                console.error('Error during token restore:', error);
-                localStorage.removeItem('gapi_token');
-                return false;
-            }
         }
 
         /**
@@ -4854,6 +4791,7 @@
                 await gisLoaded();
 
                 gapi.client.init({
+                    apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS,
                 }).then(function () {
                     console.log('GAPI client initialized');
@@ -4861,7 +4799,7 @@
                     tokenClient = google.accounts.oauth2.initTokenClient({
                         client_id: CLIENT_ID,
                         scope: SCOPES,
-                        callback: handleTokenResponse,
+                        callback: handleAuthCallback,
                     });
 
                     console.log('Token client initialized');
@@ -6792,16 +6730,6 @@
             }
         }
 
-
-        /**
-         * Build UID to Primary UID mapping (currently unused but called in code)
-         * This is a placeholder function for future UID deduplication features
-         */
-        function buildUIDToPrimaryUIDMap() {
-            // This function is called but the mapping is not currently used
-            // Placeholder for future implementation if needed
-            console.log('UID mapping built (placeholder)');
-        }
 
         /**
      * Fetch database entries from Google Sheet with format detection
@@ -9065,8 +8993,8 @@
                 let valA, valB;
 
                 if (field === 'name') {
-                    valA = a[1].name || '';
-                    valB = b[1].name || '';
+                    valA = a[1].name;
+                    valB = b[1].name;
                 } else if (field === 'email') {
                     valA = a[1].email || '';
                     valB = b[1].email || '';
@@ -9074,8 +9002,7 @@
                     valA = a[1].uids[0] || ''; // Sort by first UID in the list
                     valB = b[1].uids[0] || '';
                 }
-                // Ensure we're comparing strings
-                return multiplier * String(valA).localeCompare(String(valB));
+                return multiplier * valA.localeCompare(valB);
             });
 
             dbEntryCount.textContent = Object.keys(databaseMap).length;
