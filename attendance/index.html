@@ -3274,6 +3274,7 @@
                                         <th class="uid-column">UID</th>
                                         <th>Email</th>
                                         <th>Timestamp</th>
+                                        <th>Sent By</th>
                                         <th class="actions-header">Actions</th>
                                     </tr>
                                 </thead>
@@ -3376,7 +3377,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyR9Ho9qa_O2G8d4LV5ZioM_-7myH-5zVEt7CX2OYEcjMCk7JH-2VhG2taW9gPqX0oftg/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx7NAEzxTHnoIfGABZKhGXF5dfEZcuUiJibyK7qpqvUbAe9ZbL7fN263MWRLM1d9RXg3g/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -3435,6 +3436,12 @@
         let currentRequestId = 0; // Global request counter
         let databaseLoadPromise = null;
         let databaseResolve = null;
+        let databaseCache = null;
+        let databaseCacheTime = 0;
+        const DATABASE_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+        let initInProgress = false;
+        let lastNotificationKey = '';
+        let lastNotificationTime = 0;
 
         // DOM Elements
         const tabs = document.querySelectorAll('.tab');
@@ -3647,22 +3654,28 @@
         }
 
         /**
-         * NEW: Gets the correct log array based on whether the user is an admin or a student.
          * @returns {Array} The array of logs for the current course and user.
          */
         function getLogsForCurrentUser() {
-            if (!currentCourse) return []; // No course selected, return empty.
+            if (!currentCourse) return [];
 
             if (isGlobalAdmin) {
-                // Global admins use the main, fully-featured courseData object with direct GAPI access.
+                // Global admins use direct GAPI access with full edit capabilities
                 return courseData[currentCourse]?.logs || [];
             } else if (isAdmin && !isGlobalAdmin) {
-                // Course-specific admins: they don't have direct spreadsheet access
-                // For now, return empty until backend endpoints are added
-                console.warn('Course-specific admin cannot load logs without direct spreadsheet access');
-                return [];
+                // Non-global admins have edit access but need to use mixed approach:
+                // - Try courseData first (if they have direct sheet access for editing)
+                // - Fall back to studentLogCache (server-filtered data for viewing)
+
+                // Check if we have courseData loaded (means they have sheet edit access)
+                if (courseData[currentCourse]) {
+                    return courseData[currentCourse].logs || [];
+                }
+
+                // Otherwise use cache (shouldn't happen if permissions are set correctly)
+                return studentLogCache[currentCourse] || [];
             } else {
-                // Students use the simple, server-only cache.
+                // Students always use server-only cache (read-only)
                 return studentLogCache[currentCourse] || [];
             }
         }
@@ -3681,6 +3694,7 @@
         // Setup all event listeners in one place
         function setupEventListeners() {
             // Set up tab navigation
+            // Set up tab navigation
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.addEventListener('click', () => {
                     const tabId = tab.getAttribute('data-tab');
@@ -3693,18 +3707,16 @@
                         return;
                     }
 
-                    // Prevent non-admins from accessing the database tab
-                    if (tabId === 'database-tab' && !isAdmin) {
-                        return;
+                    // UPDATED: Prevent non-global admins AND non-admins from accessing database tab
+                    if (tabId === 'database-tab' && !isGlobalAdmin) {
+                        return; // Only global admins can access database tab
                     }
 
                     // Hide or show the course buttons based on the selected tab
-                    // This is now more explicit and runs before tab switching
                     if (courseButtons) {
                         if (tabId === 'database-tab') {
                             courseButtons.style.display = 'none';
                         } else {
-                            // Only show course buttons if user is signed in
                             courseButtons.style.display = isSignedIn ? 'flex' : 'none';
                         }
                     }
@@ -4734,151 +4746,70 @@
          * Initialize Google API client.
          * Set up auth token client and event listeners for login/logout.
          */
-        function initGoogleApi() {
-            console.log('Initializing Google API...');
-
-            if (typeof gapi === 'undefined' || typeof google === 'undefined') {
-                console.error('Google API scripts not loaded.');
-                showNotification('error', 'API Error', 'Google API libraries did not load. Please check your connection.');
-                loadingTasks.delete('gapi');
-                checkLoadingCompletion();
+        async function initGoogleApi() {
+            if (initInProgress) {
+                console.log('Init already in progress, skipping duplicate call');
                 return;
             }
 
-            const tokenCallback = (resp) => {
-                if (resp && resp.access_token) {
-                    handleTokenResponse(resp);
-                } else if (resp.error) {
-                    console.error('Token request failed:', resp.error);
-                    const isSilentRefreshFailure = resp.error.includes('immediate_failed') || resp.error.includes('closed');
-                    if (isSilentRefreshFailure) {
-                        console.log("Silent auth failed. Marking session as expired.");
-                        isSignedIn = false;
-                        if (autoSyncInterval) {
-                            clearInterval(autoSyncInterval);
-                            console.log("Auto-sync stopped due to expired session.");
-                        }
-                        updateSyncStatus("Session Expired", "error");
-                        syncBtn.disabled = true;
-                        updateAuthUI();
-                        showNotification('warning', 'Session Expired', 'Please sign in again to resume syncing.');
-                    } else {
-                        showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
-                    }
-                }
-            };
+            initInProgress = true;
+            isInitializing = true;
+            console.log('Initializing Google API (optimized)...');
 
             try {
-                tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
-                    scope: SCOPES,
-                    callback: tokenCallback
-                });
-            } catch (error) {
-                console.error('Failed to initialize token client:', error);
-                showNotification('error', 'API Error', 'Failed to initialize authentication.');
-            }
+                await gapiLoaded();
+                await gisLoaded();
 
-            gapi.load('client', () => {
                 gapi.client.init({
-                    discoveryDocs: DISCOVERY_DOCS
-                }).then(async () => {
-                    console.log('GAPI client initialized successfully.');
-                    loadingTasks.delete('gapi');
+                    apiKey: API_KEY,
+                    discoveryDocs: DISCOVERY_DOCS,
+                }).then(function () {
+                    console.log('GAPI client initialized');
 
-                    const savedToken = localStorage.getItem('gapi_token');
-                    let isStudentOnRefresh = false;
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: SCOPES,
+                        callback: handleAuthCallback,
+                    });
 
-                    if (savedToken) {
-                        // SIGNED-IN PATH
-                        try {
-                            gapi.client.setToken(JSON.parse(savedToken));
-                            isSignedIn = true;
-                            await fetchUserInfo();
-                            const adminStatus = await checkAdminStatus();
-                            isAdmin = adminStatus.isAdmin;
-                            await Promise.all([
-                                fetchAvailableCourses(), // This sets 'currentCourse'
-                                fetchDatabaseFromSheet()
-                            ]);
+                    console.log('Token client initialized');
 
-                            if (isAdminForCourse(currentCourse)) {
-                                // Now fetch registrations AFTER currentCourse is set
-                                fetchAndDisplayRegistrations();
-                            }
-
-                            // --- PERFORMANCE OPTIMIZATION ---
-                            if (isAdminForCourse(currentCourse)) {
-                                // --- ADMIN PATH ---
-                                // Admins load everything directly using gapi for full control.
-                                console.log("Admin detected. Loading all data directly...");
-
-                                // 1. Load the CURRENT active course first for a fast startup.
-                                if (currentCourse) {
-                                    const [serverLogs, serverTombs, localData] = await Promise.all([
-                                        fetchLogsFromSheet(currentCourse), // Uses the original gapi function
-                                        fetchTombstonesForCourse(currentCourse),
-                                        loadCourseFromLocalStorage(currentCourse)
-                                    ]);
-
-                                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-                                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
-                                    courseData[currentCourse] = { logs: mergedLogs, tombstones: allTombstones };
-                                    saveCourseToLocalStorage(currentCourse);
-                                }
-
-                                // 2. Load all other courses in the background.
-                                setTimeout(loadRemainingCoursesInBackground, 500);
-
-                                if (pendingChanges) {
-                                    console.log("Admin session restored with pending changes. Triggering sync.");
-                                    showNotification('info', 'Syncing...', 'Syncing offline changes now.');
-                                    setTimeout(syncData, 1000);
-                                }
-
-                            } else {
-                                // --- STUDENT PATH ---
-                                // Students load ONLY their own logs via the secure Apps Script.
-                                console.log("Student detected. Loading logs via secure gateway...");
-                                await loadAllCourseLogsForStudent(); // Uses the new, secure Apps Script function
-                            }
-
-                        } catch (e) {
-                            console.error("Token restore or initial data load failed:", e);
-                            isSignedIn = false;
-                            isAdmin = false;
-                            localStorage.removeItem('gapi_token');
-                            // Fall through to the signed-out path
+                    // Try to restore session
+                    attemptTokenRestore().then(restored => {
+                        if (restored) {
+                            console.log('Session restored successfully');
+                            onSuccessfulAuth(true); // true = restored from token
+                        } else {
+                            console.log('No previous session to restore');
+                            isInitializing = false;
+                            showMainContent();
+                            updateAuthUI();
+                            populateCourseButtons();
                         }
-                    }
+                    }).catch(err => {
+                        console.error('Token restore or initial data load failed:', err);
+                        console.log('Operating in signed-out mode.');
+                        isInitializing = false;
+                        showMainContent();
+                        updateAuthUI();
+                    });
 
-                    if (!isSignedIn) {
-                        // SIGNED-OUT PATH
-                        console.log("Operating in signed-out mode.");
-                        availableCourses = ['Default']; // Create a default course
-                        currentCourse = 'Default';
-
-                        // Manually complete the loading tasks so the UI appears
-                        loadingTasks.delete('courses');
-                        loadingTasks.delete('database');
-                        checkLoadingCompletion();
-
-                        // Draw the UI with the default course
-                        populateCourseDropdown();
-                        updateUI();
-                    }
-
-                    updateAuthUI();
-
-                }).catch(error => {
-                    console.error('Error initializing GAPI client:', error);
-                    showNotification('error', 'API Error', 'Failed to initialize Google API.');
+                }).catch(err => {
+                    console.error('GAPI init error:', err);
+                    isInitializing = false;
+                    showMainContent();
                 });
-            });
+
+            } catch (error) {
+                console.error('initGoogleApi error:', error);
+                isInitializing = false;
+                showMainContent();
+            } finally {
+                initInProgress = false;
+            }
         }
 
         /**
-         * NEW: Creates and manages the 'Clear Cache' button for admins.
          * The button is created hidden and revealed via another action.
          */
         function setupClearDataButton() {
@@ -4888,48 +4819,165 @@
         }
 
         /**
-         * NEW: Fetches logs and tombstones for all available courses from the server
          * and populates the main courseData object.
          */
-        async function loadAllCourseDataFromServer() {
-            if (!isAdmin) return; // Only run for admins.
+        async function loadAllCourseLogsForStudent() {
+            if (isAdmin || !isOnline || !isSignedIn) return;
 
-            console.log(`Starting to fetch data for ${availableCourses.length} courses...`);
+            console.log("Loading student logs optimized...");
+            studentLogCache = {};
 
-            const allCoursePromises = availableCourses.map(async (courseName) => {
+            // Load only the first course immediately for fast initial display
+            if (availableCourses.length > 0) {
+                const firstCourse = availableCourses[0];
                 try {
-                    // Fetch local and server data concurrently for each course.
-                    const [serverLogs, serverTombs, localData] = await Promise.all([
-                        fetchLogsFromSheet(courseName),
-                        fetchTombstonesForCourse(courseName),
-                        loadCourseFromLocalStorage(courseName) // New local storage function
-                    ]);
-
-                    // Combine all known tombstones (from local storage and the server).
-                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-
-                    // Merge logs using the complete, combined set of tombstones.
-                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
-
-                    // Initialise the course data with the correctly merged logs and all tombstones.
-                    courseData[courseName] = {
-                        logs: mergedLogs,
-                        tombstones: allTombstones // This persists the combined tombstones in memory.
-                    };
-
-                    // Save the fully merged state back to local storage for this session.
-                    saveCourseToLocalStorage(courseName);
-
-                } catch (error) {
-                    console.error(`Failed to load data for course: ${courseName}`, error);
-                    // If server fails, fall back to just local data.
-                    courseData[courseName] = await loadCourseFromLocalStorage(courseName);
+                    const serverLogs = await callWebApp('getStudentLogs',
+                        { courseName: firstCourse }, 'GET');
+                    if (serverLogs && Array.isArray(serverLogs) && serverLogs.length > 0) {
+                        studentLogCache[firstCourse] = serverLogs;
+                        console.log(`Loaded ${serverLogs.length} logs for ${firstCourse}`);
+                    } else {
+                        console.log(`No logs found for ${firstCourse}`);
+                    }
+                } catch (err) {
+                    console.error(`Failed to load ${firstCourse}:`, err);
                 }
-            });
 
-            // Wait for all courses to finish loading.
-            await Promise.all(allCoursePromises);
-            console.log("Finished loading data for all courses.");
+                // Update UI with first course data
+                updateUI();
+            }
+
+            // Load remaining courses in background without blocking
+            if (availableCourses.length > 1) {
+                setTimeout(async () => {
+                    console.log('Loading remaining courses in background...');
+                    const remainingCourses = availableCourses.slice(1);
+
+                    for (const course of remainingCourses) {
+                        try {
+                            const serverLogs = await callWebApp('getStudentLogs',
+                                { courseName: course }, 'GET');
+                            if (serverLogs && Array.isArray(serverLogs) && serverLogs.length > 0) {
+                                studentLogCache[course] = serverLogs;
+                                console.log(`Background loaded ${serverLogs.length} logs for ${course}`);
+                            }
+                        } catch (err) {
+                            console.error(`Background load failed for ${course}:`, err);
+                        }
+
+                        // Small delay between requests to avoid rate limiting
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                    }
+
+                    console.log('Background loading complete');
+                    updateUI();
+                }, 1500); // Start background loading after 1.5 seconds
+            }
+        }
+
+        async function onSuccessfulAuth(isRestore = false) {
+            isSignedIn = true;
+
+            try {
+                // Get user info
+                const userInfoResponse = await gapi.client.request({
+                    path: 'https://www.googleapis.com/oauth2/v3/userinfo'
+                });
+
+                currentUser = {
+                    email: userInfoResponse.result.email,
+                    name: userInfoResponse.result.name,
+                    picture: userInfoResponse.result.picture
+                };
+
+                console.log('User signed in:', currentUser.email);
+
+                // Check admin status
+                const adminCheckResult = await callWebApp('checkAdminStatus', {}, 'GET');
+
+                if (adminCheckResult) {
+                    isAdmin = adminCheckResult.isAdmin || false;
+                    isGlobalAdmin = adminCheckResult.isGlobalAdmin || false;
+                    adminCourses = adminCheckResult.courses || [];
+
+                    console.log('Admin status:', { isAdmin, isGlobalAdmin, adminCourses });
+                }
+
+                // Fetch database (with caching)
+                await fetchDatabaseFromSheet();
+
+                // Get available courses
+                const fetchedCourseDict = await callWebApp('getAvailableCourses', {}, 'GET');
+
+                if (fetchedCourseDict && typeof fetchedCourseDict === 'object') {
+                    courseDictionary = fetchedCourseDict;
+                    availableCourses = Object.keys(courseDictionary);
+                    console.log('Available courses:', availableCourses);
+                }
+
+                // Fetch course info in background
+                setTimeout(() => {
+                    fetchCourseInfo().catch(err =>
+                        console.error('Background course info load failed:', err)
+                    );
+                }, 1000);
+
+                // Handle course data loading based on user type
+                if (isGlobalAdmin) {
+                    // Global admins load from sheets directly with full edit access
+                    if (availableCourses.length > 0) {
+                        currentCourse = availableCourses[0];
+                        await fetchLogsFromSheet(currentCourse);
+
+                        setTimeout(() => {
+                            loadRemainingCoursesInBackground();
+                        }, 2000);
+                    }
+                } else if (isAdmin && !isGlobalAdmin) {
+                    // Non-global admins TRY direct sheet access first (for editing)
+                    // If they have EDITOR permission on sheets, this will work
+                    console.log('Non-global admin: attempting direct sheet access for edit capability');
+
+                    if (availableCourses.length > 0) {
+                        currentCourse = availableCourses[0];
+
+                        try {
+                            // Try to load directly from sheets (requires EDITOR permission)
+                            await fetchLogsFromSheet(currentCourse);
+                            console.log('Non-global admin has direct sheet access (can edit)');
+
+                            // Load remaining courses in background
+                            setTimeout(() => {
+                                loadRemainingCoursesInBackground();
+                            }, 2000);
+                        } catch (error) {
+                            console.warn('Non-global admin lacks direct sheet access, using cache (read-only)');
+                            console.warn('Error:', error.message);
+
+                            // Fall back to cached server data (read-only)
+                            await loadAllCourseLogsForStudent();
+                        }
+                    }
+                } else {
+                    // Students load their logs (read-only via backend)
+                    await loadAllCourseLogsForStudent();
+
+                    if (availableCourses.length > 0 && !currentCourse) {
+                        currentCourse = availableCourses[0];
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error during auth:', error);
+                showNotification('error', 'Authentication Error',
+                    'Failed to complete sign-in. Please try again.');
+            } finally {
+                isInitializing = false;
+                showMainContent();
+                updateAuthUI();
+                updateUI();
+                populateCourseButtons();
+            }
         }
 
         /**
@@ -5215,68 +5263,234 @@
             document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
         }
 
-
         /**
-         * Fetches pending registrations from the Apps Script and displays them.
-         * Hides the entire module if there are no pending registrations.
-         */
-        async function fetchAndDisplayRegistrations() {
-            const tbody = document.getElementById('registrations-tbody');
-            const pendingView = document.getElementById('pending-registrations-view');
-            const badge = document.getElementById('registration-count-badge');
+ * NEW: Show registration dialog with pre-filled UID
+ * Used when scanning unknown UID
+ */
+        function showRegisterUIDDialogWithPrefill(prefillUid) {
+            document.body.style.overflow = 'hidden';
 
-            if (!pendingView) return;
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
 
-            // Show a temporary loading state
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
 
-            try {
-                if (!currentCourse) return;
-                if (!isAdminForCourse(currentCourse)) {
-                    console.log('Not admin for', currentCourse);
-                    pendingView.classList.add('is-hidden');
-                    return;
+            dialog.innerHTML = `
+        <h3 class="dialog-title">Register Student ID Card</h3>
+        <div class="dialog-content">
+            <p style="margin-bottom: 15px; color: #666;">
+                ${isGlobalAdmin
+                    ? 'Fill in the student information to add them to the database.'
+                    : 'Submit a registration request to add this student. The global admin will review and approve it.'}
+            </p>
+            <div class="form-group">
+                <label for="register-name">Full Name <span style="color: red;">*</span></label>
+                <input type="text" id="register-name" class="form-control" 
+                    placeholder="Enter student's full name" required autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="register-email">Email <span style="color: red;">*</span></label>
+                <input type="email" id="register-email" class="form-control" 
+                    placeholder="student@example.com" required autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="register-uid">Student ID (UID) <span style="color: red;">*</span></label>
+                <input type="text" id="register-uid" class="form-control" 
+                    value="${prefillUid}" readonly style="background-color: #f0f0f0;">
+                <small style="color: #666; font-size: 0.85em;">This UID was detected from scanning.</small>
+            </div>
+        </div>
+        <div class="dialog-actions">
+            <button id="cancel-register-btn" class="btn-orange">Cancel</button>
+            <button id="submit-register-btn" class="btn-green">
+                ${isGlobalAdmin ? 'Add to Database' : 'Submit Request'}
+            </button>
+        </div>
+    `;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+
+            document.getElementById('cancel-register-btn').addEventListener('click', closeDialog);
+
+            const submitBtn = document.getElementById('submit-register-btn');
+            submitBtn.addEventListener('click', async () => {
+                const nameInput = document.getElementById('register-name');
+                const emailInput = document.getElementById('register-email');
+                const uidInput = document.getElementById('register-uid');
+
+                // Clear previous errors
+                clearInputError(nameInput);
+                clearInputError(emailInput);
+                clearInputError(uidInput);
+
+                const name = nameInput.value.trim();
+                const email = emailInput.value.trim();
+                const uid = uidInput.value.trim();
+
+                // Validation
+                let hasError = false;
+                if (!name) {
+                    showInputError(nameInput, 'Name is required');
+                    hasError = true;
                 }
-                // Parameters are now sent in the payload object for GET
-                const registrations = await callWebApp('getPendingRegistrations', {}, 'GET');
+                if (!email) {
+                    showInputError(emailInput, 'Email is required');
+                    hasError = true;
+                } else if (!isValidEmail(email)) {
+                    showInputError(emailInput, 'Please enter a valid email address');
+                    hasError = true;
+                }
+                if (!uid) {
+                    showInputError(uidInput, 'UID is required');
+                    hasError = true;
+                }
 
-                tbody.innerHTML = '';
+                if (hasError) return;
 
-                if (registrations && registrations.length > 0) {
-                    // If there are registrations, remove the 'is-hidden' class to show the module
-                    pendingView.classList.remove('is-hidden');
-                    badge.textContent = registrations.length;
-                    badge.style.display = 'inline-block';
+                // Disable button and show loading
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
 
-                    registrations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                try {
+                    // Prepare data with sender info
+                    const submissionData = {
+                        name: name,
+                        email: email,
+                        uid: uid,
+                        sentBy: {
+                            name: currentUser?.name || '',
+                            email: currentUser?.email || ''
+                        }
+                    };
+
+                    const result = await callWebApp('submitRegistration', submissionData, 'POST');
+
+                    if (result && result.result === 'success') {
+                        if (isGlobalAdmin) {
+                            showNotification('success', 'Added to Database',
+                                `${name} has been added to the database.`);
+
+                            // Refresh database for global admin
+                            await fetchDatabaseFromSheet();
+                            updateUI();
+                        } else {
+                            showNotification('success', 'Request Submitted',
+                                `Registration request for ${name} has been sent to the administrator for approval.`);
+                        }
+
+                        closeDialog();
+                    } else {
+                        throw new Error(result?.message || 'Submission failed');
+                    }
+                } catch (error) {
+                    showNotification('error', 'Submission Failed', error.message);
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = isGlobalAdmin ? 'Add to Database' : 'Submit Request';
+                }
+            });
+        }
+
+
+        function fetchAndDisplayRegistrations() {
+            if (!currentCourse) {
+                console.warn('Cannot fetch registrations: no course selected');
+                return;
+            }
+
+            callWebApp('getPendingRegistrations', {}, 'GET')
+                .then(registrations => {
+                    const tbody = document.getElementById('pending-registrations-tbody');
+                    if (!tbody) return;
+
+                    tbody.innerHTML = '';
+
+                    if (!registrations || registrations.length === 0) {
+                        tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 30px; color: #999;">
+                            <i class="fas fa-inbox" style="font-size: 2em; display: block; margin-bottom: 10px;"></i>
+                            No pending registrations
+                        </td>
+                    </tr>
+                `;
+                        return;
+                    }
+
                     registrations.forEach(reg => {
                         const row = document.createElement('tr');
-                        const timestamp = new Date(reg.timestamp).toLocaleString();
-                        row.innerHTML = `
-                    <td>${reg.name}</td>
-                    <td class="uid-column">${reg.uid}</td>
-                    <td>${reg.email}</td>
-                    <td>${timestamp}</td>
-                    <td class="actions-cell">
-                        <div class="actions-cell-content">
-                            <button class="btn-green btn-icon approve-btn" title="Approve"><i class="fas fa-check"></i></button>
-                            <button class="btn-red btn-icon reject-btn" title="Reject"><i class="fas fa-times"></i></button>
-                        </div>
-                    </td>
+
+                        // Name
+                        const nameCell = document.createElement('td');
+                        nameCell.textContent = reg.name || 'N/A';
+                        row.appendChild(nameCell);
+
+                        // UID
+                        const uidCell = document.createElement('td');
+                        uidCell.innerHTML = `<span class="uid-badge">${reg.uid || 'N/A'}</span>`;
+                        row.appendChild(uidCell);
+
+                        // Email
+                        const emailCell = document.createElement('td');
+                        emailCell.textContent = reg.email || 'N/A';
+                        emailCell.style.fontSize = '0.9em';
+                        row.appendChild(emailCell);
+
+                        // Timestamp
+                        const timestampCell = document.createElement('td');
+                        if (reg.timestamp) {
+                            const date = new Date(reg.timestamp);
+                            timestampCell.textContent = date.toLocaleString();
+                        } else {
+                            timestampCell.textContent = 'N/A';
+                        }
+                        timestampCell.style.fontSize = '0.9em';
+                        row.appendChild(timestampCell);
+
+                        // NEW: Sent By
+                        const sentByCell = document.createElement('td');
+                        sentByCell.textContent = reg.sentBy || 'Unknown';
+                        sentByCell.style.fontSize = '0.9em';
+                        row.appendChild(sentByCell);
+
+                        // Actions
+                        const actionsCell = document.createElement('td');
+                        actionsCell.className = 'actions-cell';
+                        actionsCell.innerHTML = `
+                    <button class="btn-green btn-sm approve-reg-btn" 
+                        data-row="${reg.rowNumber}" 
+                        data-name="${reg.name}"
+                        data-uid="${reg.uid}"
+                        data-email="${reg.email}">
+                        <i class="fa-solid fa-check"></i> Approve
+                    </button>
+                    <button class="btn-red btn-sm reject-reg-btn"
+                        data-row="${reg.rowNumber}"
+                        data-name="${reg.name}"
+                        data-email="${reg.email}">
+                        <i class="fa-solid fa-times"></i> Reject
+                    </button>
                 `;
-                        row.querySelector('.approve-btn').addEventListener('click', () => showApproveDialog(reg));
-                        row.querySelector('.reject-btn').addEventListener('click', () => showRejectDialog(reg));
+                        row.appendChild(actionsCell);
+
                         tbody.appendChild(row);
                     });
-                } else {
-                    pendingView.classList.add('is-hidden');
-                    badge.style.display = 'none';
-                }
-            } catch (error) {
-                console.error("Error fetching registrations:", error);
-                tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--danger-color);">${error.message}</td></tr>`;
-                pendingView.classList.remove('is-hidden');
-            }
+
+                    // Attach event listeners
+                    attachRegistrationActionListeners();
+                })
+                .catch(error => {
+                    console.error('Error fetching registrations:', error);
+                    showNotification('error', 'Fetch Failed', 'Could not load pending registrations.');
+                });
         }
 
 
@@ -6049,6 +6263,31 @@
                 directEisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
             }
 
+            if (isSignedIn) {
+                if (isAdmin) {
+                    document.body.classList.add('is-admin');
+
+                    // NEW: Hide database tab for non-global admins
+                    const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+                    if (databaseTab) {
+                        if (isGlobalAdmin) {
+                            databaseTab.style.display = 'inline-block';
+                        } else {
+                            databaseTab.style.display = 'none';
+
+                            // If currently on database tab, switch to scanner tab
+                            if (document.querySelector('.tab-content.active')?.id === 'database-tab') {
+                                document.querySelector('.tab[data-tab="scanner-tab"]')?.click();
+                            }
+                        }
+                    }
+                } else {
+                    document.body.classList.remove('is-admin');
+                }
+            } else {
+                document.body.classList.remove('is-admin');
+            }
+
             // Handle guest mode UI
             if (!isSignedIn) {
                 // Create or update the not-signed-in message
@@ -6466,62 +6705,36 @@
      * Fetch database entries from Google Sheet with format detection
      */
         async function fetchDatabaseFromSheet() {
-            if (!databaseLoadPromise) {
-                databaseLoadPromise = new Promise(resolve => { databaseResolve = resolve; });
+            // Use cache if available and fresh
+            const now = Date.now();
+            if (databaseCache && (now - databaseCacheTime) < DATABASE_CACHE_DURATION) {
+                console.log('Using cached database (age: ' + Math.round((now - databaseCacheTime) / 1000) + 's)');
+                databaseMap = databaseCache;
+                return;
             }
 
-            // This function now handles processing the raw sheet data returned by the script
-            const processDbData = (rawData) => {
-                try {
-                    if (!Array.isArray(rawData)) { // Check if the script returned an error object
-                        if (rawData && rawData.result === 'error') throw new Error(rawData.message);
-                        throw new Error("Invalid data format received from script.");
-                    }
-                    const newDbMap = {};
-                    const newUidMap = {};
-                    if (rawData.length > 1) { // Check if there's data beyond the header
-                        rawData.slice(1).forEach(row => { // Skip header row
-                            const [index, name, uidString, email] = row;
-                            // Use index as the primary key IF it's a valid number, otherwise skip
-                            const dbKey = (index !== null && index !== undefined && !isNaN(parseInt(index))) ? String(parseInt(index)).trim() : null;
-
-                            if (dbKey && name && uidString) { // Ensure key, name, and UIDs exist
-                                const uids = String(uidString).split(',').map(s => s.trim()).filter(Boolean);
-                                if (uids.length > 0) {
-                                    newDbMap[dbKey] = { name: String(name).trim(), email: email ? String(email).trim() : '', uids };
-                                    uids.forEach(uid => { newUidMap[uid] = dbKey; });
-                                }
-                            }
-                        });
-                    }
-                    databaseMap = newDbMap;
-                    uidToPrimaryUidMap = newUidMap; // Assign the populated local map to the global one
-                    console.log(`Loaded ${Object.keys(databaseMap).length} entries from database.`);
-
-                } catch (e) {
-                    console.error("Failed to parse database from script:", e);
-                    // Optionally show a notification
-                    showNotification('error', 'Database Error', `Failed to load database: ${e.message}`);
-                } finally {
-                    if (databaseResolve) databaseResolve(); // Resolve the main promise
-                    loadingTasks.delete('database');
-                    checkLoadingCompletion();
-                    // Update UI elements dependent on the database
-                    updateDatabaseStatus();
-                    updateDatabaseList();
-                }
-            };
-
-            // --- Call the script's getDatabase function for BOTH admins and students ---
-            console.log('Fetching database via Apps Script API...');
             try {
-                // Call the generic fetch function for GET, no payload needed
-                const rawData = await callWebApp('getDatabase', {}, 'GET');
-                // Pass the raw data array returned by the web app
-                processDbData(rawData);
-            } catch (err) {
-                console.error('Error fetching database via API:', err);
-                processDbData({ result: "error", message: err.message }); // Process the error state
+                console.log('Fetching fresh database from server...');
+                const result = await callWebApp('getDatabase', {}, 'GET');
+
+                if (result && typeof result === 'object') {
+                    databaseMap = result;
+                    databaseCache = result;
+                    databaseCacheTime = now;
+                    buildUIDToPrimaryUIDMap();
+                    console.log('Database fetched and cached successfully');
+                } else {
+                    throw new Error('Invalid database format received');
+                }
+            } catch (error) {
+                console.error('Error fetching database:', error);
+                // If we have old cache, use it
+                if (databaseCache) {
+                    console.warn('Using stale database cache due to fetch error');
+                    databaseMap = databaseCache;
+                    buildUIDToPrimaryUIDMap();
+                }
+                throw error;
             }
         }
 
@@ -8546,10 +8759,19 @@
                         actionsWrapper.className = 'actions-cell-content';
 
                         if (group.name === 'Unknown') {
-                            actionsWrapper.innerHTML += `
-        <button class="btn-green btn-icon add-user-btn" title="Add to Database" aria-label="Add unknown UID ${group.uid} to database">
-            <i class="fa-solid fa-user-plus"></i>
-        </button>`;
+                            const addUserBtn = document.createElement('button');
+                            addUserBtn.className = 'btn-green btn-icon add-user-btn';
+                            addUserBtn.title = 'Register Student';
+                            addUserBtn.setAttribute('aria-label', `Register student with UID ${group.uid}`);
+                            addUserBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
+
+                            // NEW: Open registration dialog instead of direct database add
+                            addUserBtn.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                showRegisterUIDDialogWithPrefill(group.uid);
+                            });
+
+                            actionsWrapper.appendChild(addUserBtn);
                         }
 
                         actionsWrapper.innerHTML += `
@@ -9141,14 +9363,19 @@
             });
         }
 
-        function showNotification(type, title, message, duration) {
-            if (!isAdmin && (title.includes('Warning') || title.includes('Error'))) {
-                // Don't show non-admin users fetch warnings/errors that they can't act on.
-                if (message.includes('load course list') || message.includes('fetch database')) {
-                    console.warn(`Notification suppressed for non-admin: ${title}`);
-                    return;
-                }
+        function showNotification(type, title, message, duration = 5000) {
+            const notificationArea = document.getElementById('in-page-notification-area');
+            if (!notificationArea) return;
+
+            // Deduplicate notifications - skip if same notification shown recently
+            const notificationKey = `${type}-${title}-${message}`;
+            if (lastNotificationKey === notificationKey &&
+                (Date.now() - lastNotificationTime) < 3000) {
+                console.log('Skipping duplicate notification:', title);
+                return;
             }
+            lastNotificationKey = notificationKey;
+            lastNotificationTime = Date.now();
 
             // Skip redundant notifications
             if (title === 'Courses Warning' && message === 'Using default course list') {
@@ -9218,13 +9445,13 @@
             }
 
             notification.innerHTML = `
-	<i class="fas fa-${icon}"></i>
-	<div style="flex-grow:1;">
-		<strong>${title}</strong><br>
-		${message}
-	</div>
-	<button class="notification-close" title="Close" aria-label="Close notification">&times;</button>
-`;
+        <i class="fas fa-${icon}"></i>
+        <div style="flex-grow:1;">
+            <strong>${title}</strong><br>
+            ${message}
+        </div>
+        <button class="notification-close" title="Close" aria-label="Close notification">&times;</button>
+    `;
 
             notificationArea.appendChild(notification);
 
@@ -9335,31 +9562,35 @@
 
         // Initialize the application when window loads
         window.addEventListener('load', function () {
+            console.log('Window loaded - initializing app');
+
             // Initialize the app UI first
             init();
 
-            // Wait longer before initializing Google API to ensure all scripts are loaded
+            // Reduced initial delay - Google APIs usually load fast
             setTimeout(() => {
                 if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
+                    console.log('Google API objects available, initializing...');
                     initGoogleApi();
                 } else {
-                    console.warn('Google API objects not available yet, waiting longer...');
+                    console.warn('Google API objects not available yet, waiting...');
 
-                    // Try again with a longer timeout
+                    // Fallback with longer timeout
                     setTimeout(() => {
                         if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-                            console.log('Google API objects loaded after extended wait');
+                            console.log('Google API objects loaded after wait');
                             initGoogleApi();
                         } else {
-                            console.error('Google API objects still not available after extended wait');
-                            showNotification('error', 'API Error', 'Google API libraries not loaded. Please check your internet connection or try using a different browser.');
+                            console.error('Google API objects still not available');
+                            showNotification('error', 'API Error',
+                                'Google API libraries not loaded. Please refresh the page.');
                             availableCourses = [];
                             populateCourseDropdown();
                             updateAuthUI();
                         }
-                    }, 3000);
+                    }, 2000);
                 }
-            }, 2000);
+            }, 1000); // Reduced from 2000ms to 1000ms
         });
     </script>
 
