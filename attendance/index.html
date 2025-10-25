@@ -3377,7 +3377,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwZUKaD5zvgCrsLTLgVgz2UEBvvhVwm_fiIVDrta1sQEYW3-C__T0Zl4F3XafIAZUsrtg/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwWc1cxlYGV9Bnwm8ogbQJ6zS8M4sJ_quQTucYVlgFmmISeiFIgPxXueljVbUz0wedDXQ/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -3653,6 +3653,23 @@
             }
         }
 
+        function buildUIDToPrimaryUIDMap() {
+            uidToPrimaryUidMap = {};
+
+            // For each student in database (keyed by Index)
+            Object.keys(databaseMap).forEach(index => {
+                const student = databaseMap[index];
+                if (student && student.uids) {
+                    // Map each UID to the student's Index
+                    student.uids.forEach(uid => {
+                        uidToPrimaryUidMap[uid] = index;
+                    });
+                }
+            });
+
+            console.log('UID mapping built:', Object.keys(uidToPrimaryUidMap).length, 'UIDs mapped');
+        }
+
         /**
              * @returns {Array} The array of logs for the current course and user.
              */
@@ -3716,6 +3733,10 @@
                     if (courseButtons) {
                         if (tabId === 'database-tab') {
                             courseButtons.style.display = 'none';
+                            // Load pending registrations when switching to database tab
+                            if (isAdmin) {
+                                refreshAdminViews();
+                            }
                         } else {
                             courseButtons.style.display = isSignedIn ? 'flex' : 'none';
                         }
@@ -4486,9 +4507,6 @@
                             const logDateStr = new Date(log.timestamp).toISOString().split('T')[0];
                             if (logDateStr === selectedDateStr) {
 
-                                // --- THIS IS THE FIX ---
-                                // Instead of using the scanned card's UID (log.uid), we find the student's
-                                // primary database key and use that for counting.
                                 const primaryStudentKey = uidToPrimaryUidMap[log.uid];
                                 if (primaryStudentKey) {
                                     uidCounts[primaryStudentKey] = (uidCounts[primaryStudentKey] || 0) + 1;
