@@ -4746,15 +4746,43 @@
   * Helper function that your existing initGoogleApi() is trying to call
   */
         function gapiLoaded() {
-            return new Promise((resolve) => {
-                // If gapi is already loaded and ready, resolve immediately
-                if (typeof gapi !== 'undefined') {
-                    resolve();
-                } else {
-                    // Wait a bit and try again
-                    setTimeout(() => resolve(), 100);
+            return new Promise((resolve, reject) => {
+                if (typeof gapi === 'undefined') {
+                    setTimeout(() => gapiLoaded().then(resolve).catch(reject), 100);
+                    return;
                 }
+
+                gapi.load('client', {
+                    callback: resolve,
+                    onerror: reject,
+                    timeout: 5000,
+                    ontimeout: () => reject(new Error('gapi.client load timeout'))
+                });
             });
+        }
+
+        async function attemptTokenRestore() {
+            try {
+                const storedToken = localStorage.getItem('gapi_token');
+                if (!storedToken) return false;
+
+                const tokenObj = JSON.parse(storedToken);
+                if (!tokenObj || !tokenObj.access_token) {
+                    localStorage.removeItem('gapi_token');
+                    return false;
+                }
+
+                gapi.client.setToken(tokenObj);
+
+                await gapi.client.request({
+                    path: 'https://www.googleapis.com/oauth2/v3/userinfo'
+                });
+
+                return true;
+            } catch (error) {
+                localStorage.removeItem('gapi_token');
+                return false;
+            }
         }
 
         /**
@@ -4791,7 +4819,6 @@
                 await gisLoaded();
 
                 gapi.client.init({
-                    apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS,
                 }).then(function () {
                     console.log('GAPI client initialized');
@@ -4799,7 +4826,7 @@
                     tokenClient = google.accounts.oauth2.initTokenClient({
                         client_id: CLIENT_ID,
                         scope: SCOPES,
-                        callback: handleAuthCallback,
+                        callback: handleTokenResponse,
                     });
 
                     console.log('Token client initialized');
@@ -6728,6 +6755,11 @@
                 syncBtn.disabled = !isSignedIn || !isOnline;
                 updateUI();
             }
+        }
+
+        function buildUIDToPrimaryUIDMap() {
+            // Placeholder for UID mapping - currently unused
+            console.log('UID mapping built');
         }
 
 
@@ -9002,7 +9034,7 @@
                     valA = a[1].uids[0] || ''; // Sort by first UID in the list
                     valB = b[1].uids[0] || '';
                 }
-                return multiplier * valA.localeCompare(valB);
+                return multiplier * String(valA).localeCompare(String(valB));
             });
 
             dbEntryCount.textContent = Object.keys(databaseMap).length;
