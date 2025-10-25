@@ -3377,7 +3377,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz3X7niK3S_jY93WeTTl2iEWQ5LJORGwbZKk85GAQWBpDWjObNL1V7yPdIS5m0qoIXDng/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxx3pgXFYv_XsLJFmZQw0JtjJnJTEVeo5Io-IxAnc3iSAGHSwvfuK8VJc12ezYCKvN8OA/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -4949,6 +4949,10 @@
 
                 console.log('User signed in:', currentUser.email);
 
+                // Update user info in UI
+                userName.textContent = currentUser.name;
+                userAvatar.src = currentUser.picture;
+
                 // Check admin status
                 const adminCheckResult = await callWebApp('checkAdminStatus', {}, 'GET');
 
@@ -4984,7 +4988,23 @@
                     // Global admins load from sheets directly with full edit access
                     if (availableCourses.length > 0) {
                         currentCourse = availableCourses[0];
-                        await fetchLogsFromSheet(currentCourse);
+
+                        // Properly load and store first course
+                        const [serverLogs, serverTombs, localData] = await Promise.all([
+                            fetchLogsFromSheet(currentCourse),
+                            fetchTombstonesForCourse(currentCourse),
+                            loadCourseFromLocalStorage(currentCourse)
+                        ]);
+
+                        const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
+                        const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
+                        courseData[currentCourse] = {
+                            logs: mergedLogs,
+                            tombstones: allTombstones
+                        };
+
+                        saveCourseToLocalStorage(currentCourse);
 
                         setTimeout(() => {
                             loadRemainingCoursesInBackground();
@@ -4999,8 +5019,23 @@
                         currentCourse = availableCourses[0];
 
                         try {
-                            // Try to load directly from sheets (requires EDITOR permission)
-                            await fetchLogsFromSheet(currentCourse);
+                            // Properly load and store first course
+                            const [serverLogs, serverTombs, localData] = await Promise.all([
+                                fetchLogsFromSheet(currentCourse),
+                                fetchTombstonesForCourse(currentCourse),
+                                loadCourseFromLocalStorage(currentCourse)
+                            ]);
+
+                            const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
+                            const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
+                            courseData[currentCourse] = {
+                                logs: mergedLogs,
+                                tombstones: allTombstones
+                            };
+
+                            saveCourseToLocalStorage(currentCourse);
+
                             console.log('Non-global admin has direct sheet access (can edit)');
 
                             // Load remaining courses in background
@@ -6722,7 +6757,23 @@
                     await syncLogsWithSheet();
                 } else if (availableCourses.length > 0) {
                     currentCourse = availableCourses[0];
-                    await fetchLogsFromSheet(currentCourse); // Correctly pass the currentCourse
+
+                    // Properly load and store course
+                    const [serverLogs, serverTombs, localData] = await Promise.all([
+                        fetchLogsFromSheet(currentCourse),
+                        fetchTombstonesForCourse(currentCourse),
+                        loadCourseFromLocalStorage(currentCourse)
+                    ]);
+
+                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
+                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
+                    courseData[currentCourse] = {
+                        logs: mergedLogs,
+                        tombstones: allTombstones
+                    };
+
+                    saveCourseToLocalStorage(currentCourse);
                 }
 
                 // Clear the pending changes flag after successful sync
@@ -6757,11 +6808,6 @@
             }
         }
 
-        function buildUIDToPrimaryUIDMap() {
-            // Placeholder for UID mapping - currently unused
-            console.log('UID mapping built');
-        }
-
 
         /**
      * Fetch database entries from Google Sheet with format detection
@@ -6783,7 +6829,6 @@
                     databaseMap = result;
                     databaseCache = result;
                     databaseCacheTime = now;
-                    buildUIDToPrimaryUIDMap();
                     console.log('Database fetched and cached successfully');
                 } else {
                     throw new Error('Invalid database format received');
@@ -6794,7 +6839,6 @@
                 if (databaseCache) {
                     console.warn('Using stale database cache due to fetch error');
                     databaseMap = databaseCache;
-                    buildUIDToPrimaryUIDMap();
                 }
                 throw error;
             }
