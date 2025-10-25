@@ -3654,8 +3654,8 @@
         }
 
         /**
-         * @returns {Array} The array of logs for the current course and user.
-         */
+             * @returns {Array} The array of logs for the current course and user.
+             */
         function getLogsForCurrentUser() {
             if (!currentCourse) return [];
 
@@ -4743,56 +4743,39 @@
         }
 
         /**
- * Promise-based wrapper for gapi.load()
- * Ensures Google API client library is loaded before use
- */
+  * Helper function that your existing initGoogleApi() is trying to call
+  */
         function gapiLoaded() {
-            return new Promise((resolve, reject) => {
-                if (typeof gapi === 'undefined') {
-                    reject(new Error('Google API (gapi) not loaded'));
-                    return;
-                }
-
-                // If already loaded, resolve immediately
-                if (gapi.client) {
+            return new Promise((resolve) => {
+                // If gapi is already loaded and ready, resolve immediately
+                if (typeof gapi !== 'undefined') {
                     resolve();
-                    return;
+                } else {
+                    // Wait a bit and try again
+                    setTimeout(() => resolve(), 100);
                 }
-
-                // Load the client library
-                gapi.load('client', {
-                    callback: () => {
-                        console.log('gapi.client loaded');
-                        resolve();
-                    },
-                    onerror: () => {
-                        reject(new Error('Failed to load gapi.client'));
-                    },
-                    timeout: 5000,
-                    ontimeout: () => {
-                        reject(new Error('Timeout loading gapi.client'));
-                    }
-                });
             });
         }
 
         /**
-         * Promise-based wrapper for Google Identity Services
-         * Ensures GIS library is loaded before use
+         * Helper function that your existing initGoogleApi() is trying to call
          */
         function gisLoaded() {
-            return new Promise((resolve, reject) => {
-                if (typeof google === 'undefined' || !google.accounts) {
-                    reject(new Error('Google Identity Services (GIS) not loaded'));
-                    return;
+            return new Promise((resolve) => {
+                // If google identity services is already loaded, resolve immediately
+                if (typeof google !== 'undefined' && google.accounts) {
+                    resolve();
+                } else {
+                    // Wait a bit and try again
+                    setTimeout(() => resolve(), 100);
                 }
-
-                // GIS is loaded synchronously, so we can resolve immediately
-                console.log('GIS loaded');
-                resolve();
             });
         }
 
+        /**
+         * Initialize Google API client.
+         * Set up auth token client and event listeners for login/logout.
+         */
         async function initGoogleApi() {
             if (initInProgress) {
                 console.log('Init already in progress, skipping duplicate call');
@@ -4804,49 +4787,51 @@
             console.log('Initializing Google API (optimized)...');
 
             try {
-                // These functions now exist!
                 await gapiLoaded();
                 await gisLoaded();
 
-                await gapi.client.init({
+                gapi.client.init({
                     apiKey: API_KEY,
                     discoveryDocs: DISCOVERY_DOCS,
-                });
+                }).then(function () {
+                    console.log('GAPI client initialized');
 
-                console.log('GAPI client initialized');
+                    tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: CLIENT_ID,
+                        scope: SCOPES,
+                        callback: handleAuthCallback,
+                    });
 
-                tokenClient = google.accounts.oauth2.initTokenClient({
-                    client_id: CLIENT_ID,
-                    scope: SCOPES,
-                    callback: handleAuthCallback,
-                });
+                    console.log('Token client initialized');
 
-                console.log('Token client initialized');
-
-                // Try to restore session
-                attemptTokenRestore().then(restored => {
-                    if (restored) {
-                        console.log('Session restored successfully');
-                        onSuccessfulAuth(true);
-                    } else {
-                        console.log('No previous session to restore');
+                    // Try to restore session
+                    attemptTokenRestore().then(restored => {
+                        if (restored) {
+                            console.log('Session restored successfully');
+                            onSuccessfulAuth(true); // true = restored from token
+                        } else {
+                            console.log('No previous session to restore');
+                            isInitializing = false;
+                            showMainContent();
+                            updateAuthUI();
+                            populateCourseButtons();
+                        }
+                    }).catch(err => {
+                        console.error('Token restore or initial data load failed:', err);
+                        console.log('Operating in signed-out mode.');
                         isInitializing = false;
                         showMainContent();
                         updateAuthUI();
-                        populateCourseButtons();
-                    }
+                    });
+
                 }).catch(err => {
-                    console.error('Token restore or initial data load failed:', err);
-                    console.log('Operating in signed-out mode.');
+                    console.error('GAPI init error:', err);
                     isInitializing = false;
                     showMainContent();
-                    updateAuthUI();
                 });
 
             } catch (error) {
                 console.error('initGoogleApi error:', error);
-                showNotification('error', 'API Initialization Failed',
-                    'Could not initialize Google API. Please refresh the page.');
                 isInitializing = false;
                 showMainContent();
             } finally {
