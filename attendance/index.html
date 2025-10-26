@@ -1980,18 +1980,6 @@
             padding: 12px 15px;
         }
 
-        .approve-reg-btn:hover {
-            background-color: var(--success-color) !important;
-            color: white !important;
-            border-color: var(--success-color) !important;
-        }
-
-        .reject-reg-btn:hover {
-            background-color: var(--danger-color) !important;
-            color: white !important;
-            border-color: var(--danger-color) !important;
-        }
-
         /* This is the main container for the new hours counter */
         .number-input-container {
             display: flex;
@@ -3394,7 +3382,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxV-Rw6LJgZY6Fcqzwz4opkerPek9YxG2XWZiKtq40eNHociluKzP7AfS80Fni-7iXcRQ/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz-rXbpvevkyerBiHns5tU6hVt_WiyAxQzUPSFkWOJmj5DrXJmfmQEZYoGad7e4Hd8snw/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -4978,9 +4966,8 @@
                         }, 1000);
                     }
 
-                    // Handle course data loading
                     if (isGlobalAdmin) {
-                        // ONLY global admins load via GAPI
+                        // 1. GLOBAL ADMIN PATH (GAPI)
                         if (currentCourse) {
                             const [serverLogs, serverTombs, localData] = await Promise.all([
                                 fetchLogsFromSheet(currentCourse),
@@ -5003,8 +4990,12 @@
                                 loadRemainingCoursesInBackground();
                             }, 2000);
                         }
+                    } else if (isAdmin) {
+                        // 2. NON-GLOBAL (COURSE) ADMIN PATH (Backend API)
+                        await loadAllCourseLogsForCourseAdmin();
+
                     } else {
-                        // Everyone else: load via backend API ONLY
+                        // 3. STUDENT PATH (Backend API)
                         await loadAllCourseLogsForStudent();
                     }
                 }
@@ -5463,8 +5454,6 @@
 
             callWebApp('getPendingRegistrations', { courseName: currentCourse }, 'GET')
                 .then(registrations => {
-                    console.log('Registrations received:', registrations);
-
                     tbody.innerHTML = '';
 
                     const pendingView = document.getElementById('pending-registrations-view');
@@ -5875,7 +5864,7 @@
                 };
 
                 button.disabled = true;
-                button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Replacing...`;
+                button.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Approving...`;
 
                 callWebApp('approveRegistration', payload, 'POST')
                     .then(result => {
@@ -5989,7 +5978,9 @@
 
             // Add context parameters needed by Apps Script
             payload.logsSpreadsheetId = LOGS_SPREADSHEET_ID;
-            payload.courseName = currentCourse || '';
+            if (!('courseName' in payload)) { // Check if courseName is not already set
+                payload.courseName = currentCourse || '';
+            }
             payload.access_token = token;
 
             if (method === 'GET') {
@@ -6327,7 +6318,7 @@
             // Show/hide main containers based on auth state
             if (loginContainer) loginContainer.style.display = isSignedIn ? 'none' : 'flex';
             if (userContainer) userContainer.style.display = isSignedIn ? 'flex' : 'none';
-            if (tabsContainer) tabsContainer.style.display = isAdmin ? 'flex' : 'none';
+            if (tabsContainer) tabsContainer.style.display = isGlobalAdmin ? 'flex' : 'none';
             if (courseButtonsContainer) courseButtonsContainer.style.display = isSignedIn ? 'flex' : 'none';
 
             // Handle scanner and scan buttons
@@ -6347,7 +6338,7 @@
                     const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
                     if (databaseTab) {
                         if (isGlobalAdmin) {
-                            databaseTab.style.setProperty('display', 'inline-block', 'important');
+                            databaseTab.style.setProperty('display', 'flex', 'important');
                         } else {
                             databaseTab.style.setProperty('display', 'none', 'important');
                             // Switch away if currently on database tab
@@ -6669,6 +6660,44 @@
             }
         }
 
+        async function loadAllCourseLogsForCourseAdmin() {
+            if (!isAdmin || isGlobalAdmin || !isOnline || !isSignedIn) {
+                return;
+            }
+
+            // Clear any old student cache
+            studentLogCache = {};
+
+            const fetchPromises = availableCourses.map(async (course) => {
+                try {
+                    // Call the NEW Web App endpoint
+                    const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: course }, 'GET');
+
+                    if (serverLogs && serverLogs.length > 0) {
+                        // We can use studentLogCache for this, its just a cache
+                        studentLogCache[course] = serverLogs;
+                        console.log(`Fetched and cached ${serverLogs.length} admin logs for ${course}`);
+                    }
+                } catch (err) {
+                    console.error(`Failed to call Apps Script for ${course}:`, err);
+                }
+            });
+
+            await Promise.all(fetchPromises);
+
+            // Populate courseData for the course admin
+            availableCourses.forEach(course => {
+                if (studentLogCache[course]) {
+                    courseData[course] = {
+                        logs: studentLogCache[course],
+                        tombstones: new Set() // Course admins don't use GAPI, so no tombstones
+                    };
+                }
+            });
+
+            updateUI();
+        }
+
         /**
      * Proactively fetches and caches logs for all available courses FOR A STUDENT.
      */
@@ -6680,7 +6709,7 @@
                 checkLoadingCompletion();
                 return;
             }
-            if (isAdmin || !isOnline || !isSignedIn) return;
+            if (!isOnline || !isSignedIn) return;
             studentLogCache = {};
 
             const fetchPromises = availableCourses.map(async (course) => {
