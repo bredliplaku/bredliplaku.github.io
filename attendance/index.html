@@ -3299,14 +3299,7 @@
             <div id="pending-registrations-view">
                 <div class="module" style="margin-top:20px">
                     <div class="module-header">
-                        <span class="module-title"><i class="fa-solid fa-list-ol"></i> UID Database</span>
-
-                        <div class="module-header-actions">
-                            <button id="database-refresh-btn" class="btn-blue btn-icon refresh-btn"
-                                title="Refresh Database">
-                                <i class="fa-solid fa-arrows-rotate"></i>
-                            </button>
-                        </div>
+                        <span class="module-title"><i class="fa-solid fa-inbox"></i> Pending Registrations</span>
                     </div>
                     <div class="module-content">
                         <div class="table-container">
@@ -3331,6 +3324,12 @@
             <div class="module" style="margin-top:20px">
                 <div class="module-header">
                     <span class="module-title"><i class="fa-solid fa-list-ol"></i> UID Database</span>
+                    <div class="module-header-actions">
+                        <button id="database-refresh-btn" class="btn-blue btn-icon refresh-btn"
+                            title="Refresh Database">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="module-content">
                     <div class="filter-container">
@@ -3420,7 +3419,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzpbQEVReqlAvD3b_tXPx5xzvNm6N4Q-b27QwMKBC9IgoFV0WK6nRTDx5G3r_accW-UdQ/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzqlcGc31rKZ8bu68qUJlAiFrLAxoSprAzU748tKImRtQXF7lR6MBsG0sW3zApMKRYZ6g/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -3692,7 +3691,7 @@
             }
         }
 
-        function buildUIDToPrimaryUIDMap() {
+        window.buildUIDToPrimaryUidMap = function () {
             uidToPrimaryUidMap = {};
 
             // For each student in database (keyed by Index)
@@ -9293,7 +9292,7 @@
             };
 
             dialog.querySelector('#cancel-add-log-btn').addEventListener('click', closeDialog);
-            dialog.querySelector('#confirm-add-log-btn').addEventListener('click', () => {
+            dialog.querySelector('#confirm-add-log-btn').addEventListener('click', async () => {
                 clearInputError(nameInput);
                 clearInputError(emailInput);
 
@@ -9312,17 +9311,49 @@
 
                 if (!isValid) return;
 
-                const existingKeys = Object.keys(databaseMap).map(Number);
-                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+                const confirmBtn = dialog.querySelector('#confirm-add-log-btn');
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
 
-                databaseMap[newDbKey] = { name: name, email: email, uids: [uid] };
+                try {
+                    const submissionData = {
+                        name: name,
+                        email: email,
+                        uid: uid,
+                        sentBy: {
+                            name: currentUser?.name || '',
+                            email: currentUser?.email || ''
+                        }
+                    };
 
-                if (isOnline && isSignedIn) {
-                    syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                    if (isGlobalAdmin) {
+                        // Global admins add directly to the database
+                        const result = await callWebApp('addEntryToDatabase_Admin', submissionData, 'POST');
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Added to Database', `${name} has been added to the database.`);
+                            invalidateDatabaseCache();
+                            await fetchDatabaseFromSheet();
+                            window.buildUIDToPrimaryUidMap(); // Correctly call the global function
+                            updateUI();
+                            closeDialog();
+                        } else {
+                            throw new Error(result?.message || 'Failed to add entry');
+                        }
+                    } else {
+                        // Non-global admins submit a registration request
+                        const result = await callWebApp('submitRegistration', submissionData, 'POST');
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Request Submitted', `Registration request for ${name} has been sent for approval.`);
+                            closeDialog();
+                        } else {
+                            throw new Error(result?.message || 'Submission failed');
+                        }
+                    }
+                } catch (error) {
+                    showNotification('error', 'Submission Failed', error.message);
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = 'Add Student';
                 }
-                updateUI();
-                showNotification('success', 'Entry Added', `Added ${name} (${uid}) to the database.`);
-                closeDialog();
             });
         }
 
