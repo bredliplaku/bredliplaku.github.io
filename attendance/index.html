@@ -3389,7 +3389,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzn3oBnU55XkUM263MMuYMVt4tHCmmbLaEXfVGnwCf91ha1akfpvEXCnnLj15RKm8WuEg/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw4L85bbNYtJNglkPGg5HmmtaTFK4wj4bWzUTJwhRcgVBHxo-jGCGQZ6R-JKCA0Q4l9/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -3496,10 +3496,8 @@
 
         function checkLoadingCompletion() {
             if (loadingTasks.size === 0) {
-                console.log("All loading tasks complete. Showing main content.");
                 setTimeout(showMainContent, 100); // Short delay for rendering
             } else {
-                console.log("Waiting for tasks:", Array.from(loadingTasks));
             }
         }
 
@@ -3550,7 +3548,6 @@
 
             // Remove the collected keys.
             keysToRemove.forEach(key => {
-                console.log(`Removing key: ${key}`);
                 localStorage.removeItem(key);
             });
 
@@ -4663,11 +4660,12 @@
         function init() {
             if (!localStorage.getItem('gapi_token')) {
                 localStorage.removeItem('last_active_course');
-                console.log("No auth token on load. Cleared last active course to ensure a clean start.");
             }
 
             document.body.classList.add('is-loading');
             isInitializing = true;
+
+            cleanupOldLocalStorage();
 
             setupThemeToggle();
 
@@ -4900,8 +4898,14 @@
          * and populates the main courseData object.
          */
         async function loadAllCourseLogsForStudent() {
-            if (isGlobalAdmin || !isOnline || !isSignedIn) return;
-            console.log("Non-global user signed in. Loading course logs from backend...");
+            if (isGlobalAdmin || !isOnline || !isSignedIn) {
+                loadingTasks.delete('courses');
+                loadingTasks.delete('database');
+                loadingTasks.delete('gapi');
+                checkLoadingCompletion();
+                return;
+            }
+
             studentLogCache = {};
 
             const fetchPromises = availableCourses.map(async (course) => {
@@ -4917,17 +4921,20 @@
             });
 
             await Promise.all(fetchPromises);
-            console.log("Finished pre-loading all course logs.");
 
             // Also populate courseData for non-global users (without edit capability)
             availableCourses.forEach(course => {
                 if (studentLogCache[course]) {
+                    console.log(`Setting courseData[${course}] with ${studentLogCache[course].length} logs`);
                     courseData[course] = {
-                        logs: studentLogCache[course],
+                        logs: [...studentLogCache[course]], // Create a copy
                         tombstones: new Set() // Read-only, no tombstones
                     };
+                } else {
+                    console.warn(`No logs in cache for course: ${course}`);
                 }
             });
+            console.log('Final courseData keys:', Object.keys(courseData));
 
             updateUI();
         }
@@ -4981,16 +4988,13 @@
                         if (adminCourses.includes('*')) {
                             // Global admin with old backend - show all courses (temporary fallback)
                             availableCourses = allCourses;
-                            console.log('Admin with wildcard access - all courses:', availableCourses);
                         } else {
                             // Filter to only courses where admin email is in Column J
                             availableCourses = allCourses.filter(course => adminCourses.includes(course));
-                            console.log('Admin - filtered to assigned courses:', availableCourses);
                         }
                     } else {
                         // Students: backend already filtered
                         availableCourses = allCourses;
-                        console.log('Student - filtered courses:', availableCourses);
                     }
 
                     // Update courseDictionary to match filtered courses
@@ -5002,12 +5006,9 @@
                     });
                     courseDictionary = filteredDict;
 
-                    console.log('Final available courses:', availableCourses);
-
                     // Set first course ONLY from filtered list
                     if (availableCourses.length > 0) {
                         currentCourse = availableCourses[0];
-                        console.log('First course set to:', currentCourse);
                     } else {
                         console.warn('No courses available for user');
                         currentCourse = null;
@@ -5049,7 +5050,6 @@
                         }
                     } else {
                         // Everyone else: load via backend API ONLY
-                        console.log('Loading courses via backend API for:', currentUser.email);
                         await loadAllCourseLogsForStudent();
                     }
                 }
@@ -5512,17 +5512,21 @@
 
                     tbody.innerHTML = '';
 
+                    const pendingView = document.getElementById('pending-registrations-view');
+                    const pendingModule = pendingView?.closest('.module');
+
+                    tbody.innerHTML = '';
+
                     if (!registrations || registrations.length === 0) {
-                        tbody.innerHTML = `
-                    <tr>
-                        <td colspan="6" style="text-align: center; padding: 30px; color: #999;">
-                            <i class="fas fa-inbox" style="font-size: 2em; display: block; margin-bottom: 10px;"></i>
-                            No pending registrations
-                        </td>
-                    </tr>
-                `;
+                        // Hide entire section when empty
+                        if (pendingView) pendingView.style.display = 'none';
+                        if (pendingModule) pendingModule.style.display = 'none';
                         return;
                     }
+
+                    // Show section when there are registrations
+                    if (pendingView) pendingView.style.display = 'block';
+                    if (pendingModule) pendingModule.style.display = 'block';
 
                     registrations.forEach(reg => {
                         const row = document.createElement('tr');
@@ -5563,25 +5567,26 @@
                         // Actions
                         const actionsCell = document.createElement('td');
                         actionsCell.className = 'actions-cell';
-                        actionsCell.innerHTML = `
-    <button class="btn-icon approve-reg-btn" 
+                        const actionsWrapper = document.createElement('div');
+                        actionsWrapper.className = 'actions-cell-content';
+                        actionsWrapper.innerHTML = `
+    <button class="btn-icon btn-green approve-reg-btn" 
         data-row="${reg.rowNumber}" 
         data-name="${reg.name}"
         data-uid="${reg.uid}"
         data-email="${reg.email}"
-        title="Approve Registration"
-        style="background: transparent; color: #666; border: 1px solid #ddd;">
+        title="Approve Registration">
         <i class="fa-solid fa-check"></i>
     </button>
-    <button class="btn-icon reject-reg-btn"
+    <button class="btn-icon btn-red reject-reg-btn"
         data-row="${reg.rowNumber}"
         data-name="${reg.name}"
         data-email="${reg.email}"
-        title="Reject Registration"
-        style="background: transparent; color: #666; border: 1px solid #ddd;">
+        title="Reject Registration">
         <i class="fa-solid fa-times"></i>
     </button>
 `;
+                        actionsCell.appendChild(actionsWrapper);
                         row.appendChild(actionsCell);
 
                         tbody.appendChild(row);
@@ -6045,7 +6050,6 @@
             }
 
             try {
-                console.log(`Calling Web App (${method}) action: "${action}" via fetch...`);
                 const response = await fetch(url, options);
 
                 if (!response.ok) {
@@ -6098,18 +6102,13 @@
          */
         function getCourseMetadata(course) {
             if (!course) {
-                console.log("getCourseMetadata: No course provided");
                 return null;
             }
 
             // Check if the global courseInfoMap exists and contains this course
             if (window.courseInfoMap && window.courseInfoMap[course]) {
-                console.log(`Found metadata for course: ${course}`, window.courseInfoMap[course]);
                 return window.courseInfoMap[course];
             }
-
-            console.log(`No metadata found for course: ${course}`);
-            console.log("Available courseInfoMap:", window.courseInfoMap);
 
             // No metadata found
             return null;
@@ -6712,8 +6711,14 @@
      * Proactively fetches and caches logs for all available courses FOR A STUDENT.
      */
         async function loadAllCourseLogsForStudent() {
+            if (isGlobalAdmin || !isOnline || !isSignedIn) {
+                loadingTasks.delete('courses'); // CRITICAL: Remove from loading tasks
+                loadingTasks.delete('database');
+                loadingTasks.delete('gapi');
+                checkLoadingCompletion();
+                return;
+            }
             if (isAdmin || !isOnline || !isSignedIn) return;
-            console.log("Student signed in. Proactively loading all course logs from server...");
             studentLogCache = {};
 
             const fetchPromises = availableCourses.map(async (course) => {
@@ -6731,7 +6736,6 @@
             });
 
             await Promise.all(fetchPromises);
-            console.log("Finished pre-loading all student logs.");
 
             // Also populate courseData for students (without tombstones since they can't edit)
             availableCourses.forEach(course => {
@@ -7189,7 +7193,17 @@
         function saveAndMarkChanges(courseName) {
             saveCourseToLocalStorage(courseName);
             pendingChanges = true;
-            updateSyncStatus(autoSyncEnabled ? 'Pending auto-sync' : 'Pending sync', 'waiting');
+
+            // Trigger immediate auto-sync if enabled
+            if (autoSyncEnabled && isOnline && isSignedIn) {
+                // Small delay to batch multiple rapid changes
+                clearTimeout(window.autoSyncTimeout);
+                window.autoSyncTimeout = setTimeout(() => {
+                    autoSyncData();
+                }, 5000); // Sync after 5 seconds of no changes
+            } else {
+                updateSyncStatus(autoSyncEnabled ? 'Pending auto-sync' : 'Pending sync', 'waiting');
+            }
         }
 
         // Helper function to convert a timestamp to a local ISO-like string (without timezone info)
@@ -7206,10 +7220,24 @@
         }
 
         /**
-         * CORRECTED: Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
-         */
+ * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
+ */
         async function syncLogsWithSheet() {
-            if (!currentCourse || !isAdmin || !isOnline || !courseData[currentCourse]) return;
+            // Basic conditions check
+            if (!currentCourse || !isOnline || !isSignedIn) {
+                return;
+            }
+
+            // CRITICAL: Non-global admins sync via backend API
+            if (isAdmin && !isGlobalAdmin) {
+                return syncViaBackendAPI();
+            }
+
+            // From here on, only GLOBAL ADMINS execute
+            // Ensure we have data to sync
+            if (!isGlobalAdmin || !courseData[currentCourse]) {
+                return;
+            }
 
             const currentData = courseData[currentCourse];
 
@@ -7237,7 +7265,10 @@
                 const formattedSheetName = formatSheetName(sheetName);
                 const fullRange = `${formattedSheetName}!A2:G`;
 
-                await gapi.client.sheets.spreadsheets.values.clear({ spreadsheetId: LOGS_SPREADSHEET_ID, range: fullRange });
+                await gapi.client.sheets.spreadsheets.values.clear({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: fullRange
+                });
 
                 if (sheetData.length > 0) {
                     await gapi.client.sheets.spreadsheets.values.update({
@@ -7248,13 +7279,44 @@
                     });
                 }
 
-                console.log(`Successfully completed tombstone-aware sync for ${currentCourse}.`);
                 currentData.tombstones.clear();
-                saveAndMarkChanges(currentCourse);
+                saveCourseToLocalStorage(currentCourse);
 
             } catch (error) {
                 console.error('Error during tombstone-aware sync:', error);
                 throw error; // Let the caller handle the UI notification.
+            }
+        }
+
+        async function syncViaBackendAPI() {
+            try {
+
+                const logsToSync = courseData[currentCourse]?.logs || [];
+
+                if (logsToSync.length === 0) {
+                    console.log('No logs to sync');
+                    return;
+                }
+
+                // Call backend to sync logs
+                const result = await callWebApp('syncCourseLogs_Admin', {
+                    courseName: currentCourse,
+                    logs: logsToSync
+                }, 'POST');
+
+                if (result && result.result === 'success') {
+                    pendingChanges = false;
+                    lastSyncTime = Date.now();
+                    saveCourseToLocalStorage(currentCourse);
+                    showNotification('success', 'Synced', `${currentCourse} synced successfully`);
+                } else {
+                    throw new Error(result?.message || 'Sync failed');
+                }
+
+            } catch (error) {
+                console.error('Backend sync error:', error);
+                showNotification('error', 'Sync Failed', error.message);
+                throw error;
             }
         }
 
@@ -7265,11 +7327,9 @@
         async function syncDatabaseToSheet() {
             // Add checks for admin status, online status, and current course context
             if (!isAdmin || !isOnline || !currentCourse) {
-                console.log("SyncDatabaseToSheet: Skipping sync (not admin, offline, or no course selected).");
                 return;
             }
 
-            console.log("Syncing frontend databaseMap to Google Sheet via Apps Script...");
             showNotification('info', 'Syncing Database...', 'Please wait.');
 
             try {
@@ -7699,13 +7759,10 @@
          */
         async function fetchCourseInfo() {
             if (!isOnline || !isSignedIn) {
-                console.log("Not fetching course info: not signed in or offline");
                 return;
             }
 
             try {
-                console.log("Fetching course info from spreadsheet...");
-
                 // Check if the COURSE_INFO sheet exists
                 const spreadsheetResponse = await gapi.client.sheets.spreadsheets.get({
                     spreadsheetId: LOGS_SPREADSHEET_ID
@@ -8913,7 +8970,6 @@
         async function loadRemainingCoursesInBackground() {
             if (!isAdmin) return;
 
-            console.log(`Starting background fetch for remaining courses...`);
             const remainingCourses = availableCourses.filter(c => c !== currentCourse);
 
             const remainingCoursePromises = remainingCourses.map(async (courseName) => {
