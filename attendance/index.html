@@ -66,6 +66,11 @@
             display: none !important;
         }
 
+        /* Hide tabs container for non-global admins */
+        body:not(.is-admin) .tabs {
+            display: none !important;
+        }
+
         #user-avatar {
             cursor: default;
             /* This keeps the feature hidden */
@@ -3181,11 +3186,11 @@
                         loaded</span></span>
                 <span class="info-item"><i class="fas fa-clock"></i> Last scan: <span id="last-scan">Never</span></span>
             </div>
-            <div class="tabs" style="display: none;">
+            <div class="tabs admin-only" style="display: none;">
                 <div class="tab active" data-tab="scanner-tab">
                     <i class="fa-brands fa-nfc-symbol"></i>&nbsp; Scanner
                 </div>
-                <div class="tab admin-only" data-tab="database-tab">
+                <div class="tab" data-tab="database-tab">
                     <i class="fa-solid fa-list-ol"></i>&nbsp; Database
                 </div>
             </div>
@@ -3389,7 +3394,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw4L85bbNYtJNglkPGg5HmmtaTFK4wj4bWzUTJwhRcgVBHxo-jGCGQZ6R-JKCA0Q4l9/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxV-Rw6LJgZY6Fcqzwz4opkerPek9YxG2XWZiKtq40eNHociluKzP7AfS80Fni-7iXcRQ/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -3606,7 +3611,7 @@
                 let newLog = {
                     uid: uid,
                     timestamp: newDate.getTime(),
-                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    id: Date.now() + Math.random().toString(36).substring(2, 11),
                     manual: true
                 };
                 newLog = touchLogForEdit(newLog, currentUser?.email);
@@ -3642,7 +3647,7 @@
             let newLog = {
                 uid: group.originalLogs[0]?.uid,
                 timestamp: newDate.getTime(),
-                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                id: Date.now() + Math.random().toString(36).substring(2, 11),
                 manual: true
             };
             newLog = touchLogForEdit(newLog, currentUser?.email);
@@ -4886,58 +4891,8 @@
         }
 
         /**
-         * The button is created hidden and revealed via another action.
-         */
-        function setupClearDataButton() {
-            // This function no longer creates a separate button
-            // The avatar itself will transform into the clear button on 5 clicks
-            // Nothing to do here anymore
-        }
-
-        /**
          * and populates the main courseData object.
          */
-        async function loadAllCourseLogsForStudent() {
-            if (isGlobalAdmin || !isOnline || !isSignedIn) {
-                loadingTasks.delete('courses');
-                loadingTasks.delete('database');
-                loadingTasks.delete('gapi');
-                checkLoadingCompletion();
-                return;
-            }
-
-            studentLogCache = {};
-
-            const fetchPromises = availableCourses.map(async (course) => {
-                try {
-                    const serverLogs = await callWebApp('getStudentLogs', { courseName: course }, 'GET');
-                    if (serverLogs && serverLogs.length > 0) {
-                        studentLogCache[course] = serverLogs;
-                        console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
-                    }
-                } catch (err) {
-                    console.error(`Failed to load logs for ${course}:`, err);
-                }
-            });
-
-            await Promise.all(fetchPromises);
-
-            // Also populate courseData for non-global users (without edit capability)
-            availableCourses.forEach(course => {
-                if (studentLogCache[course]) {
-                    console.log(`Setting courseData[${course}] with ${studentLogCache[course].length} logs`);
-                    courseData[course] = {
-                        logs: [...studentLogCache[course]], // Create a copy
-                        tombstones: new Set() // Read-only, no tombstones
-                    };
-                } else {
-                    console.warn(`No logs in cache for course: ${course}`);
-                }
-            });
-            console.log('Final courseData keys:', Object.keys(courseData));
-
-            updateUI();
-        }
 
         async function onSuccessfulAuth(isRestore = false) {
             isSignedIn = true;
@@ -6343,8 +6298,6 @@
 
             document.body.classList.toggle('is-admin', isAdmin);
 
-            setupClearDataButton();
-
             const sortSelect = document.getElementById('sort-select');
             if (sortSelect) {
                 // Get all options as an array
@@ -6503,6 +6456,15 @@
 
             currentCourse = courseName;
             localStorage.setItem('last_active_course', currentCourse);
+
+            // For students and non-global admins: ensure courseData is populated from cache
+            if (!isGlobalAdmin && studentLogCache && studentLogCache[courseName]) {
+                console.log(`Switching to ${courseName}, loading from cache`);
+                courseData[courseName] = {
+                    logs: [...studentLogCache[courseName]], // Create a fresh copy
+                    tombstones: new Set()
+                };
+            }
 
             // Simply update the UI to show the data for the new course.
             // updateUI() will call updateLogsList(), which reads the flag.
@@ -7059,22 +7021,6 @@
             }).filter(l => l.id && Number.isFinite(l.timestamp));
         }
 
-        async function fetchTombstonesForCourse(courseName) {
-            if (!courseName) return new Set();
-            const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
-
-            const { result } = await gapi.client.sheets.spreadsheets.values.get({
-                spreadsheetId: LOGS_SPREADSHEET_ID,
-                range: tombstoneRange
-            });
-
-            const set = new Set();
-            for (const row of (result.values || [])) {
-                const [course, id] = row;
-                if (course === courseName && id) set.add(id);
-            }
-            return set;
-        }
 
         /**
  * Updates a log's version and updatedAt timestamp for an edit.
@@ -8118,11 +8064,17 @@
                 let newLog = {
                     uid: selectedUid,
                     timestamp: new Date(`${manualDate}T${manualTime}:00`).getTime(),
-                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    id: Date.now() + Math.random().toString(36).substring(2, 11),
                     manual: true
                 };
 
                 newLog = touchLogForEdit(newLog, currentUser?.email);
+
+                // Initialize courseData for current course if it doesn't exist
+                if (!courseData[currentCourse]) {
+                    courseData[currentCourse] = { logs: [], tombstones: new Set() };
+                }
+
                 courseData[currentCourse].logs.unshift(newLog);
                 saveAndMarkChanges(currentCourse);
                 updateUI();
@@ -8364,7 +8316,7 @@
                     let newLog = {
                         uid: group.originalLogs[0]?.uid,
                         timestamp: newTimestampObj.getTime(),
-                        id: Date.now() + Math.random().toString(36).substr(2, 9),
+                        id: Date.now() + Math.random().toString(36).substring(2, 11),
                         manual: true // All newly added times are manual
                     };
                     newLog = touchLogForEdit(newLog, currentUser?.email);
@@ -8603,7 +8555,7 @@
 
                         // Ensure each log has an ID
                         if (!log.id) {
-                            log.id = Date.now() + Math.random().toString(36).substr(2, 9);
+                            log.id = Date.now() + Math.random().toString(36).substring(2, 11);
                         }
                     });
 
@@ -9386,7 +9338,7 @@
             let newLog = {
                 uid: serialNumber,
                 timestamp: timestamp.getTime(),
-                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                id: Date.now() + Math.random().toString(36).substring(2, 11),
                 manual: false
             };
             newLog = touchLogForEdit(newLog, currentUser?.email); // currentUser will be null in lecturer mode, which is fine.
