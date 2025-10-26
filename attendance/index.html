@@ -3377,7 +3377,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxvuOh2JUPK7EK-uV2tcfRu1SfMZoZVd-8A4MnEQ-xCUQgNgOtfhusmsRXyPNfJ_SzaNg/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzRZAxFXE43cTUG3fLiNc5ifd6pYJCV1O9_iqsrtAp2qIT6dQVH566GYxz-WwqJaX524A/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -4980,6 +4980,12 @@
                     adminCourses = adminCheckResult.courses || [];
 
                     console.log('Admin status:', { isAdmin, isGlobalAdmin, adminCourses });
+                    console.log('🔍 DEBUG - Current user email:', currentUser.email);
+                    console.log('🔍 DEBUG - Is admin:', isAdmin);
+                    console.log('🔍 DEBUG - Admin courses:', adminCourses);
+                    if (!isAdmin && !isGlobalAdmin) {
+                        console.log('⚠️ User is NOT an admin.');
+                    }
                 }
 
                 // Fetch database (with caching)
@@ -5513,15 +5519,25 @@
 
 
         function fetchAndDisplayRegistrations() {
+            console.log('🔍 Fetching registrations for course:', currentCourse);
+            console.log('🔍 isAdmin:', isAdmin, 'isGlobalAdmin:', isGlobalAdmin);
+
             if (!currentCourse) {
-                console.warn('Cannot fetch registrations: no course selected');
+                console.warn('❌ Cannot fetch registrations: no course selected');
                 return;
             }
 
             callWebApp('getPendingRegistrations', { courseName: currentCourse }, 'GET')
                 .then(registrations => {
+                    console.log('📋 Pending registrations response:', registrations);
+                    console.log('📋 Type:', typeof registrations, 'Is Array:', Array.isArray(registrations));
+                    console.log('📋 Length:', registrations?.length);
+
                     const tbody = document.getElementById('pending-registrations-tbody');
-                    if (!tbody) return;
+                    if (!tbody) {
+                        console.error('❌ tbody element not found!');
+                        return;
+                    }
 
                     tbody.innerHTML = '';
 
@@ -6561,14 +6577,29 @@
             document.addEventListener('keydown', () => { lastAuthCheck = Date.now(); });
         }
 
-        // Try to silently refresh the token
+        // Try to silently refresh the token without popup
         async function attemptSilentAuth() {
             try {
-                // This simply triggers the request. The result is handled by the tokenCallback now.
-                tokenClient.requestAccessToken({ prompt: 'none' });
+                // Check if we have a valid token stored
+                const tokenObj = gapi.client.getToken();
+                if (!tokenObj) {
+                    console.log('No token found, user needs to sign in');
+                    return;
+                }
+
+                // Try to make a simple API call to test if token is still valid
+                // If it succeeds, token is good; if it fails, we'll catch it elsewhere
+                await gapi.client.request({
+                    path: 'https://www.googleapis.com/oauth2/v3/tokeninfo',
+                    method: 'GET'
+                });
+
+                console.log('Token is still valid');
             } catch (error) {
-                // This catch block is unlikely to be hit, but is kept for safety.
-                console.error('Error initiating silent auth:', error);
+                console.warn('Token expired, user will need to sign in again');
+                showNotification('warning', 'Session Expired', 'Please sign in again to continue.');
+                // Don't use requestAccessToken here as it opens popup
+                // Let the user naturally re-authenticate next time they interact
             }
         }
 
@@ -6708,6 +6739,17 @@
 
             await Promise.all(fetchPromises);
             console.log("Finished pre-loading all student logs.");
+
+            // Also populate courseData for students (without tombstones since they can't edit)
+            availableCourses.forEach(course => {
+                if (studentLogCache[course]) {
+                    courseData[course] = {
+                        logs: studentLogCache[course],
+                        tombstones: new Set() // Students can't delete, so no tombstones
+                    };
+                }
+            });
+
             updateUI();
         }
 
