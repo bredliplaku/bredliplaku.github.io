@@ -3675,23 +3675,11 @@
             if (!currentCourse) return [];
 
             if (isGlobalAdmin) {
-                // Global admins use direct GAPI access with full edit capabilities
+                // Global admins use GAPI
                 return courseData[currentCourse]?.logs || [];
-            } else if (isAdmin && !isGlobalAdmin) {
-                // Non-global admins have edit access but need to use mixed approach:
-                // - Try courseData first (if they have direct sheet access for editing)
-                // - Fall back to studentLogCache (server-filtered data for viewing)
-
-                // Check if we have courseData loaded (means they have sheet edit access)
-                if (courseData[currentCourse]) {
-                    return courseData[currentCourse].logs || [];
-                }
-
-                // Otherwise use cache (shouldn't happen if permissions are set correctly)
-                return studentLogCache[currentCourse] || [];
             } else {
-                // Students always use server-only cache (read-only)
-                return studentLogCache[currentCourse] || [];
+                // Non-global admins and students use courseData (populated from backend)
+                return courseData[currentCourse]?.logs || [];
             }
         }
 
@@ -4953,17 +4941,17 @@
                 userName.textContent = currentUser.name;
                 userAvatar.src = currentUser.picture;
 
-                // Check admin status
+                // Check admin status FIRST
                 const adminCheckResult = await callWebApp('checkAdminStatus', {}, 'GET');
 
                 if (adminCheckResult) {
                     isAdmin = adminCheckResult.isAdmin || false;
                     isGlobalAdmin = adminCheckResult.isGlobalAdmin || false;
                     adminCourses = adminCheckResult.courses || [];
-
+                    console.log('Admin status:', { isAdmin, isGlobalAdmin, adminCourses });
                 }
 
-                // Fetch database (with caching)
+                // Fetch database
                 await fetchDatabaseFromSheet();
                 buildUIDToPrimaryUIDMap();
 
@@ -4972,28 +4960,42 @@
 
                 if (fetchedCourseDict && typeof fetchedCourseDict === 'object') {
                     courseDictionary = fetchedCourseDict;
-                    availableCourses = Object.keys(courseDictionary);
+                    let allCourses = Object.keys(courseDictionary);
 
-                    // Filter courses based on user type
-                    if (isAdmin && !isGlobalAdmin) {
-                        // Non-global admins: only show courses they admin
-                        availableCourses = availableCourses.filter(course => adminCourses.includes(course));
-
-                        // Update courseDictionary to match filtered courses
-                        const filteredDict = {};
-                        availableCourses.forEach(course => {
-                            if (courseDictionary[course]) {
-                                filteredDict[course] = courseDictionary[course];
-                            }
-                        });
-                        courseDictionary = filteredDict;
+                    // CRITICAL: Filter courses BEFORE doing anything else
+                    if (isGlobalAdmin) {
+                        availableCourses = allCourses;
+                        console.log('Global admin - all courses:', availableCourses);
+                    } else if (isAdmin && !isGlobalAdmin) {
+                        // Non-global admins: ONLY their courses
+                        availableCourses = allCourses.filter(course => adminCourses.includes(course));
+                        console.log('Non-global admin - filtered courses:', availableCourses);
+                    } else {
+                        // Students: backend already filtered
+                        availableCourses = allCourses;
+                        console.log('Student - filtered courses:', availableCourses);
                     }
-                    // Students: availableCourses already filtered by backend
 
-                    console.log('Available courses:', availableCourses);
+                    // Update courseDictionary to match
+                    const filteredDict = {};
+                    availableCourses.forEach(course => {
+                        if (courseDictionary[course]) {
+                            filteredDict[course] = courseDictionary[course];
+                        }
+                    });
+                    courseDictionary = filteredDict;
                 }
 
-                // Only fetch course info for global admins (requires sheet access)
+                // Set first course ONLY from filtered list
+                if (availableCourses.length > 0) {
+                    currentCourse = availableCourses[0];
+                    console.log('First course set to:', currentCourse);
+                } else {
+                    console.warn('No courses available for user');
+                    currentCourse = null;
+                }
+
+                // Only fetch course info for global admins
                 if (isGlobalAdmin) {
                     setTimeout(() => {
                         fetchCourseInfo().catch(err =>
@@ -5002,13 +5004,10 @@
                     }, 1000);
                 }
 
-                // Handle course data loading based on user type
+                // Handle course data loading
                 if (isGlobalAdmin) {
-                    // Global admins load from sheets directly with full edit access
-                    if (availableCourses.length > 0) {
-                        currentCourse = availableCourses[0];
-
-                        // Properly load and store first course
+                    // ONLY global admins load via GAPI
+                    if (currentCourse) {
                         const [serverLogs, serverTombs, localData] = await Promise.all([
                             fetchLogsFromSheet(currentCourse),
                             fetchTombstonesForCourse(currentCourse),
@@ -5025,23 +5024,20 @@
 
                         saveCourseToLocalStorage(currentCourse);
 
+                        // Load remaining in background
                         setTimeout(() => {
                             loadRemainingCoursesInBackground();
                         }, 2000);
                     }
                 } else {
-                    // Non-global admins AND students: Load via backend API (read-only)
+                    // Everyone else: load via backend API ONLY
+                    console.log('Loading courses via backend API for:', currentUser.email);
                     await loadAllCourseLogsForStudent();
-
-                    if (availableCourses.length > 0 && !currentCourse) {
-                        currentCourse = availableCourses[0];
-                    }
                 }
 
             } catch (error) {
                 console.error('Error during auth:', error);
-                showNotification('error', 'Authentication Error',
-                    'Failed to complete sign-in. Please try again.');
+                showNotification('error', 'Authentication Error', 'Failed to complete sign-in. Please try again.');
             } finally {
                 isInitializing = false;
                 showMainContent();
@@ -5472,20 +5468,28 @@
                 return;
             }
 
-            // Make sure we're on the admin tab before looking for the element
-            const adminTab = document.getElementById('admin-tab');
-            if (!adminTab || !adminTab.classList.contains('active')) {
+            if (!isAdmin) {
+                console.warn('Only admins can view pending registrations');
                 return;
+            }
+
+            let tbody = document.getElementById('registrations-tbody');
+
+            // Create tbody if it doesn't exist
+            if (!tbody) {
+                const table = document.querySelector('#admin-tab .database-table');
+                if (!table) {
+                    console.error('Pending registrations table not found in HTML');
+                    return;
+                }
+                tbody = document.createElement('tbody');
+                tbody.id = 'registrations-tbody';
+                table.appendChild(tbody);
             }
 
             callWebApp('getPendingRegistrations', { courseName: currentCourse }, 'GET')
                 .then(registrations => {
-
-                    const tbody = document.getElementById('pending-registrations-tbody');
-                    if (!tbody) {
-                        console.error('❌ tbody element not found!');
-                        return;
-                    }
+                    console.log('Registrations received:', registrations);
 
                     tbody.innerHTML = '';
 
@@ -6334,23 +6338,18 @@
             }
 
             if (isSignedIn) {
+                // Hide database tab for everyone except global admins (must be BEFORE isAdmin check)
+                const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
+                if (databaseTab) {
+                    databaseTab.style.display = isGlobalAdmin ? 'inline-block' : 'none';
+                    // Switch away if currently on database tab
+                    if (!isGlobalAdmin && document.querySelector('.tab-content.active')?.id === 'database-tab') {
+                        document.querySelector('.tab[data-tab="scanner-tab"]')?.click();
+                    }
+                }
+
                 if (isAdmin) {
                     document.body.classList.add('is-admin');
-
-                    // NEW: Hide database tab for non-global admins
-                    const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-                    if (databaseTab) {
-                        if (isGlobalAdmin) {
-                            databaseTab.style.display = 'inline-block';
-                        } else {
-                            databaseTab.style.display = 'none';
-
-                            // If currently on database tab, switch to scanner tab
-                            if (document.querySelector('.tab-content.active')?.id === 'database-tab') {
-                                document.querySelector('.tab[data-tab="scanner-tab"]')?.click();
-                            }
-                        }
-                    }
                 } else {
                     document.body.classList.remove('is-admin');
                 }
@@ -9541,47 +9540,9 @@
             }
 
             courseButtonsContainer.innerHTML = '';
+
+            // availableCourses is already filtered in onSuccessfulAuth, use it directly
             let coursesToDisplay = availableCourses;
-
-            // For students, filter courses based on the in-memory cache.
-            if (!isAdmin && currentUser) {
-                const studentNameNormalised = normalizeName(currentUser.name);
-                const studentEmail = currentUser.email ? currentUser.email.toLowerCase() : '';
-
-                coursesToDisplay = availableCourses.filter(course => {
-                    const logsForCourse = studentLogCache[course] || [];
-
-                    // If no logs cached for this course, include it (student might have logs but cache failed)
-                    if (logsForCourse.length === 0) {
-                        return true; // Show the course, let the backend filter it
-                    }
-
-                    // Check if at least one log in this course belongs to the student
-                    return logsForCourse.some(log => {
-                        // Try multiple matching strategies for robustness
-
-                        // Strategy 1: Match by UID in database
-                        const logOwnerName = databaseMap[log.uid]?.name || '';
-                        if (logOwnerName && normalizeName(logOwnerName) === studentNameNormalised) {
-                            return true;
-                        }
-
-                        // Strategy 2: Match by email if available in log
-                        if (log.email && studentEmail && log.email.toLowerCase() === studentEmail) {
-                            return true;
-                        }
-
-                        // Strategy 3: Match by name if stored directly in log
-                        if (log.name && normalizeName(log.name) === studentNameNormalised) {
-                            return true;
-                        }
-
-                        return false;
-                    });
-                });
-
-                console.log(`Student course filtering: ${coursesToDisplay.length} of ${availableCourses.length} courses shown`);
-            }
 
             coursesToDisplay.forEach(course => {
                 const button = document.createElement('div');
