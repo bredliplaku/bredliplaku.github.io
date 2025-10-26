@@ -66,11 +66,6 @@
             display: none !important;
         }
 
-        /* Hide tabs container for non-global admins */
-        body:not(.is-admin) .tabs {
-            display: none !important;
-        }
-
         #user-avatar {
             cursor: default;
             /* This keeps the feature hidden */
@@ -563,6 +558,38 @@
 
         .module-content {
             padding: 15px;
+        }
+
+        .module-header-actions {
+            margin-left: auto;
+            /* This pushes it to the right */
+            display: flex;
+            align-items: center;
+        }
+
+        .refresh-btn {
+            width: 30px;
+            height: 30px;
+            background-color: transparent;
+            border-color: transparent;
+            box-shadow: none;
+            color: white;
+            opacity: 0.8;
+        }
+
+        .refresh-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            border-color: transparent;
+            opacity: 1;
+        }
+
+        .refresh-btn i.fa-spin {
+            animation: spin 1s linear infinite;
+        }
+
+        /* Fix for dark mode */
+        .dark-mode .refresh-btn {
+            color: white;
         }
 
         .not-signed-in-message {
@@ -3198,6 +3225,12 @@
             <div class="module">
                 <div class="module-header">
                     <span class="module-title"><i class="fas fa-history"></i> Scan History</span>
+
+                    <div class="module-header-actions">
+                        <button id="scanner-refresh-btn" class="btn-blue btn-icon refresh-btn" title="Refresh Logs">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="module-content">
                     <div class="filter-container">
@@ -3266,9 +3299,14 @@
             <div id="pending-registrations-view">
                 <div class="module" style="margin-top:20px">
                     <div class="module-header">
-                        <span class="module-title"><i class="fas fa-inbox"></i> Pending Applications</span>
-                        <span id="registration-count-badge" class="info-item"
-                            style="display:none; padding: 0px 12px; border-radius:14px;"></span>
+                        <span class="module-title"><i class="fa-solid fa-list-ol"></i> UID Database</span>
+
+                        <div class="module-header-actions">
+                            <button id="database-refresh-btn" class="btn-blue btn-icon refresh-btn"
+                                title="Refresh Database">
+                                <i class="fa-solid fa-arrows-rotate"></i>
+                            </button>
+                        </div>
                     </div>
                     <div class="module-content">
                         <div class="table-container">
@@ -3382,7 +3420,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz-rXbpvevkyerBiHns5tU6hVt_WiyAxQzUPSFkWOJmj5DrXJmfmQEZYoGad7e4Hd8snw/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzpbQEVReqlAvD3b_tXPx5xzvNm6N4Q-b27QwMKBC9IgoFV0WK6nRTDx5G3r_accW-UdQ/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -3880,7 +3918,7 @@
                             // Replace avatar with button
                             userAvatar.parentNode.replaceChild(clearButton, userAvatar);
 
-                            showNotification('info', 'Cache Button Unlocked', 'Click the bomb icon to clear cache.');
+                            showNotification('info', 'Cache Button Unlocked', 'Click to clear cache.');
                         }
                         avatarClickCount = 0; // Reset after activation
                     }
@@ -4195,7 +4233,7 @@
 
                     // Show notification
                     if (autoSyncEnabled) {
-                        showNotification('info', 'Auto-Sync Enabled',
+                        showNotification('success', 'Auto-Sync Enabled',
                             'Changes will sync automatically when online');
 
                         // Try to sync immediately if we have pending changes
@@ -4239,7 +4277,7 @@
 
                     // Show notification
                     if (autoSyncEnabled) {
-                        showNotification('info', 'Auto-Sync Enabled',
+                        showNotification('success', 'Auto-Sync Enabled',
                             'Changes will sync automatically when online');
                     } else {
                         showNotification('info', 'Auto-Sync Disabled',
@@ -4262,6 +4300,14 @@
                 // Prevent additional click events
                 e.preventDefault();
             });
+        }
+
+        /**
+ * Clears the local database cache to force a re-fetch from the server.
+ */
+        function invalidateDatabaseCache() {
+            databaseCache = null;
+            databaseCacheTime = 0;
         }
 
         // Add this function to implement auto-save and auto-sync
@@ -4702,6 +4748,7 @@
 
             // Set up event listeners
             setupEventListeners();
+            setupRefreshButtons();
 
             // Restore and apply the last saved sort UI state
             sortSelect.value = currentSort;
@@ -5090,7 +5137,6 @@
                     isAdmin = adminStatus.isAdmin;
 
                     updateAuthUI();
-                    showNotification('success', 'Signed In', `Welcome ${currentUser.name}`);
 
                     // NEW: Check for pending changes on login
                     if (isAdmin) {
@@ -5398,25 +5444,28 @@
                         }
                     };
 
-                    const result = await callWebApp('submitRegistration', submissionData, 'POST');
-
-                    if (result && result.result === 'success') {
-                        if (isGlobalAdmin) {
-                            showNotification('success', 'Added to Database',
-                                `${name} has been added to the database.`);
-
-                            // Refresh database for global admin
-                            await fetchDatabaseFromSheet();
-                            buildUIDToPrimaryUIDMap();
+                    if (isGlobalAdmin) {
+                        // Global admins add directly to the database
+                        const result = await callWebApp('addEntryToDatabase_Admin', submissionData, 'POST');
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Added to Database', `${name} has been added to the database.`);
+                            invalidateDatabaseCache(); // Invalidate cache
+                            await fetchDatabaseFromSheet(); // Re-fetch
+                            buildUIDToPrimaryUidMap();
                             updateUI();
+                            closeDialog();
                         } else {
-                            showNotification('success', 'Request Submitted',
-                                `Registration request for ${name} has been sent to the administrator for approval.`);
+                            throw new Error(result?.message || 'Failed to add entry');
                         }
-
-                        closeDialog();
                     } else {
-                        throw new Error(result?.message || 'Submission failed');
+                        // Non-global admins submit a registration request
+                        const result = await callWebApp('submitRegistration', submissionData, 'POST');
+                        if (result && result.result === 'success') {
+                            showNotification('success', 'Request Submitted', `Registration request for ${name} has been sent for approval.`);
+                            closeDialog();
+                        } else {
+                            throw new Error(result?.message || 'Submission failed');
+                        }
                     }
                 } catch (error) {
                     showNotification('error', 'Submission Failed', error.message);
@@ -5426,6 +5475,162 @@
             });
         }
 
+        /**
+         * Checks for duplicates in the local databaseMap.
+         * @param {object} entry - The new entry to check {name, email, uid}.
+         * @returns {object | null} A match object if found, or null.
+         */
+        function findDuplicateInDatabase(entry) {
+            const norm = (str) => (str || '').toString().normalize("NFD").replace(/[\u00e0-\u00f6]/g, "").toLowerCase().trim();
+            const newUid = norm(entry.uid);
+            const newName = norm(entry.name);
+            const newEmail = norm(entry.email);
+
+            for (const [dbKey, studentData] of Object.entries(databaseMap)) {
+                const existingUids = studentData.uids.map(norm);
+                const existingName = norm(studentData.name);
+                const existingEmail = norm(studentData.email);
+
+                const duplicateData = {
+                    index: dbKey, // This is the PRIMARY KEY from the databaseMap
+                    name: studentData.name,
+                    uid: studentData.uids.join(', '),
+                    email: studentData.email || '',
+                    rowIndex: parseInt(dbKey) // Use the index as the key
+                };
+
+                if (existingUids.includes(newUid)) return { type: 'uid', duplicate: duplicateData };
+                if (newEmail && existingEmail && existingEmail === newEmail) return { type: 'email', duplicate: duplicateData };
+                if (existingName === newName) return { type: 'name', duplicate: duplicateData };
+            }
+            return null;
+        }
+
+        /**
+         * Creates the warning dialog for adding a new entry that is a duplicate.
+         * This version modifies the local databaseMap directly.
+         */
+        function showDuplicateWarningForNewEntry(newData, duplicates, onCompleteCallback) {
+            document.body.style.overflow = 'hidden';
+            const existing = duplicates[0];
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
+
+            // --- Comparison logic ---
+            const norm = (str) => (str || '').toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+            const isNameMatch = norm(newData.name) === norm(existing.name);
+            const isEmailMatch = norm(newData.email) === norm(existing.email);
+            const existingUids = (existing.uid || '').toString().split(',').map(norm);
+            const isUidMatch = existingUids.includes(norm(newData.uid));
+
+            // --- Dynamic HTML ---
+            const nameActionHTML = isNameMatch ? '<span style="opacity: 0.6;">(Names match)</span>' :
+                `<div class="field-action"><input type="checkbox" id="replace-name-check" data-field="name"><label for="replace-name-check">Replace</label></div>`;
+            const emailActionHTML = isEmailMatch ? '<span style="opacity: 0.6;">(Emails match)</span>' :
+                `<div class="field-action"><input type="checkbox" id="replace-email-check" data-field="email"><label for="replace-email-check">Replace</label></div>`;
+            const uidActionHTML = isUidMatch ? '<span style="opacity: 0.6;">(UID exists)</span>' :
+                `<div class="field-action">
+            <select id="uid-action-select" class="form-control" style="padding: 5px 8px;">
+                <option value="none" selected>Do Nothing</option>
+                <option value="merge">Merge (Add this UID)</option>
+                <option value="replace">Replace (Overwrite all UIDs)</option>
+            </select>
+        </div>`;
+
+            dialog.innerHTML = `
+<h3 class="dialog-title" style="color: var(--warning-color);"><i class="fas fa-exclamation-triangle"></i> Similar Entry Found</h3>
+<div class="dialog-content">
+    <p>An entry with similar data already exists. Please review and choose an action.</p>
+    <h4>Existing Data</h4>
+    <div class="form-group"><label>Name:</label><input class="form-control" value="${existing.name}" disabled></div>
+    <div class="form-group"><label>UID(s):</label><input class="form-control" value="${existing.uid}" disabled></div>
+    <div class="form-group"><label>Email:</label><input class="form-control" value="${existing.email || 'N/A'}" disabled></div>
+    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+    <h4>New Entry</h4>
+    <div class="comparison-grid">
+        <div class="form-group" style="margin: 0;"><label>Name:</label><input class="form-control" value="${newData.name}" disabled></div>
+        ${nameActionHTML}
+        <div class="form-group" style="margin: 0;"><label>Email:</label><input class="form-control" value="${newData.email}" disabled></div>
+        ${emailActionHTML}
+        <div class="form-group" style="margin: 0;"><label>UID:</label><input class="form-control" value="${newData.uid}" disabled></div>
+        ${uidActionHTML}
+    </div>
+</div>
+<div class="dialog-actions">
+    <button id="cancel-duplicate-btn" class="btn-red">Cancel</button>
+    <button id="add-anyway-btn" class="btn-orange">Add as Separate</button>
+    <button id="apply-btn" class="btn-green">Apply Changes</button>
+</div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+            const addAnywayBtn = document.getElementById('add-anyway-btn');
+            const applyBtn = document.getElementById('apply-btn');
+            const actionControls = dialog.querySelectorAll('[data-field="name"], [data-field="email"], #uid-action-select');
+
+            const updateButtonStates = () => {
+                const isAnyActionSelected = Array.from(actionControls).some(control =>
+                    (control.type === 'checkbox' && control.checked) ||
+                    (control.tagName === 'SELECT' && control.value !== 'none')
+                );
+                addAnywayBtn.disabled = isAnyActionSelected;
+                applyBtn.disabled = !isAnyActionSelected;
+            };
+
+            actionControls.forEach(control => control.addEventListener('change', updateButtonStates));
+            updateButtonStates();
+            document.getElementById('cancel-duplicate-btn').addEventListener('click', closeDialog);
+
+            // "Add as Separate" button
+            addAnywayBtn.addEventListener('click', () => {
+                const existingKeys = Object.keys(databaseMap).map(Number);
+                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+                databaseMap[newDbKey] = { name: newData.name, email: newData.email, uids: [newData.uid] };
+                showNotification('success', 'Entry Added', `Added ${newData.name} as a separate entry.`);
+                onCompleteCallback();
+                closeDialog();
+            });
+
+            // "Apply Changes" button
+            applyBtn.addEventListener('click', () => {
+                const existingEntryKey = existing.index; // The key from databaseMap
+                const existingEntryData = databaseMap[existingEntryKey];
+
+                if (!existingEntryData) {
+                    showNotification('error', 'Error', 'Could not find existing entry to update.');
+                    closeDialog();
+                    return;
+                }
+
+                const nameCheck = dialog.querySelector('#replace-name-check');
+                const emailCheck = dialog.querySelector('#replace-email-check');
+                const uidSelect = dialog.querySelector('#uid-action-select');
+
+                if (nameCheck && nameCheck.checked) existingEntryData.name = newData.name;
+                if (emailCheck && emailCheck.checked) existingEntryData.email = newData.email;
+                if (uidSelect) {
+                    if (uidSelect.value === 'merge') {
+                        if (!existingEntryData.uids.includes(newData.uid)) {
+                            existingEntryData.uids.push(newData.uid);
+                        }
+                    } else if (uidSelect.value === 'replace') {
+                        existingEntryData.uids = [newData.uid];
+                    }
+                }
+                showNotification('success', 'Entry Updated', `Updated details for ${existingEntryData.name}.`);
+                onCompleteCallback();
+                closeDialog();
+            });
+        }
 
         function fetchAndDisplayRegistrations() {
             if (!currentCourse) {
@@ -5707,9 +5912,10 @@
 
                 if (!currentCourse) return;
                 callWebApp('approveRegistration', finalData, 'POST')
-                    .then(result => { // 'result' is the direct response from the script
+                    .then(result => {
                         if (result && result.result === 'success') {
                             showNotification('success', 'Approved!', `${finalData.name} has been added to the database.`);
+                            invalidateDatabaseCache(); // <-- ADD THIS LINE
                             refreshAdminViews();
                             closeDialog();
                         } else {
@@ -5831,6 +6037,7 @@
                     .then(result => {
                         if (result && result.result === 'success') {
                             showNotification('success', 'Action Complete', `Registration for ${newData.name} has been processed.`);
+                            invalidateDatabaseCache();
                             refreshAdminViews();
                             closeDialog();
                         } else { throw new Error(result ? result.message : 'Action failed'); }
@@ -5870,6 +6077,7 @@
                     .then(result => {
                         if (result && result.result === 'success') {
                             showNotification('success', 'Action Complete', 'The entry has been updated.');
+                            invalidateDatabaseCache();
                             refreshAdminViews();
                             closeDialog();
                         } else { throw new Error(result ? result.message : 'Action failed'); }
@@ -6110,6 +6318,56 @@
         }
 
         /**
+ * Handles the click on either refresh button.
+ * Shows a spinner, runs a full sync, then stops the spinner.
+ */
+        async function handleManualRefresh(buttonId) {
+            if (isSyncing) return; // Don't refresh if already syncing
+
+            const refreshBtn = document.getElementById(buttonId);
+            if (!refreshBtn) return;
+
+            const icon = refreshBtn.querySelector('i');
+            const originalIconClass = icon.className;
+
+            // Start spinner
+            icon.className = 'fa-solid fa-arrows-rotate fa-spin';
+            refreshBtn.disabled = true;
+
+            try {
+                // Call syncData() which PUSHES and PULLS all data
+                // and calls updateUI() at the end.
+                await syncData();
+            } catch (error) {
+                console.error('Manual refresh failed:', error);
+                showNotification('error', 'Refresh Failed', 'Could not sync data. Check console.');
+            } finally {
+                // Stop spinner
+                icon.className = originalIconClass;
+                refreshBtn.disabled = false;
+            }
+        }
+
+        // ADD THIS new function
+
+        function setupRefreshButtons() {
+            const scannerRefreshBtn = document.getElementById('scanner-refresh-btn');
+            const databaseRefreshBtn = document.getElementById('database-refresh-btn');
+
+            if (scannerRefreshBtn) {
+                scannerRefreshBtn.addEventListener('click', () => {
+                    handleManualRefresh('scanner-refresh-btn');
+                });
+            }
+
+            if (databaseRefreshBtn) {
+                databaseRefreshBtn.addEventListener('click', () => {
+                    handleManualRefresh('database-refresh-btn');
+                });
+            }
+        }
+
+        /**
          * Calculate the current week of the course
          * @param {Object} metadata - Course metadata with start_date, end_date, and holiday_weeks
          * @returns {number|null} Current week number or null if metadata is invalid
@@ -6237,7 +6495,7 @@
 
                 // The current course and its data remain in memory for scanning.
                 updateAuthUI(); // Updates only the auth-related UI parts.
-                showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active. Refresh to end the session.`);
+                showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active.`);
 
             } else {
                 // --- STANDARD STUDENT SIGN-OUT ---
@@ -6450,7 +6708,6 @@
 
             // For students and non-global admins: ensure courseData is populated from cache
             if (!isGlobalAdmin && studentLogCache && studentLogCache[courseName]) {
-                console.log(`Switching to ${courseName}, loading from cache`);
                 courseData[courseName] = {
                     logs: [...studentLogCache[courseName]], // Create a fresh copy
                     tombstones: new Set()
@@ -6676,7 +6933,6 @@
                     if (serverLogs && serverLogs.length > 0) {
                         // We can use studentLogCache for this, its just a cache
                         studentLogCache[course] = serverLogs;
-                        console.log(`Fetched and cached ${serverLogs.length} admin logs for ${course}`);
                     }
                 } catch (err) {
                     console.error(`Failed to call Apps Script for ${course}:`, err);
@@ -6719,7 +6975,6 @@
                     // No need to parse JSON, callWebApp already does it
                     if (serverLogs && serverLogs.length > 0) {
                         studentLogCache[course] = serverLogs;
-                        console.log(`Fetched and cached ${serverLogs.length} logs for ${course}`);
                     }
                 } catch (err) {
                     console.error(`Failed to call Apps Script for ${course}:`, err);
@@ -6846,7 +7101,7 @@
             } catch (error) {
                 console.error('Sync error:', error);
                 updateSyncStatus("Sync failed", "error");
-                showNotification('error', 'Sync Failed', 'Failed to sync with Google Sheets. Check console for details.');
+                showNotification('error', 'Sync Failed', 'Failed to sync data.');
             } finally {
                 isSyncing = false;
 
@@ -7283,14 +7538,12 @@
                     pendingChanges = false;
                     lastSyncTime = Date.now();
                     saveCourseToLocalStorage(currentCourse);
-                    showNotification('success', 'Synced', `${currentCourse} synced successfully`);
                 } else {
                     throw new Error(result?.message || 'Sync failed');
                 }
 
             } catch (error) {
                 console.error('Backend sync error:', error);
-                showNotification('error', 'Sync Failed', error.message);
                 throw error;
             }
         }
@@ -7305,15 +7558,12 @@
                 return;
             }
 
-            showNotification('info', 'Syncing Database...', 'Please wait.');
-
             try {
                 // Call the Web App using POST, parameters go in payload
                 const resultData = await callWebApp('syncDatabase_Admin', { databaseData: databaseMap }, 'POST');
                 // No need for resp.result..., callWebApp returns the data directly
                 if (resultData && resultData.result === 'success') {
                     console.log(`Successfully synced ${resultData.count} database entries via script.`);
-                    showNotification('success', 'Database Synced', `${resultData.count} entries synced.`);
                 } else {
                     throw new Error(resultData ? resultData.message : 'Unknown error during database sync.');
                 }
@@ -7357,7 +7607,7 @@
 
             } catch (error) {
                 console.error('Error appending log:', error);
-                showNotification('warning', 'Sync Warning', 'Failed to sync log immediately. Will sync on next full sync.');
+                showNotification('warning', 'Sync Warning', 'Failed to sync log. Please sync manually.');
             }
         }
 
@@ -7503,67 +7753,54 @@
 
             document.getElementById('cancel-add-btn').addEventListener('click', close);
 
-            // Your existing save logic is preserved below
-            document.getElementById('confirm-add-btn').addEventListener('click', () => {
+            document.getElementById('confirm-add-btn').addEventListener('click', async () => {
                 const nameInput = document.getElementById('add-name');
                 const emailInput = document.getElementById('add-email');
                 const uidInput = document.getElementById('add-uid');
 
+                // --- Validation (no changes) ---
                 clearInputError(nameInput);
                 clearInputError(emailInput);
                 clearInputError(uidInput);
-
                 const name = nameInput.value.trim();
                 const email = emailInput.value.trim();
                 const uid = uidInput.value.trim();
                 let isValid = true;
-
-                if (name === '') {
-                    showInputError(nameInput, 'Name is required.');
-                    isValid = false;
-                }
-                if (!isValidEmail(email)) {
-                    showInputError(emailInput, 'A valid email is required.');
-                    isValid = false;
-                }
-                if (uid === '') {
-                    showInputError(uidInput, 'UID is required.');
-                    isValid = false;
-                }
-
+                if (name === '') { showInputError(nameInput, 'Name is required.'); isValid = false; }
+                if (!isValidEmail(email)) { showInputError(emailInput, 'A valid email is required.'); isValid = false; }
+                if (uid === '') { showInputError(uidInput, 'UID is required.'); isValid = false; }
                 if (!isValid) return;
+                // --- End Validation ---
 
-                let merged = false;
-                for (const [dbKey, studentData] of Object.entries(databaseMap)) {
-                    if (studentData.name.toLowerCase() === name.toLowerCase() && studentData.email.toLowerCase() === email.toLowerCase()) {
-                        if (studentData.uids.includes(uid)) {
-                            showInputError(uidInput, 'This UID is already assigned to this student.');
-                            return;
-                        }
-                        databaseMap[dbKey].uids.push(uid);
-                        merged = true;
-                        showNotification('success', 'UID Merged', `Added new UID to existing record for ${name}.`);
-                        break;
+                // This function will be called to finalize any change
+                const completeAction = async () => {
+                    if (isOnline) {
+                        await syncDatabaseToSheet(); // Push changes
+                        invalidateDatabaseCache();  // Dump local cache
+                        await fetchDatabaseFromSheet(); // Pull fresh data
                     }
+                    buildUIDToPrimaryUidMap(); // Rebuild map
+                    updateUI(); // Refresh UI
+                    close(); // Close the dialog
+                };
+
+                const match = findDuplicateInDatabase({ name, email, uid });
+                if (match) {
+                    // DUPLICATE FOUND: Show the warning dialog
+                    // We pass 'completeAction' as the callback
+                    showDuplicateWarningForNewEntry({ name, email, uid }, [match.duplicate], completeAction);
+                    close(); // Close the 'Add New Student' dialog
+                    return;
                 }
 
-                if (!merged) {
-                    const isDuplicate = Object.values(databaseMap).some(student => student.uids.includes(uid));
-                    if (isDuplicate) {
-                        showInputError(uidInput, 'This UID is already assigned to another student.');
-                        return;
-                    }
+                // NO DUPLICATE: Add to local map first
+                const existingKeys = Object.keys(databaseMap).map(Number);
+                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+                databaseMap[newDbKey] = { name, email, uids: [uid] };
+                showNotification('success', 'Entry Added', `Added ${name} to the database.`);
 
-                    const existingKeys = Object.keys(databaseMap).map(Number);
-                    const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
-
-                    databaseMap[newDbKey] = { name, email, uids: [uid] };
-                    showNotification('success', 'Entry Added', `Added ${name} to the database.`);
-                }
-
-                if (isOnline) syncDatabaseToSheet();
-                updateUI();
-                close();
+                // Finalize by pushing/pulling
+                await completeAction();
             });
         }
 
@@ -7663,41 +7900,39 @@
             };
 
             document.getElementById('cancel-edit-btn').addEventListener('click', closeDialog);
-            document.getElementById('confirm-edit-btn').addEventListener('click', () => {
+            document.getElementById('confirm-edit-btn').addEventListener('click', async () => {
                 const nameInput = document.getElementById('edit-name');
                 const emailInput = document.getElementById('edit-email');
                 const uidInputs = Array.from(dialog.querySelectorAll('.uid-input'));
 
-                // Clear previous errors
+                // --- Validation (no changes) ---
                 clearInputError(nameInput);
                 clearInputError(emailInput);
                 uidInputs.forEach(clearInputError);
-
                 const newName = nameInput.value.trim();
                 const newEmail = emailInput.value.trim();
                 let isValid = true;
-
-                if (newName === '') {
-                    showInputError(nameInput, 'Name is required.');
-                    isValid = false;
-                }
-                if (!isValidEmail(newEmail)) {
-                    showInputError(emailInput, 'A valid email is required.');
-                    isValid = false;
-                }
-
+                if (newName === '') { showInputError(nameInput, 'Name is required.'); isValid = false; }
+                if (!isValidEmail(newEmail)) { showInputError(emailInput, 'A valid email is required.'); isValid = false; }
                 const updatedUids = uidInputs.map(input => input.value.trim());
                 if (updatedUids.some(uid => uid === '')) {
                     showInputError(uidInputs.find(input => input.value.trim() === ''), 'UID fields cannot be empty.');
                     isValid = false;
                 }
-
                 if (!isValid) return;
+                // --- End Validation ---
 
+                // Update local map
                 databaseMap[dbKey] = { name: newName, email: newEmail, uids: updatedUids.filter(Boolean) };
 
-                if (isOnline) syncDatabaseToSheet();
+                if (isOnline) {
+                    await syncDatabaseToSheet(); // Push
+                    invalidateDatabaseCache();  // Dump
+                    await fetchDatabaseFromSheet(); // Pull
+                }
+                buildUIDToPrimaryUidMap();
                 updateUI();
+
                 showNotification('success', 'Entry Updated', `Updated details for ${newName}.`);
                 closeDialog();
             });
@@ -7717,13 +7952,16 @@
                 message: `Are you sure you want to delete "${name}" (${uid}) from the database?`,
                 confirmText: 'Delete',
                 isDestructive: true,
-                onConfirm: () => {
+                onConfirm: async () => {
                     delete databaseMap[uid];
                     if (isOnline && isSignedIn) {
-                        syncDatabaseToSheet().catch(err => console.error('Error syncing database:', err));
+                        await syncDatabaseToSheet(); // Push
+                        invalidateDatabaseCache();  // Dump
+                        await fetchDatabaseFromSheet(); // Pull
                     }
+                    buildUIDToPrimaryUidMap();
                     updateUI();
-                    showNotification('delete', 'Entry Deleted', `Removed ${name} (${uid}) from the database.`);
+                    showNotification('delete', 'Entry Deleted', `Removed ${name} from the database.`);
                 }
             });
         }
@@ -8113,7 +8351,6 @@
                 }
 
                 const name = databaseMap[selectedUid]?.name || 'Unknown';
-                showNotification('success', 'Manual Entry Added', `Added attendance for ${name}.`);
                 closeDialog();
             });
 
@@ -8264,7 +8501,6 @@
                     logsToDelete.add(logId);
                     timestampGroup.classList.add('deleted');
                     timestampGroup.style.display = 'none'; // Hide it visually
-                    showNotification('info', 'Marked for Deletion', 'Timestamp will be removed upon saving.');
                 });
             });
 
@@ -8280,7 +8516,7 @@
                         courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
                         saveAndMarkChanges(currentCourse);
                         updateUI();
-                        showNotification('delete', 'Entry Deleted', 'All timestamps for this entry were removed.');
+                        showNotification('delete', 'Entry Deleted', 'All timestamps were deleted.');
                         if (isOnline && isSignedIn) syncLogsWithSheet();
                     }
                 });
@@ -8363,7 +8599,6 @@
                 }
 
                 updateUI();
-                showNotification('success', 'Log Updated', 'The log entry was updated successfully.');
                 closeDialog();
             });
 
@@ -8398,7 +8633,7 @@
                         courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
                         saveAndMarkChanges(currentCourse);
                         updateUI();
-                        showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} on this date were removed.`);
+                        showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
                         if (isOnline && isSignedIn) syncLogsWithSheet();
                     }
                 });
@@ -8476,7 +8711,7 @@
 
                     const excelCount = Object.keys(excelMappings).length;
                     if (excelCount === 0) {
-                        return showNotification('error', 'Import Failed', 'Could not find Name and UID data in the first two columns.');
+                        return showNotification('error', 'Import Failed', 'Could not find Name and UID.');
                     }
                     showDatabaseImportDialog(excelMappings);
                 } catch (error) {
@@ -8984,7 +9219,7 @@
             });
 
             await Promise.all(remainingCoursePromises);
-            console.log("Finished loading data for all remaining courses in the background.");
+            console.log("Finished loading data for all courses.");
         }
 
         /**
