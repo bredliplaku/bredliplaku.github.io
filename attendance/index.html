@@ -3419,7 +3419,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwc9sK544jBw1oHwiYzs0zLKXGGl9dg4yrm_bDi4CW7hxUKHD8v-DVLSwExrWaYh-eIdA/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycby5_LY6VnfeK6jBOjTB7x6ctufmQunT9xN60scvKTzGaTtOQaPSWEyPEYubI6ZJUfeMkw/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -4925,33 +4925,29 @@
         }
 
         /**
-         * and populates the main courseData object.
+         * REPLACED: Loads data in phases for a fast boot
          */
-
         async function onSuccessfulAuth(isRestore = false) {
             isSignedIn = true;
 
             try {
-                // Get user info
+                // --- PHASE 1: CRITICAL BOOT (Get minimum data to show UI) ---
+
+                // 1. Get user info
                 const userInfoResponse = await gapi.client.request({
                     path: 'https://www.googleapis.com/oauth2/v3/userinfo'
                 });
-
                 currentUser = {
                     email: userInfoResponse.result.email,
                     name: userInfoResponse.result.name,
                     picture: userInfoResponse.result.picture
                 };
-
                 console.log('User signed in:', currentUser.email);
-
-                // Update user info in UI
                 userName.textContent = currentUser.name;
                 userAvatar.src = currentUser.picture;
 
-                // Check admin status FIRST
+                // 2. Get admin status
                 const adminCheckResult = await callWebApp('checkAdminStatus', {}, 'GET');
-
                 if (adminCheckResult) {
                     isAdmin = adminCheckResult.isAdmin || false;
                     isGlobalAdmin = adminCheckResult.isGlobalAdmin || false;
@@ -4959,34 +4955,22 @@
                     console.log('Admin status:', { isAdmin, isGlobalAdmin, adminCourses });
                 }
 
-                // Fetch database
-                await fetchDatabaseFromSheet();
-                window.buildUIDToPrimaryUidMap();
-
-                // Get available courses from backend
+                // 3. Get available courses (names only)
                 const fetchedCourseDict = await callWebApp('getAvailableCourses', {}, 'GET');
-
                 if (fetchedCourseDict && typeof fetchedCourseDict === 'object') {
                     courseDictionary = fetchedCourseDict;
                     let allCourses = Object.keys(courseDictionary);
 
-                    // CRITICAL: Filter courses BEFORE doing anything else
-                    // ALL admins (global and non-global) are filtered by Column J in COURSE_INFO
                     if (isAdmin) {
-                        // Check if backend returned '*' (old behavior)
                         if (adminCourses.includes('*')) {
-                            // Global admin with old backend - show all courses (temporary fallback)
                             availableCourses = allCourses;
                         } else {
-                            // Filter to only courses where admin email is in Column J
                             availableCourses = allCourses.filter(course => adminCourses.includes(course));
                         }
                     } else {
-                        // Students: backend already filtered
                         availableCourses = allCourses;
                     }
 
-                    // Update courseDictionary to match filtered courses
                     const filteredDict = {};
                     availableCourses.forEach(course => {
                         if (courseDictionary[course]) {
@@ -4995,66 +4979,104 @@
                     });
                     courseDictionary = filteredDict;
 
-                    // Set first course ONLY from filtered list
-                    if (availableCourses.length > 0) {
+                    // Determine which course to show first
+                    const hashCourse = window.location.hash.replace('#', '');
+                    const lastActiveCourse = localStorage.getItem('last_active_course');
+                    if (hashCourse && availableCourses.includes(hashCourse)) {
+                        currentCourse = hashCourse;
+                    } else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
+                        currentCourse = lastActiveCourse;
+                    } else if (availableCourses.length > 0) {
                         currentCourse = availableCourses[0];
                     } else {
-                        console.warn('No courses available for user');
                         currentCourse = null;
-                    }
-
-                    // Only fetch course info for global admins
-                    if (isGlobalAdmin) {
-                        setTimeout(() => {
-                            fetchCourseInfo().catch(err =>
-                                console.error('Background course info load failed:', err)
-                            );
-                        }, 1000);
-                    }
-
-                    if (isGlobalAdmin) {
-                        // 1. GLOBAL ADMIN PATH (GAPI)
-                        if (currentCourse) {
-                            const [serverLogs, serverTombs, localData] = await Promise.all([
-                                fetchLogsFromSheet(currentCourse),
-                                fetchTombstonesForCourse(currentCourse),
-                                loadCourseFromLocalStorage(currentCourse)
-                            ]);
-
-                            const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-                            const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
-
-                            courseData[currentCourse] = {
-                                logs: mergedLogs,
-                                tombstones: allTombstones
-                            };
-
-                            saveCourseToLocalStorage(currentCourse);
-
-                            // Load remaining in background
-                            setTimeout(() => {
-                                loadRemainingCoursesInBackground();
-                            }, 2000);
-                        }
-                    } else if (isAdmin) {
-                        // 2. NON-GLOBAL (COURSE) ADMIN PATH (Backend API)
-                        await loadAllCourseLogsForCourseAdmin();
-
-                    } else {
-                        // 3. STUDENT PATH (Backend API)
-                        await loadAllCourseLogsForStudent();
                     }
                 }
 
-            } catch (error) {
-                console.error('Error during auth:', error);
-                showNotification('error', 'Authentication Error', 'Failed to complete sign-in. Please try again.');
-            } finally {
+                // --- PHASE 2: SHOW THE APP ---
+                // We have everything we need to draw the main screen
                 isInitializing = false;
                 showMainContent();
                 updateAuthUI();
-                updateUI();
-                populateCourseButtons();
+                populateCourseButtons(); // This will draw the course buttons
+                updatePageTitle(); // Set the page title
+
+                // The app is now visible and interactive!
+                // The log list is empty, which is fine.
+
+                // --- PHASE 3: BACKGROUND DATA LOADING ---
+                (async () => {
+                    try {
+                        // 5. Load the database (no 'await')
+                        // We assign this to a global promise so other parts of the app
+                        // can wait for it if they need it (like the Database tab)
+                        databaseLoadPromise = fetchDatabaseFromSheet().then(() => {
+                            window.buildUIDToPrimaryUidMap();
+                            updateDatabaseStatus();
+                        });
+
+                        // Only fetch course info for global admins
+                        if (isGlobalAdmin) {
+                            fetchCourseInfo().catch(err =>
+                                console.error('Background course info load failed:', err)
+                            );
+                        }
+
+                        // 6. Load logs for the *first* course
+                        if (currentCourse) {
+                            if (isGlobalAdmin) {
+                                const [serverLogs, serverTombs, localData] = await Promise.all([
+                                    fetchLogsFromSheet(currentCourse),
+                                    fetchTombstonesForCourse(currentCourse),
+                                    loadCourseFromLocalStorage(currentCourse)
+                                ]);
+                                const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
+                                const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+                                courseData[currentCourse] = { logs: mergedLogs, tombstones: allTombstones };
+                                saveCourseToLocalStorage(currentCourse);
+
+                                // Load remaining in background
+                                setTimeout(loadRemainingCoursesInBackground, 1000);
+
+                            } else if (isAdmin) {
+                                const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                                studentLogCache[currentCourse] = serverLogs;
+                                courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
+                                // Load remaining in background
+                                setTimeout(loadRemainingCourseAdminLogs, 1000);
+
+                            } else {
+                                const serverLogs = await callWebApp('getStudentLogs', { courseName: currentCourse }, 'GET');
+                                studentLogCache[currentCourse] = serverLogs;
+                                courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
+                                // Load remaining in background
+                                setTimeout(loadRemainingStudentLogs, 1000);
+                            }
+                        }
+
+                        // 7. Refresh the UI *again* with the new log data
+                        updateUI(); // This will populate the log list for the first course
+
+                        if (isAdmin) {
+                            // This runs in the background. When you click the
+                            // 'Database' tab, the data will already be there.
+                            fetchAndDisplayRegistrations();
+                        }
+
+                    } catch (backgroundError) {
+                        console.error('Error during background data load:', backgroundError);
+                        showNotification('error', 'Data Error', 'Could not load all course data.');
+                    }
+                })();
+
+            } catch (bootError) {
+                // Critical boot error
+                console.error('Error during auth:', bootError);
+                showNotification('error', 'Authentication Error', 'Failed to complete sign-in. Please try again.');
+                // Still need to show the main content, even on failure, to hide the loader
+                isInitializing = false;
+                showMainContent();
+                updateAuthUI();
             }
         }
 
@@ -6702,28 +6724,95 @@
         }
 
         /**
-         * REFACTORED: Switches the active course in the UI.
+         * REPLACED: Switches the active course and loads data on-demand if needed.
          */
         async function handleCourseChange(courseName) {
             // Do nothing if the course is not actually changing.
             if (currentCourse === courseName) return;
 
             isChangingCourses = true;
-
             currentCourse = courseName;
             localStorage.setItem('last_active_course', currentCourse);
 
-            // For students and non-global admins: ensure courseData is populated from cache
-            if (!isGlobalAdmin && studentLogCache && studentLogCache[courseName]) {
-                courseData[courseName] = {
-                    logs: [...studentLogCache[courseName]], // Create a fresh copy
-                    tombstones: new Set()
-                };
-            }
+            // --- NEW ON-DEMAND LOADING LOGIC ---
+            // Check if data for this course is already loaded in memory
+            if (!courseData[currentCourse]) {
+                // Data is NOT loaded. Show a loading state in the table.
+                logsTbody.innerHTML = '';
+                filteredCount.textContent = '0';
+                emptyLogs.innerHTML = `<div class="loading-spinner" style="margin: 20px auto;"></div><p style="text-align: center;">Loading logs for ${courseName.replace(/_/g, ' ')}...</p>`;
+                emptyLogs.style.display = 'block';
 
-            // Simply update the UI to show the data for the new course.
-            // updateUI() will call updateLogsList(), which reads the flag.
+                try {
+                    // Now, fetch the data for this specific course
+                    if (isGlobalAdmin) {
+                        const [serverLogs, serverTombs, localData] = await Promise.all([
+                            fetchLogsFromSheet(courseName),
+                            fetchTombstonesForCourse(courseName),
+                            loadCourseFromLocalStorage(courseName)
+                        ]);
+                        const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
+                        const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+                        courseData[courseName] = { logs: mergedLogs, tombstones: allTombstones };
+                        saveCourseToLocalStorage(courseName);
+
+                    } else if (isAdmin) {
+                        const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
+                        studentLogCache[courseName] = serverLogs;
+                        courseData[courseName] = { logs: serverLogs, tombstones: new Set() };
+
+                    } else { // Student
+                        const serverLogs = await callWebApp('getStudentLogs', { courseName: courseName }, 'GET');
+                        studentLogCache[courseName] = serverLogs;
+                        courseData[courseName] = { logs: serverLogs, tombstones: new Set() };
+                    }
+                } catch (err) {
+                    console.error(`Failed to load logs for ${courseName} on demand:`, err);
+                    showNotification('error', 'Load Failed', `Could not load logs for ${courseName}.`);
+                    courseData[courseName] = { logs: [], tombstones: new Set() }; // Set empty data on fail
+                }
+            }
+            // --- END ON-DEMAND LOGIC ---
+
             updateUI();
+        }
+
+        /**
+         * NEW: Background loads remaining logs for a Course Admin
+         */
+        async function loadRemainingCourseAdminLogs() {
+            const remainingCourses = availableCourses.filter(c => c !== currentCourse);
+            for (const course of remainingCourses) {
+                try {
+                    // Check if already in cache (in case of fast-switching)
+                    if (!studentLogCache[course]) {
+                        const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: course }, 'GET');
+                        studentLogCache[course] = serverLogs;
+                        courseData[course] = { logs: serverLogs, tombstones: new Set() };
+                    }
+                } catch (err) {
+                    console.error(`Failed to background load logs for ${course}:`, err);
+                }
+            }
+        }
+
+        /**
+         * NEW: Background loads remaining logs for a Student
+         */
+        async function loadRemainingStudentLogs() {
+            const remainingCourses = availableCourses.filter(c => c !== currentCourse);
+            for (const course of remainingCourses) {
+                try {
+                    // Check if already in cache (in case of fast-switching)
+                    if (!studentLogCache[course]) {
+                        const serverLogs = await callWebApp('getStudentLogs', { courseName: course }, 'GET');
+                        studentLogCache[course] = serverLogs;
+                        courseData[course] = { logs: serverLogs, tombstones: new Set() };
+                    }
+                } catch (err) {
+                    console.error(`Failed to background load logs for ${course}:`, err);
+                }
+            }
         }
 
         /**
