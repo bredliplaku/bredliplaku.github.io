@@ -3419,7 +3419,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw5-tCZWZsB-a2_iRHTcFKTaSrhFySczfCMyq8MowbVQtnMijNHOmYUKs3lqikfmkUHsA/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxdN7OqRXwKnbQxZOZo-4aIIDBy-7jODZkDmRYaplkMkKnpVjChLwumK_nPIIzj9q9e6Q/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -8023,19 +8023,40 @@
                 if (!isValid) return;
                 // --- End Validation ---
 
-                // Update local map
+                // 1. Update local map
                 databaseMap[dbKey] = { name: newName, email: newEmail, uids: updatedUids.filter(Boolean) };
 
-                if (isOnline) {
-                    await syncDatabaseToSheet(); // Push
-                    invalidateDatabaseCache();  // Dump
-                    await fetchDatabaseFromSheet(); // Pull
-                }
+                // 2. UPDATE UI IMMEDIATELY
                 window.buildUIDToPrimaryUidMap();
                 updateUI();
 
+                // 3. SHOW SUCCESS AND CLOSE DIALOG IMMEDIATELY
                 showNotification('success', 'Entry Updated', `Updated details for ${newName}.`);
                 closeDialog();
+
+                // 4. SYNC IN THE BACKGROUND (using our NEW targeted function)
+                if (isOnline) {
+
+                    // Prepare data for our new, fast function
+                    const updateData = {
+                        dbKey: dbKey, // The primary key (e.g., '101')
+                        name: newName,
+                        email: newEmail,
+                        uids: updatedUids.filter(Boolean)
+                    };
+
+                    // Call our new function instead of the slow syncDatabaseToSheet()
+                    callWebApp('updateStudentInDatabase_Admin', updateData, 'POST')
+                        .then(() => {
+                            // Success. Invalidate cache so the *next* full refresh gets it.
+                            invalidateDatabaseCache();
+                        })
+                        .catch((err) => {
+                            // If the background sync fails, notify the user.
+                            console.error("Background sync failed:", err);
+                            showNotification('error', 'Sync Failed', 'Changes saved locally but failed to sync.');
+                        });
+                }
             });
         }
 
