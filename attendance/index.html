@@ -6424,32 +6424,72 @@
             refreshBtn.disabled = true;
 
             try {
-                // --- NEW LOGIC: Check if admin ---
                 if (isAdmin) {
-                    // Admins run the full sync (pushes and pulls everything)
-                    await syncData();
+                    // --- ADMIN REFRESH (Full Sync) ---
+                    await syncData(); // Admins run the full sync
                     showNotification('success', 'Refresh Complete', 'Data synced with server.');
+
                 } else {
-                    // Students only refresh *their* logs for the current course
-                    if (currentCourse && isSignedIn) {
-                        updateSyncStatus("Refreshing logs...", "syncing"); // Show temporary status
-                        const serverLogs = await callWebApp('getStudentLogs', { courseName: currentCourse }, 'GET');
-
-                        // Update cache and main data
-                        studentLogCache[currentCourse] = serverLogs;
-                        courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
-
-                        updateUI(); // Redraw the log list
-                        updateSyncStatus("Online", "online"); // Revert status
-                    } else {
-                        showNotification('info', 'Nothing to Refresh', 'Please select a course.');
+                    // --- STUDENT REFRESH (Course List + Current Logs) ---
+                    if (!isSignedIn) {
+                        showNotification('info', 'Please Sign In', 'Sign in to refresh your courses and logs.');
+                        return; // Nothing to refresh if not signed in
                     }
+
+                    updateSyncStatus("Refreshing...", "syncing"); // Show temporary status
+
+                    // 1. Re-fetch Available Courses (using the efficient boot function)
+                    const bootData = await callWebApp('getBootData', {}, 'GET');
+                    const fetchedCourseDict = bootData.courses;
+
+                    if (fetchedCourseDict && typeof fetchedCourseDict === 'object') {
+                        // Update the global availableCourses list
+                        availableCourses = Object.keys(fetchedCourseDict);
+
+                        // Update the global course dictionary
+                        const filteredDict = {};
+                        availableCourses.forEach(course => {
+                            if (fetchedCourseDict[course]) {
+                                filteredDict[course] = fetchedCourseDict[course];
+                            }
+                        });
+                        courseDictionary = filteredDict;
+
+                        // Check if the *currently selected* course is still valid
+                        if (currentCourse && !availableCourses.includes(currentCourse)) {
+                            // If the current course is no longer available, switch to the first available one
+                            currentCourse = availableCourses.length > 0 ? availableCourses[0] : null;
+                            if (currentCourse) window.location.hash = currentCourse; // Update URL hash if needed
+                            localStorage.setItem('last_active_course', currentCourse);
+                        }
+
+                        // 2. Repopulate the Course Buttons
+                        populateCourseButtons(); // Redraw buttons with the new list
+
+                        // 3. Refresh Logs for the (potentially new) Current Course
+                        if (currentCourse) {
+                            const serverLogs = await callWebApp('getStudentLogs', { courseName: currentCourse }, 'GET');
+                            studentLogCache[currentCourse] = serverLogs;
+                            courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
+                        } else {
+                            // Handle case where student has NO courses after refresh
+                            courseData = {}; // Clear all local course data
+                            studentLogCache = {};
+                        }
+
+                        // 4. Update the entire UI (including the log list)
+                        updateUI();
+                        showNotification('success', 'Refresh Complete', 'Your courses and attendance are up to date.');
+
+                    } else {
+                        throw new Error("Could not fetch course list.");
+                    }
+                    updateSyncStatus("Online", "online"); // Revert status
                 }
-                // --- END NEW LOGIC ---
 
             } catch (error) {
                 console.error('Manual refresh failed:', error);
-                const errorMsg = isAdmin ? 'Could not sync data.' : 'Could not refresh logs.';
+                const errorMsg = isAdmin ? 'Could not sync data.' : 'Could not refresh courses/logs.';
                 showNotification('error', 'Refresh Failed', `${errorMsg} ${error.message}`);
                 updateSyncStatus("Error", "error"); // Show error status
             } finally {
@@ -6457,8 +6497,9 @@
                 icon.className = originalIconClass;
                 refreshBtn.disabled = false;
                 // Ensure sync status reverts if it wasn't an error
-                if (!syncStatus.classList.contains('error') && !isAdmin) {
-                    setTimeout(() => updateSyncStatus("Online", "online"), 1000);
+                if (!syncStatus.classList.contains('error')) {
+                    // Small delay to let the "success" message show briefly
+                    setTimeout(() => updateSyncStatus("Online", "online"), 2000);
                 }
             }
         }
