@@ -529,7 +529,10 @@
         .module-header {
             background-color: #3949ab;
             color: white;
-            padding: 15px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            padding-right: 20px;
+            padding-left: 20px;
             font-weight: 500;
             display: flex;
             justify-content: space-between;
@@ -574,13 +577,10 @@
             border-color: transparent;
             box-shadow: none;
             color: white;
-            opacity: 0.8;
         }
 
         .refresh-btn:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-            border-color: transparent;
-            opacity: 1;
+            border-color: var(--primary-color);
         }
 
         .refresh-btn i.fa-spin {
@@ -3227,7 +3227,7 @@
                     <span class="module-title"><i class="fas fa-history"></i> Scan History</span>
 
                     <div class="module-header-actions">
-                        <button id="scanner-refresh-btn" class="btn-blue btn-icon refresh-btn" title="Refresh Logs">
+                        <button id="scanner-refresh-btn" class="btn-icon refresh-btn" title="Refresh Logs">
                             <i class="fa-solid fa-arrows-rotate"></i>
                         </button>
                     </div>
@@ -3325,8 +3325,7 @@
                 <div class="module-header">
                     <span class="module-title"><i class="fa-solid fa-list-ol"></i> UID Database</span>
                     <div class="module-header-actions">
-                        <button id="database-refresh-btn" class="btn-blue btn-icon refresh-btn"
-                            title="Refresh Database">
+                        <button id="database-refresh-btn" class="btn-icon refresh-btn" title="Refresh Database">
                             <i class="fa-solid fa-arrows-rotate"></i>
                         </button>
                     </div>
@@ -9151,237 +9150,236 @@
         }
 
         /**
- * This version uses data-attributes for event delegation and no longer creates listeners in a loop.
- */
+        * This version uses data-attributes for event delegation and no longer creates listeners in a loop.
+        */
         function updateLogsList() {
             const tableContainer = document.querySelector('#scanner-tab .table-container');
             if (isChangingCourses) {
                 tableContainer.classList.add('reloading');
             }
 
-            setTimeout(() => {
-                if (!currentCourse) {
-                    logsTbody.innerHTML = '';
-                    filteredCount.textContent = '0';
-                    emptyLogs.innerHTML = `<i class="fas fa-hand-pointer" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+            if (!currentCourse) {
+                logsTbody.innerHTML = '';
+                filteredCount.textContent = '0';
+                emptyLogs.innerHTML = `<i class="fas fa-hand-pointer" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
                                <p style="font-size: 1.1em; margin-bottom: 5px;">Please select a course.</p>
                                <p style="font-size: 0.9em; color: #999;">Choose a course above to view its attendance history.</p>`;
-                    emptyLogs.style.display = 'block';
-                    tableContainer.classList.remove('reloading');
-                    return;
-                }
+                emptyLogs.style.display = 'block';
+                tableContainer.classList.remove('reloading');
+                return;
+            }
 
-                // If the data object for the current course hasn't been created yet,
-                // it means Phase 3 is still running. Show a spinner.
-                if (!courseData[currentCourse]) {
-                    logsTbody.innerHTML = '';
-                    filteredCount.textContent = '0';
-                    emptyLogs.innerHTML = `<div class="loading-spinner" style="margin: 20px auto;"></div><p style="text-align: center;">Loading logs...</p>`;
-                    emptyLogs.style.display = 'block';
-                    tableContainer.classList.remove('reloading');
-                    return; // Stop here and wait for the next updateUI() call
-                }
-
-                const currentCourseLogs = getLogsForCurrentUser();
-
-                // For students, the logs are already filtered by the backend
-                // No need to filter again - this was causing empty tables!
-                let logsToDisplay = currentCourseLogs;
-
-                // Only apply additional filtering for admins
-                // Students' logs are already filtered on the server by getStudentLogs
-                // (The backend matches logs by the student's UIDs from the database)
-
-                const grouped = {};
-                logsToDisplay.forEach(log => {
-                    const dateObj = new Date(log.timestamp);
-                    if (isNaN(dateObj.getTime())) return;
-
-                    const scannedUid = log.uid; // The actual UID from the card
-                    const dbKey = uidToPrimaryUidMap[scannedUid];
-
-                    const studentData = dbKey ? databaseMap[dbKey] : null;
-                    const name = studentData ? studentData.name : 'Unknown';
-                    const uidsForDisplay = studentData ? studentData.uids : [scannedUid];
-
-                    const day = String(dateObj.getDate()).padStart(2, '0');
-                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-                    const year = dateObj.getFullYear();
-                    const date = `${day}-${month}-${year}`;
-
-                    // --- THIS IS THE REVERTED LOGIC ---
-                    // The key now uses the specific card's UID (`scannedUid`), ensuring a separate row for each card.
-                    const key = `${date}_${scannedUid}`;
-
-                    if (!grouped[key]) {
-                        grouped[key] = {
-                            key: key,
-                            date,
-                            dateObj: new Date(year, month - 1, day),
-                            uid: scannedUid, // The specific UID for this group
-                            name: name,
-                            uidsForDisplay: uidsForDisplay, // All UIDs for the student, for context
-                            originalLogs: []
-                        };
-                    }
-                    grouped[key].originalLogs.push(log);
-                });
-
-                let result = Object.values(grouped);
-
-                if (filter) {
-                    result = result.filter(group => {
-                        const name = group.name || '';
-                        // The main UID for the group is now the specific one that was scanned
-                        const uidMatch = group.uid.toLowerCase().includes(filter);
-                        const date = group.date || '';
-                        const hasMatchingTime = group.originalLogs.some(log => {
-                            const timeObj = new Date(log.timestamp);
-                            const timeStr = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
-                            return timeStr.includes(filter);
-                        });
-                        return name.toLowerCase().includes(filter) || uidMatch || date.includes(filter) || hasMatchingTime;
-                    });
-                }
-
-                const finalLogCount = result.reduce((acc, group) => acc + group.originalLogs.length, 0);
-                filteredCount.textContent = finalLogCount;
-
-                const [field, direction] = currentSort.split('-');
-                const sortMultiplier = direction === 'asc' ? 1 : -1;
-                result.sort((a, b) => {
-                    if (field === 'date') {
-                        const dateCompare = sortMultiplier * (a.dateObj - b.dateObj);
-                        return dateCompare !== 0 ? dateCompare : a.name.localeCompare(b.name);
-                    }
-                    if (field === 'name') return sortMultiplier * a.name.localeCompare(b.name);
-                    if (field === 'uid') return sortMultiplier * (a.uid || '').localeCompare(b.uid || '');
-                    return 0;
-                });
-
+            // If the data object for the current course hasn't been created yet,
+            // it means Phase 3 is still running. Show a spinner.
+            if (!courseData[currentCourse]) {
                 logsTbody.innerHTML = '';
+                filteredCount.textContent = '0';
+                emptyLogs.innerHTML = `<div class="loading-spinner" style="margin: 20px auto;"></div><p style="text-align: center;">Loading logs...</p>`;
+                emptyLogs.style.display = 'block';
+                tableContainer.classList.remove('reloading');
+                return; // Stop here and wait for the next updateUI() call
+            }
 
-                if (result.length === 0) {
-                    let emptyMessageHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+            const currentCourseLogs = getLogsForCurrentUser();
+
+            // For students, the logs are already filtered by the backend
+            // No need to filter again - this was causing empty tables!
+            let logsToDisplay = currentCourseLogs;
+
+            // Only apply additional filtering for admins
+            // Students' logs are already filtered on the server by getStudentLogs
+            // (The backend matches logs by the student's UIDs from the database)
+
+            const grouped = {};
+            logsToDisplay.forEach(log => {
+                const dateObj = new Date(log.timestamp);
+                if (isNaN(dateObj.getTime())) return;
+
+                const scannedUid = log.uid; // The actual UID from the card
+                const dbKey = uidToPrimaryUidMap[scannedUid];
+
+                const studentData = dbKey ? databaseMap[dbKey] : null;
+                const name = studentData ? studentData.name : 'Unknown';
+                const uidsForDisplay = studentData ? studentData.uids : [scannedUid];
+
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const year = dateObj.getFullYear();
+                const date = `${day}-${month}-${year}`;
+
+                // --- THIS IS THE REVERTED LOGIC ---
+                // The key now uses the specific card's UID (`scannedUid`), ensuring a separate row for each card.
+                const key = `${date}_${scannedUid}`;
+
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        key: key,
+                        date,
+                        dateObj: new Date(year, month - 1, day),
+                        uid: scannedUid, // The specific UID for this group
+                        name: name,
+                        uidsForDisplay: uidsForDisplay, // All UIDs for the student, for context
+                        originalLogs: []
+                    };
+                }
+                grouped[key].originalLogs.push(log);
+            });
+
+            let result = Object.values(grouped);
+
+            if (filter) {
+                result = result.filter(group => {
+                    const name = group.name || '';
+                    // The main UID for the group is now the specific one that was scanned
+                    const uidMatch = group.uid.toLowerCase().includes(filter);
+                    const date = group.date || '';
+                    const hasMatchingTime = group.originalLogs.some(log => {
+                        const timeObj = new Date(log.timestamp);
+                        const timeStr = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
+                        return timeStr.includes(filter);
+                    });
+                    return name.toLowerCase().includes(filter) || uidMatch || date.includes(filter) || hasMatchingTime;
+                });
+            }
+
+            const finalLogCount = result.reduce((acc, group) => acc + group.originalLogs.length, 0);
+            filteredCount.textContent = finalLogCount;
+
+            const [field, direction] = currentSort.split('-');
+            const sortMultiplier = direction === 'asc' ? 1 : -1;
+            result.sort((a, b) => {
+                if (field === 'date') {
+                    const dateCompare = sortMultiplier * (a.dateObj - b.dateObj);
+                    return dateCompare !== 0 ? dateCompare : a.name.localeCompare(b.name);
+                }
+                if (field === 'name') return sortMultiplier * a.name.localeCompare(b.name);
+                if (field === 'uid') return sortMultiplier * (a.uid || '').localeCompare(b.uid || '');
+                return 0;
+            });
+
+            logsTbody.innerHTML = '';
+
+            if (result.length === 0) {
+                let emptyMessageHTML = `<i class="fas fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
                                <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>`;
-                    if (isAdminForCourse(currentCourse)) {
-                        emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
-                    } else {
-                        emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">There are no attendance records for you in this course.</p>`;
-                    }
-                    emptyLogs.innerHTML = emptyMessageHTML;
-                    emptyLogs.style.display = 'block';
+                if (isAdminForCourse(currentCourse)) {
+                    emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">Start scanning or try changing the filter.</p>`;
                 } else {
-                    emptyLogs.style.display = 'none';
+                    emptyMessageHTML += `<p style="font-size: 0.9em; color: #999;">There are no attendance records for you in this course.</p>`;
+                }
+                emptyLogs.innerHTML = emptyMessageHTML;
+                emptyLogs.style.display = 'block';
+            } else {
+                emptyLogs.style.display = 'none';
+            }
+
+            let currentDay = null;
+
+            result.forEach((group) => {
+                if (isAdmin && currentSort.startsWith('date')) {
+                    const thisDay = group.date;
+                    if (thisDay !== currentDay) {
+                        currentDay = thisDay;
+                        const separatorRow = document.createElement('tr');
+                        separatorRow.className = 'day-separator';
+                        const separatorCell = document.createElement('td');
+                        separatorCell.colSpan = 5;
+                        const flexWrapper = document.createElement('div');
+                        flexWrapper.className = 'day-separator-content';
+                        const dateText = document.createElement('span');
+                        dateText.className = 'day-separator-date';
+                        dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
+                        flexWrapper.appendChild(dateText);
+                        const buttonContainer = document.createElement('div');
+                        buttonContainer.className = 'day-separator-actions';
+                        const dateForButton = thisDay;
+                        const eisBtn = document.createElement('button');
+                        eisBtn.className = 'btn-sm eis-day-btn';
+                        eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Add to EIS';
+                        eisBtn.title = 'Add to EIS for this day';
+                        eisBtn.setAttribute('aria-label', `Add attendance for ${group.date} to EIS`);
+                        eisBtn.onclick = (e) => { e.stopPropagation(); showDirectEisExportDialog(dateForButton); };
+                        buttonContainer.appendChild(eisBtn);
+                        const bulkAddBtn = document.createElement('button');
+                        bulkAddBtn.className = 'btn-green btn-icon';
+                        bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
+                        bulkAddBtn.title = 'Add +1 Hour to All Students on This Day';
+                        bulkAddBtn.setAttribute('aria-label', `Add a plus one hour log to all students on ${group.date}`);
+                        bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
+                        buttonContainer.appendChild(bulkAddBtn);
+                        flexWrapper.appendChild(buttonContainer);
+                        separatorCell.appendChild(flexWrapper);
+                        separatorRow.appendChild(separatorCell);
+                        logsTbody.appendChild(separatorRow);
+                    }
                 }
 
-                let currentDay = null;
+                const row = document.createElement('tr');
+                row.dataset.key = group.key;
+                if (group.name === 'Unknown') row.classList.add('unknown-row');
 
-                result.forEach((group) => {
-                    if (isAdmin && currentSort.startsWith('date')) {
-                        const thisDay = group.date;
-                        if (thisDay !== currentDay) {
-                            currentDay = thisDay;
-                            const separatorRow = document.createElement('tr');
-                            separatorRow.className = 'day-separator';
-                            const separatorCell = document.createElement('td');
-                            separatorCell.colSpan = 5;
-                            const flexWrapper = document.createElement('div');
-                            flexWrapper.className = 'day-separator-content';
-                            const dateText = document.createElement('span');
-                            dateText.className = 'day-separator-date';
-                            dateText.innerHTML = `<i class="fas fa-calendar-day"></i> ${group.date}`;
-                            flexWrapper.appendChild(dateText);
-                            const buttonContainer = document.createElement('div');
-                            buttonContainer.className = 'day-separator-actions';
-                            const dateForButton = thisDay;
-                            const eisBtn = document.createElement('button');
-                            eisBtn.className = 'btn-sm eis-day-btn';
-                            eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Add to EIS';
-                            eisBtn.title = 'Add to EIS for this day';
-                            eisBtn.setAttribute('aria-label', `Add attendance for ${group.date} to EIS`);
-                            eisBtn.onclick = (e) => { e.stopPropagation(); showDirectEisExportDialog(dateForButton); };
-                            buttonContainer.appendChild(eisBtn);
-                            const bulkAddBtn = document.createElement('button');
-                            bulkAddBtn.className = 'btn-green btn-icon';
-                            bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
-                            bulkAddBtn.title = 'Add +1 Hour to All Students on This Day';
-                            bulkAddBtn.setAttribute('aria-label', `Add a plus one hour log to all students on ${group.date}`);
-                            bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
-                            buttonContainer.appendChild(bulkAddBtn);
-                            flexWrapper.appendChild(buttonContainer);
-                            separatorCell.appendChild(flexWrapper);
-                            separatorRow.appendChild(separatorCell);
-                            logsTbody.appendChild(separatorRow);
-                        }
+                const nameCell = document.createElement('td');
+                nameCell.className = 'name-cell name-column';
+                nameCell.textContent = group.name;
+                row.appendChild(nameCell);
+
+                if (isAdminForCourse(currentCourse)) {
+                    const uidCell = document.createElement('td');
+                    uidCell.className = 'uid-cell uid-column admin-only';
+                    uidCell.innerHTML = `<span class="uid-badge">${group.uid}</span>`;
+                    row.appendChild(uidCell);
+                }
+
+                const dateCell = document.createElement('td');
+                dateCell.className = 'date-cell date-column';
+                dateCell.textContent = group.date;
+                row.appendChild(dateCell);
+
+                const timesCell = document.createElement('td');
+                timesCell.className = 'times-cell';
+                group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
+                    const timeTag = document.createElement('span');
+                    timeTag.className = 'time-tag';
+                    if (log.manual === true || log.manual === 'true') {
+                        timeTag.classList.add('manual', 'excused');
+                        timeTag.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            if (!isAdmin && currentUser && normalizeName(group.name) === normalizeName(currentUser.name)) {
+                                showNotification('warning', 'Excused Absence', 'You have been excused for this hour.');
+                            } else {
+                                showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
+                            }
+                        });
+                    }
+                    const timeObj = new Date(log.timestamp);
+                    timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
+                    timesCell.appendChild(timeTag);
+                });
+                row.appendChild(timesCell);
+
+                if (isAdminForCourse(currentCourse)) {
+                    const actionsCell = document.createElement('td');
+                    actionsCell.className = 'actions-cell admin-only';
+                    const actionsWrapper = document.createElement('div');
+                    actionsWrapper.className = 'actions-cell-content';
+
+                    if (group.name === 'Unknown') {
+                        const addUserBtn = document.createElement('button');
+                        addUserBtn.className = 'btn-green btn-icon add-user-btn';
+                        addUserBtn.title = 'Register Student';
+                        addUserBtn.setAttribute('aria-label', `Register student with UID ${group.uid}`);
+                        addUserBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
+
+                        // NEW: Open registration dialog instead of direct database add
+                        addUserBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            showRegisterUIDDialogWithPrefill(group.uid);
+                        });
+
+                        actionsWrapper.appendChild(addUserBtn);
                     }
 
-                    const row = document.createElement('tr');
-                    row.dataset.key = group.key;
-                    if (group.name === 'Unknown') row.classList.add('unknown-row');
-
-                    const nameCell = document.createElement('td');
-                    nameCell.className = 'name-cell name-column';
-                    nameCell.textContent = group.name;
-                    row.appendChild(nameCell);
-
-                    if (isAdminForCourse(currentCourse)) {
-                        const uidCell = document.createElement('td');
-                        uidCell.className = 'uid-cell uid-column admin-only';
-                        uidCell.innerHTML = `<span class="uid-badge">${group.uid}</span>`;
-                        row.appendChild(uidCell);
-                    }
-
-                    const dateCell = document.createElement('td');
-                    dateCell.className = 'date-cell date-column';
-                    dateCell.textContent = group.date;
-                    row.appendChild(dateCell);
-
-                    const timesCell = document.createElement('td');
-                    timesCell.className = 'times-cell';
-                    group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
-                        const timeTag = document.createElement('span');
-                        timeTag.className = 'time-tag';
-                        if (log.manual === true || log.manual === 'true') {
-                            timeTag.classList.add('manual', 'excused');
-                            timeTag.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                if (!isAdmin && currentUser && normalizeName(group.name) === normalizeName(currentUser.name)) {
-                                    showNotification('warning', 'Excused Absence', 'You have been excused for this hour.');
-                                } else {
-                                    showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
-                                }
-                            });
-                        }
-                        const timeObj = new Date(log.timestamp);
-                        timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
-                        timesCell.appendChild(timeTag);
-                    });
-                    row.appendChild(timesCell);
-
-                    if (isAdminForCourse(currentCourse)) {
-                        const actionsCell = document.createElement('td');
-                        actionsCell.className = 'actions-cell admin-only';
-                        const actionsWrapper = document.createElement('div');
-                        actionsWrapper.className = 'actions-cell-content';
-
-                        if (group.name === 'Unknown') {
-                            const addUserBtn = document.createElement('button');
-                            addUserBtn.className = 'btn-green btn-icon add-user-btn';
-                            addUserBtn.title = 'Register Student';
-                            addUserBtn.setAttribute('aria-label', `Register student with UID ${group.uid}`);
-                            addUserBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
-
-                            // NEW: Open registration dialog instead of direct database add
-                            addUserBtn.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                showRegisterUIDDialogWithPrefill(group.uid);
-                            });
-
-                            actionsWrapper.appendChild(addUserBtn);
-                        }
-
-                        actionsWrapper.innerHTML += `
+                    actionsWrapper.innerHTML += `
     <button class="btn-green btn-icon add-time-btn" title="Add +1 Hour" aria-label="Add another hour for ${group.name}">
         <i class="fa-solid fa-plus"></i>
     </button>
@@ -9392,17 +9390,16 @@
         <i class="fa-solid fa-pencil"></i>
     </button>`;
 
-                        actionsCell.appendChild(actionsWrapper);
-                        row.appendChild(actionsCell);
-                    }
-                    logsTbody.appendChild(row);
-                });
-
-                tableContainer.classList.remove('reloading');
-                if (isChangingCourses) {
-                    isChangingCourses = false;
+                    actionsCell.appendChild(actionsWrapper);
+                    row.appendChild(actionsCell);
                 }
-            }, 150);
+                logsTbody.appendChild(row);
+            });
+
+            tableContainer.classList.remove('reloading');
+            if (isChangingCourses) {
+                isChangingCourses = false;
+            }
         }
 
         /**
