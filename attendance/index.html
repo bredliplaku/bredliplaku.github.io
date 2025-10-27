@@ -2214,8 +2214,10 @@
             min-width: unset !important;
         }
 
-        .student-name-clickable:hover {
-            color: var(--primary-dark);
+
+        .student-profile-chip .user-avatar,
+        .student-profile-chip #user-name {
+            cursor: pointer;
         }
 
         /* New styles for the student profile chip */
@@ -2241,7 +2243,7 @@
         .student-profile-chip:hover {
             background-color: #f5f5f5;
             /* Light grey hover */
-            border-color: #ccc;
+            border-color: var(--primary-color);
         }
 
         .student-profile-chip:active {
@@ -6744,6 +6746,7 @@
             const userContainer = document.getElementById('user-container');
             const userInfo = userContainer.querySelector('.user-info'); // More robust selector
             const userAvatar = document.getElementById('user-avatar');
+            // We use the global 'userName' variable defined at the top
             const logoutBtn = document.getElementById('logout-btn');
             const tabsContainer = document.querySelector('.tabs');
             // Scanner module might need a more specific selector if you add more modules
@@ -6790,42 +6793,86 @@
                         chip.appendChild(userAvatar);
                         chip.appendChild(userName);
 
-                        // Add the click listener to the chip
+                        // --- START OF REVAMPED CLICK LISTENER ---
                         chip.addEventListener('click', () => {
                             if (isSignedIn && !isAdmin && currentUser) {
+
+                                let uidContent; // Will hold the HTML for the UID list
+
+                                // Find UIDs
                                 let userUIDs = [];
                                 for (const dbKey in databaseMap) {
                                     const entry = databaseMap[dbKey];
                                     if (entry.email && entry.email.toLowerCase() === currentUser.email.toLowerCase()) {
                                         userUIDs = entry.uids;
-                                        break;
+                                        break; // Found the user, stop searching
                                     }
                                 }
-                                const uidList = userUIDs.length > 0
-                                    ? userUIDs.map(uid => `<li style="font-family: monospace; margin-bottom: 5px;">${uid}</li>`).join('')
-                                    : '<li>No UIDs found in database.</li>';
 
+                                // Generate UID list HTML
+                                if (userUIDs.length > 0) {
+                                    const listItems = userUIDs.map(uid =>
+                                        // Use inline styles that respect theme variables
+                                        `<li style="font-family: monospace; 
+                                                     background: var(--background-color); 
+                                                     padding: 10px 12px; 
+                                                     border-radius: 8px; 
+                                                     margin-bottom: 5px; 
+                                                     border: 1px solid #c5cae9;
+                                                     color: var(--text-color);
+                                                     opacity: 0.9;">
+                                           ${uid}
+                                         </li>`
+                                    ).join('');
+                                    uidContent = `<ul style="list-style: none; padding-left: 0; margin: 0;">${listItems}</ul>`;
+                                } else {
+                                    uidContent = `<p style="font-size: 0.9em; text-align: center; opacity: 0.7; margin: 10px 0 0 0;">No UIDs found in database.</p>`;
+                                }
+
+                                // Generate final dialog HTML
                                 const profileMessage = `
-                            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
-                                <img src="${currentUser.picture}" alt="Your Avatar" style="width: 50px; height: 50px; border-radius: 50%;">
-                                <div>
-                                    <p style="margin: 0;"><strong>Name:</strong> ${currentUser.name}</p>
-                                    <p style="margin: 0;"><strong>Email:</strong> ${currentUser.email}</p>
-                                </div>
-                            </div>
-                            <p style="margin-top: 10px;"><strong>Registered UIDs:</strong></p>
-                            <ul style="list-style: none; padding-left: 10px; margin-top: 5px;">${uidList}</ul>
-                        `;
+                                    <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 20px;">
+                                        <a href="https://myaccount.google.com/" target="_blank" rel="noopener noreferrer" title="Manage your Google Account"
+                                           style="border-radius: 50%; padding: 2px; border: 2px solid transparent; transition: border-color 0.2s ease;">
+                                            
+                                            <img src="${currentUser.picture}" alt="Your Avatar" 
+                                                 style="width: 60px; height: 60px; border-radius: 50%; cursor: pointer; display: block;">
+                                        </a>
+                                        <div style="text-align: center;">
+                                            <h4 style="margin: 0; font-family: 'Google Sans', sans-serif; color: var(--text-color);">${currentUser.name}</h4>
+                                            <p style="margin: 5px 0 0 0; font-size: 0.9em; opacity: 0.8; color: var(--text-color);">${currentUser.email}</p>
+                                        </div>
+                                    </div>
+
+                                    <h5 style="margin-top: 15px; margin-bottom: 10px; font-family: 'Google Sans', sans-serif; 
+                                               border-bottom: 1px solid var(--primary-dark); padding-bottom: 5px; color: var(--text-color);">
+                                        Registered UIDs
+                                    </h5>
+                                    ${uidContent}
+                                `;
+
+                                // Call the dialog function
                                 showAlertDialog('Your Profile', profileMessage);
+
+                                // Add hover effect for the new clickable image
+                                const dialogImgLink = document.querySelector('.dialog-backdrop a[title="Manage your Google Account"]');
+                                if (dialogImgLink) {
+                                    dialogImgLink.addEventListener('mouseover', () => {
+                                        dialogImgLink.style.borderColor = 'var(--primary-color)';
+                                    });
+                                    dialogImgLink.addEventListener('mouseout', () => {
+                                        dialogImgLink.style.borderColor = 'transparent';
+                                    });
+                                }
                             }
                         });
                     }
 
                     // Remove any old styling from name element
-                    userName.style.cursor = 'default'; // <--- USE GLOBAL 'userName'
-                    userName.style.color = 'inherit'; // <--- USE GLOBAL 'userName'
-                    userName.style.textDecoration = 'none'; // <--- USE GLOBAL 'userName'
-                    userName.classList.remove('student-name-clickable'); // <--- USE GLOBAL 'userName'
+                    userName.style.cursor = 'default';
+                    userName.style.color = 'inherit';
+                    userName.style.textDecoration = 'none';
+                    userName.classList.remove('student-name-clickable');
 
                 } else {
                     // --- This is an ADMIN ---
@@ -6833,15 +6880,15 @@
                     if (chip && logoutBtn && userInfo) {
                         // Deconstruct the chip: move elements back out
                         userInfo.insertBefore(userAvatar, logoutBtn);
-                        userInfo.insertBefore(userName, logoutBtn); // <--- USE GLOBAL 'userName'
+                        userInfo.insertBefore(userName, logoutBtn);
                         chip.remove(); // Remove the empty chip
                     }
 
                     // Apply default admin styling (non-clickable name)
-                    userName.style.cursor = 'default'; // <--- USE GLOBAL 'userName'
-                    userName.style.color = 'inherit'; // <--- USE GLOBAL 'userName'
-                    userName.style.textDecoration = 'none'; // <--- USE GLOBAL 'userName'
-                    userName.classList.remove('student-name-clickable'); // <--- USE GLOBAL 'userName'
+                    userName.style.cursor = 'default';
+                    userName.style.color = 'inherit';
+                    userName.style.textDecoration = 'none';
+                    userName.classList.remove('student-name-clickable');
                 }
 
                 // Admin-specific UI adjustments
@@ -6887,7 +6934,7 @@
                 if (chip && logoutBtn && userInfo) {
                     // Deconstruct the chip if it exists from a previous session
                     userInfo.insertBefore(userAvatar, logoutBtn);
-                    userInfo.insertBefore(userName, logoutBtn); // <--- USE GLOBAL 'userName'
+                    userInfo.insertBefore(userName, logoutBtn);
                     chip.remove();
                 }
 
@@ -8497,7 +8544,7 @@
         <h3 class="dialog-title">${title}</h3>
         <div class="dialog-content"><p>${message}</p>
         </div><div class="dialog-actions">
-            <button id="dialog-ok-btn" class="btn-blue">OK</button>
+            <button id="dialog-ok-btn" class="btn-blue" style="margin-top:-20px">Ok</button>
         </div>
     `;
 
