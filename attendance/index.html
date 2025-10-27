@@ -7052,123 +7052,156 @@
             syncBtn.disabled = true;
 
             try {
-                // First sync database to get up-to-date UID-name mappings
+                // --- Step 1: Sync Database (Fetch latest) ---
                 try {
                     await fetchDatabaseFromSheet();
                     window.buildUIDToPrimaryUidMap();
                 } catch (dbError) {
-                    console.error('Database sync error:', dbError);
-                    // Continue with logs sync even if database sync fails
+                    console.error('Database sync error during refresh:', dbError);
+                    // Decide if you want to stop the whole sync or continue
+                    // For now, we'll continue to try syncing logs.
                 }
 
-                // Fetch course info data
+                // --- Step 2: Sync Course Info (Fetch latest) ---
                 try {
-                    await fetchCourseInfo();
+                    await fetchCourseInfo(); // Ensure metadata is up-to-date
                 } catch (infoError) {
-                    console.error('Course info sync error:', infoError);
-                    // Continue with logs sync even if course info sync fails
+                    console.error('Course info sync error during refresh:', infoError);
                 }
 
-                // Then sync logs if a course is selected
-                if (currentCourse) {
-                    // --- START: NEW Non-Global Admin Sync Logic ---
-                    if (isAdmin && !isGlobalAdmin) {
-                        try {
-                            // 1. PULL latest logs from backend
-                            updateSyncStatus("Fetching latest...", "syncing");
-                            const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                // --- Step 3: Sync Logs (Pull -> Merge -> Push) ---
+                if (currentCourse && isSignedIn) { // Only sync logs if signed in and a course is selected
+                    let serverLogs = [];
+                    let serverTombstones = new Set(); // Only used by global admin fetch
+                    let localData = { logs: [], tombstones: new Set() }; // Default empty
 
-                            // 2. MERGE server logs with local changes (using existing merge function)
-                            const localData = await loadCourseFromLocalStorage(currentCourse); // Load local logs and tombstones
-                            // Non-global admins don't use server tombstones, just local ones if any were created offline (unlikely but safe)
-                            const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, new Set());
+                    // --- 3a: Initial PULL ---
+                    updateSyncStatus("Fetching latest logs...", "syncing");
+                    try {
+                        localData = await loadCourseFromLocalStorage(currentCourse); // Load local state first
 
-                            // Update local data with merged result BEFORE pushing
-                            courseData[currentCourse] = {
-                                logs: mergedLogs,
-                                tombstones: new Set() // Non-global admins don't persist tombstones after merge
-                            };
-                            saveCourseToLocalStorage(currentCourse); // Save merged state locally
-
-                            // 3. PUSH the fully merged logs back via backend API
-                            updateSyncStatus("Uploading changes...", "syncing");
-                            await syncViaBackendAPI(); // This sends the updated courseData[currentCourse].logs
-
-                            console.log(`Non-global admin sync for ${currentCourse} complete.`);
-
-                        } catch (syncError) {
-                            console.error(`Non-global admin sync failed for ${currentCourse}:`, syncError);
-                            throw syncError; // Re-throw to be caught by the outer catch block
+                        if (isGlobalAdmin) {
+                            // Global Admin: Fetch logs and server tombstones via GAPI
+                            [serverLogs, serverTombstones] = await Promise.all([
+                                fetchLogsFromSheet(currentCourse),
+                                fetchTombstonesForCourse(currentCourse)
+                            ]);
+                        } else if (isAdmin) {
+                            // Non-Global Admin: Fetch logs via Backend API
+                            serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                            // Non-global admins don't fetch server tombstones
                         }
-                    } else if (isGlobalAdmin) {
-                        // Global admin path
-                        await syncLogsWithSheet(); // Pushes merged data up
+                        // Students don't PULL/PUSH logs during manual sync/refresh
+                    } catch (pullError) {
+                        console.error(`Initial log fetch failed for ${currentCourse}:`, pullError);
+                        throw new Error(`Could not fetch latest logs. ${pullError.message}`); // Stop sync if initial pull fails
+                    }
 
-                        // --- START: ADD REFETCH STEP ---
+                    // --- 3b: MERGE (If Admin) ---
+                    let logsToPush = [];
+                    if (isAdmin) { // Only admins merge and push
+                        const combinedTombstones = new Set([...localData.tombstones, ...serverTombstones]);
+                        const mergedLogs = mergeLogs(serverLogs, localData.logs, combinedTombstones); // Use combined tombstones for merge
+
+                        // Prepare the data to be pushed
+                        logsToPush = mergedLogs;
+
+                        // Update local state temporarily with merged data before push
+                        courseData[currentCourse] = {
+                            logs: mergedLogs,
+                            // Global admins will sync local tombstones UP, Non-global clear them after push
+                            tombstones: isGlobalAdmin ? localData.tombstones : new Set()
+                        };
+                        // Don't save locally yet, wait for final pull
+                    } else {
+                        // For students, just display the server logs (they don't merge/push)
+                        logsToPush = serverLogs; // This won't be pushed, just used for local update later
+                        courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
+                        saveCourseToLocalStorage(currentCourse); // Students save the pulled state
+                    }
+
+
+                    // --- 3c: PUSH (If Admin & Changes Exist) ---
+                    if (isAdmin) { // Only admins push changes
+                        updateSyncStatus("Uploading changes...", "syncing");
                         try {
-                            // Explicitly re-fetch logs AFTER pushing to get the absolute latest state
-                            console.log(`Global admin: Re-fetching logs for ${currentCourse} after sync push.`);
-                            const latestLogs = await fetchLogsFromSheet(currentCourse);
-                            // Also refetch tombstones in case deletions happened concurrently
-                            const latestTombstones = await fetchTombstonesForCourse(currentCourse);
+                            // Update the local data with the potentially merged logs BEFORE pushing
+                            courseData[currentCourse].logs = logsToPush;
 
-                            // Update local data directly with the fetched state
-                            courseData[currentCourse] = {
-                                logs: latestLogs,
-                                tombstones: latestTombstones // Use the latest server tombstones
-                            };
-                            saveCourseToLocalStorage(currentCourse); // Save the fetched state
-                            console.log(`Global admin: Updated local logs for ${currentCourse} with fetched data.`);
-                        } catch (fetchError) {
-                            console.error(`Global admin: Error re-fetching logs after sync for ${currentCourse}:`, fetchError);
-                            // Don't throw; allow sync to complete, but log the error.
-                            // The UI will show the state before the re-fetch attempt.
+                            if (isGlobalAdmin) {
+                                await syncLogsWithSheet(); // GAPI Push (includes logs & local tombstones)
+                                // Clear local tombstones AFTER successful GAPI push
+                                courseData[currentCourse].tombstones.clear();
+                            } else {
+                                await syncViaBackendAPI(); // Backend API Push (sends merged logs)
+                                // Non-global admins already have empty tombstones here
+                            }
+                            pendingChanges = false; // Mark changes as pushed
+                            lastSyncTime = Date.now();
+                        } catch (pushError) {
+                            console.error(`Log push failed for ${currentCourse}:`, pushError);
+                            // Don't necessarily stop, but log the error. The final pull might resolve inconsistencies.
+                            // Keep pendingChanges = true if push fails? Maybe. Let's try clearing it for now.
+                            pendingChanges = false; // Assume push failed, next sync will retry merge/push.
+                            updateSyncStatus("Sync failed", "error"); // Show immediate error
                         }
                     }
-                    // Students don't sync up, so no 'else' needed
-                    // --- END: NEW Non-Global Admin Sync Logic ---
+                } // End log sync block
 
-                } else if (availableCourses.length > 0) {
-                    currentCourse = availableCourses[0];
+                // --- Step 4: FINAL PULL (Mandatory after Push/Merge) ---
+                if (currentCourse && isSignedIn) {
+                    updateSyncStatus("Verifying sync...", "syncing");
+                    try {
+                        let finalLogs = [];
+                        let finalTombstones = new Set(); // Keep track even if non-global
 
-                    // Properly load and store course
-                    const [serverLogs, serverTombs, localData] = await Promise.all([
-                        fetchLogsFromSheet(currentCourse),
-                        fetchTombstonesForCourse(currentCourse),
-                        loadCourseFromLocalStorage(currentCourse)
-                    ]);
+                        if (isGlobalAdmin) {
+                            [finalLogs, finalTombstones] = await Promise.all([
+                                fetchLogsFromSheet(currentCourse),
+                                fetchTombstonesForCourse(currentCourse) // Re-fetch tombstones too
+                            ]);
+                        } else if (isAdmin) {
+                            // Non-Global Admin: Fetch final logs via Backend API
+                            finalLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                        } else {
+                            // Student: Fetch logs via Backend API (redundant if already done in Step 3a, but safe)
+                            finalLogs = await callWebApp('getStudentLogs', { courseName: currentCourse }, 'GET');
+                        }
 
-                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+                        // **CRITICAL:** Update local state with the DEFINITIVE server state
+                        courseData[currentCourse] = {
+                            logs: finalLogs,
+                            tombstones: finalTombstones // Store latest tombstones (mainly for Global Admins)
+                        };
+                        saveCourseToLocalStorage(currentCourse); // Save the definitive state
 
-                    courseData[currentCourse] = {
-                        logs: mergedLogs,
-                        tombstones: allTombstones
-                    };
 
-                    saveCourseToLocalStorage(currentCourse);
+                    } catch (finalPullError) {
+                        console.error(`Final log pull failed for ${currentCourse}:`, finalPullError);
+                        // Don't throw, allow the sync to finish, but UI might be slightly stale.
+                        showNotification('warning', 'Sync Issue', 'Could not verify final sync state. UI might be slightly outdated.');
+                    }
+                } // End final pull block
+
+
+                // --- Step 5: Update Sync Status (Success/Failure handled in parts above or finally) ---
+                if (!syncStatus.classList.contains('error')) { // Don't overwrite error status
+                    const now = new Date();
+                    const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                    updateSyncStatus(`Synced ${time}`, "success");
+                    setTimeout(() => {
+                        if (!pendingChanges && isOnline) { // Revert to online status if no errors/pending
+                            updateSyncStatus("Online", "online");
+                        }
+                    }, 3000);
                 }
 
-                // Clear the pending changes flag after successful sync
-                pendingChanges = false;
-                lastSyncTime = Date.now();
-
-                // Update the sync status to show success
-                const now = new Date();
-                const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                updateSyncStatus(`Manually synced ${time}`, "success");
-
-                // Hide success indication after a few seconds
-                setTimeout(() => {
-                    if (!pendingChanges) {
-                        updateSyncStatus(isOnline ? "Online" : "Offline", isOnline ? "online" : "offline");
-                    }
-                }, 3000);
-
-            } catch (error) {
-                console.error('Sync error:', error);
+            } catch (error) { // Catch errors from initial pulls or major issues
+                console.error('Main sync error:', error);
                 updateSyncStatus("Sync failed", "error");
-                showNotification('error', 'Sync Failed', 'Failed to sync data.');
+                showNotification('error', 'Sync Failed', `Could not sync data: ${error.message}`);
+                // Don't update UI on major failure? Or update with potentially stale local data?
+                // Let's allow UI update for now, it might show *something*.
             } finally {
                 isSyncing = false;
 
