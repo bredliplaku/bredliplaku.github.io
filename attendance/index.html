@@ -3419,7 +3419,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx-5k3MOCu80MVs-N2lWt7S_Di6CralJ67I9yTAZSfvZd1Hqe0DvpdHDNfj2CuZ2DU6CQ/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw5-tCZWZsB-a2_iRHTcFKTaSrhFySczfCMyq8MowbVQtnMijNHOmYUKs3lqikfmkUHsA/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -5535,8 +5535,8 @@
                 `<div class="field-action">
             <select id="uid-action-select" class="form-control" style="padding: 5px 8px;">
                 <option value="none" selected>Do Nothing</option>
-                <option value="merge">Merge (Add this UID)</option>
-                <option value="replace">Replace (Overwrite all UIDs)</option>
+                <option value="merge">Merge</option>
+                <option value="replace">Replace</option>
             </select>
         </div>`;
 
@@ -7071,7 +7071,42 @@
 
                 // Then sync logs if a course is selected
                 if (currentCourse) {
-                    await syncLogsWithSheet();
+                    // --- START: NEW Non-Global Admin Sync Logic ---
+                    if (isAdmin && !isGlobalAdmin) {
+                        try {
+                            // 1. PULL latest logs from backend
+                            updateSyncStatus("Fetching latest...", "syncing");
+                            const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+
+                            // 2. MERGE server logs with local changes (using existing merge function)
+                            const localData = await loadCourseFromLocalStorage(currentCourse); // Load local logs and tombstones
+                            // Non-global admins don't use server tombstones, just local ones if any were created offline (unlikely but safe)
+                            const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, new Set());
+
+                            // Update local data with merged result BEFORE pushing
+                            courseData[currentCourse] = {
+                                logs: mergedLogs,
+                                tombstones: new Set() // Non-global admins don't persist tombstones after merge
+                            };
+                            saveCourseToLocalStorage(currentCourse); // Save merged state locally
+
+                            // 3. PUSH the fully merged logs back via backend API
+                            updateSyncStatus("Uploading changes...", "syncing");
+                            await syncViaBackendAPI(); // This sends the updated courseData[currentCourse].logs
+
+                            console.log(`Non-global admin sync for ${currentCourse} complete.`);
+
+                        } catch (syncError) {
+                            console.error(`Non-global admin sync failed for ${currentCourse}:`, syncError);
+                            throw syncError; // Re-throw to be caught by the outer catch block
+                        }
+                    } else if (isGlobalAdmin) {
+                        // Global admin path (no change)
+                        await syncLogsWithSheet();
+                    }
+                    // Students don't sync up, so no 'else' needed
+                    // --- END: NEW Non-Global Admin Sync Logic ---
+
                 } else if (availableCourses.length > 0) {
                     currentCourse = availableCourses[0];
 
@@ -9305,23 +9340,19 @@
 
             dialog.querySelector('#cancel-add-log-btn').addEventListener('click', closeDialog);
             dialog.querySelector('#confirm-add-log-btn').addEventListener('click', async () => {
+                const nameInput = dialog.querySelector('#add-log-name');
+                const emailInput = dialog.querySelector('#add-log-email');
+
+                // --- Validation (no changes needed here) ---
                 clearInputError(nameInput);
                 clearInputError(emailInput);
-
                 const name = nameInput.value.trim();
                 const email = emailInput.value.trim();
                 let isValid = true;
-
-                if (name === '') {
-                    showInputError(nameInput, 'Name is required.');
-                    isValid = false;
-                }
-                if (!isValidEmail(email)) {
-                    showInputError(emailInput, 'A valid email is required.');
-                    isValid = false;
-                }
-
+                if (name === '') { showInputError(nameInput, 'Name is required.'); isValid = false; }
+                if (!isValidEmail(email)) { showInputError(emailInput, 'A valid email is required.'); isValid = false; }
                 if (!isValid) return;
+                // --- End Validation ---
 
                 const confirmBtn = dialog.querySelector('#confirm-add-log-btn');
                 confirmBtn.disabled = true;
@@ -9331,7 +9362,7 @@
                     const submissionData = {
                         name: name,
                         email: email,
-                        uid: uid,
+                        uid: uid, // 'uid' is available from the outer function's scope
                         sentBy: {
                             name: currentUser?.name || '',
                             email: currentUser?.email || ''
@@ -9339,23 +9370,43 @@
                     };
 
                     if (isGlobalAdmin) {
-                        // Global admins add directly to the database
-                        const result = await callWebApp('addEntryToDatabase_Admin', submissionData, 'POST');
-                        if (result && result.result === 'success') {
-                            showNotification('success', 'Added to Database', `${name} has been added to the database.`);
-                            invalidateDatabaseCache();
-                            await fetchDatabaseFromSheet();
-                            window.window.buildUIDToPrimaryUidMap(); // Correctly call the global function
-                            updateUI();
-                            closeDialog();
+                        // --- START: NEW DUPLICATE CHECK FOR GLOBAL ADMIN ---
+                        const match = findDuplicateInDatabase({ name, email, uid }); // Check for duplicates
+
+                        if (match) {
+                            // DUPLICATE FOUND: Show the warning dialog
+                            const completeAction = async () => { // Define the callback
+                                if (isOnline) {
+                                    await syncDatabaseToSheet();
+                                    invalidateDatabaseCache();
+                                    await fetchDatabaseFromSheet();
+                                }
+                                window.buildUIDToPrimaryUidMap();
+                                updateUI();
+                            };
+                            showDuplicateWarningForNewEntry(submissionData, [match.duplicate], completeAction);
+                            closeDialog(); // Close the current 'Add from Log' dialog
+                            return; // Stop further execution here
                         } else {
-                            throw new Error(result?.message || 'Failed to add entry');
+                            // NO DUPLICATE: Add directly to the database via backend
+                            const result = await callWebApp('addEntryToDatabase_Admin', submissionData, 'POST');
+                            if (result && result.result === 'success') {
+                                showNotification('success', 'Added to Database', `${name} has been added.`);
+                                invalidateDatabaseCache();
+                                await fetchDatabaseFromSheet();
+                                window.buildUIDToPrimaryUidMap(); // Use window scope
+                                updateUI();
+                                closeDialog();
+                            } else {
+                                throw new Error(result?.message || 'Failed to add entry');
+                            }
                         }
+                        // --- END: NEW DUPLICATE CHECK FOR GLOBAL ADMIN ---
                     } else {
-                        // Non-global admins submit a registration request
+                        // Non-global admins submit a registration request (no change here)
                         const result = await callWebApp('submitRegistration', submissionData, 'POST');
                         if (result && result.result === 'success') {
-                            showNotification('success', 'Request Submitted', `Registration request for ${name} has been sent for approval.`);
+                            showNotification('success', 'Request Submitted', `Registration request for ${name} has been sent.`);
                             closeDialog();
                         } else {
                             throw new Error(result?.message || 'Submission failed');
@@ -9364,7 +9415,7 @@
                 } catch (error) {
                     showNotification('error', 'Submission Failed', error.message);
                     confirmBtn.disabled = false;
-                    confirmBtn.innerHTML = 'Add Student';
+                    confirmBtn.innerHTML = 'Add Student'; // Reset button text
                 }
             });
         }
@@ -9703,13 +9754,16 @@
                 }, 5000);
             }
 
-            if (isOnline && isSignedIn && isAdmin) {
+            // Only Global Admins attempt immediate append via GAPI
+            if (isOnline && isSignedIn && isGlobalAdmin) { // <-- Check isGlobalAdmin
                 try {
+                    // Global admin direct append (might still fail sometimes, but that's less critical)
                     await appendLogToSheet(newLog);
                 } catch (err) {
-                    console.error('Error appending log:', err);
+                    // Log error but don't show notification, rely on standard sync
                 }
             }
+            // Non-global admins rely on the standard auto/manual sync triggered by saveAndMarkChanges
         }
 
 
