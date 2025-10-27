@@ -3815,6 +3815,52 @@
                 });
             }
 
+            // --- NEW: Student Profile Click Listener ---
+            const userNameElement = document.getElementById('user-name');
+            if (userNameElement) {
+                userNameElement.addEventListener('click', () => {
+                    // Only show for signed-in students (not admins)
+                    if (isSignedIn && !isAdmin && currentUser) {
+
+                        // Find UIDs from the databaseMap
+                        let userUIDs = [];
+                        for (const dbKey in databaseMap) {
+                            const entry = databaseMap[dbKey];
+                            if (entry.email && entry.email.toLowerCase() === currentUser.email.toLowerCase()) {
+                                userUIDs = entry.uids;
+                                break; // Found the user, stop searching
+                            }
+                        }
+
+                        const uidList = userUIDs.length > 0
+                            ? userUIDs.map(uid => `<li style="font-family: monospace; margin-bottom: 5px;">${uid}</li>`).join('')
+                            : '<li>No UIDs found in database.</li>';
+
+                        const profileMessage = `
+                        <p><strong>Name:</strong> ${currentUser.name}</p>
+                        <p><strong>Email:</strong> ${currentUser.email}</p>
+                        <p><strong>Registered UIDs:</strong></p>
+                        <ul style="list-style: none; padding-left: 10px;">${uidList}</ul>
+                    `;
+
+                        showAlertDialog('Your Profile', profileMessage);
+                    } else if (isAdmin) {
+                        // Optional: Add a different action for admins if needed
+                        console.log("Admin clicked their name.");
+                    }
+                });
+
+                // Add cursor style to indicate clickability for students
+                if (!isAdmin) {
+                    userNameElement.style.cursor = 'pointer';
+                    userNameElement.style.textDecoration = 'underline';
+                } else {
+                    userNameElement.style.cursor = 'default';
+                    userNameElement.style.textDecoration = 'none';
+                }
+            }
+            // --- END: Student Profile Click Listener ---
+
             document.addEventListener('focusin', (event) => {
                 const target = event.target;
                 // Check if the focus event happened on an input or textarea inside any of our dialogs.
@@ -6354,6 +6400,9 @@
  * Handles the click on either refresh button.
  * Shows a spinner, runs a full sync, then stops the spinner.
  */
+        /**
+     * REVISED: Handles refresh differently for Admins and Students.
+     */
         async function handleManualRefresh(buttonId) {
             if (isSyncing) return; // Don't refresh if already syncing
 
@@ -6368,20 +6417,45 @@
             refreshBtn.disabled = true;
 
             try {
-                // Call syncData() which PUSHES and PULLS all data
-                // and calls updateUI() at the end.
-                await syncData();
+                // --- NEW LOGIC: Check if admin ---
+                if (isAdmin) {
+                    // Admins run the full sync (pushes and pulls everything)
+                    await syncData();
+                    showNotification('success', 'Refresh Complete', 'Data synced with server.');
+                } else {
+                    // Students only refresh *their* logs for the current course
+                    if (currentCourse && isSignedIn) {
+                        updateSyncStatus("Refreshing logs...", "syncing"); // Show temporary status
+                        const serverLogs = await callWebApp('getStudentLogs', { courseName: currentCourse }, 'GET');
+
+                        // Update cache and main data
+                        studentLogCache[currentCourse] = serverLogs;
+                        courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
+
+                        updateUI(); // Redraw the log list
+                        showNotification('success', 'Logs Refreshed', 'Your attendance records are up to date.');
+                        updateSyncStatus("Online", "online"); // Revert status
+                    } else {
+                        showNotification('info', 'Nothing to Refresh', 'Please select a course.');
+                    }
+                }
+                // --- END NEW LOGIC ---
+
             } catch (error) {
                 console.error('Manual refresh failed:', error);
-                showNotification('error', 'Refresh Failed', 'Could not sync data. Check console.');
+                const errorMsg = isAdmin ? 'Could not sync data.' : 'Could not refresh logs.';
+                showNotification('error', 'Refresh Failed', `${errorMsg} ${error.message}`);
+                updateSyncStatus("Error", "error"); // Show error status
             } finally {
                 // Stop spinner
                 icon.className = originalIconClass;
                 refreshBtn.disabled = false;
+                // Ensure sync status reverts if it wasn't an error
+                if (!syncStatus.classList.contains('error') && !isAdmin) {
+                    setTimeout(() => updateSyncStatus("Online", "online"), 1000);
+                }
             }
         }
-
-        // ADD THIS new function
 
         function setupRefreshButtons() {
             const scannerRefreshBtn = document.getElementById('scanner-refresh-btn');
@@ -6566,6 +6640,7 @@
         }
 
         function updateAuthUI() {
+            // --- Initial UI State ---
             if (loadingTasks.has('auth')) {
                 loadingTasks.delete('auth');
                 checkLoadingCompletion();
@@ -6575,158 +6650,157 @@
             if (appHeader) {
                 appHeader.style.display = isSignedIn ? 'block' : 'none';
             }
-
-            document.getElementById('course-buttons-container').style.display = isSignedIn ? 'flex' : 'none';
+            // Temporarily hide course buttons; we'll show them later if needed
+            const courseButtonsContainer = document.getElementById('course-buttons-container');
+            if (courseButtonsContainer) courseButtonsContainer.style.display = 'none';
 
             document.body.classList.toggle('is-admin', isAdmin);
 
+            // --- Sort Select Logic ---
             const sortSelect = document.getElementById('sort-select');
             if (sortSelect) {
-                // Get all options as an array
                 const options = Array.from(sortSelect.options);
                 options.forEach(option => {
                     const isStudentOnlyOption = option.value.includes('date');
-                    // Hide or show options based on admin status
                     option.style.display = (isAdmin || isStudentOnlyOption) ? '' : 'none';
                 });
-
-                // If a non-admin has a non-date sort selected, reset it
                 if (!isAdmin && !currentSort.startsWith('date')) {
                     currentSort = 'date-desc';
                     sortSelect.value = currentSort;
                 }
             }
 
-            // Get elements that need direct manipulation
+            // --- Element References ---
             const loginContainer = document.getElementById('login-container');
             const userContainer = document.getElementById('user-container');
             const tabsContainer = document.querySelector('.tabs');
-            const courseButtonsContainer = document.querySelector('.course-buttons-container');
-            const scannerModule = document.querySelector('.module');
+            // Scanner module might need a more specific selector if you add more modules
+            const scannerModule = document.getElementById('scanner-tab')?.querySelector('.module');
             const directEisExportBtn = document.getElementById('direct-eis-export-btn');
+            const logsHeader = document.querySelector('.logs-header');
+            const filterContainer = document.querySelector('.filter-container');
+            const tableContainer = document.querySelector('.table-container');
+            const notSignedInMsgElement = document.getElementById('not-signed-in-message');
 
 
-            // Show/hide main containers based on auth state
+            // --- Core Auth UI Toggling ---
             if (loginContainer) loginContainer.style.display = isSignedIn ? 'none' : 'flex';
             if (userContainer) userContainer.style.display = isSignedIn ? 'flex' : 'none';
-            if (tabsContainer) tabsContainer.style.display = isGlobalAdmin ? 'flex' : 'none';
-            if (courseButtonsContainer) courseButtonsContainer.style.display = isSignedIn ? 'flex' : 'none';
+            if (tabsContainer) tabsContainer.style.display = isGlobalAdmin ? 'flex' : 'none'; // Only global admins see tabs
+            if (directEisExportBtn) directEisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
 
-            // Handle scanner and scan buttons
-            if (scannerModule) {
-                scannerModule.style.display = isSignedIn ? 'block' : 'none';
-            }
 
-            if (directEisExportBtn) {
-                directEisExportBtn.style.display = isAdmin ? 'inline-block' : 'none';
-            }
-
+            // --- Signed In State ---
             if (isSignedIn) {
-                if (isAdmin) {
-                    document.body.classList.add('is-admin');
+                // Update user display
+                if (currentUser) {
+                    userName.textContent = currentUser.name;
+                    userAvatar.src = currentUser.picture;
+                }
 
-                    // Hide database tab for non-global admins (must override CSS !important)
+                // Apply cursor style to name (clickable for students)
+                const userNameElement = document.getElementById('user-name');
+                if (userNameElement) {
+                    if (!isAdmin) { // Only students get the clickable style
+                        userNameElement.style.cursor = 'pointer';
+                        userNameElement.style.textDecoration = 'underline';
+                    } else {
+                        userNameElement.style.cursor = 'default';
+                        userNameElement.style.textDecoration = 'none';
+                    }
+                }
+
+                // Admin-specific UI adjustments
+                if (isAdmin) {
+                    document.body.classList.add('is-admin'); // Ensure admin styles apply
+                    // Database tab visibility (only for global admins)
                     const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
                     if (databaseTab) {
                         if (isGlobalAdmin) {
                             databaseTab.style.setProperty('display', 'flex', 'important');
                         } else {
                             databaseTab.style.setProperty('display', 'none', 'important');
-                            // Switch away if currently on database tab
                             if (document.querySelector('.tab-content.active')?.id === 'database-tab') {
                                 document.querySelector('.tab[data-tab="scanner-tab"]')?.click();
                             }
                         }
                     }
                 } else {
-                    document.body.classList.remove('is-admin');
-                }
-            } else {
-                document.body.classList.remove('is-admin');
-            }
-
-            // Handle guest mode UI
-            if (!isSignedIn) {
-                // Create or update the not-signed-in message
-                let notSignedInMsg = document.getElementById('not-signed-in-message');
-                if (!notSignedInMsg) {
-                    notSignedInMsg = document.createElement('div');
-                    notSignedInMsg.id = 'not-signed-in-message';
-                    notSignedInMsg.className = 'not-signed-in-message';
-
-                    // Insert after the app header
-                    const appHeader = document.querySelector('.app-header');
-                    if (appHeader && appHeader.nextSibling) {
-                        appHeader.parentNode.insertBefore(notSignedInMsg, appHeader.nextSibling.nextSibling);
-                    } else if (appHeader) {
-                        appHeader.parentNode.appendChild(notSignedInMsg);
-                    }
+                    document.body.classList.remove('is-admin'); // Ensure non-admin styles apply
                 }
 
-                if (lastScannedUID) {
-                    // Show last scanned UID
-                    notSignedInMsg.innerHTML = `
-<p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
-<h2 style="margin-top: 10px; font-weight: bold; font-family: monospace; font-size: 1.8em; letter-spacing: 1px; word-break: break-all; color: var(--primary-dark);">${lastScannedUID}</h2>
-            `;
-                } else {
-                    // Default welcome message
-                    notSignedInMsg.innerHTML = `
-                <h3><i class="fas fa-info-circle"></i> Welcome to Attendance Tracker</h3>
-                <p>Please sign in with your <b>EPOKA Mail</b> to track your attendance.</p>
-            `;
-                }
+                // Show course buttons
+                if (courseButtonsContainer) courseButtonsContainer.style.display = 'flex';
 
-                // Hide UI elements except scan button
-                const logsHeader = document.querySelector('.logs-header');
-                const filterContainer = document.querySelector('.filter-container');
-                const tableContainer = document.querySelector('.table-container');
+                // Remove guest message if present
+                if (notSignedInMsgElement) notSignedInMsgElement.remove();
 
-                if (logsHeader) logsHeader.style.display = 'none';
-                if (filterContainer) filterContainer.style.display = 'none';
-                if (tableContainer) tableContainer.style.display = 'none';
-            } else {
-                // Remove not-signed-in message if exists
-                const notSignedInMsg = document.getElementById('not-signed-in-message');
-                if (notSignedInMsg) {
-                    notSignedInMsg.remove();
-                }
-
-                // Show UI elements for signed-in users
-                const logsHeader = document.querySelector('.logs-header');
-                const filterContainer = document.querySelector('.filter-container');
-                const tableContainer = document.querySelector('.table-container');
-
+                // Show log-related UI elements
                 if (logsHeader) logsHeader.style.display = 'flex';
                 if (filterContainer) filterContainer.style.display = 'flex';
                 if (tableContainer) tableContainer.style.display = 'block';
+                if (scannerModule) scannerModule.style.display = 'block'; // Show scanner module
 
                 // Show/hide UID columns based on admin status
                 document.querySelectorAll('.uid-column').forEach(col => {
                     col.style.display = isAdmin ? 'table-cell' : 'none';
                 });
+
+                // --- Signed Out State ---
+            } else {
+                document.body.classList.remove('is-admin'); // Ensure non-admin styles
+                if (courseButtonsContainer) courseButtonsContainer.style.display = 'none'; // Hide course buttons
+
+                // Create or update the not-signed-in message
+                let notSignedInMsg = notSignedInMsgElement; // Use existing reference if available
+                if (!notSignedInMsg) {
+                    notSignedInMsg = document.createElement('div');
+                    notSignedInMsg.id = 'not-signed-in-message';
+                    notSignedInMsg.className = 'not-signed-in-message';
+                    const mainContainer = document.getElementById('main-container'); // Find a stable place to insert
+                    if (mainContainer) mainContainer.insertBefore(notSignedInMsg, mainContainer.children[1] || null); // Insert after sync/auth container
+                }
+
+                if (lastScannedUID) {
+                    notSignedInMsg.innerHTML = `
+                        <p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
+                        <h2 style="margin-top: 10px; font-weight: bold; font-family: monospace; font-size: 1.8em; letter-spacing: 1px; word-break: break-all; color: var(--primary-dark);">${lastScannedUID}</h2>`;
+                } else {
+                    notSignedInMsg.innerHTML = `
+                        <h3><i class="fas fa-info-circle"></i> Welcome to Attendance Tracker</h3>
+                        <p>Please sign in with your <b>EPOKA Mail</b> to track your attendance.</p>`;
+                }
+
+                // Hide log-related UI elements
+                if (logsHeader) logsHeader.style.display = 'none';
+                if (filterContainer) filterContainer.style.display = 'none';
+                if (tableContainer) tableContainer.style.display = 'none';
+                if (scannerModule) scannerModule.style.display = 'none'; // Hide scanner module
             }
 
-            // Update sync button visibility (admin only)
+            // --- Common UI Updates (Run regardless of login state) ---
             const syncBtn = document.getElementById('sync-btn');
             if (syncBtn) {
                 syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
                 syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
             }
 
-            // Update empty logs message for signed-in users
             const emptyLogs = document.getElementById('empty-logs');
-            if (emptyLogs && isSignedIn) {
-
+            if (emptyLogs && isSignedIn) { // Only update message if signed in
                 const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
                 if (!currentCourse) {
                     emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> Please select a course to view attendance logs.';
-                } else if (logsForCurrentCourse.length === 0) {
-                    emptyLogs.innerHTML = '<i class="fas fa-info-circle"></i> No attendance records found for this course.';
+                } else if (logsForCurrentCourse.length === 0 && courseData[currentCourse]) { // Check if logs are loaded but empty
+                    emptyLogs.innerHTML = '<i class="fas fa-ghost"></i> No attendance records found for this course.';
+                } else if (!courseData[currentCourse]) {
+                    // Logs are still loading, keep the spinner message (set by updateLogsList)
                 }
+            } else if (emptyLogs && !isSignedIn) {
+                emptyLogs.style.display = 'none'; // Hide empty message if not signed in
             }
         }
 
+        
         /**
          * REPLACED: Switches the active course and loads data on-demand if needed.
          */
