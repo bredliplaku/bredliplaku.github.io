@@ -6693,16 +6693,13 @@
                 checkLoadingCompletion();
             }
 
-            // Insert after the sync/auth container (which holds the sign-in button)
-            const syncAuthContainer = document.querySelector('.sync-auth-container');
-            if (syncAuthContainer && syncAuthContainer.parentNode) {
-                // Insert the message right after the sync/auth bar
-                syncAuthContainer.parentNode.insertBefore(notSignedInMsg, syncAuthContainer.nextSibling);
-            } else {
-                // Fallback: Append to main container if sync/auth bar isn't found (shouldn't happen)
-                const mainContainer = document.getElementById('main-container');
-                if (mainContainer) mainContainer.appendChild(notSignedInMsg);
+            const appHeader = document.querySelector('.app-header');
+            if (appHeader) {
+                appHeader.style.display = isSignedIn ? 'block' : 'none';
             }
+
+            const syncAuthContainer = document.querySelector('.sync-auth-container');
+            if (syncAuthContainer) syncAuthContainer.style.display = isSignedIn ? 'flex' : 'none';
 
             // Temporarily hide course buttons; we'll show them later if needed
             const courseButtonsContainer = document.getElementById('course-buttons-container');
@@ -6735,7 +6732,6 @@
             const filterContainer = document.querySelector('.filter-container');
             const tableContainer = document.querySelector('.table-container');
             const notSignedInMsgElement = document.getElementById('not-signed-in-message');
-            let notSignedInMsg = document.getElementById('not-signed-in-message');
 
 
             // --- Core Auth UI Toggling ---
@@ -6756,22 +6752,24 @@
                 // Apply cursor style to name (clickable for students)
                 const userNameElement = document.getElementById('user-name');
                 if (userNameElement) {
-                    if (!isAdmin) { // Only students get the clickable style
+                    if (isSignedIn && !isAdmin) {
                         userNameElement.style.cursor = 'pointer';
+                        // Use a theme color (or a specific blue like #1a73e8)
                         userNameElement.style.color = 'var(--primary-color)';
-                        userNameElement.style.textDecoration = 'none';
-                        userNameElement.classList.add('student-name-clickable');
+                        userNameElement.style.textDecoration = 'none'; // Ensure no underline
+                        userNameElement.classList.add('student-name-clickable'); // Add class for hover
                     } else {
                         userNameElement.style.cursor = 'default';
-                        userNameElement.style.color = 'inherit';
+                        userNameElement.style.color = 'inherit'; // Use default text color
                         userNameElement.style.textDecoration = 'none';
-                        userNameElement.classList.remove('student-name-clickable');
+                        userNameElement.classList.remove('student-name-clickable'); // Remove class
                     }
                 }
 
                 // Admin-specific UI adjustments
                 if (isAdmin) {
-                    document.body.classList.add('is-admin');
+                    document.body.classList.add('is-admin'); // Ensure admin styles apply
+                    // Database tab visibility (only for global admins)
                     const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
                     if (databaseTab) {
                         if (isGlobalAdmin) {
@@ -6784,62 +6782,64 @@
                         }
                     }
                 } else {
-                    document.body.classList.remove('is-admin');
+                    document.body.classList.remove('is-admin'); // Ensure non-admin styles apply
                 }
 
                 // Show course buttons
                 if (courseButtonsContainer) courseButtonsContainer.style.display = 'flex';
 
-                // Hide the guest message
-                const notSignedInMsg = document.getElementById('not-signed-in-message');
-                if (notSignedInMsg) notSignedInMsg.style.display = 'none';
+                // Remove guest message if present
+                if (notSignedInMsgElement) notSignedInMsgElement.remove();
 
                 // Show log-related UI elements
                 if (logsHeader) logsHeader.style.display = 'flex';
                 if (filterContainer) filterContainer.style.display = 'flex';
                 if (tableContainer) tableContainer.style.display = 'block';
-                if (scannerModule) scannerModule.style.display = 'block';
+                if (scannerModule) scannerModule.style.display = 'block'; // Show scanner module
 
                 // Show/hide UID columns based on admin status
                 document.querySelectorAll('.uid-column').forEach(col => {
                     col.style.display = isAdmin ? 'table-cell' : 'none';
                 });
 
-            } else { // User is NOT signed in
+                // --- Signed Out State ---
+            } else {
                 document.body.classList.remove('is-admin'); // Ensure non-admin styles
                 if (courseButtonsContainer) courseButtonsContainer.style.display = 'none'; // Hide course buttons
 
-                // Get or Create the not-signed-in message element
-                let notSignedInMsg = document.getElementById('not-signed-in-message');
+                // Create or update the not-signed-in message
+                let notSignedInMsg = notSignedInMsgElement; // Use existing reference if available
                 if (!notSignedInMsg) {
                     notSignedInMsg = document.createElement('div');
                     notSignedInMsg.id = 'not-signed-in-message';
                     notSignedInMsg.className = 'not-signed-in-message';
-                    const syncAuthContainer = document.querySelector('.sync-auth-container');
-                    if (syncAuthContainer && syncAuthContainer.parentNode) {
-                        syncAuthContainer.parentNode.insertBefore(notSignedInMsg, syncAuthContainer.nextSibling);
+                    const mainContainer = document.getElementById('main-container'); // Find a stable place to insert
+
+                    // We now find the .app-header and insert the message *before* it.
+                    // This guarantees it appears *after* the .sync-auth-container.
+                    const appHeaderElement = mainContainer.querySelector('.app-header');
+                    if (mainContainer && appHeaderElement) {
+                        mainContainer.insertBefore(notSignedInMsg, appHeaderElement);
+                    } else if (mainContainer) {
+                        mainContainer.appendChild(notSignedInMsg); // Fallback in case header isn't found
                     }
                 }
 
-                // Update the message content based on last scan
                 if (lastScannedUID) {
                     notSignedInMsg.innerHTML = `
-                    <p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
-                    <h2 style="margin-top: 10px; font-weight: bold; font-family: monospace; font-size: 1.8em; letter-spacing: 1px; word-break: break-all; color: var(--primary-dark);">${lastScannedUID}</h2>`;
+                        <p><i class="fas fa-id-card"></i> The UID of your ID Card is:</p>
+                        <h2 style="margin-top: 10px; font-weight: bold; font-family: monospace; font-size: 1.8em; letter-spacing: 1px; word-break: break-all; color: var(--primary-dark);">${lastScannedUID}</h2>`;
                 } else {
                     notSignedInMsg.innerHTML = `
-                    <h3><i class="fas fa-info-circle"></i> Welcome to Attendance Tracker</h3>
-                    <p>Please sign in with your <b>EPOKA Mail</b> to track your attendance.</p>`;
+                        <h3><i class="fas fa-info-circle"></i> Welcome to Attendance Tracker</h3>
+                        <p>Please sign in with your <b>EPOKA Mail</b> to track your attendance.</p>`;
                 }
-                // Make the message visible
-                notSignedInMsg.style.display = 'block';
 
-                // --- ALWAYS HIDE LOGS WHEN SIGNED OUT ---
+                // Hide log-related UI elements
                 if (logsHeader) logsHeader.style.display = 'none';
                 if (filterContainer) filterContainer.style.display = 'none';
                 if (tableContainer) tableContainer.style.display = 'none';
-                if (scannerModule) scannerModule.style.display = 'none'; // Also hide the scanner module wrapper
-                // --- END HIDE LOGS ---
+                if (scannerModule) scannerModule.style.display = 'none'; // Hide scanner module
             }
 
             // --- Common UI Updates (Run regardless of login state) ---
