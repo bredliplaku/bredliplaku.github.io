@@ -3419,7 +3419,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycby5_LY6VnfeK6jBOjTB7x6ctufmQunT9xN60scvKTzGaTtOQaPSWEyPEYubI6ZJUfeMkw/exec';
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyJzHLq4xfawrftj9yUpeL5d_pbkKJs65mjZZ5UJMx6W_3tbNWkS1B_7aEkej4BEP4-BQ/exec';
 
         // Admin emails - backend manages admin status via COURSE_INFO sheet
         // This is just a fallback that won't actually be used
@@ -4946,17 +4946,19 @@
                 userName.textContent = currentUser.name;
                 userAvatar.src = currentUser.picture;
 
-                // 2. Get admin status
-                const adminCheckResult = await callWebApp('checkAdminStatus', {}, 'GET');
-                if (adminCheckResult) {
-                    isAdmin = adminCheckResult.isAdmin || false;
-                    isGlobalAdmin = adminCheckResult.isGlobalAdmin || false;
-                    adminCourses = adminCheckResult.courses || [];
+                // 2. Get ALL boot data in ONE call (Admin Status + Course List)
+                const bootData = await callWebApp('getBootData', {}, 'GET');
+
+                // 3. Process Admin Status from boot data
+                if (bootData.adminStatus) {
+                    isAdmin = bootData.adminStatus.isAdmin || false;
+                    isGlobalAdmin = bootData.adminStatus.isGlobalAdmin || false;
+                    adminCourses = bootData.adminStatus.courses || [];
                     console.log('Admin status:', { isAdmin, isGlobalAdmin, adminCourses });
                 }
 
-                // 3. Get available courses (names only)
-                const fetchedCourseDict = await callWebApp('getAvailableCourses', {}, 'GET');
+                // 4. Process Available Courses from boot data
+                const fetchedCourseDict = bootData.courses;
                 if (fetchedCourseDict && typeof fetchedCourseDict === 'object') {
                     courseDictionary = fetchedCourseDict;
                     let allCourses = Object.keys(courseDictionary);
@@ -9157,8 +9159,6 @@
                 tableContainer.classList.add('reloading');
             }
 
-            const currentCourseLogs = getLogsForCurrentUser();
-
             setTimeout(() => {
                 if (!currentCourse) {
                     logsTbody.innerHTML = '';
@@ -9170,6 +9170,19 @@
                     tableContainer.classList.remove('reloading');
                     return;
                 }
+
+                // If the data object for the current course hasn't been created yet,
+                // it means Phase 3 is still running. Show a spinner.
+                if (!courseData[currentCourse]) {
+                    logsTbody.innerHTML = '';
+                    filteredCount.textContent = '0';
+                    emptyLogs.innerHTML = `<div class="loading-spinner" style="margin: 20px auto;"></div><p style="text-align: center;">Loading logs...</p>`;
+                    emptyLogs.style.display = 'block';
+                    tableContainer.classList.remove('reloading');
+                    return; // Stop here and wait for the next updateUI() call
+                }
+
+                const currentCourseLogs = getLogsForCurrentUser();
 
                 // For students, the logs are already filtered by the backend
                 // No need to filter again - this was causing empty tables!
