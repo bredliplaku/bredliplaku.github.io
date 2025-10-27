@@ -7101,8 +7101,29 @@
                             throw syncError; // Re-throw to be caught by the outer catch block
                         }
                     } else if (isGlobalAdmin) {
-                        // Global admin path (no change)
-                        await syncLogsWithSheet();
+                        // Global admin path
+                        await syncLogsWithSheet(); // Pushes merged data up
+
+                        // --- START: ADD REFETCH STEP ---
+                        try {
+                            // Explicitly re-fetch logs AFTER pushing to get the absolute latest state
+                            console.log(`Global admin: Re-fetching logs for ${currentCourse} after sync push.`);
+                            const latestLogs = await fetchLogsFromSheet(currentCourse);
+                            // Also refetch tombstones in case deletions happened concurrently
+                            const latestTombstones = await fetchTombstonesForCourse(currentCourse);
+
+                            // Update local data directly with the fetched state
+                            courseData[currentCourse] = {
+                                logs: latestLogs,
+                                tombstones: latestTombstones // Use the latest server tombstones
+                            };
+                            saveCourseToLocalStorage(currentCourse); // Save the fetched state
+                            console.log(`Global admin: Updated local logs for ${currentCourse} with fetched data.`);
+                        } catch (fetchError) {
+                            console.error(`Global admin: Error re-fetching logs after sync for ${currentCourse}:`, fetchError);
+                            // Don't throw; allow sync to complete, but log the error.
+                            // The UI will show the state before the re-fetch attempt.
+                        }
                     }
                     // Students don't sync up, so no 'else' needed
                     // --- END: NEW Non-Global Admin Sync Logic ---
