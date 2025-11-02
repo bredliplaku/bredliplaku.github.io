@@ -626,7 +626,6 @@
             animation: spin 1s linear infinite;
         }
 
-        /* Fix for dark mode */
         .dark-mode .refresh-btn {
             color: white;
         }
@@ -2511,7 +2510,6 @@
             background-color: #6a1b9a;
         }
 
-        /* Fix unknown row highlight in dark mode */
         .dark-mode .unknown-row {
             background-color: rgba(251, 140, 0, 0.2) !important;
             border-left: 3px solid var(--warning-color);
@@ -4365,10 +4363,11 @@
             // Clear timer on mouse up
             newSyncBtn.addEventListener('mouseup', function () {
                 clearTimeout(pressTimer);
+                const courseToSync = currentCourse; // Get course at the moment of click
 
                 // Only trigger sync on short press
-                if (!isLongPress) {
-                    syncData();
+                if (!isLongPress && courseToSync) {
+                    syncData(courseToSync);
                 }
             });
 
@@ -4403,10 +4402,11 @@
 
             newSyncBtn.addEventListener('touchend', function (e) {
                 clearTimeout(pressTimer);
+                const courseToSync = currentCourse; // Get course at the moment of click
 
                 // Only trigger sync on short touch
-                if (!isLongPress) {
-                    syncData();
+                if (!isLongPress && courseToSync) {
+                    syncData(courseToSync);
                 }
 
                 // Prevent additional click events
@@ -4461,13 +4461,14 @@
 
         // Auto-sync function with retry logic
         async function autoSyncData() {
-            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing) return;
+            const courseToSync = currentCourse; // Get course at start of function
+            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing || !courseToSync) return;
 
             try {
                 isSyncing = true;
                 updateSyncStatus("Syncing...", "syncing");
 
-                await syncLogsWithSheet();
+                await syncLogsWithSheet(courseToSync);
 
                 // Reset state after successful sync
                 pendingChanges = false;
@@ -5092,6 +5093,10 @@
                     currentCourse = availableCourses[0];
                 } else {
                     currentCourse = null;
+                }
+                // If we found a default course and the hash is empty, set it.
+                if (currentCourse && !hashCourse) {
+                    window.location.hash = currentCourse;
                 }
 
                 // --- PHASE 2: SHOW THE APP ---
@@ -6332,11 +6337,14 @@
  * Handles the click on either refresh button.
  * Shows a spinner, runs a full sync, then stops the spinner.
  */
-        /**
-     * REVISED: Handles refresh differently for Admins and Students.
-     */
         async function handleManualRefresh(buttonId) {
-            if (isSyncing) return; // Don't refresh if already syncing
+            if (isSyncing || isChangingCourses) return; // Don't refresh if already syncing OR changing courses
+
+            const courseToRefresh = currentCourse;
+            if (isAdmin && !courseToRefresh) {
+                showNotification('info', 'No Course', 'Please select a course to refresh.');
+                return;
+            }
 
             const refreshBtn = document.getElementById(buttonId);
             if (!refreshBtn) return;
@@ -6351,7 +6359,7 @@
             try {
                 if (isAdmin) {
                     // --- ADMIN REFRESH (Full Sync) ---
-                    await syncData(); // Admins run the full sync
+                    await syncData(courseToRefresh); // Admins run the full sync
                     showNotification('success', 'Refresh Complete', 'Data synced with server.');
 
                 } else {
@@ -6906,9 +6914,19 @@
 
 
         /**
-         * REPLACED: Switches the active course and loads data on-demand if needed.
+         * Switches the active course and loads data on-demand if needed.
          */
         async function handleCourseChange(courseName) {
+            // --- SAFETY LOCK ---
+            if (isSyncing) {
+                showNotification('warning', 'Sync in Progress', 'Please wait for the current sync to finish.');
+                // Force the hash back to the course that is currently syncing
+                if (window.location.hash !== `#${currentCourse}`) {
+                    window.location.hash = currentCourse;
+                }
+                return; // Stop the function
+            }
+
             // Do nothing if the course is not actually changing.
             if (currentCourse === courseName) return;
 
@@ -7165,8 +7183,9 @@
          * Sync data with Google Sheets.
          * Fetches and updates both database and logs.
          */
-        async function syncData() {
-            if (!isOnline || !isSignedIn || isSyncing) {
+        async function syncData(courseName) {
+            if (!courseName || !isOnline || !isSignedIn || isSyncing) {
+                if (courseName) console.warn(`Sync for ${courseName} skipped: already syncing.`);
                 return;
             }
 
@@ -7199,7 +7218,7 @@
                 }
 
                 // --- Step 3: Sync Logs (Pull -> Merge -> Push) ---
-                if (currentCourse && isSignedIn) { // Only sync logs if signed in and a course is selected
+                if (courseName && isSignedIn) { // Only sync logs if signed in and a course is selected
                     let serverLogs = [];
                     let serverTombstones = new Set(); // Only used by global admin fetch
                     let localData = { logs: [], tombstones: new Set() }; // Default empty
@@ -7207,21 +7226,21 @@
                     // --- 3a: Initial PULL ---
                     updateSyncStatus("Loading logs...", "syncing");
                     try {
-                        localData = await loadCourseFromLocalStorage(currentCourse); // Load local state first
+                        localData = await loadCourseFromLocalStorage(courseName); // Load local state first
 
                         if (isGlobalAdmin) {
                             // Call backend for logs AND tombstones
-                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
+                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
                             serverLogs = logs;
                             serverTombstones = new Set(tombstones); // Ensure it's a Set
                         } else if (isAdmin) {
                             // Non-Global Admin: Fetch logs via Backend API
-                            serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                            serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
                             // Non-global admins don't fetch server tombstones
                         }
                         // Students don't PULL/PUSH logs during manual sync/refresh
                     } catch (pullError) {
-                        console.error(`Initial log fetch failed for ${currentCourse}:`, pullError);
+                        console.error(`Initial log fetch failed for ${courseName}:`, pullError);
                         throw new Error(`Could not fetch latest logs. ${pullError.message}`); // Stop sync if initial pull fails
                     }
 
@@ -7235,7 +7254,7 @@
                         logsToPush = mergedLogs;
 
                         // Update local state temporarily with merged data before push
-                        courseData[currentCourse] = {
+                        courseData[courseName] = {
                             logs: mergedLogs,
                             // Global admins will sync local tombstones UP, Non-global clear them after push
                             tombstones: isGlobalAdmin ? localData.tombstones : new Set()
@@ -7244,8 +7263,8 @@
                     } else {
                         // For students, just display the server logs (they don't merge/push)
                         logsToPush = serverLogs; // This won't be pushed, just used for local update later
-                        courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
-                        saveCourseToLocalStorage(currentCourse); // Students save the pulled state
+                        courseData[courseName] = { logs: serverLogs, tombstones: new Set() };
+                        saveCourseToLocalStorage(courseName); // Students save the pulled state
                     }
 
 
@@ -7254,12 +7273,12 @@
                         updateSyncStatus("Syncing changes...", "syncing");
                         try {
                             // Update the local data with the potentially merged logs BEFORE pushing
-                            courseData[currentCourse].logs = logsToPush;
+                            courseData[courseName].logs = logsToPush;
 
                             if (isGlobalAdmin) {
                                 await syncLogsWithSheet(); // GAPI Push (includes logs & local tombstones)
                                 // Clear local tombstones AFTER successful GAPI push
-                                courseData[currentCourse].tombstones.clear();
+                                courseData[courseName].tombstones.clear();
                             } else {
                                 await syncViaBackendAPI(); // Backend API Push (sends merged logs)
                                 // Non-global admins already have empty tombstones here
@@ -7267,7 +7286,7 @@
                             pendingChanges = false; // Mark changes as pushed
                             lastSyncTime = Date.now();
                         } catch (pushError) {
-                            console.error(`Log push failed for ${currentCourse}:`, pushError);
+                            console.error(`Log push failed for ${courseName}:`, pushError);
                             // Don't necessarily stop, but log the error. The final pull might resolve inconsistencies.
                             // Keep pendingChanges = true if push fails? Maybe. Let's try clearing it for now.
                             pendingChanges = false; // Assume push failed, next sync will retry merge/push.
@@ -7277,7 +7296,7 @@
                 } // End log sync block
 
                 // --- Step 4: FINAL PULL (Mandatory after Push/Merge) ---
-                if (currentCourse && isSignedIn) {
+                if (courseName && isSignedIn) {
                     updateSyncStatus("Verifying...", "syncing");
                     try {
                         let finalLogs = [];
@@ -7285,23 +7304,23 @@
 
                         if (isGlobalAdmin) {
                             // Call backend for final logs AND tombstones
-                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
+                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
                             finalLogs = logs;
                             finalTombstones = new Set(tombstones); // Ensure it's a Set
                         } else if (isAdmin) {
                             // Non-Global Admin: Fetch final logs via Backend API
-                            finalLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                            finalLogs = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
                         } else {
                             // Student: Fetch logs via Backend API (redundant if already done in Step 3a, but safe)
-                            finalLogs = await callWebApp('getStudentLogs', { courseName: currentCourse }, 'GET');
+                            finalLogs = await callWebApp('getStudentLogs', { courseName: courseName }, 'GET');
                         }
 
                         // **CRITICAL:** Update local state with the DEFINITIVE server state
-                        courseData[currentCourse] = {
+                        courseData[courseName] = {
                             logs: finalLogs,
                             tombstones: finalTombstones // Store latest tombstones (mainly for Global Admins)
                         };
-                        saveCourseToLocalStorage(currentCourse); // Save the definitive state
+                        saveCourseToLocalStorage(courseName); // Save the definitive state
 
 
                     } catch (finalPullError) {
@@ -7410,7 +7429,6 @@
             serverLogs = Array.isArray(serverLogs) ? serverLogs : [];
             localLogs = Array.isArray(localLogs) ? localLogs : [];
 
-            // --- THIS IS THE FIX ---
             // We create the 'deleted' set by combining the two tombstone sets from the function signature.
             const deleted = new Set([...localTombstones, ...serverTombstones]);
 
@@ -7471,9 +7489,9 @@
         /**
          * Syncs logs (and tombstones for global admins) via the backend.
          */
-        async function syncLogsWithSheet() {
+        async function syncLogsWithSheet(courseName) {
             // Basic conditions check
-            if (!currentCourse || !isOnline || !isSignedIn || !isAdmin) {
+            if (!courseName || !isOnline || !isSignedIn || !isAdmin) {
                 return;
             }
 
@@ -7481,13 +7499,13 @@
             // The backend's syncCourseLogs_Admin will handle both
             // global and non-global admins correctly.
             try {
-                await syncViaBackendAPI(); // This is the single point of truth now
+                await syncViaBackendAPI(courseName); // This is the single point of truth now
 
                 // Clear local tombstones *after* a successful sync
-                if (courseData[currentCourse]) {
-                    courseData[currentCourse].tombstones.clear();
+                if (courseData[courseName]) {
+                    courseData[courseName].tombstones.clear();
                 }
-                saveCourseToLocalStorage(currentCourse);
+                saveCourseToLocalStorage(courseName);
 
             } catch (error) {
                 console.error('Error during syncLogsWithSheet wrapper:', error);
@@ -7495,10 +7513,10 @@
             }
         }
 
-        async function syncViaBackendAPI() {
+        async function syncViaBackendAPI(courseName) {
             try {
 
-                const logsToSync = courseData[currentCourse]?.logs || [];
+                const logsToSync = courseData[courseName]?.logs || [];
 
                 if (logsToSync.length === 0) {
                     console.log('No logs to sync');
@@ -7507,7 +7525,7 @@
 
                 // Call backend to sync logs AND tombstones
                 const result = await callWebApp('syncCourseLogs_Admin', {
-                    courseName: currentCourse,
+                    courseName: courseName,
                     logs: logsToSync,
                     tombstones: Array.from(courseData[currentCourse]?.tombstones || [])
                 }, 'POST');
@@ -7515,7 +7533,7 @@
                 if (result && result.result === 'success') {
                     pendingChanges = false;
                     lastSyncTime = Date.now();
-                    saveCourseToLocalStorage(currentCourse);
+                    saveCourseToLocalStorage(courseName);
                 } else {
                     throw new Error(result?.message || 'Sync failed');
                 }
@@ -8320,10 +8338,8 @@
                 const timeObj = new Date(log.timestamp);
                 const formattedTime = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
 
-                // --- START FIX ---
                 // Check if the log is manual and add the class if it is.
                 const manualClass = (log.manual === true || log.manual === 'true') ? 'manual-timestamp-input' : '';
-                // --- END FIX ---
 
                 timestampFields += `
 <div class="timestamp-edit-group" data-log-id="${log.id}">
@@ -8482,14 +8498,12 @@
                         const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
                         log.timestamp = newTimestampObj.getTime();
 
-                        // --- FIX STARTS HERE ---
                         // Check if the input field had the manual class and update the log data
                         if (timeInput.classList.contains('manual-timestamp-input')) {
                             log.manual = true;
                         } else {
                             log.manual = false;
                         }
-                        // --- FIX ENDS HERE ---
 
                         touchLogForEdit(log, currentUser?.email);
                     }
@@ -9391,7 +9405,6 @@
             updateDatabaseStatus();
             updatePageTitle();
 
-            // --- START FIX ---
             // This logic ensures the course buttons are correctly hidden when on the database tab.
             const activeTabId = document.querySelector('.tab.active')?.dataset.tab;
             const courseButtonsContainer = document.getElementById('course-buttons-container');
