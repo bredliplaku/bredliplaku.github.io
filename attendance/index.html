@@ -759,9 +759,7 @@
 
         .btn-icon {
             width: 44px;
-            /* Fixed width */
             height: 44px;
-            /* Fixed height, making it a square */
             padding: 0;
             /* Remove all padding */
             border-radius: 50%;
@@ -1043,7 +1041,7 @@
             border-radius: 18px 8px 8px 18px;
             font-size: 0.9em;
             box-sizing: border-box;
-            min-width: 200px;
+            min-width: 0;
         }
 
         .filter-input,
@@ -3534,120 +3532,121 @@
 
     <script>
         // Config
-        let isAdmin = false;
-        let isGlobalAdmin = false;
-        let adminCourses = [];
-        const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
-        const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
-        const LOGS_STORAGE_KEY = 'attendance_logs';
-        const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzOuBc3flyEUiL2vZaLtvj73QbLwcTC3E6LU12eprlTW4V1nIBvsxwlxCmwJnzBZbz8/exec';
+            let isAdmin = false;
+            let isGlobalAdmin = false;
+            let adminCourses = [];
+            const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
+            const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
+            const LOGS_STORAGE_KEY = 'attendance_logs';
+            const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxlQipgsTxNUUtYx9u1Ya0eu8aWzdlKfmkQCB5BueWATF4657kaZilAvtQ76-rrrHtwzQ/exec';
 
-        // Discovery docs and scopes for Google API
-        // const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
+            // Discovery docs and scopes for Google API
+            // const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
 
-        // App state
-        let courseData = {};
-        let isScanning = false;
-        let nfcSupported = false;
-        let nfcReader = null;
-        let filter = '';
-        let dbFilter = '';
-        let databaseMap = {}; // Map UIDs to {name, email} objects
-        let uidToPrimaryUidMap = {};
-        let currentSort = localStorage.getItem('logs_sort') || 'date-desc';
-        let currentDbSort = localStorage.getItem('db_sort') || 'name-asc';
-        let soundEnabled = true; // Sound effects enabled by default
-        let isSignedIn = false; // User is signed in
-        let currentUser = null; // Current user info
-        let tokenClient = null; // Google OAuth token client
-        let currentCourse = ''; // Currently selected course
-        let availableCourses = []; // Will be populated from spreadsheet
-        let isOnline = navigator.onLine;
-        let isSyncing = false;
-        let isInitializing = true;
-        let isChangingCourses = false;
-        let pendingNotifications = [];
-        let criticalErrorsOnly = true;
-        let initialSignIn = true; // Flag to track initial sign-in
-        let lastScannedUID = null;
-        let courseIDMap = {}; // Object to store course information - name to ID mapping
-        let sheetNameMap = {}; // Maps display names to actual sheet names
-        let excusedUIDs = new Set();
-        let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
-        let cooldownUIDs = new Set();
-        let nfcAbortController = null;
-        let initialisedCourses = new Set();
-        let initialPullDone = false;
-        let avatarClickCount = 0;
-        let lastAvatarClickTime = 0;
+            // App state
+            let courseData = {};
+            let isScanning = false;
+            let nfcSupported = false;
+            let nfcReader = null;
+            let filter = '';
+            let dbFilter = '';
+            let databaseMap = {}; // Map UIDs to {name, email} objects
+            let uidToPrimaryUidMap = {};
+            let currentSort = localStorage.getItem('logs_sort') || 'date-desc';
+            let currentDbSort = localStorage.getItem('db_sort') || 'name-asc';
+            let soundEnabled = true; // Sound effects enabled by default
+            let isSignedIn = false; // User is signed in
+            let currentUser = null; // Current user info
+            let tokenClient = null; // Google OAuth token client
+            let currentCourse = ''; // Currently selected course
+            let availableCourses = []; // Will be populated from spreadsheet
+            let isOnline = navigator.onLine;
+            let isSyncing = false;
+            let isInitializing = true;
+            let isChangingCourses = false;
+            let pendingNotifications = [];
+            let criticalErrorsOnly = true;
+            let initialSignIn = true; // Flag to track initial sign-in
+            let lastScannedUID = null;
+            let courseIDMap = {}; // Object to store course information - name to ID mapping
+            let sheetNameMap = {}; // Maps display names to actual sheet names
+            let excusedUIDs = new Set();
+            let loadingTasks = new Set(['gapi', 'auth', 'courses', 'database']);
+            let cooldownUIDs = new Set();
+            let nfcAbortController = null;
+            let initialisedCourses = new Set();
+            let initialPullDone = false;
+            let avatarClickCount = 0;
+            let lastAvatarClickTime = 0;
+            let allCourseDictionary = {}; // Stores ALL courses for global admin hash loading
+            let baseAdminCourses = []; // Stores the admin's *own* courses (from Column J)
 
-        // Auto syncing
-        let autoSyncInterval = null;
-        let autoSyncEnabled = true;
-        let lastSyncTime = 0;
-        let pendingChanges = false;
-        let syncAttempts = 0;
-        const MAX_SYNC_ATTEMPTS = 5;
-        const SYNC_INTERVAL = 60000; // Auto-sync every 60 seconds
-        const SYNC_RETRY_INTERVAL = 15000; // Retry failed syncs after 15 seconds
-        let activeRequests = new Map(); // Track active requests per course
-        let studentLogCache = {};
-        let currentRequestId = 0; // Global request counter
-        let databaseLoadPromise = null;
-        let databaseResolve = null;
-        let databaseCache = null;
-        let databaseCacheTime = 0;
-        const DATABASE_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-        let initInProgress = false;
-        let lastNotificationKey = '';
-        let lastNotificationTime = 0;
+            // Auto syncing
+            let autoSyncInterval = null;
+            let autoSyncEnabled = true;
+            let lastSyncTime = 0;
+            let pendingChanges = false;
+            let syncAttempts = 0;
+            const MAX_SYNC_ATTEMPTS = 5;
+            const SYNC_INTERVAL = 60000; // Auto-sync every 60 seconds
+            const SYNC_RETRY_INTERVAL = 15000; // Retry failed syncs after 15 seconds
+            let activeRequests = new Map(); // Track active requests per course
+            let studentLogCache = {};
+            let currentRequestId = 0; // Global request counter
+            let databaseLoadPromise = null;
+            let databaseResolve = null;
+            let databaseCache = null;
+            let databaseCacheTime = 0;
+            const DATABASE_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+            let initInProgress = false;
+            let lastNotificationKey = '';
+            let lastNotificationTime = 0;
 
-        // DOM Elements
-        const tabs = document.querySelectorAll('.tab');
-        const tabContents = document.querySelectorAll('.tab-content');
-        const importExcelBtn = document.getElementById('import-excel-btn');
-        const excelInput = document.getElementById('excel-input');
-        const filterInput = document.getElementById('filter-input');
-        const sortSelect = document.getElementById('sort-select');
-        const dbFilterInput = document.getElementById('db-filter-input');
-        const importBtn = document.getElementById('import-btn');
-        const importInput = document.getElementById('import-input');
-        const exportBtn = document.getElementById('export-btn');
-        const clearBtn = document.getElementById('clear-btn');
-        const addLogBtn = document.getElementById('add-log-btn');
-        const addEntryBtn = document.getElementById('add-entry-btn');
-        const exportExcelBtn = document.getElementById('export-excel-btn');
-        const clearDbBtn = document.getElementById('clear-db-btn');
-        const logsTbody = document.getElementById('logs-tbody');
-        const databaseTbody = document.getElementById('database-tbody');
-        const emptyLogs = document.getElementById('empty-logs');
-        const emptyDatabase = document.getElementById('empty-database');
-        const filteredCount = document.getElementById('filtered-count');
-        const dbEntryCount = document.getElementById('db-entry-count');
-        const totalScans = document.getElementById('total-scans');
-        const lastScan = document.getElementById('last-scan');
-        const databaseStatus = document.getElementById('database-status');
-        const notificationArea = document.getElementById('in-page-notification-area');
-        const successSound = document.getElementById('success-sound');
-        const errorSound = document.getElementById('error-sound');
-        const syncBtn = document.getElementById('sync-btn');
-        const syncStatus = document.getElementById('sync-status');
-        const syncText = document.getElementById('sync-text');
-        const loginBtn = document.getElementById('login-btn');
-        const logoutBtn = document.getElementById('logout-btn');
-        const loginContainer = document.getElementById('login-container');
-        const userContainer = document.getElementById('user-container');
-        const userName = document.getElementById('user-name');
-        const userAvatar = document.getElementById('user-avatar');
-        const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+            // DOM Elements
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
+            const importExcelBtn = document.getElementById('import-excel-btn');
+            const excelInput = document.getElementById('excel-input');
+            const filterInput = document.getElementById('filter-input');
+            const sortSelect = document.getElementById('sort-select');
+            const dbFilterInput = document.getElementById('db-filter-input');
+            const importBtn = document.getElementById('import-btn');
+            const importInput = document.getElementById('import-input');
+            const exportBtn = document.getElementById('export-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const addLogBtn = document.getElementById('add-log-btn');
+            const addEntryBtn = document.getElementById('add-entry-btn');
+            const exportExcelBtn = document.getElementById('export-excel-btn');
+            const clearDbBtn = document.getElementById('clear-db-btn');
+            const logsTbody = document.getElementById('logs-tbody');
+            const databaseTbody = document.getElementById('database-tbody');
+            const emptyLogs = document.getElementById('empty-logs');
+            const emptyDatabase = document.getElementById('empty-database');
+            const filteredCount = document.getElementById('filtered-count');
+            const dbEntryCount = document.getElementById('db-entry-count');
+            const totalScans = document.getElementById('total-scans');
+            const lastScan = document.getElementById('last-scan');
+            const databaseStatus = document.getElementById('database-status');
+            const notificationArea = document.getElementById('in-page-notification-area');
+            const successSound = document.getElementById('success-sound');
+            const errorSound = document.getElementById('error-sound');
+            const syncBtn = document.getElementById('sync-btn');
+            const syncStatus = document.getElementById('sync-status');
+            const syncText = document.getElementById('sync-text');
+            const loginBtn = document.getElementById('login-btn');
+            const logoutBtn = document.getElementById('logout-btn');
+            const loginContainer = document.getElementById('login-container');
+            const userContainer = document.getElementById('user-container');
+            const userName = document.getElementById('user-name');
+            const userAvatar = document.getElementById('user-avatar');
+            const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
-        function checkLoadingCompletion() {
-            if (loadingTasks.size === 0) {
-                setTimeout(showMainContent, 100); // Short delay for rendering
-            } else {
+            function checkLoadingCompletion() {
+                if (loadingTasks.size === 0) {
+                    setTimeout(showMainContent, 100); // Short delay for rendering
+                } else {
+                }
             }
-        }
 
         /**
  * Check admin status from server
@@ -3682,7 +3681,7 @@
         }
 
         /**
-         * NEW: Finds and removes all data related to this app from localStorage.
+         * Finds and removes all data related to this app from localStorage.
          */
         function clearAllAppData() {
             const keysToRemove = [];
@@ -3719,7 +3718,7 @@
         }
 
         /**
-         * NEW: Adds a +1 hour log to the latest entry for every student present on a given day.
+         * Adds a +1 hour log to the latest entry for every student present on a given day.
          * @param {string} dateStr - The date string in "DD-MM-YYYY" format.
          */
         function addPlusOneHourToDay(dateStr) {
@@ -3795,7 +3794,7 @@
             };
             newLog = touchLogForEdit(newLog, currentUser?.email);
 
-            // FIX: Add log to the correct course data array
+            // Add log to the correct course data array
             courseData[currentCourse].logs.unshift(newLog);
 
             saveAndMarkChanges(currentCourse);
@@ -4133,30 +4132,61 @@
         }
 
         function handleRouting() {
-            // Add this guard clause at the beginning.
-            // 'isInitializing' is set to false when the loading animation disappears.
             if (isInitializing) {
                 return;
             }
 
             const hash = window.location.hash.replace('#', '');
 
-            // Check if user has access to this course
-            if (hash && !availableCourses.includes(hash)) {
-                console.warn('Access denied to course:', hash);
-                showNotification('error', 'Access Denied', 'You do not have access to this course.');
-                // Redirect to first available course
-                if (availableCourses.length > 0) {
-                    window.location.hash = availableCourses[0];
-                } else {
-                    window.location.hash = '';
+            // Do nothing if hash is empty
+            if (!hash) {
+                // If we are on a temp course, unload it
+                if (currentCourse && isGlobalAdmin && !baseAdminCourses.includes(currentCourse)) {
+                    handleCourseChange(''); // Pass empty string to unload
                 }
                 return;
             }
 
-            // Only change course if the hash is valid and different from the current one.
-            if (hash && availableCourses.includes(hash) && hash !== currentCourse) {
-                handleCourseChange(hash);
+            // 1. Check if hash is one of the user's *assigned* courses
+            if (courseDictionary[hash]) {
+                if (hash !== currentCourse) {
+                    handleCourseChange(hash);
+                }
+                return;
+            }
+
+            // 2. If not, check if user is Global Admin and hash is a valid *other* course
+            if (isGlobalAdmin && allCourseDictionary[hash]) {
+                console.log(`Global Admin: Temporarily loading course: ${hash}`);
+                // Temporarily add this course to the user's lists
+                courseDictionary[hash] = allCourseDictionary[hash];
+                if (!availableCourses.includes(hash)) {
+                    availableCourses.push(hash);
+                }
+
+                if (hash !== currentCourse) {
+                    handleCourseChange(hash); // This will load the course
+                }
+                return;
+            }
+
+            // 3. If hash is invalid or no access
+            if (hash !== currentCourse) {
+                console.warn('Access denied or course not found:', hash);
+                showNotification('error', 'Access Denied', 'You do not have access to this course.');
+
+                // Redirect to first *assigned* course or empty
+                const redirectTo = baseAdminCourses.length > 0 ? baseAdminCourses[0] : (availableCourses.length > 0 ? availableCourses[0] : '');
+
+                if (window.location.hash !== redirectTo) {
+                    window.location.hash = redirectTo;
+                }
+
+                // If we are *already* on the (now invalid) hash, we need to manually trigger
+                // the change to unload it.
+                if (hash === currentCourse) {
+                    handleCourseChange(redirectTo);
+                }
             }
         }
 
@@ -4798,7 +4828,6 @@
                         if (typeof gapi !== 'undefined' && gapi.client) {
                             gapi.client.setToken({ access_token: params.access_token });
                             localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-                            isSignedIn = true;
                         } else {
                             setTimeout(processToken, 100);
                         }
@@ -5046,7 +5075,7 @@
         }
 
         /**
-         * REFACTORED: Loads data in phases for a fast boot
+         * Loads data in phases for a fast boot
          */
         async function onSuccessfulAuth(isRestore = false) {
             isSignedIn = true;
@@ -5079,41 +5108,34 @@
                 }
 
                 // 4. Process Available Courses from boot data
-                const fetchedCourseDict = bootData.courses;
-                if (fetchedCourseDict && typeof fetchedCourseDict === 'object') {
-                    courseDictionary = fetchedCourseDict;
-                    let allCourses = Object.keys(courseDictionary);
+                allCourseDictionary = bootData.allCourses || {}; // Full system list
+                courseDictionary = bootData.assignedCourses || {}; // User's own list
 
-                    if (isAdmin) {
-                        if (isGlobalAdmin) { // Use isGlobalAdmin
-                            availableCourses = allCourses;
-                        } else { // Course admin
-                            availableCourses = allCourses.filter(course => adminCourses.includes(course));
-                        }
-                    } else { // Student
-                        availableCourses = allCourses;
-                    }
+                if (isGlobalAdmin) {
+                    // Store the base list of *own* courses to manage temp-loaded courses
+                    baseAdminCourses = Object.keys(courseDictionary);
+                }
 
-                    const filteredDict = {};
-                    availableCourses.forEach(course => {
-                        if (courseDictionary[course]) {
-                            filteredDict[course] = courseDictionary[course];
-                        }
-                    });
-                    courseDictionary = filteredDict;
+                availableCourses = Object.keys(courseDictionary); // This is now the user's *own* list
 
-                    // Determine which course to show first
-                    const hashCourse = window.location.hash.replace('#', '');
-                    const lastActiveCourse = localStorage.getItem('last_active_course');
-                    if (hashCourse && availableCourses.includes(hashCourse)) {
-                        currentCourse = hashCourse;
-                    } else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
-                        currentCourse = lastActiveCourse;
-                    } else if (availableCourses.length > 0) {
-                        currentCourse = availableCourses[0];
-                    } else {
-                        currentCourse = null;
-                    }
+                // Determine which course to show first (from *own* list)
+                const hashCourse = window.location.hash.replace('#', '');
+                const lastActiveCourse = localStorage.getItem('last_active_course');
+
+                // Check if hash is a temporarily loaded course
+                const isTempCourse = isGlobalAdmin && hashCourse && allCourseDictionary[hashCourse] && !courseDictionary[hashCourse];
+
+                if (hashCourse && availableCourses.includes(hashCourse)) {
+                    currentCourse = hashCourse;
+                } else if (isTempCourse) {
+                    // This will be handled by handleRouting, set currentCourse to null for now
+                    currentCourse = null;
+                } else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
+                    currentCourse = lastActiveCourse;
+                } else if (availableCourses.length > 0) {
+                    currentCourse = availableCourses[0];
+                } else {
+                    currentCourse = null;
                 }
 
                 // --- PHASE 2: SHOW THE APP ---
@@ -5142,7 +5164,7 @@
                         // 7. Load logs for the *first* course
                         if (currentCourse) {
                             if (isGlobalAdmin) {
-                                // NEW: Call backend for logs AND tombstones
+                                // Call backend for logs AND tombstones
                                 const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
                                 const localData = await loadCourseFromLocalStorage(currentCourse);
                                 const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
@@ -5194,7 +5216,7 @@
         }
 
         /**
-         * REFACTORED: Saves the data for a single, specified course to local storage.
+         * Saves the data for a single, specified course to local storage.
          * @param {string} courseName - The name of the course to save.
          */
         function saveCourseToLocalStorage(courseName) {
@@ -5272,7 +5294,7 @@
 
                     updateAuthUI();
 
-                    // NEW: Check for pending changes on login
+                    // Check for pending changes on login
                     if (isAdmin) {
                         const lastSaveTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`) || '0');
                         const lastSyncTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`) || '0');
@@ -5415,7 +5437,7 @@
         }
 
         /**
- * NEW: Show registration dialog with pre-filled UID
+ * Show registration dialog with pre-filled UID
  * Used when scanning unknown UID
  */
         function showRegisterUIDDialogWithPrefill(prefillUid) {
@@ -5784,7 +5806,7 @@
                         timestampCell.style.fontSize = '0.9em';
                         row.appendChild(timestampCell);
 
-                        // NEW: Sent By
+                        // Sent By
                         const sentByCell = document.createElement('td');
                         sentByCell.textContent = reg.sentBy || 'Unknown';
                         sentByCell.style.fontSize = '0.9em';
@@ -6265,7 +6287,7 @@
                 throw new Error("User not signed in or token expired.");
             }
 
-            let url = WEB_APP_URL;
+            let url = BRAIN_URL;
             const options = {
                 method: method,
                 redirect: 'follow',  // IMPORTANT: Must include this
@@ -6339,7 +6361,7 @@
         }
 
         /**
-         * Get course metadata for the specified course - FIXED version with better logging
+         * Get course metadata for the specified course
          */
         function getCourseMetadata(course) {
             if (!course) {
@@ -6988,6 +7010,23 @@
             // Do nothing if the course is not actually changing.
             if (currentCourse === courseName) return;
 
+            // Check if the course we are *leaving* was a temp course
+            if (currentCourse && isGlobalAdmin && !baseAdminCourses.includes(currentCourse)) {
+                console.log(`Unloading temp course: ${currentCourse}`);
+                delete courseDictionary[currentCourse];
+                availableCourses = availableCourses.filter(c => c !== currentCourse);
+                // We don't need to remove from baseAdminCourses, it was never there
+            }
+            // --- End: Unload logic ---
+
+            // Handle empty courseName (e.g., hash is '#')
+            if (courseName === '') {
+                currentCourse = null;
+                localStorage.removeItem('last_active_course');
+                updateUI(); // Update to show "select a course"
+                return;
+            }
+
             isChangingCourses = true;
             currentCourse = courseName;
             localStorage.setItem('last_active_course', currentCourse);
@@ -7034,7 +7073,7 @@
         }
 
         /**
-         * NEW: Background loads remaining logs for a Course Admin
+         * Background loads remaining logs for a Course Admin
          */
         async function loadRemainingCourseAdminLogs() {
             const remainingCourses = availableCourses.filter(c => c !== currentCourse);
@@ -7053,7 +7092,7 @@
         }
 
         /**
-         * NEW: Background loads remaining logs for a Student
+         * Background loads remaining logs for a Student
          */
         async function loadRemainingStudentLogs() {
             const remainingCourses = availableCourses.filter(c => c !== currentCourse);
@@ -7072,7 +7111,7 @@
         }
 
         /**
-         * NEW: Loads data for a single course from local storage.
+         * Loads data for a single course from local storage.
          * @param {string} courseName - The name of the course to load.
          * @returns {Promise<{logs: Array, tombstones: Set}>}
          */
@@ -7422,7 +7461,7 @@
                         localData = await loadCourseFromLocalStorage(currentCourse); // Load local state first
 
                         if (isGlobalAdmin) {
-                            // NEW: Call backend for logs AND tombstones
+                            // Call backend for logs AND tombstones
                             const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
                             serverLogs = logs;
                             serverTombstones = new Set(tombstones); // Ensure it's a Set
@@ -7496,7 +7535,7 @@
                         let finalTombstones = new Set(); // Keep track even if non-global
 
                         if (isGlobalAdmin) {
-                            // NEW: Call backend for final logs AND tombstones
+                            // Call backend for final logs AND tombstones
                             const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
                             finalLogs = logs;
                             finalTombstones = new Set(tombstones); // Ensure it's a Set
@@ -7642,7 +7681,7 @@
                 log.uid || '',
                 new Date(Number(log.timestamp || Date.now())).toISOString(),
                 log.id,
-                // FIX: Write an explicit string for 100% reliability with Google Sheets.
+                // Write an explicit string for 100% reliability with Google Sheets.
                 log.manual ? 'TRUE' : 'FALSE',
                 Number(log.version || 0),
                 new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
@@ -7700,7 +7739,7 @@
         }
 
         /**
- * NEW: Centralized function to save course data and flag it for auto-sync.
+ * Centralized function to save course data and flag it for auto-sync.
  */
         function saveAndMarkChanges(courseName) {
             saveCourseToLocalStorage(courseName);
@@ -7732,7 +7771,7 @@
         }
 
         /**
-         * REFACTORED: Syncs logs (and tombstones for global admins) via the backend.
+         * Syncs logs (and tombstones for global admins) via the backend.
          */
         async function syncLogsWithSheet() {
             // Basic conditions check
@@ -7822,7 +7861,7 @@
 
 
         /**
-          * REFACTORED: Append a single log via the backend (for immediate sync).
+          * Append a single log via the backend (for immediate sync).
           */
         async function appendLogToSheet(log) {
             if (!currentCourse || !isOnline || !isSignedIn || !isGlobalAdmin) {
@@ -8250,7 +8289,7 @@
         }
 
         /**
-         * REFACTORED: Fetch course information from COURSE_INFO sheet via backend
+         * Fetch course information from COURSE_INFO sheet via backend
          * @returns {Promise} A promise that resolves when course info is fetched
          */
         async function fetchCourseInfo() {
@@ -8862,7 +8901,7 @@
         function confirmDeleteLog(group) {
             if (!isAdmin) return;
 
-            // FIX: This line was missing.
+            // This line was missing.
             const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
 
             if (group.originalLogs.length > 1) {
@@ -8892,7 +8931,7 @@
         }
 
         /**
-         * REFACTORED: Clear logs for the currently selected course.
+         * Clear logs for the currently selected course.
          */
         function clearLogs() {
             if (!isAdmin || !currentCourse || !courseData[currentCourse]) return;
@@ -9128,7 +9167,7 @@
                 let newCount = 0;
                 importedLogs.forEach(log => {
                     if (!existingIds.has(log.id)) {
-                        // FIX: Push to the correct course's log array.
+                        // Push to the correct course's log array.
                         logsForCurrentCourse.push(log);
                         newCount++;
                     }
@@ -9148,7 +9187,7 @@
 
             // Replace option
             document.getElementById('replace-logs-btn').addEventListener('click', () => {
-                // FIX: Replace the logs for the current course only.
+                // Replace the logs for the current course only.
                 courseData[currentCourse].logs = [...importedLogs].sort((a, b) => b.timestamp - a.timestamp);
                 saveCourseToLocalStorage(currentCourse);
 
@@ -9408,7 +9447,7 @@
                         addUserBtn.setAttribute('aria-label', `Register student with UID ${group.uid}`);
                         addUserBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
 
-                        // NEW: Open registration dialog instead of direct database add
+                        // Open registration dialog instead of direct database add
                         addUserBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
                             showRegisterUIDDialogWithPrefill(group.uid);
@@ -9441,7 +9480,7 @@
         }
 
         /**
-         * NEW: Loads data for all non-active courses in the background.
+         * Loads data for all non-active courses in the background.
          */
         async function loadRemainingCoursesInBackground() {
             if (!isAdmin) return;
