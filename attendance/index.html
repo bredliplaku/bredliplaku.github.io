@@ -3096,6 +3096,7 @@
             z-index: 10000;
             background-color: var(--background-color);
             opacity: 1;
+            overflow-y: hidden;
             transition: opacity 0.5s ease-out, visibility 0.5s ease-out;
         }
 
@@ -3104,6 +3105,8 @@
             margin: 0 auto;
             padding: 20px;
             position: relative;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .skeleton-loader.hidden {
@@ -4095,6 +4098,19 @@
             processPendingNotifications();
         }
 
+        function hideSkeletonLoader() {
+            const loadingIndicator = document.getElementById('app-loading');
+            if (loadingIndicator) {
+                loadingIndicator.classList.add('hidden');
+                setTimeout(() => {
+                    if (loadingIndicator.style.display !== 'none') {
+                        loadingIndicator.style.display = 'none';
+                    }
+                }, 500); // Match CSS transition
+            }
+            document.body.classList.remove('is-loading'); // Re-enable scrolling
+        }
+
         function handleRouting() {
             if (isInitializing) {
                 return;
@@ -4462,48 +4478,40 @@
         // Auto-sync function with retry logic
         async function autoSyncData() {
             const courseToSync = currentCourse; // Get course at start of function
-            if (!autoSyncEnabled || !isOnline || !isSignedIn || isSyncing || !courseToSync) return;
+
+            // Only check for auto-sync enabled and a valid course.
+            // The main syncData function will handle all other checks (isSyncing, isOnline, etc.)
+            if (!autoSyncEnabled || !courseToSync) return;
 
             try {
-                isSyncing = true;
-                updateSyncStatus("Syncing...", "syncing");
+                // Call the main, robust sync function.
+                // It will handle setting isSyncing, all status updates, and all logic.
+                await syncData(courseToSync);
 
-                await syncLogsWithSheet(courseToSync);
-
-                // Reset state after successful sync
+                // If syncData succeeds, reset the auto-sync state.
                 pendingChanges = false;
                 lastSyncTime = Date.now();
                 syncAttempts = 0;
-                const now = new Date();
-                const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                updateSyncStatus(`Synced (${time})`, "success");
 
-                // Hide success indication after a few seconds
-                setTimeout(() => {
-                    if (!pendingChanges) {
-                        updateSyncStatus("Online", "online");
-                    }
-                }, 3000);
             } catch (error) {
-                console.error('Sync error!:', error);
+                // This catch block will run if syncData itself throws an error.
+                console.error('Auto-sync attempt failed:', error);
                 syncAttempts++;
 
-                // Update UI to show sync failed
-                updateSyncStatus("Sync failed!", "error");
-
+                // The error status is already set by syncData,
+                // so we just schedule the retry.
                 if (syncAttempts < MAX_SYNC_ATTEMPTS) {
-                    // Schedule retry with exponential backoff
                     const retryDelay = SYNC_RETRY_INTERVAL * Math.pow(2, syncAttempts - 1);
                     updateSyncStatus(`Retry in ${Math.round(retryDelay / 1000)} s...`, "waiting");
 
                     setTimeout(() => {
                         if (isOnline && isSignedIn) {
-                            autoSyncData();
+                            autoSyncData(); // Try again
                         }
                     }, retryDelay);
+                } else {
+                    updateSyncStatus('Auto-sync failed!', 'error');
                 }
-            } finally {
-                isSyncing = false;
             }
         }
 
@@ -6237,7 +6245,11 @@
         function handleTokenResponse(resp) {
             if (resp.error) {
                 console.error('Token response error:', resp.error);
-                showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
+
+                if (resp.error !== 'popup_closed_by_user') {
+                    showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
+                }
+                hideSkeletonLoader();
                 return;
             }
             // Save the token to local storage so it can be restored next time
