@@ -6212,6 +6212,15 @@
          */
         function handleAuthClick(e) {
             if (e) e.preventDefault();
+
+            const loadingIndicator = document.getElementById('app-loading');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'flex';
+                loadingIndicator.classList.remove('hidden');
+                loadingIndicator.style.opacity = '1';
+            }
+            document.body.classList.add('is-loading');
+
             if (tokenClient) {
                 // This will open the Google sign-in pop-up
                 tokenClient.requestAccessToken();
@@ -7242,43 +7251,8 @@
                     }
                 } // End log sync block
 
-                // --- Step 4: FINAL PULL (Mandatory after Push/Merge) ---
-                if (courseName && isSignedIn) {
-                    updateSyncStatus("Verifying...", "syncing");
-                    try {
-                        let finalLogs = [];
-                        let finalTombstones = new Set(); // Keep track even if non-global
 
-                        if (isGlobalAdmin) {
-                            // Call backend for final logs AND tombstones
-                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
-                            finalLogs = logs;
-                            finalTombstones = new Set(tombstones); // Ensure it's a Set
-                        } else if (isAdmin) {
-                            // Non-Global Admin: Fetch final logs via Backend API
-                            finalLogs = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
-                        } else {
-                            // Student: Fetch logs via Backend API (redundant if already done in Step 3a, but safe)
-                            finalLogs = await callWebApp('getStudentLogs', { courseName: courseName }, 'GET');
-                        }
-
-                        // **CRITICAL:** Update local state with the DEFINITIVE server state
-                        courseData[courseName] = {
-                            logs: finalLogs,
-                            tombstones: finalTombstones // Store latest tombstones (mainly for Global Admins)
-                        };
-                        saveCourseToLocalStorage(courseName); // Save the definitive state
-
-
-                    } catch (finalPullError) {
-                        console.error(`Final log pull failed for ${currentCourse}:`, finalPullError);
-                        // Don't throw, allow the sync to finish, but UI might be slightly stale.
-                        showNotification('warning', 'Sync Issue', 'Could not verify final sync state. UI might be slightly outdated.');
-                    }
-                } // End final pull block
-
-
-                // --- Step 5: Update Sync Status (Success/Failure handled in parts above or finally) ---
+                // --- Step 4: Update Sync Status (Success/Failure handled in parts above or finally) ---
                 if (!syncStatus.classList.contains('error')) { // Don't overwrite error status
                     const now = new Date();
                     const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
@@ -9601,16 +9575,6 @@
                 }, 5000);
             }
 
-            // Only Admins attempt immediate append
-            if (isOnline && isSignedIn && isAdmin) {
-                try {
-                    // Global admin direct append (might still fail sometimes, but that's less critical)
-                    await appendLogToSheet(newLog);
-                } catch (err) {
-                    // Log error but don't show notification, rely on standard sync
-                }
-            }
-            // Non-global admins rely on the standard auto/manual sync triggered by saveAndMarkChanges
         }
 
 
