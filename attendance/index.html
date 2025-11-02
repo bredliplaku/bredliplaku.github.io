@@ -3639,17 +3639,22 @@
         }
 
         /**
- * Acquires a lock for sync operation.
- * Returns a release function that must be called when done.
+ * Checks if a sync is currently in progress
  */
+        function isSyncing() {
+            return syncLock !== null;
+        }
+
+        /**
+   * Acquires the sync lock. Returns a function to release it.
+   */
         async function acquireSyncLock() {
-            // If there's already a lock, wait for it
+            // Wait for any existing sync to complete
             if (syncLock) {
                 console.log('Waiting for existing sync to complete...');
                 try {
                     await syncLock;
                 } catch (e) {
-                    // Previous sync failed, but we can continue
                     console.log('Previous sync failed, continuing...');
                 }
             }
@@ -3657,7 +3662,10 @@
             // Create new lock
             let releaseLock;
             syncLock = new Promise((resolve) => {
-                releaseLock = resolve;
+                releaseLock = () => {
+                    syncLock = null; // Clear the lock
+                    resolve();
+                };
             });
 
             return releaseLock;
@@ -4504,7 +4512,7 @@
             const courseToSync = currentCourse; // Get course at start of function
 
             // Only check for auto-sync enabled and a valid course.
-            // The main syncData function will handle all other checks (isSyncing, isOnline, etc.)
+            // It will handle acquiring the sync lock, all status updates, and all logic.
             if (!autoSyncEnabled || !courseToSync) return;
 
             try {
@@ -6370,7 +6378,7 @@
  * Shows a spinner, runs a full sync, then stops the spinner.
  */
         async function handleManualRefresh(buttonId) {
-            if (isSyncing || isChangingCourses) return; // Don't refresh if already syncing OR changing courses
+            if (isSyncing() || isChangingCourses) return;
 
             const courseToRefresh = currentCourse;
             if (isAdmin && !courseToRefresh) {
@@ -6925,7 +6933,7 @@
             // --- Common UI Updates (Run regardless of login state) ---
             const syncBtn = document.getElementById('sync-btn');
             if (syncBtn) {
-                syncBtn.disabled = !isOnline || !isSignedIn || isSyncing;
+                syncBtn.disabled = !isOnline || !isSignedIn || isSyncing();
                 syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
             }
 
@@ -6950,7 +6958,7 @@
          */
         async function handleCourseChange(courseName) {
             // --- SAFETY LOCK ---
-            if (isSyncing) {
+            if (isSyncing()) {
                 showNotification('warning', 'Sync in Progress', 'Please wait for the current sync to finish.');
                 // Force the hash back to the course that is currently syncing
                 if (window.location.hash !== `#${currentCourse}`) {
@@ -7172,7 +7180,7 @@
             if (isOnline) {
                 syncText.textContent = 'Online';
                 syncStatus.className = 'sync-status online';
-                syncBtn.disabled = !isSignedIn || isSyncing;
+                syncBtn.disabled = !isSignedIn || isSyncing();
             } else {
                 syncText.textContent = 'Offline';
                 syncStatus.className = 'sync-status offline';
