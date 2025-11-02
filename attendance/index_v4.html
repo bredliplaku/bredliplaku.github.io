@@ -2203,9 +2203,8 @@
                 opacity 0.5s ease-in-out,
                 margin-top 0.5s ease-in-out,
                 padding 0.5s ease-in-out;
-            max-height: 80vh;
+            max-height: 1000px;
             opacity: 1;
-            overflow-y: auto;
         }
 
         #pending-registrations-view.is-hidden {
@@ -8069,20 +8068,17 @@
      * ONLY callable by admins.
      */
         async function syncDatabaseToSheet() {
-            // Add checks for admin status, online status
-            if (!isGlobalAdmin || !isOnline) { // Only global admins can sync the whole DB
-                console.warn("Skipping DB sync: not a global admin or offline.");
+            // Add checks for admin status, online status, and current course context
+            if (!isAdmin || !isOnline || !currentCourse) {
                 return;
             }
 
             try {
                 // Call the Web App using POST, parameters go in payload
-                // databaseMap is the global variable holding the frontend state
                 const resultData = await callWebApp('syncDatabase_Admin', { databaseData: databaseMap }, 'POST');
-
+                // No need for resp.result..., callWebApp returns the data directly
                 if (resultData && resultData.result === 'success') {
                     console.log(`Successfully synced ${resultData.count} database entries via script.`);
-                    invalidateDatabaseCache(); // Invalidate cache after successful push
                 } else {
                     throw new Error(resultData ? resultData.message : 'Unknown error during database sync.');
                 }
@@ -8090,7 +8086,7 @@
             } catch (error) {
                 console.error('Error syncing database via script:', error);
                 showNotification('error', 'Database Sync Error', `Failed to sync database: ${error.message}`);
-                // Rethrow the error to be caught by the caller (e.g., completeAction)
+                // Rethrow the error if needed by calling functions
                 throw error;
             }
         }
@@ -8201,8 +8197,10 @@
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
+            // --- START: NEW LOGIC ---
             // State tracker for the NFC scan session
             let activeNfcSession = { controller: null, button: null };
+            // --- END: NEW LOGIC ---
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Add New Student</h3>
@@ -8228,8 +8226,10 @@
             document.body.appendChild(dialogBackdrop);
 
             const close = () => {
+                // --- START: NEW LOGIC ---
                 // Ensure any active scan is stopped when the dialog closes
                 if (activeNfcSession.controller) activeNfcSession.controller.abort();
+                // --- END: NEW LOGIC ---
                 if (document.body.contains(dialogBackdrop)) {
                     document.body.removeChild(dialogBackdrop);
                 }
@@ -8241,6 +8241,7 @@
             const scanBtn = dialog.querySelector('.scan-uid-btn');
 
             if (scanBtn) {
+                // --- START: NEW ADVANCED NFC LOGIC ---
                 scanBtn.addEventListener('click', () => {
                     // Check if the clicked button is already the active one
                     if (activeNfcSession.button === scanBtn) {
@@ -8262,17 +8263,17 @@
                         activeNfcSession = { controller, button: scanBtn };
                     }
                 });
+                // --- END: NEW ADVANCED NFC LOGIC ---
             }
 
             document.getElementById('cancel-add-btn').addEventListener('click', close);
 
-            // --- REPLACED Event Listener ---
             document.getElementById('confirm-add-btn').addEventListener('click', async () => {
                 const nameInput = document.getElementById('add-name');
                 const emailInput = document.getElementById('add-email');
                 const uidInput = document.getElementById('add-uid');
 
-                // --- Validation ---
+                // --- Validation (no changes) ---
                 clearInputError(nameInput);
                 clearInputError(emailInput);
                 clearInputError(uidInput);
@@ -8286,68 +8287,35 @@
                 if (!isValid) return;
                 // --- End Validation ---
 
-                const submissionData = {
-                    name: name,
-                    email: email,
-                    uid: uid,
-                    sentBy: {
-                        name: currentUser?.name || '',
-                        email: currentUser?.email || ''
+                // This function will be called to finalize any change
+                const completeAction = async () => {
+                    if (isOnline) {
+                        await syncDatabaseToSheet(); // Push changes
+                        invalidateDatabaseCache();  // Dump local cache
+                        await fetchDatabaseFromSheet(); // Pull fresh data
                     }
+                    window.buildUIDToPrimaryUidMap(); // Rebuild map
+                    updateUI(); // Refresh UI
+                    close(); // Close the dialog
                 };
 
-                // Check for local duplicates first
-                const match = findDuplicateInDatabase(submissionData);
+                const match = findDuplicateInDatabase({ name, email, uid });
                 if (match) {
-                    // Duplicate found. Define the optimistic-UI callback for the warning dialog.
-                    const completeAction = () => {
-                        // This callback will be triggered by the warning dialog *after* it updates
-                        // the local databaseMap.
-                        window.buildUIDToPrimaryUidMap();
-                        updateUI(); // Refresh UI immediately
-
-                        // Now, sync the *entire* database in the background.
-                        if (isOnline) {
-                            // This now calls the NEW fast function
-                            syncDatabaseToSheet().catch(err => {
-                                console.error("Background sync failed:", err);
-                                showNotification('error', 'Sync Failed', 'Changes saved locally but failed to sync.');
-                            });
-                        }
-                    };
-
-                    showDuplicateWarningForNewEntry(submissionData, [match.duplicate], completeAction);
-                    close(); // Close the current 'Add' dialog
+                    // DUPLICATE FOUND: Show the warning dialog
+                    // We pass 'completeAction' as the callback
+                    showDuplicateWarningForNewEntry({ name, email, uid }, [match.duplicate], completeAction);
+                    close(); // Close the 'Add New Student' dialog
                     return;
                 }
 
-                // NO DUPLICATE: Use the fast backend call `addEntryToDatabase_Admin`
-                const confirmBtn = document.getElementById('confirm-add-btn');
-                confirmBtn.disabled = true;
-                confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Adding...';
+                // NO DUPLICATE: Add to local map first
+                const existingKeys = Object.keys(databaseMap).map(Number);
+                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
+                databaseMap[newDbKey] = { name, email, uids: [uid] };
+                showNotification('success', 'Entry Added', `Added ${name} to the database.`);
 
-                try {
-                    const result = await callWebApp('addEntryToDatabase_Admin', submissionData, 'POST');
-
-                    if (result && result.result === 'success') {
-                        showNotification('success', 'Added to Database', `${name} has been added.`);
-
-                        // The entry was added on the backend. Invalidate our local cache
-                        // and re-fetch the *entire* database to get the new entry with its proper key.
-                        invalidateDatabaseCache();
-                        await fetchDatabaseFromSheet(); // This is the fast backend call 'getDatabase'
-
-                        window.buildUIDToPrimaryUidMap();
-                        updateUI(); // Re-render everything with the new data
-                        close(); //
-                    } else {
-                        throw new Error(result?.message || 'Failed to add entry');
-                    }
-                } catch (error) {
-                    showNotification('error', 'Submission Failed', error.message);
-                    confirmBtn.disabled = false;
-                    confirmBtn.innerHTML = 'Add Student';
-                }
+                // Finalize by pushing/pulling
+                await completeAction();
             });
         }
 
