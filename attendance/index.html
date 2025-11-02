@@ -3538,10 +3538,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxlQipgsTxNUUtYx9u1Ya0eu8aWzdlKfmkQCB5BueWATF4657kaZilAvtQ76-rrrHtwzQ/exec';
-
-        // Discovery docs and scopes for Google API
-        // const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwF1sYeRXNJaFQyamye8h-ZiN5Tqja6llExsGSYaayDUGhM1sdBgIW0rE_m9MOPmljZ8A/exec';
 
         // App state
         let courseData = {};
@@ -3631,7 +3628,7 @@
         const userContainer = document.getElementById('user-container');
         const userName = document.getElementById('user-name');
         const userAvatar = document.getElementById('user-avatar');
-        const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+        const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
         function checkLoadingCompletion() {
             if (loadingTasks.size === 0) {
@@ -3640,29 +3637,6 @@
             }
         }
 
-        /**
- * Check admin status from server
- */
-        async function checkAdminStatus() {
-            try {
-                const result = await callWebApp('checkAdminStatus', {}, 'GET');
-
-                isAdmin = result.isAdmin;
-                isGlobalAdmin = result.isGlobalAdmin;
-                adminCourses = result.courses;
-
-                console.log('Admin status:', {
-                    isAdmin,
-                    isGlobalAdmin,
-                    courses: adminCourses
-                });
-
-                return result;
-            } catch (error) {
-                console.error('Error checking admin status:', error);
-                return { isAdmin: false, courses: [] };
-            }
-        }
 
         /**
          * Check if user is admin for specific course
@@ -4815,16 +4789,10 @@
                     window.location.hash = originalHash || '';
                 }
 
+                // 4. UST SAVE THE TOKEN
+                // DO NOT call gapi.client.setToken() here because gapi isn't loaded yet.
                 if (params.access_token) {
-                    const processToken = () => {
-                        if (typeof gapi !== 'undefined' && gapi.client) {
-                            gapi.client.setToken({ access_token: params.access_token });
-                            localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-                        } else {
-                            setTimeout(processToken, 100);
-                        }
-                    };
-                    processToken();
+                    localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
                 }
             }
         }
@@ -5023,15 +4991,11 @@
                 await gisLoaded();
 
                 gapi.client.init({
-                    //   discoveryDocs: DISCOVERY_DOCS,
+                    // discoveryDocs are no longer needed
                 }).then(function () {
 
-                    tokenClient = google.accounts.oauth2.initTokenClient({
-                        client_id: CLIENT_ID,
-                        scope: SCOPES,
-                        callback: handleTokenResponse,
-                    });
-
+                    // tokenClient is not needed because we use a redirect flow
+                    // The 'callback: handleTokenResponse' is also no longer needed
 
                     // Try to restore session
                     attemptTokenRestore().then(restored => {
@@ -5255,60 +5219,6 @@
                     }
                 }
             });
-        }
-
-
-        /**
-         * Handle token response from Google OAuth.
-         * @param {Object} resp - The token response object.
-         */
-        function handleTokenResponse(resp) {
-
-            if (resp.error) {
-                console.error('Token response error:', resp.error);
-                showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
-                return;
-            }
-
-            if (!resp.access_token) {
-                console.error('No access token in response');
-                showNotification('error', 'Auth Error', 'Did not receive access token');
-                return;
-            }
-
-            try {
-                localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
-                isSignedIn = true;
-
-                fetchUserInfo().then(async () => {  // ← Added "async"
-                    const adminStatus = await checkAdminStatus();
-                    isAdmin = adminStatus.isAdmin;
-
-                    updateAuthUI();
-
-                    // Check for pending changes on login
-                    if (isAdmin) {
-                        const lastSaveTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`) || '0');
-                        const lastSyncTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`) || '0');
-
-                        if (lastSaveTimestamp > lastSyncTimestamp) {
-                            pendingChanges = true;
-                        }
-
-                        if (pendingChanges) {
-                            console.log("Admin signed in with pending offline changes. Triggering immediate sync.");
-                            showNotification('info', 'Syncing...', 'Syncing offline changes now.');
-                            setTimeout(syncData, 1000);
-                        }
-                    } else {
-                        // For student users
-                        loadAllCourseLogsForStudent();
-                    }
-                });
-            } catch (error) {
-                console.error('Error processing token:', error);
-                showNotification('error', 'Auth Error', 'Error during sign-in process');
-            }
         }
 
 
@@ -7182,159 +7092,6 @@
             }
         }
 
-        // Show a warning in the UI about authentication issues
-        function updateAuthWarningUI(show) {
-            const userContainer = document.getElementById('user-container');
-
-            if (show && userContainer) {
-                // Add warning indicator
-                if (!document.getElementById('auth-warning')) {
-                    const warning = document.createElement('div');
-                    warning.id = 'auth-warning';
-                    warning.style.backgroundColor = '#fb8c00';
-                    warning.style.color = 'white';
-                    warning.style.padding = '2px 8px';
-                    warning.style.borderRadius = '4px';
-                    warning.style.fontSize = '0.7em';
-                    warning.style.marginLeft = '5px';
-                    warning.style.animation = 'pulse 2s infinite';
-                    warning.textContent = 'Session Expiring';
-                    warning.title = 'Your login session may be expiring soon';
-
-                    // Add animation
-                    const style = document.createElement('style');
-                    style.textContent = `
-                @keyframes pulse {
-                    0% { opacity: 0.6; }
-                    50% { opacity: 1; }
-                    100% { opacity: 0.6; }
-                }
-            `;
-                    document.head.appendChild(style);
-
-                    userContainer.appendChild(warning);
-                }
-            } else {
-                // Remove warning if present
-                const warning = document.getElementById('auth-warning');
-                if (warning) warning.remove();
-            }
-        }
-
-        /**
-         * Populate course dropdown with available courses.
-         */
-        function populateCourseDropdown() {
-            const courseButtonsContainer = document.getElementById('course-buttons-container');
-            if (!courseButtonsContainer) return;
-
-            const activeTabId = document.querySelector('.tab.active')?.dataset.tab;
-
-            if (!isSignedIn) {
-                courseButtonsContainer.innerHTML = ''; // Clear any old buttons
-                const button = document.createElement('div');
-                button.className = 'course-button active'; // Make the default button active
-                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; Default`;
-                courseButtonsContainer.appendChild(button);
-                courseButtonsContainer.style.display = 'flex';
-                return; // Exit the function here for signed-out users
-            }
-
-            // This block handles the logic for signed-in users.
-            if (activeTabId === 'database-tab') {
-                courseButtonsContainer.style.display = 'none'; // Keep it hidden on the database tab
-            } else {
-                courseButtonsContainer.style.display = 'flex'; // Show it on other tabs
-            }
-            courseButtonsContainer.innerHTML = '';
-            let coursesToDisplay = availableCourses;
-
-            if (!isAdmin && currentUser) {
-                const studentNameNormalised = normalizeName(currentUser.name);
-                const studentEmail = currentUser.email ? currentUser.email.toLowerCase() : '';
-
-                coursesToDisplay = availableCourses.filter(course => {
-                    const logsForCourse = studentLogCache[course] || [];
-
-                    // If no logs cached for this course, include it (student might have logs but cache failed)
-                    if (logsForCourse.length === 0) {
-                        return true; // Show the course, let the backend filter it
-                    }
-
-                    // Check if at least one log in this course belongs to the student
-                    return logsForCourse.some(log => {
-                        // Try multiple matching strategies for robustness
-
-                        // Strategy 1: Match by UID in database
-                        const logOwnerName = databaseMap[log.uid]?.name || '';
-                        if (logOwnerName && normalizeName(logOwnerName) === studentNameNormalised) {
-                            return true;
-                        }
-
-                        // Strategy 2: Match by email if available in log
-                        if (log.email && studentEmail && log.email.toLowerCase() === studentEmail) {
-                            return true;
-                        }
-
-                        // Strategy 3: Match by name if stored directly in log
-                        if (log.name && normalizeName(log.name) === studentNameNormalised) {
-                            return true;
-                        }
-
-                        return false;
-                    });
-                });
-            }
-
-            coursesToDisplay.forEach(course => {
-                const button = document.createElement('div');
-                button.className = 'course-button' + (currentCourse === course ? ' active' : '');
-                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace(/_/g, ' ')}`;
-                button.addEventListener('click', () => selectCourseButton(course));
-                courseButtonsContainer.appendChild(button);
-            });
-
-            if (!currentCourse && coursesToDisplay.length > 0) {
-                selectCourseButton(coursesToDisplay[0]);
-            }
-        }
-
-        async function loadAllCourseLogsForCourseAdmin() {
-            if (!isAdmin || isGlobalAdmin || !isOnline || !isSignedIn) {
-                return;
-            }
-
-            // Clear any old student cache
-            studentLogCache = {};
-
-            const fetchPromises = availableCourses.map(async (course) => {
-                try {
-                    // Call the NEW Web App endpoint
-                    const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: course }, 'GET');
-
-                    if (serverLogs && serverLogs.length > 0) {
-                        // We can use studentLogCache for this, its just a cache
-                        studentLogCache[course] = serverLogs;
-                    }
-                } catch (err) {
-                    console.error(`Failed to call Apps Script for ${course}:`, err);
-                }
-            });
-
-            await Promise.all(fetchPromises);
-
-            // Populate courseData for the course admin
-            availableCourses.forEach(course => {
-                if (studentLogCache[course]) {
-                    courseData[course] = {
-                        logs: studentLogCache[course],
-                        tombstones: new Set() // Course admins don't use GAPI, so no tombstones
-                    };
-                }
-            });
-
-            updateUI();
-        }
 
         /**
      * Proactively fetches and caches logs for all available courses FOR A STUDENT.
@@ -7620,18 +7377,6 @@
 
 
         /**
-         * Format a sheet name for the Google Sheets API
-         * Encloses in single quotes if the name has spaces or special characters
-         */
-        function formatSheetName(sheetName) {
-            return sheetName.includes(' ') ||
-                sheetName.includes('!') ||
-                sheetName.includes('\'') ?
-                `'${sheetName}'` : sheetName;
-        }
-
-
-        /**
          * Get the EIS ID for the current course
          * @returns {string|null} The EIS ID for the current course or null if not found
          */
@@ -7653,25 +7398,6 @@
             log.updatedAt = Date.now();
             if (userEmail) log.updatedBy = userEmail;
             return log;
-        }
-
-
-        /**
-                 * Converts a log object into an array for writing to the Google Sheet.
-                 * @param {object} log - The log object.
-                 * @returns {Array} The log data as a row array.
-                 */
-        function toSheetRow(log) {
-            return [
-                log.uid || '',
-                new Date(Number(log.timestamp || Date.now())).toISOString(),
-                log.id,
-                // Write an explicit string for 100% reliability with Google Sheets.
-                log.manual ? 'TRUE' : 'FALSE',
-                Number(log.version || 0),
-                new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
-                String(log.updatedBy || '')
-            ];
         }
 
 
@@ -7740,19 +7466,6 @@
             } else {
                 updateSyncStatus(autoSyncEnabled ? 'Syncing...' : 'Syncing...', 'waiting');
             }
-        }
-
-        // Helper function to convert a timestamp to a local ISO-like string (without timezone info)
-        function convertTimestampToLocalISOString(timestamp) {
-            const date = new Date(timestamp);
-            const pad = (num) => String(num).padStart(2, '0');
-            // Build a string like "YYYY-MM-DDTHH:MM:SS"
-            return date.getFullYear() + '-' +
-                pad(date.getMonth() + 1) + '-' +
-                pad(date.getDate()) + 'T' +
-                pad(date.getHours()) + ':' +
-                pad(date.getMinutes()) + ':' +
-                pad(date.getSeconds());
         }
 
         /**
@@ -8349,67 +8062,6 @@
             };
 
             document.getElementById('dialog-ok-btn').addEventListener('click', closeDialog);
-            dialogBackdrop.addEventListener('click', (e) => {
-                if (e.target === dialogBackdrop) closeDialog();
-            });
-        }
-
-        /**
-       * Displays a custom, non-blocking prompt dialog.
-       * @param {object} options - The options for the dialog.
-       */
-        function showPromptDialog({ title, message, initialValue = '', confirmText = 'Confirm', cancelText = 'Cancel', onConfirm }) {
-            document.body.style.overflow = 'hidden';
-            const existingDialog = document.querySelector('.dialog-backdrop');
-            if (existingDialog) existingDialog.remove();
-
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            dialog.setAttribute('role', 'dialog');
-            dialog.setAttribute('aria-modal', 'true');
-            dialog.innerHTML = `
-        <h3 class="dialog-title">${title}</h3>
-        <div class="dialog-content"><p>${message}</p>
-        <div class="form-group">
-            <input type="text" id="dialog-prompt-input" class="form-control" value="${initialValue}">
-        </div>
-        </div><div class="dialog-actions">
-            <button id="dialog-cancel-btn" class="btn-red">${cancelText}</button>
-            <button id="dialog-confirm-btn" class="btn-green">${confirmText}</button>
-        </div>
-    `;
-
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-
-            const confirmBtn = document.getElementById('dialog-confirm-btn');
-            const cancelBtn = document.getElementById('dialog-cancel-btn');
-            const input = document.getElementById('dialog-prompt-input');
-            input.focus();
-            input.select();
-
-            const closeDialog = () => {
-                // This line assumes 'dialogBackdrop' is available in the function's scope.
-                if (document.body.contains(dialogBackdrop)) {
-                    document.body.removeChild(dialogBackdrop);
-                }
-                document.body.style.overflow = ''; // Restore background scrolling
-            };
-
-            const confirmAction = () => {
-                onConfirm(input.value);
-                closeDialog();
-            };
-
-            confirmBtn.addEventListener('click', confirmAction);
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') confirmAction();
-            });
-
-            cancelBtn.addEventListener('click', closeDialog);
             dialogBackdrop.addEventListener('click', (e) => {
                 if (e.target === dialogBackdrop) closeDialog();
             });
@@ -10255,7 +9907,6 @@
                             showNotification('error', 'API Error',
                                 'Google API libraries not loaded. Please refresh the page.');
                             availableCourses = [];
-                            populateCourseDropdown();
                             updateAuthUI();
                         }
                     }, 2000);
