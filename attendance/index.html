@@ -3541,14 +3541,10 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbymIRyqLp6fE-V16FMC5zMUYL94-w_J2Av4-X1A2O_GGGsEso41Vd6Cq3qeXhlCWAmdlg/exec';
-
-        // Admin emails - backend manages admin status via COURSE_INFO sheet
-        // This is just a fallback that won't actually be used
-        const ADMIN_EMAILS = [];
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzOuBc3flyEUiL2vZaLtvj73QbLwcTC3E6LU12eprlTW4V1nIBvsxwlxCmwJnzBZbz8/exec';
 
         // Discovery docs and scopes for Google API
-        const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
+        // const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
 
         // App state
         let courseData = {};
@@ -4957,14 +4953,18 @@
                     return false;
                 }
 
+                // Set the token for gapi, which callWebApp will use
                 gapi.client.setToken(tokenObj);
 
-                await gapi.client.request({
-                    path: 'https://www.googleapis.com/oauth2/v3/userinfo'
-                });
+                // Ping the backend to validate the token
+                // callWebApp automatically includes the token
+                await callWebApp('ping', {}, 'GET');
 
+                // If the ping succeeds, the token is valid
                 return true;
             } catch (error) {
+                // If ping fails (e.g., auth error), the token is bad
+                console.warn('Token restore failed:', error.message);
                 localStorage.removeItem('gapi_token');
                 return false;
             }
@@ -5002,7 +5002,7 @@
                 await gisLoaded();
 
                 gapi.client.init({
-                    discoveryDocs: DISCOVERY_DOCS,
+                    //   discoveryDocs: DISCOVERY_DOCS,
                 }).then(function () {
 
                     tokenClient = google.accounts.oauth2.initTokenClient({
@@ -5046,7 +5046,7 @@
         }
 
         /**
-         * REPLACED: Loads data in phases for a fast boot
+         * REFACTORED: Loads data in phases for a fast boot
          */
         async function onSuccessfulAuth(isRestore = false) {
             isSignedIn = true;
@@ -5054,7 +5054,7 @@
             try {
                 // --- PHASE 1: CRITICAL BOOT (Get minimum data to show UI) ---
 
-                // 1. Get user info
+                // 1. Get user info (This is an OIDC call, not a Sheets API call - this is fine!)
                 const userInfoResponse = await gapi.client.request({
                     path: 'https://www.googleapis.com/oauth2/v3/userinfo'
                 });
@@ -5085,12 +5085,12 @@
                     let allCourses = Object.keys(courseDictionary);
 
                     if (isAdmin) {
-                        if (adminCourses.includes('*')) {
+                        if (isGlobalAdmin) { // Use isGlobalAdmin
                             availableCourses = allCourses;
-                        } else {
+                        } else { // Course admin
                             availableCourses = allCourses.filter(course => adminCourses.includes(course));
                         }
-                    } else {
+                    } else { // Student
                         availableCourses = allCourses;
                     }
 
@@ -5117,46 +5117,37 @@
                 }
 
                 // --- PHASE 2: SHOW THE APP ---
-                // We have everything we need to draw the main screen
                 isInitializing = false;
                 showMainContent();
                 updateAuthUI();
-                populateCourseButtons(); // This will draw the course buttons
-                updatePageTitle(); // Set the page title
-
-                updateUI(); //
-
+                populateCourseButtons();
+                updatePageTitle();
+                updateUI();
                 // The app is now visible and interactive!
-                // The log list is empty, which is fine.
 
                 // --- PHASE 3: BACKGROUND DATA LOADING ---
                 (async () => {
                     try {
                         // 5. Load the database (no 'await')
-                        // We assign this to a global promise so other parts of the app
-                        // can wait for it if they need it (like the Database tab)
                         databaseLoadPromise = fetchDatabaseFromSheet().then(() => {
                             window.buildUIDToPrimaryUidMap();
                             updateDatabaseStatus();
                         });
 
-                        // Only fetch course info for global admins
-                        if (isGlobalAdmin) {
-                            fetchCourseInfo().catch(err =>
-                                console.error('Background course info load failed:', err)
-                            );
-                        }
+                        // 6. Load Course Info (metadata for EIS export, etc.)
+                        fetchCourseInfo().catch(err =>
+                            console.error('Background course info load failed:', err)
+                        );
 
-                        // 6. Load logs for the *first* course
+                        // 7. Load logs for the *first* course
                         if (currentCourse) {
                             if (isGlobalAdmin) {
-                                const [serverLogs, serverTombs, localData] = await Promise.all([
-                                    fetchLogsFromSheet(currentCourse),
-                                    fetchTombstonesForCourse(currentCourse),
-                                    loadCourseFromLocalStorage(currentCourse)
-                                ]);
+                                // NEW: Call backend for logs AND tombstones
+                                const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
+                                const localData = await loadCourseFromLocalStorage(currentCourse);
                                 const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
                                 const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
                                 courseData[currentCourse] = { logs: mergedLogs, tombstones: allTombstones };
                                 saveCourseToLocalStorage(currentCourse);
 
@@ -5164,27 +5155,25 @@
                                 setTimeout(loadRemainingCoursesInBackground, 1000);
 
                             } else if (isAdmin) {
+                                // This logic stays the same
                                 const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
                                 studentLogCache[currentCourse] = serverLogs;
                                 courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
-                                // Load remaining in background
                                 setTimeout(loadRemainingCourseAdminLogs, 1000);
 
                             } else {
+                                // This logic stays the same
                                 const serverLogs = await callWebApp('getStudentLogs', { courseName: currentCourse }, 'GET');
                                 studentLogCache[currentCourse] = serverLogs;
                                 courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
-                                // Load remaining in background
                                 setTimeout(loadRemainingStudentLogs, 1000);
                             }
                         }
 
-                        // 7. Refresh the UI *again* with the new log data
+                        // 8. Refresh the UI *again* with the new log data
                         updateUI(); // This will populate the log list for the first course
 
                         if (isAdmin) {
-                            // This runs in the background. When you click the
-                            // 'Database' tab, the data will already be there.
                             fetchAndDisplayRegistrations();
                         }
 
@@ -5198,7 +5187,6 @@
                 // Critical boot error
                 console.error('Error during auth:', bootError);
                 showNotification('error', 'Authentication Error', 'Failed to complete sign-in. Please try again.');
-                // Still need to show the main content, even on failure, to hide the loader
                 isInitializing = false;
                 showMainContent();
                 updateAuthUI();
@@ -5309,61 +5297,6 @@
             }
         }
 
-        /**
-         * Fetch user info (profile) from Google.
-         * @returns {Promise} A promise that resolves when user info is fetched.
-         */
-        async function fetchUserInfo() {
-            try {
-                const tokenObj = gapi.client.getToken();
-                if (!tokenObj || !tokenObj.access_token) {
-                    console.error('No valid token available');
-                    throw new Error('No valid token available');
-                }
-
-
-                const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                    headers: { 'Authorization': `Bearer ${tokenObj.access_token}` }
-                });
-
-                if (!response.ok) {
-                    console.error('Failed to fetch user info, status:', response.status);
-                    throw new Error(`Failed to fetch user info: ${response.status} ${response.statusText}`);
-                }
-
-                const userInfo = await response.json();
-
-                const initials = (userInfo.name || userInfo.email)
-                    .split(' ')
-                    .map(n => n[0])
-                    .join('')
-                    .substring(0, 2)
-                    .toUpperCase();
-
-                const randomColor = Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
-                const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=${randomColor}&color=ffffff&size=64&bold=true`;
-
-                currentUser = {
-                    id: userInfo.sub,
-                    name: userInfo.name || userInfo.email,
-                    email: userInfo.email,
-                    picture: userInfo.picture || avatarUrl
-                };
-
-                // Update user info in UI
-                userName.textContent = currentUser.name;
-                userAvatar.src = currentUser.picture;
-
-                // Check if user is admin
-                isAdmin = ADMIN_EMAILS.includes(currentUser.email);
-
-                return currentUser;
-            } catch (error) {
-                console.error('Error fetching user info:', error);
-                showNotification('error', 'User Info Error', error.message || 'Failed to get user information');
-                throw error;
-            }
-        }
 
         function showRegisterUIDDialog() {
             if (!isSignedIn || isAdmin || !currentUser) return;
@@ -7071,13 +7004,11 @@
                 try {
                     // Now, fetch the data for this specific course
                     if (isGlobalAdmin) {
-                        const [serverLogs, serverTombs, localData] = await Promise.all([
-                            fetchLogsFromSheet(courseName),
-                            fetchTombstonesForCourse(courseName),
-                            loadCourseFromLocalStorage(courseName)
-                        ]);
+                        const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
+                        const localData = await loadCourseFromLocalStorage(courseName);
                         const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
                         const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+
                         courseData[courseName] = { logs: mergedLogs, tombstones: allTombstones };
                         saveCourseToLocalStorage(courseName);
 
@@ -7175,20 +7106,14 @@
                 // Only check if we've been idle for a while
                 if (Date.now() - lastAuthCheck > AUTH_CHECK_INTERVAL) {
                     try {
-                        // Simple API call to check token validity
-                        await gapi.client.sheets.spreadsheets.get({
-                            spreadsheetId: LOGS_SPREADSHEET_ID,
-                            fields: 'spreadsheetId'
-                        });
+                        // Simple backend ping to check token validity
+                        await callWebApp('ping', {}, 'GET');
 
                         // If successful, update last check time
                         lastAuthCheck = Date.now();
                     } catch (error) {
                         // Check if this is an auth error
-                        if (error.status === 401 ||
-                            (error.result && error.result.error &&
-                                (error.result.error.status === 'UNAUTHENTICATED' ||
-                                    error.result.error.status === 'PERMISSION_DENIED'))) {
+                        if (error.message.includes('Authorization failed') || error.message.includes('Token error')) {
 
                             console.warn('Authentication token expired, attempting silent refresh');
                             attemptSilentAuth();
@@ -7497,11 +7422,10 @@
                         localData = await loadCourseFromLocalStorage(currentCourse); // Load local state first
 
                         if (isGlobalAdmin) {
-                            // Global Admin: Fetch logs and server tombstones via GAPI
-                            [serverLogs, serverTombstones] = await Promise.all([
-                                fetchLogsFromSheet(currentCourse),
-                                fetchTombstonesForCourse(currentCourse)
-                            ]);
+                            // NEW: Call backend for logs AND tombstones
+                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
+                            serverLogs = logs;
+                            serverTombstones = new Set(tombstones); // Ensure it's a Set
                         } else if (isAdmin) {
                             // Non-Global Admin: Fetch logs via Backend API
                             serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
@@ -7572,10 +7496,10 @@
                         let finalTombstones = new Set(); // Keep track even if non-global
 
                         if (isGlobalAdmin) {
-                            [finalLogs, finalTombstones] = await Promise.all([
-                                fetchLogsFromSheet(currentCourse),
-                                fetchTombstonesForCourse(currentCourse) // Re-fetch tombstones too
-                            ]);
+                            // NEW: Call backend for final logs AND tombstones
+                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
+                            finalLogs = logs;
+                            finalTombstones = new Set(tombstones); // Ensure it's a Set
                         } else if (isAdmin) {
                             // Non-Global Admin: Fetch final logs via Backend API
                             finalLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
@@ -7684,105 +7608,6 @@
 
 
         /**
-     * Fetch available courses (sheet names) from logs spreadsheet.
-     */
-        async function fetchAvailableCourses() {
-            if (!isOnline) {
-                availableCourses = [];
-                loadingTasks.delete('courses');
-                checkLoadingCompletion();
-                return;
-            }
-
-            // Only global admins use direct GAPI access
-            // Everyone else already has courses from onSuccessfulAuth
-            if (isGlobalAdmin) {
-                // --- GLOBAL ADMIN PATH: Direct GAPI access ---
-                try {
-                    const response = await gapi.client.sheets.spreadsheets.get({
-                        spreadsheetId: LOGS_SPREADSHEET_ID
-                    });
-                    const sheets = response.result.sheets || [];
-                    const allSheetNames = sheets.map(sheet => sheet.properties.title);
-
-                    if (allSheetNames.includes('COURSE_INFO')) {
-                        const codeResponse = await gapi.client.sheets.spreadsheets.values.get({
-                            spreadsheetId: LOGS_SPREADSHEET_ID,
-                            range: "'COURSE_INFO'!A2:H"
-                        });
-                        const rows = codeResponse.result.values || [];
-                        if (rows.length > 0) {
-                            availableCourses = [];
-                            courseIDMap = {};
-                            sheetNameMap = {};
-                            rows.forEach(row => {
-                                if (row.length >= 1 && row[0]) {
-                                    const courseDisplayName = row[0].trim();
-                                    const courseID = (row.length >= 8 && row[7]) ? row[7].trim() : "";
-                                    availableCourses.push(courseDisplayName);
-                                    if (courseID) courseIDMap[courseDisplayName] = courseID;
-                                    sheetNameMap[courseDisplayName] = courseDisplayName;
-                                }
-                            });
-                        } else {
-                            availableCourses = allSheetNames.filter(name => name !== 'COURSE_INFO');
-                        }
-                    } else {
-                        availableCourses = allSheetNames;
-                    }
-                    if (availableCourses.length === 0) {
-                        console.warn('No courses found in spreadsheet.');
-                    }
-                } catch (error) {
-                    console.error('Error fetching courses:', error);
-                    if (!isInitializing) {
-                        showNotification('warning', 'Courses Warning', 'Could not load course list from server.');
-                    }
-                } finally {
-                    const hashCourse = window.location.hash.replace('#', '');
-                    const lastActiveCourse = localStorage.getItem('last_active_course');
-                    let courseToLoad = '';
-                    if (hashCourse && availableCourses.includes(hashCourse)) {
-                        courseToLoad = hashCourse;
-                    } else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
-                        courseToLoad = lastActiveCourse;
-                    } else if (availableCourses.length > 0) {
-                        courseToLoad = availableCourses[0];
-                    }
-                    currentCourse = courseToLoad;
-                    if (history.replaceState) {
-                        history.replaceState(null, null, '#' + courseToLoad);
-                    } else {
-                        window.location.hash = courseToLoad;
-                    }
-                    populateCourseDropdown();
-                    if (courseToLoad) {
-                        handleCourseChange(courseToLoad);
-                    }
-                    loadingTasks.delete('courses');
-                    checkLoadingCompletion();
-                }
-            } else {
-                // Non-global users already have courses loaded from onSuccessfulAuth
-                // Just populate the UI
-                const courseToLoad = availableCourses[0] || '';
-                currentCourse = courseToLoad;
-                if (history.replaceState) {
-                    history.replaceState(null, null, '#' + courseToLoad);
-                } else {
-                    window.location.hash = courseToLoad;
-                }
-                populateCourseDropdown();
-                if (courseToLoad) {
-                    handleCourseChange(courseToLoad);
-                }
-                loadingTasks.delete('courses');
-                checkLoadingCompletion();
-            }
-        }
-
-
-        /**
          * Get the EIS ID for the current course
          * @returns {string|null} The EIS ID for the current course or null if not found
          */
@@ -7790,35 +7615,6 @@
             if (!currentCourse) return null;
 
             return courseIDMap[currentCourse] || null;
-        }
-
-        /**
-         * Fetch logs from Google Sheet for current course.
-         */
-        async function fetchLogsFromSheet(courseName) {
-            if (!courseName) return [];
-            const sheetName = getSheetNameForCourse(courseName);
-            const range = `${formatSheetName(sheetName)}!A2:G`;
-
-            const { result } = await gapi.client.sheets.spreadsheets.values.get({
-                spreadsheetId: LOGS_SPREADSHEET_ID,
-                range
-            });
-
-            const rows = result.values || [];
-            return rows.map(r => {
-                const [uid, tsISO, id, manual, version, updISO, updatedBy] = r;
-                return {
-                    uid: String(uid || ''),
-                    timestamp: tsISO ? Date.parse(tsISO) : 0,
-                    id,
-                    // FIX: Robustly check for boolean TRUE or string 'true'
-                    manual: manual === true || manual === 'true' || manual === 'TRUE',
-                    version: version != null ? Number(version) : 0,
-                    updatedAt: updISO ? Date.parse(updISO) : 0,
-                    updatedBy: updatedBy || ''
-                };
-            }).filter(l => l.id && Number.isFinite(l.timestamp));
         }
 
 
@@ -7854,36 +7650,6 @@
             ];
         }
 
-
-
-        /**
- * Fetches the set of deleted log IDs (tombstones) for a course from the server.
- * @param {string} courseName - The name of the course.
- * @returns {Promise<Set<string>>} A promise that resolves with a Set of deleted log IDs.
- */
-        async function fetchTombstonesForCourse(courseName) {
-            if (!courseName) return new Set();
-
-            const serverTombs = new Set();
-            try {
-                const tombstoneRange = `DELETED_LOG_IDS!A2:C`;
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: tombstoneRange
-                });
-
-                (response.result.values || []).forEach(row => {
-                    const course = row[0];
-                    const logId = row[1];
-                    if (course === courseName && logId) {
-                        serverTombs.add(logId);
-                    }
-                });
-            } catch (e) {
-                console.info('No DELETED_LOG_IDS sheet found on server; skipping.', e.result?.error?.message);
-            }
-            return serverTombs;
-        }
 
 
         /**
@@ -7966,70 +7732,28 @@
         }
 
         /**
- * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
- */
+         * REFACTORED: Syncs logs (and tombstones for global admins) via the backend.
+         */
         async function syncLogsWithSheet() {
             // Basic conditions check
-            if (!currentCourse || !isOnline || !isSignedIn) {
+            if (!currentCourse || !isOnline || !isSignedIn || !isAdmin) {
                 return;
             }
 
-            // CRITICAL: Non-global admins sync via backend API
-            if (isAdmin && !isGlobalAdmin) {
-                return syncViaBackendAPI();
-            }
-
-            // From here on, only GLOBAL ADMINS execute
-            // Ensure we have data to sync
-            if (!isGlobalAdmin || !courseData[currentCourse]) {
-                return;
-            }
-
-            const currentData = courseData[currentCourse];
-
+            // This function is now just a wrapper for syncViaBackendAPI
+            // The backend's syncCourseLogs_Admin will handle both
+            // global and non-global admins correctly.
             try {
-                // --- A) Sync Tombstones UP to the server ---
-                if (currentData.tombstones.size > 0) {
-                    const serverTombs = await fetchTombstonesForCourse(currentCourse);
-                    const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
+                await syncViaBackendAPI(); // This is the single point of truth now
 
-                    if (newTombsToAppend.length > 0) {
-                        const tombstoneRows = newTombsToAppend.map(id => [currentCourse, id, new Date().toISOString()]);
-                        await gapi.client.sheets.spreadsheets.values.append({
-                            spreadsheetId: LOGS_SPREADSHEET_ID,
-                            range: 'DELETED_LOG_IDS!A:C',
-                            valueInputOption: 'USER_ENTERED',
-                            insertDataOption: 'INSERT_ROWS',
-                            resource: { values: tombstoneRows }
-                        });
-                    }
+                // Clear local tombstones *after* a successful sync
+                if (courseData[currentCourse]) {
+                    courseData[currentCourse].tombstones.clear();
                 }
-
-                // --- B) Sync Merged Logs UP to the server ---
-                const sheetData = currentData.logs.map(toSheetRow);
-                const sheetName = getSheetNameForCourse(currentCourse);
-                const formattedSheetName = formatSheetName(sheetName);
-                const fullRange = `${formattedSheetName}!A2:G`;
-
-                await gapi.client.sheets.spreadsheets.values.clear({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: fullRange
-                });
-
-                if (sheetData.length > 0) {
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: fullRange,
-                        valueInputOption: 'USER_ENTERED',
-                        resource: { values: sheetData }
-                    });
-                }
-
-                currentData.tombstones.clear();
                 saveCourseToLocalStorage(currentCourse);
 
             } catch (error) {
-                console.error('Error during tombstone-aware sync:', error);
+                console.error('Error during syncLogsWithSheet wrapper:', error);
                 throw error; // Let the caller handle the UI notification.
             }
         }
@@ -8044,10 +7768,11 @@
                     return;
                 }
 
-                // Call backend to sync logs
+                // Call backend to sync logs AND tombstones
                 const result = await callWebApp('syncCourseLogs_Admin', {
                     courseName: currentCourse,
-                    logs: logsToSync
+                    logs: logsToSync,
+                    tombstones: Array.from(courseData[currentCourse]?.tombstones || [])
                 }, 'POST');
 
                 if (result && result.result === 'success') {
@@ -8097,36 +7822,26 @@
 
 
         /**
-         * Append a single log to Google Sheet (for immediate sync).
-         */
+          * REFACTORED: Append a single log via the backend (for immediate sync).
+          */
         async function appendLogToSheet(log) {
-            if (!currentCourse || !isOnline || !isSignedIn) {
-                return;
+            if (!currentCourse || !isOnline || !isSignedIn || !isGlobalAdmin) {
+                return; // Only global admins use fast append
             }
 
             try {
-                // Get the actual sheet name
-                const sheetName = getSheetNameForCourse(currentCourse);
-                const formattedSheetName = formatSheetName(sheetName);
-
-                await gapi.client.sheets.spreadsheets.values.append({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: `${formattedSheetName}!A2:G`,
-                    valueInputOption: 'RAW',
-                    insertDataOption: 'INSERT_ROWS',
-                    resource: {
-                        values: [[
-                            log.uid,
-                            new Date(log.timestamp).toISOString(),
-                            log.id,
-                            log.manual ? 'true' : 'false'
-                        ]]
-                    }
-                });
+                // Call the new backend action
+                await callWebApp('appendLog_Admin', {
+                    log: log,
+                    courseName: currentCourse
+                }, 'POST');
 
             } catch (error) {
-                console.error('Error appending log:', error);
-                showNotification('warning', 'Sync Warning', 'Failed to sync log. Please sync manually.');
+                console.error('Error appending log via backend:', error);
+                showNotification('warning', 'Sync Warning', 'Failed to fast-sync log. Please sync manually.');
+                // Mark changes as pending since fast-append failed
+                pendingChanges = true;
+                updateSyncStatus('Pending sync', 'waiting');
             }
         }
 
@@ -8535,71 +8250,35 @@
         }
 
         /**
-         * Fetch course information from COURSE_INFO sheet
+         * REFACTORED: Fetch course information from COURSE_INFO sheet via backend
          * @returns {Promise} A promise that resolves when course info is fetched
          */
         async function fetchCourseInfo() {
             if (!isOnline || !isSignedIn) {
                 return;
             }
-
             try {
-                // Check if the COURSE_INFO sheet exists
-                const spreadsheetResponse = await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID
-                });
+                // Call the new backend action
+                const infoMap = await callWebApp('getCourseInfo', {}, 'GET');
 
-                const sheets = spreadsheetResponse.result.sheets || [];
-                const hasInfoSheet = sheets.some(sheet => sheet.properties.title === 'COURSE_INFO');
-
-                if (!hasInfoSheet) {
-                    console.log("No COURSE_INFO sheet found");
-                    return;
-                }
-
-                // Fetch the course info data
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: 'COURSE_INFO!A2:I'
-                });
-
-                const rows = response.result.values || [];
-                if (rows.length === 0) {
-                    console.log("No course info data found");
-                    return;
-                }
-
-                // Initialize global courseInfoMap if it doesn't exist
-                if (!window.courseInfoMap) {
-                    window.courseInfoMap = {};
-                }
-
-                // Process the course info data
-                // Columns: A=Course, B=Start Date, C=End Date, D=Holiday Weeks, E=Default Hours, F=Default Category, G=EIS ID
-                rows.forEach(row => {
-                    if (row.length < 4) return;
-                    const course = row[0];
-                    if (!course) return;
-
-                    window.courseInfoMap[course] = {
-                        start_date: row[1] || "",      // Column B
-                        end_date: row[2] || "",      // Column C
-                        holiday_weeks: row[3] || "0",     // Column D
-                        holiday_start_date: row[4] || "",      // Column E (The new column)
-                        default_hours: row[5] || "2",     // Column F (Index changed from 4 to 5)
-                        default_category: row[6] || "theory",// Column G (Index changed from 5 to 6)
-                        eis_id: row[7] || "",      // Column H (Index changed from 6 to 7)
-                        default_section: row[8] || "ALL"    // Column I (Index changed from 7 to 8)
-                    };
-
-                    // If EIS ID is provided, update the courseIDMap (also needs the index fix)
-                    if (row[7]) { // Use the correct index 7 for eis_id
-                        if (!courseIDMap) courseIDMap = {};
-                        courseIDMap[course] = row[7];
+                if (infoMap && infoMap.result !== 'error') {
+                    // Initialize or update the global courseInfoMap
+                    if (!window.courseInfoMap) {
+                        window.courseInfoMap = {};
                     }
-                });
+                    window.courseInfoMap = infoMap;
 
-                console.log("Course info loaded successfully:", window.courseInfoMap);
+                    // Also update the courseIDMap for EIS exports
+                    if (!courseIDMap) courseIDMap = {};
+                    for (const course in infoMap) {
+                        if (infoMap[course].eis_id) {
+                            courseIDMap[course] = infoMap[course].eis_id;
+                        }
+                    }
+                    console.log("Course info loaded successfully:", window.courseInfoMap);
+                } else {
+                    throw new Error(infoMap.message || "Failed to parse course info");
+                }
             } catch (error) {
                 console.error("Error fetching course info:", error);
             }
@@ -9771,11 +9450,8 @@
 
             const remainingCoursePromises = remainingCourses.map(async (courseName) => {
                 try {
-                    const [serverLogs, serverTombs, localData] = await Promise.all([
-                        fetchLogsFromSheet(courseName),
-                        fetchTombstonesForCourse(courseName),
-                        loadCourseFromLocalStorage(courseName)
-                    ]);
+                    const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
+                    const localData = await loadCourseFromLocalStorage(courseName);
 
                     // Combine all known tombstones (from local storage and the server).
                     const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
