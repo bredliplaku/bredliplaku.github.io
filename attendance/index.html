@@ -5137,8 +5137,7 @@
                                 // Call backend for logs AND tombstones
                                 const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
                                 const localData = await loadCourseFromLocalStorage(currentCourse);
-                                const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-                                const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+                                const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
 
                                 courseData[currentCourse] = { logs: mergedLogs, tombstones: allTombstones };
                                 saveCourseToLocalStorage(currentCourse);
@@ -7005,8 +7004,7 @@
                     if (isGlobalAdmin) {
                         const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
                         const localData = await loadCourseFromLocalStorage(courseName);
-                        const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-                        const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+                        const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
 
                         courseData[courseName] = { logs: mergedLogs, tombstones: allTombstones };
                         saveCourseToLocalStorage(courseName);
@@ -7270,7 +7268,7 @@
                     let premergeSnapshot = null;
 
                     if (isAdmin) {
-                        // IMPROVED: Detect conflicts before merging
+                        // Detect conflicts before merging
                         const allTombstones = new Set([...localData.tombstones, ...serverTombstones]);
                         const conflicts = detectConflicts(serverLogs, localData.logs, allTombstones);
 
@@ -7339,7 +7337,7 @@
                         } catch (pushError) {
                             console.error(`Log push failed for ${syncCourseName}:`, pushError);
 
-                            // IMPROVED: Rollback to pre-merge state on failure
+                            // Rollback to pre-merge state on failure
                             if (premergeSnapshot) {
                                 console.log('Rolling back to pre-merge state...');
                                 restoreCourseSnapshot(syncCourseName, premergeSnapshot);
@@ -9262,11 +9260,7 @@
                     const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
                     const localData = await loadCourseFromLocalStorage(courseName);
 
-                    // Combine all known tombstones (from local storage and the server).
-                    const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
-
-                    // Merge logs using the complete, combined set of tombstones.
-                    const mergedLogs = mergeLogs(serverLogs, localData.logs, allTombstones);
+                    const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
 
                     // Initialise the course data with the correctly merged logs and all tombstones.
                     courseData[courseName] = {
