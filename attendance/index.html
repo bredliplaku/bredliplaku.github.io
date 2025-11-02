@@ -4765,39 +4765,6 @@
             }
         }
 
-
-        // Check for auth redirect
-        function checkAuthRedirect() {
-            if (window.location.hash && window.location.hash.includes('access_token=')) {
-
-                // 1. Get the original course hash we saved before leaving
-                const originalHash = sessionStorage.getItem('redirect_hash');
-                sessionStorage.removeItem('redirect_hash'); // Clean up immediately
-
-                // 2. Parse the authentication token from the URL
-                const params = {};
-                window.location.hash.substring(1).split('&').forEach(pair => {
-                    const [key, value] = pair.split('=');
-                    params[key] = decodeURIComponent(value);
-                });
-
-                // 3. Clean the URL, but restore the original course hash
-                if (history.replaceState) {
-                    // Replace the URL with the base path plus the original hash
-                    history.replaceState(null, null, window.location.pathname + (originalHash || ''));
-                } else {
-                    // Fallback for older browsers
-                    window.location.hash = originalHash || '';
-                }
-
-                // 4. UST SAVE THE TOKEN
-                // DO NOT call gapi.client.setToken() here because gapi isn't loaded yet.
-                if (params.access_token) {
-                    localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-                }
-            }
-        }
-
         /**
         * Initialize the application.
         * Sets up event listeners, checks NFC support, and prepares the UI.
@@ -4870,9 +4837,6 @@
             setupAutoSync();
             setupEnhancedSyncButton();
             setupAuthStateTracking();
-
-            // Handle auth redirect
-            checkAuthRedirect();
 
             // Override syncLogsWithSheet to track sync status
             const originalSyncLogs = syncLogsWithSheet;
@@ -6242,29 +6206,32 @@
         /**
          * Handle auth button click to sign in.
          */
-        // Replace your handleAuthClick function with this updated version
         function handleAuthClick(e) {
-            sessionStorage.setItem('redirect_hash', window.location.hash);
             if (e) e.preventDefault();
+            if (tokenClient) {
+                // This will open the Google sign-in pop-up
+                tokenClient.requestAccessToken();
+            } else {
+                console.error("Auth client is not ready.");
+                showNotification('error', 'Auth Error', 'Authentication service is not ready. Please try again in a moment.');
+            }
+        }
 
+        /**
+         * Handles the token response from the Google OAuth pop-up.
+         * @param {Object} resp - The token response object.
+         */
+        function handleTokenResponse(resp) {
+            if (resp.error) {
+                console.error('Token response error:', resp.error);
+                showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
+                return;
+            }
+            // Save the token to local storage so it can be restored next time
+            localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
 
-            // Get the exact current URL as redirect URI (very important!)
-            const redirectUri = window.location.origin + window.location.pathname;
-
-            // Create Google OAuth URL with scopes
-            const scopes = encodeURIComponent('openid ' + SCOPES);
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-                `client_id=${CLIENT_ID}&` +
-                `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-                `response_type=token&` +
-                `scope=${scopes}`;
-
-
-            // Add a small delay before redirecting to ensure the notification is displayed
-            setTimeout(() => {
-                // Redirect to Google login
-                window.location.href = authUrl;
-            }, 100);
+            // Trigger the main sign-in logic
+            onSuccessfulAuth(false); // false = not restored
         }
 
         /**
