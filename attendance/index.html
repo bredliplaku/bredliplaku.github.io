@@ -3539,7 +3539,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwTWnfisJf59BJjBG8McPB-d8M5BNr2qDf9LvkRVuzraHdZPADzlXxTi5KVsfmYwOddZA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwCCeQfpDeki41re6fcHI-GzrFdwH_LEyAROZPWQjh7ZLiTQsq1SLoO7jKlIbzR6pJW8w/exec';
 
         // App state
         let courseData = {};
@@ -3559,7 +3559,7 @@
         let currentCourse = ''; // Currently selected course
         let availableCourses = []; // Will be populated from spreadsheet
         let isOnline = navigator.onLine;
-        let isSyncing = false;
+        let syncLock = null; // Will hold the Promise when sync is running
         let isInitializing = true;
         let isChangingCourses = false;
         let pendingNotifications = [];
@@ -3638,6 +3638,30 @@
             }
         }
 
+        /**
+ * Acquires a lock for sync operation.
+ * Returns a release function that must be called when done.
+ */
+        async function acquireSyncLock() {
+            // If there's already a lock, wait for it
+            if (syncLock) {
+                console.log('Waiting for existing sync to complete...');
+                try {
+                    await syncLock;
+                } catch (e) {
+                    // Previous sync failed, but we can continue
+                    console.log('Previous sync failed, continuing...');
+                }
+            }
+
+            // Create new lock
+            let releaseLock;
+            syncLock = new Promise((resolve) => {
+                releaseLock = resolve;
+            });
+
+            return releaseLock;
+        }
 
         /**
          * Check if user is admin for specific course
@@ -7168,12 +7192,16 @@
          * Fetches and updates both database and logs.
          */
         async function syncData(courseName) {
-            if (!courseName || !isOnline || !isSignedIn || isSyncing) {
-                if (courseName) console.warn(`Sync for ${courseName} skipped: already syncing.`);
+            if (!courseName || !isOnline || !isSignedIn) {
+                if (courseName) console.warn(`Sync for ${courseName} skipped: not ready.`);
                 return;
             }
 
-            isSyncing = true;
+            // Use promise-based lock
+            const releaseLock = await acquireSyncLock();
+
+            // Capture courseName at start to prevent race conditions
+            const syncCourseName = courseName;
 
             // Show syncing indicator
             const syncIcon = syncBtn.querySelector('i');
@@ -7218,9 +7246,10 @@
                             serverLogs = logs;
                             serverTombstones = new Set(tombstones); // Ensure it's a Set
                         } else if (isAdmin) {
-                            // Non-Global Admin: Fetch logs via Backend API
-                            serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
-                            // Non-global admins don't fetch server tombstones
+                            // Non-Global Admin: Fetch logs AND tombstones via Backend API
+                            const result = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
+                            serverLogs = result.logs;
+                            serverTombstones = new Set(result.tombstones); // Now they get tombstones too!
                         }
                         // Students don't PULL/PUSH logs during manual sync/refresh
                     } catch (pullError) {
@@ -7230,50 +7259,88 @@
 
                     // --- 3b: MERGE (If Admin) ---
                     let logsToPush = [];
-                    if (isAdmin) { // Only admins merge and push
-                        const combinedTombstones = new Set([...localData.tombstones, ...serverTombstones]);
-                        const mergedLogs = mergeLogs(serverLogs, localData.logs, combinedTombstones); // Use combined tombstones for merge
+                    let premergeSnapshot = null;
+
+                    if (isAdmin) {
+                        // IMPROVED: Detect conflicts before merging
+                        const allTombstones = new Set([...localData.tombstones, ...serverTombstones]);
+                        const conflicts = detectConflicts(serverLogs, localData.logs, allTombstones);
+
+                        if (conflicts.length > 0) {
+                            console.warn('Conflicts detected:', conflicts);
+
+                            // Show warning to user (async, but we'll wait)
+                            const shouldProceed = await new Promise((resolve) => {
+                                showConflictWarning(
+                                    conflicts,
+                                    () => resolve(true),  // Proceed
+                                    () => resolve(false)  // Cancel
+                                );
+                            });
+
+                            if (!shouldProceed) {
+                                console.log('Sync cancelled by user due to conflicts');
+                                updateSyncStatus("Sync cancelled", "waiting");
+                                return; // Exit sync function
+                            }
+                        }
+
+                        // Create snapshot before merge for potential rollback
+                        premergeSnapshot = createCourseSnapshot(syncCourseName);
+
+                        // Continue with merge...
+                        const mergedLogs = mergeLogs(
+                            serverLogs,
+                            localData.logs,
+                            localData.tombstones,
+                            serverTombstones
+                        );
 
                         // Prepare the data to be pushed
                         logsToPush = mergedLogs;
 
                         // Update local state temporarily with merged data before push
-                        courseData[courseName] = {
+                        courseData[syncCourseName] = {
                             logs: mergedLogs,
-                            // Global admins will sync local tombstones UP, Non-global clear them after push
-                            tombstones: isGlobalAdmin ? localData.tombstones : new Set()
+                            tombstones: isGlobalAdmin ? localData.tombstones : localData.tombstones
                         };
-                        // Don't save locally yet, wait for final pull
                     } else {
-                        // For students, just display the server logs (they don't merge/push)
-                        logsToPush = serverLogs; // This won't be pushed, just used for local update later
-                        courseData[courseName] = { logs: serverLogs, tombstones: new Set() };
-                        saveCourseToLocalStorage(courseName); // Students save the pulled state
+                        // For students, just display the server logs
+                        logsToPush = serverLogs;
+                        courseData[syncCourseName] = { logs: serverLogs, tombstones: new Set() };
+                        saveCourseToLocalStorage(syncCourseName);
                     }
 
-
                     // --- 3c: PUSH (If Admin & Changes Exist) ---
-                    if (isAdmin) { // Only admins push changes
+                    if (isAdmin) {
                         updateSyncStatus("Syncing changes...", "syncing");
                         try {
-                            // Update the local data with the potentially merged logs BEFORE pushing
-                            courseData[courseName].logs = logsToPush;
+                            courseData[syncCourseName].logs = logsToPush;
 
                             if (isGlobalAdmin) {
-                                await syncLogsWithSheet(courseName);
-                                // Clear local tombstones AFTER successful GAPI push
-                                courseData[courseName].tombstones.clear();
+                                await syncLogsWithSheet(syncCourseName);
+                                courseData[syncCourseName].tombstones.clear();
                             } else {
-                                await syncViaBackendAPI(courseName);
-                                // Non-global admins already have empty tombstones here
+                                await syncViaBackendAPI(syncCourseName);
+                                // Non-global admins also send tombstones now!
                             }
-                            pendingChanges = false; // Mark changes as pushed
+
+                            pendingChanges = false;
                             lastSyncTime = Date.now();
+
                         } catch (pushError) {
-                            console.error(`Log push failed for ${courseName}:`, pushError);
-                            pendingChanges = true; // Ensure we know changes are still pending.
-                            updateSyncStatus("Sync failed!", "error"); // Show immediate error
-                            throw pushError; // Stop the sync
+                            console.error(`Log push failed for ${syncCourseName}:`, pushError);
+
+                            // IMPROVED: Rollback to pre-merge state on failure
+                            if (premergeSnapshot) {
+                                console.log('Rolling back to pre-merge state...');
+                                restoreCourseSnapshot(syncCourseName, premergeSnapshot);
+                                saveCourseToLocalStorage(syncCourseName);
+                            }
+
+                            pendingChanges = true;
+                            updateSyncStatus("Sync failed!", "error");
+                            throw pushError;
                         }
                     }
                 } // End log sync block
@@ -7291,14 +7358,12 @@
                     }, 3000);
                 }
 
-            } catch (error) { // Catch errors from initial pulls or major issues
+            } catch (error) {
                 console.error('Main sync error:', error);
                 updateSyncStatus("Sync failed!", "error");
                 showNotification('error', 'Sync Failed', `Could not sync data: ${error.message}`);
-                // Don't update UI on major failure? Or update with potentially stale local data?
-                // Let's allow UI update for now, it might show *something*.
             } finally {
-                isSyncing = false;
+                releaseLock(); // Release the lock
 
                 if (syncIcon) {
                     syncIcon.classList.remove('fa-spin');
@@ -7416,6 +7481,110 @@
         }
 
         /**
+ * Detects conflicts between local and server logs.
+ * Returns array of conflicts with details.
+ */
+        function detectConflicts(serverLogs, localLogs, tombstones) {
+            const conflicts = [];
+            const serverById = new Map();
+            const deleted = new Set([...tombstones]);
+
+            // Index server logs
+            serverLogs.forEach(log => {
+                if (log && log.id && !deleted.has(log.id)) {
+                    serverById.set(log.id, log);
+                }
+            });
+
+            // Check local logs for conflicts
+            localLogs.forEach(localLog => {
+                if (!localLog || !localLog.id || deleted.has(localLog.id)) return;
+
+                const serverLog = serverById.get(localLog.id);
+                if (serverLog) {
+                    // Same log exists in both places - check for conflicts
+                    const localVer = Number(localLog.version || 0);
+                    const serverVer = Number(serverLog.version || 0);
+                    const localTime = Number(localLog.updatedAt || 0);
+                    const serverTime = Number(serverLog.updatedAt || 0);
+
+                    // Conflict if:
+                    // 1. Same version but different data
+                    // 2. Different versions with recent server update (< 5 minutes)
+                    const timeDiff = Math.abs(serverTime - localTime);
+                    const recentUpdate = timeDiff < 5 * 60 * 1000; // 5 minutes
+
+                    if (localVer === serverVer && localTime !== serverTime && recentUpdate) {
+                        conflicts.push({
+                            id: localLog.id,
+                            type: 'concurrent_edit',
+                            local: localLog,
+                            server: serverLog,
+                            message: `Log ${localLog.id} was edited both locally and on server`
+                        });
+                    } else if (localVer !== serverVer && recentUpdate) {
+                        // Check who will win
+                        const localWins = localVer > serverVer ||
+                            (localVer === serverVer && localTime > serverTime);
+
+                        conflicts.push({
+                            id: localLog.id,
+                            type: 'version_conflict',
+                            local: localLog,
+                            server: serverLog,
+                            winner: localWins ? 'local' : 'server',
+                            message: `Log ${localLog.id} has version conflict (local: v${localVer}, server: v${serverVer})`
+                        });
+                    }
+                }
+            });
+
+            return conflicts;
+        }
+
+        /**
+         * Shows conflict warning dialog to user
+         */
+        function showConflictWarning(conflicts, onProceed, onCancel) {
+            const conflictList = conflicts.map(c =>
+                `• ${c.message}` +
+                (c.winner ? ` → ${c.winner} version will be kept` : '')
+            ).join('\n');
+
+            const message = `⚠️ Detected ${conflicts.length} potential conflict(s):\n\n${conflictList}\n\nProceed with sync?`;
+
+            if (confirm(message)) {
+                onProceed();
+            } else {
+                onCancel();
+            }
+        }
+
+        /**
+ * Creates a snapshot of course data for rollback on push failure
+ */
+        function createCourseSnapshot(courseName) {
+            if (!courseData[courseName]) return null;
+
+            return {
+                logs: JSON.parse(JSON.stringify(courseData[courseName].logs)),
+                tombstones: new Set(courseData[courseName].tombstones)
+            };
+        }
+
+        /**
+         * Restores course data from a snapshot
+         */
+        function restoreCourseSnapshot(courseName, snapshot) {
+            if (!snapshot) return;
+
+            courseData[courseName] = {
+                logs: snapshot.logs,
+                tombstones: snapshot.tombstones
+            };
+        }
+
+        /**
  * Centralized function to save course data and flag it for auto-sync.
  */
         function saveAndMarkChanges(courseName) {
@@ -7428,7 +7597,7 @@
                 clearTimeout(window.autoSyncTimeout);
                 window.autoSyncTimeout = setTimeout(() => {
                     autoSyncData();
-                }, 5000); // Sync after 5 seconds of no changes
+                }, 2000); // Sync after 5 seconds of no changes
             } else {
                 updateSyncStatus(autoSyncEnabled ? 'Syncing...' : 'Syncing...', 'waiting');
             }
@@ -7462,7 +7631,6 @@
 
         async function syncViaBackendAPI(courseName) {
             try {
-
                 const logsToSync = courseData[courseName]?.logs || [];
 
                 if (logsToSync.length === 0) {
@@ -7474,7 +7642,7 @@
                 const result = await callWebApp('syncCourseLogs_Admin', {
                     courseName: courseName,
                     logs: logsToSync,
-                    tombstones: Array.from(courseData[currentCourse]?.tombstones || [])
+                    tombstones: Array.from(courseData[courseName]?.tombstones || [])  // ✅ CORRECT!
                 }, 'POST');
 
                 if (result && result.result === 'success') {
@@ -9859,6 +10027,35 @@
                 }
             }, 1000); // Reduced from 2000ms to 1000ms
         });
+
+        // Add beforeunload handler to save pending changes
+        window.addEventListener('beforeunload', function (e) {
+            if (pendingChanges && isOnline && isSignedIn && autoSyncEnabled) {
+                // Show warning to user
+                e.preventDefault();
+                e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+
+                // Try to sync (may not complete if browser closes immediately)
+                if (currentCourse) {
+                    syncData(currentCourse).catch(err => {
+                        console.error('Final sync failed:', err);
+                    });
+                }
+            }
+        });
+
+        // Add visibility change handler for mobile/tab switching
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden && pendingChanges && isOnline && isSignedIn && autoSyncEnabled) {
+                // Page is being hidden, try to sync
+                if (currentCourse) {
+                    syncData(currentCourse).catch(err => {
+                        console.error('Background sync failed:', err);
+                    });
+                }
+            }
+        });
+
     </script>
 
 </body>
