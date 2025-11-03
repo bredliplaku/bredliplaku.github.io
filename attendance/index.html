@@ -5133,9 +5133,22 @@
 
                         // 7. Load logs for the *first* course
                         if (currentCourse) {
-                            if (isGlobalAdmin) {
-                                // Call backend for logs AND tombstones
-                                const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
+                            if (isGlobalAdmin || isAdmin) {
+                                // CONSOLIDATED ADMIN LOGIC
+                                let serverLogs, serverTombs;
+
+                                if (isGlobalAdmin) {
+                                    // Global admin uses the original call
+                                    const result = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                                    serverLogs = result.logs;
+                                    serverTombs = new Set(result.tombstones);
+                                } else {
+                                    // Non-global admin uses the other call, but now we correctly destructure the object
+                                    const result = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                                    serverLogs = result.logs;
+                                    serverTombs = new Set(result.tombstones);
+                                }
+
                                 const localData = await loadCourseFromLocalStorage(currentCourse);
                                 const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
                                 const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
@@ -5144,14 +5157,11 @@
                                 saveCourseToLocalStorage(currentCourse);
 
                                 // Load remaining in background
-                                setTimeout(loadRemainingCoursesInBackground, 1000);
-
-                            } else if (isAdmin) {
-                                // This logic stays the same
-                                const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
-                                studentLogCache[currentCourse] = serverLogs;
-                                courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
-                                setTimeout(loadRemainingCourseAdminLogs, 1000);
+                                if (isGlobalAdmin) {
+                                    setTimeout(loadRemainingCoursesInBackground, 1000);
+                                } else {
+                                    setTimeout(loadRemainingCourseAdminLogs, 1000);
+                                }
 
                             } else {
                                 // This logic stays the same
@@ -6197,11 +6207,6 @@
         }
 
         async function callWebApp(action, payload = {}, method = 'GET') {
-            const token = gapi.client.getToken()?.access_token;
-            if (!token) {
-                handleSignoutClick();
-                throw new Error("User not signed in or token expired.");
-            }
 
             let url = BRAIN_URL;
             const options = {
@@ -6214,7 +6219,7 @@
 
             // Only add courseName if this action actually needs it
             const actionsNeedingCourse = [
-                'getCourseData_Admin',
+                'getCourseLogs_Admin',
                 'getCourseLogs_Admin',
                 'getStudentLogs',
                 'syncCourseLogs_Admin',
@@ -6229,8 +6234,6 @@
                     payload.courseName = currentCourse || '';
                 }
             }
-
-            payload.access_token = token;
 
             if (method === 'GET') {
                 const params = new URLSearchParams(payload);
@@ -7019,7 +7022,7 @@
                 try {
                     // Now, fetch the data for this specific course
                     if (isGlobalAdmin) {
-                        const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
+                        const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
                         const localData = await loadCourseFromLocalStorage(courseName);
                         const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
                         const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
@@ -7266,7 +7269,7 @@
 
                         if (isGlobalAdmin) {
                             // Call backend for logs AND tombstones
-                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: syncCourseName }, 'GET');
+                            const { logs, tombstones } = await callWebApp('getCourseLogs_Admin', { courseName: syncCourseName }, 'GET');
                             serverLogs = logs;
                             serverTombstones = new Set(tombstones); // Ensure it's a Set
                         } else if (isAdmin) {
@@ -9277,7 +9280,7 @@
 
             const remainingCoursePromises = remainingCourses.map(async (courseName) => {
                 try {
-                    const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
+                    const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
                     const localData = await loadCourseFromLocalStorage(courseName);
 
                     // Combine all known tombstones (from local storage and the server).
