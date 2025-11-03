@@ -7643,39 +7643,33 @@
 
         /**
          * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
-         * This function now forces ALL ADMINS to use the backend API.
-         */
-        /**
-         * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
          * This function is for GLOBAL ADMINS ONLY.
          */
-        async function syncLogsWithSheet() {
+        async function syncLogsWithSheet(courseName) { // <-- 1. ACCEPT courseName
             // Basic conditions check
-            if (!currentCourse || !isOnline || !isSignedIn) {
+            if (!courseName || !isOnline || !isSignedIn) { // <-- 2. USE courseName
+                console.warn(`Global admin sync for ${courseName} skipped: not ready.`);
                 return;
             }
 
-            // CRITICAL: Non-global admins sync via backend API
-            if (isAdmin && !isGlobalAdmin) {
-                return syncViaBackendAPI();
-            }
-
-            // From here on, only GLOBAL ADMINS execute
-            if (!isGlobalAdmin || !courseData[currentCourse]) {
+            // CRITICAL: REMOVED REDUNDANT ROUTING.
+            // We trust syncData to only call this for global admins.
+            if (!isGlobalAdmin || !courseData[courseName]) { // <-- 3. USE courseName
+                console.warn(`Global admin sync for ${courseName} skipped: no data or not global admin.`);
                 return;
             }
 
-            const currentData = courseData[currentCourse];
+            const currentData = courseData[courseName]; // <-- 4. USE courseName
 
             try {
                 // --- A) Sync Tombstones UP to the server ---
                 // We must do this *before* syncing logs
                 if (currentData.tombstones.size > 0) {
-                    const serverTombs = await fetchTombstonesForCourse(currentCourse);
+                    const serverTombs = await fetchTombstonesForCourse(courseName); // <-- 5. USE courseName
                     const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
 
                     if (newTombsToAppend.length > 0) {
-                        const tombstoneRows = newTombsToAppend.map(id => [currentCourse, id, new Date().toISOString()]);
+                        const tombstoneRows = newTombsToAppend.map(id => [courseName, id, new Date().toISOString()]); // <-- 6. USE courseName
                         await gapi.client.sheets.spreadsheets.values.append({
                             spreadsheetId: LOGS_SPREADSHEET_ID,
                             range: 'DELETED_LOG_IDS!A:C',
@@ -7701,7 +7695,7 @@
                     ];
                 });
 
-                const sheetName = getSheetNameForCourse(currentCourse);
+                const sheetName = getSheetNameForCourse(courseName); // <-- 7. USE courseName
                 const formattedSheetName = formatSheetName(sheetName);
                 const fullRange = `${formattedSheetName}!A2:G`;
 
@@ -7725,7 +7719,7 @@
 
                 // Clear local tombstones *only after* a successful sync
                 currentData.tombstones.clear();
-                saveCourseToLocalStorage(currentCourse);
+                saveCourseToLocalStorage(courseName); // <-- 8. USE courseName
 
             } catch (error) {
                 console.error('Error during global admin sync:', error);
