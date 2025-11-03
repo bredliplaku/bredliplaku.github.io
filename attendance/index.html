@@ -4878,21 +4878,6 @@
             setupEnhancedSyncButton();
             setupAuthStateTracking();
 
-            // Override syncLogsWithSheet to track sync status
-            const originalSyncLogs = syncLogsWithSheet;
-            syncLogsWithSheet = async function () {
-                try {
-                    await originalSyncLogs.call(this);
-
-                    // On successful sync, update the last sync time in localStorage
-                    localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`, Date.now().toString());
-                    pendingChanges = false;
-
-                    return true;
-                } catch (error) {
-                    throw error;
-                }
-            };
         }
 
         function processPendingNotifications() {
@@ -7645,35 +7630,34 @@
          * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
          * This function is for GLOBAL ADMINS ONLY.
          */
-        async function syncLogsWithSheet(courseName) { // <-- 1. ACCEPTS THE ARGUMENT
+        async function syncLogsWithSheet(courseName) { // <-- 1. IT NOW ACCEPTS THE courseName
             // Basic conditions check
-            if (!courseName || !isOnline || !isSignedIn) { // <-- 2. USES THE ARGUMENT
+            if (!courseName || !isOnline || !isSignedIn) { // <-- 2. IT USES courseName HERE
                 console.warn(`Global admin sync for ${courseName} skipped: not ready.`);
                 return;
             }
 
             // CRITICAL: Non-global admins sync via backend API
             if (isAdmin && !isGlobalAdmin) {
-                // This call is correct, it uses the global currentCourse
-                return syncViaBackendAPI(currentCourse);
+                return syncViaBackendAPI(courseName); // <-- 3. IT PASSES courseName HERE
             }
 
             // From here on, only GLOBAL ADMINS execute
-            if (!isGlobalAdmin || !courseData[courseName]) { // <-- 3. USES THE ARGUMENT
+            if (!isGlobalAdmin || !courseData[courseName]) { // <-- 4. IT USES courseName HERE
                 console.warn(`Global admin sync for ${courseName} skipped: no data.`);
                 return;
             }
 
-            const currentData = courseData[courseName]; // <-- 4. USES THE ARGUMENT
+            const currentData = courseData[courseName]; // <-- 5. IT USES courseName HERE
 
             try {
                 // --- A) Sync Tombstones UP to the server ---
                 if (currentData.tombstones.size > 0) {
-                    const serverTombs = await fetchTombstonesForCourse(courseName); // <-- 5. USES THE ARGUMENT
+                    const serverTombs = await fetchTombstonesForCourse(courseName); // <-- 6. IT USES courseName HERE
                     const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
 
                     if (newTombsToAppend.length > 0) {
-                        const tombstoneRows = newTombsToAppend.map(id => [courseName, id, new Date().toISOString()]); // <-- 6. USES THE ARGUMENT
+                        const tombstoneRows = newTombsToAppend.map(id => [courseName, id, new Date().toISOString()]); // <-- 7. IT USES courseName HERE
                         await gapi.client.sheets.spreadsheets.values.append({
                             spreadsheetId: LOGS_SPREADSHEET_ID,
                             range: 'DELETED_LOG_IDS!A:C',
@@ -7698,7 +7682,7 @@
                     ];
                 });
 
-                const sheetName = getSheetNameForCourse(courseName); // <-- 7. USES THE ARGUMENT
+                const sheetName = getSheetNameForCourse(courseName); // <-- 8. IT USES courseName HERE
                 const formattedSheetName = formatSheetName(sheetName);
                 const fullRange = `${formattedSheetName}!A2:G`;
 
@@ -7720,9 +7704,15 @@
 
                 console.log(`Synced ${sheetData.length} logs to ${sheetName}.`);
 
+                // --- C) THIS IS THE LOGIC THAT WAS IN THE BROKEN OVERRIDE ---
+                // It now runs here, correctly, *after* a successful sync.
+                localStorage.setItem(`${LOGS_STORAGE_KEY}_${courseName}_last_sync`, Date.now().toString());
+                pendingChanges = false;
+                // --- END NEW LOGIC ---
+
                 // Clear local tombstones *only after* a successful sync
                 currentData.tombstones.clear();
-                saveCourseToLocalStorage(courseName); // <-- 8. USES THE ARGUMENT
+                saveCourseToLocalStorage(courseName); // <-- 9. IT USES courseName HERE
 
             } catch (error) {
                 console.error('Error during global admin sync:', error);
