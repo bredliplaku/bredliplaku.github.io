@@ -7645,19 +7645,92 @@
          * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
          * This function now forces ALL ADMINS to use the backend API.
          */
+        /**
+         * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
+         * This function is for GLOBAL ADMINS ONLY.
+         */
         async function syncLogsWithSheet() {
             // Basic conditions check
             if (!currentCourse || !isOnline || !isSignedIn) {
                 return;
             }
 
-            // This is the fix. We no longer check if the user is Global Admin.
-            // If the user is any kind of admin, they must use the backend.
-            if (isAdmin) {
+            // CRITICAL: Non-global admins sync via backend API
+            if (isAdmin && !isGlobalAdmin) {
                 return syncViaBackendAPI();
             }
 
-            // Non-admins (students) do nothing.
+            // From here on, only GLOBAL ADMINS execute
+            if (!isGlobalAdmin || !courseData[currentCourse]) {
+                return;
+            }
+
+            const currentData = courseData[currentCourse];
+
+            try {
+                // --- A) Sync Tombstones UP to the server ---
+                // We must do this *before* syncing logs
+                if (currentData.tombstones.size > 0) {
+                    const serverTombs = await fetchTombstonesForCourse(currentCourse);
+                    const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
+
+                    if (newTombsToAppend.length > 0) {
+                        const tombstoneRows = newTombsToAppend.map(id => [currentCourse, id, new Date().toISOString()]);
+                        await gapi.client.sheets.spreadsheets.values.append({
+                            spreadsheetId: LOGS_SPREADSHEET_ID,
+                            range: 'DELETED_LOG_IDS!A:C',
+                            valueInputOption: 'USER_ENTERED',
+                            insertDataOption: 'INSERT_ROWS',
+                            resource: { values: tombstoneRows }
+                        });
+                        console.log(`Pushed ${newTombsToAppend.length} new tombstones to server.`);
+                    }
+                }
+
+                // --- B) Sync Merged Logs UP to the server ---
+                // This block replaces the broken call to "toSheetRow"
+                const sheetData = currentData.logs.map(log => {
+                    return [
+                        log.uid || '',
+                        new Date(Number(log.timestamp || Date.now())).toISOString(),
+                        log.id,
+                        log.manual ? 'TRUE' : 'FALSE',
+                        Number(log.version || 0),
+                        new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
+                        String(log.updatedBy || '')
+                    ];
+                });
+
+                const sheetName = getSheetNameForCourse(currentCourse);
+                const formattedSheetName = formatSheetName(sheetName);
+                const fullRange = `${formattedSheetName}!A2:G`;
+
+                // Clear the sheet
+                await gapi.client.sheets.spreadsheets.values.clear({
+                    spreadsheetId: LOGS_SPREADSHEET_ID,
+                    range: fullRange
+                });
+
+                // Write the new data
+                if (sheetData.length > 0) {
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: LOGS_SPREADSHEET_ID,
+                        range: fullRange,
+                        valueInputOption: 'USER_ENTERED',
+                        resource: { values: sheetData }
+                    });
+                }
+
+                console.log(`Synced ${sheetData.length} logs to ${sheetName}.`);
+
+                // Clear local tombstones *only after* a successful sync
+                currentData.tombstones.clear();
+                saveCourseToLocalStorage(currentCourse);
+
+            } catch (error) {
+                console.error('Error during global admin sync:', error);
+                throw error; // Let the caller handle the UI notification.
+            }
         }
 
         async function syncViaBackendAPI(courseName) {
