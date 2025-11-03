@@ -3539,7 +3539,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzZbCt40Wm80QxrF4aLVdH04K74WlbBMhDC2v9wTZbfWt5f36iDouuAx-g-muULTUAIKw/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyzfU_vPmDu3FU0h9cuUXhXtQsRcs7ST8c_wqIXd5HsIgTAD3wJp0A0WEVzbiAbeV3AVw/exec';
 
         // App state
         let courseData = {};
@@ -3630,6 +3630,93 @@
         const userName = document.getElementById('user-name');
         const userAvatar = document.getElementById('user-avatar');
         const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+
+        function debugState() {
+            console.log('=== ATTENDANCE TRACKER DEBUG STATE ===');
+            console.log('Signed In:', isSignedIn);
+            console.log('Is Admin:', isAdmin);
+            console.log('Is Global Admin:', isGlobalAdmin);
+            console.log('User Email:', gapi.client.getToken()?.email || 'Unknown');
+            console.log('Current Course:', currentCourse);
+            console.log('Available Courses:', availableCourses);
+            console.log('Course Info Map:', courseInfoMap);
+            console.log('Backend URL:', BRAIN_URL);
+            console.log('Logs Spreadsheet ID:', LOGS_SPREADSHEET_ID);
+            console.log('Database Spreadsheet ID:', DATABASE_SPREADSHEET_ID);
+            console.log('Pending Changes:', pendingChanges);
+            console.log('Is Online:', isOnline);
+            console.log('Auto Sync Enabled:', autoSyncEnabled);
+
+            if (currentCourse) {
+                console.log('Current Course Data:', {
+                    logs: courseData[currentCourse]?.logs?.length || 0,
+                    tombstones: courseData[currentCourse]?.tombstones?.size || 0
+                });
+            }
+
+            console.log('Database Map Size:', Object.keys(databaseMap || {}).length);
+            console.log('=== END DEBUG STATE ===');
+        }
+
+        // Make it available globally
+        window.debugState = debugState;
+
+
+        // 2. REPLACE YOUR syncViaBackendAPI WITH THIS DEBUG VERSION:
+
+        async function syncViaBackendAPI(courseName) {
+            console.log('=== syncViaBackendAPI CALLED ===');
+            console.log('Course:', courseName);
+
+            try {
+                const logsToSync = courseData[courseName]?.logs || [];
+                const tombstonesToSync = Array.from(courseData[courseName]?.tombstones || []);
+
+                console.log(`Syncing ${logsToSync.length} logs and ${tombstonesToSync.length} tombstones for ${courseName}`);
+
+                // Debug: Show first log if exists
+                if (logsToSync.length > 0) {
+                    console.log('First log sample:', JSON.stringify(logsToSync[0], null, 2));
+                }
+
+                console.log('Calling backend with:', {
+                    courseName: courseName,
+                    logCount: logsToSync.length,
+                    tombstoneCount: tombstonesToSync.length,
+                    backendURL: BRAIN_URL
+                });
+
+                // Call backend to sync logs AND tombstones (even if empty - to clear the sheet)
+                const result = await callWebApp('syncCourseLogs_Admin', {
+                    courseName: courseName,
+                    logs: logsToSync,
+                    tombstones: tombstonesToSync
+                }, 'POST');
+
+                console.log('Backend response:', result);
+
+                if (result && result.result === 'success') {
+                    console.log(`✓ Sync complete: ${result.message || 'Success'}`);
+                    console.log(`  - Logs synced: ${result.count || 0}`);
+                    console.log(`  - Tombstones synced: ${result.tombstoneCount || 0}`);
+
+                    pendingChanges = false;
+                    lastSyncTime = Date.now();
+                    saveCourseToLocalStorage(courseName);
+                } else {
+                    throw new Error(result?.message || 'Sync failed');
+                }
+
+            } catch (error) {
+                console.error('✗ Backend sync error:', error);
+                console.error('Error details:', {
+                    name: error.name,
+                    message: error.message,
+                    stack: error.stack
+                });
+                throw error;
+            }
+        }
 
         function checkLoadingCompletion() {
             if (loadingTasks.size === 0) {
@@ -6197,53 +6284,79 @@
         }
 
         async function callWebApp(action, payload = {}, method = 'GET') {
+            console.log(`→ callWebApp: ${action} (${method})`);
+
             const token = gapi.client.getToken()?.access_token;
             if (!token) {
+                console.error('✗ No access token available');
                 handleSignoutClick();
                 throw new Error("User not signed in or token expired.");
             }
 
             let url = BRAIN_URL;
+            console.log('Backend URL:', url);
+
             const options = {
                 method: method,
-                redirect: 'follow',  // IMPORTANT: Must include this
+                redirect: 'follow',
             };
 
-            // Add context parameters needed by Apps Script
+            // Add context parameters
             payload.logsSpreadsheetId = LOGS_SPREADSHEET_ID;
-            if (!('courseName' in payload)) { // Check if courseName is not already set
+            if (!('courseName' in payload)) {
                 payload.courseName = currentCourse || '';
             }
             payload.access_token = token;
+
+            console.log('Request payload:', {
+                action: action,
+                courseName: payload.courseName,
+                logsSpreadsheetId: payload.logsSpreadsheetId,
+                hasToken: !!payload.access_token,
+                method: method
+            });
 
             if (method === 'GET') {
                 const params = new URLSearchParams(payload);
                 params.append('action', action);
                 url += '?' + params.toString();
+                console.log('Full GET URL:', url.substring(0, 150) + '...');
             } else { // POST
                 options.headers = {
                     'Content-Type': 'text/plain;charset=utf-8'
                 };
                 payload.action = action;
                 options.body = JSON.stringify(payload);
+                console.log('POST body length:', options.body.length);
             }
 
             try {
+                console.log('Fetching...');
                 const response = await fetch(url, options);
+                console.log('Response status:', response.status, response.statusText);
+                console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
+                console.log('Response data:', data);
 
                 if (data && data.result === 'error') {
                     throw new Error(data.message || 'Script execution failed.');
                 }
+
+                console.log(`✓ callWebApp success: ${action}`);
                 return data;
 
             } catch (error) {
-                console.error(`Error calling Web App action "${action}" via fetch:`, error);
+                console.error(`✗ callWebApp failed: ${action}`, error);
+                console.error('Fetch error details:', {
+                    message: error.message,
+                    name: error.name,
+                    url: url.substring(0, 100) + '...'
+                });
                 throw error;
             }
         }
