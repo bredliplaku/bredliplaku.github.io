@@ -3541,7 +3541,7 @@
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
         const TOMBSTONES_STORAGE_KEY = 'attendance_deleted_ids';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwkMRbS0okAfDNM6k1ADfRYpQqpx6_oOzS7SvXHNrQ-IL4oig3Dc9KLEdcenV01tlywGg/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyeK2qq_fMHthavRL6o0jaaHDlSG6ZJXIwDYL9XLBuq5Taeyr527mpSJ5IBoDkjVJawTg/exec';
 
         // Discovery docs and scopes for Google API
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
@@ -8534,69 +8534,14 @@
          * @returns {Promise} A promise that resolves when course info is fetched
          */
         async function fetchCourseInfo() {
-            if (!isOnline || !isSignedIn) {
-                return;
-            }
-
             try {
-                // Check if the COURSE_INFO sheet exists
-                const spreadsheetResponse = await gapi.client.sheets.spreadsheets.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID
-                });
-
-                const sheets = spreadsheetResponse.result.sheets || [];
-                const hasInfoSheet = sheets.some(sheet => sheet.properties.title === 'COURSE_INFO');
-
-                if (!hasInfoSheet) {
-                    console.log("No COURSE_INFO sheet found");
-                    return;
+                const result = await callWebApp('getCourseInfo', {}, 'GET');
+                if (result) {
+                    courseInfoMap = result;
+                    console.log('Course info loaded:', courseInfoMap);
                 }
-
-                // Fetch the course info data
-                const response = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: 'COURSE_INFO!A2:I'
-                });
-
-                const rows = response.result.values || [];
-                if (rows.length === 0) {
-                    console.log("No course info data found");
-                    return;
-                }
-
-                // Initialize global courseInfoMap if it doesn't exist
-                if (!window.courseInfoMap) {
-                    window.courseInfoMap = {};
-                }
-
-                // Process the course info data
-                // Columns: A=Course, B=Start Date, C=End Date, D=Holiday Weeks, E=Default Hours, F=Default Category, G=EIS ID
-                rows.forEach(row => {
-                    if (row.length < 4) return;
-                    const course = row[0];
-                    if (!course) return;
-
-                    window.courseInfoMap[course] = {
-                        start_date: row[1] || "",      // Column B
-                        end_date: row[2] || "",      // Column C
-                        holiday_weeks: row[3] || "0",     // Column D
-                        holiday_start_date: row[4] || "",      // Column E (The new column)
-                        default_hours: row[5] || "2",     // Column F (Index changed from 4 to 5)
-                        default_category: row[6] || "theory",// Column G (Index changed from 5 to 6)
-                        eis_id: row[7] || "",      // Column H (Index changed from 6 to 7)
-                        default_section: row[8] || "ALL"    // Column I (Index changed from 7 to 8)
-                    };
-
-                    // If EIS ID is provided, update the courseIDMap (also needs the index fix)
-                    if (row[7]) { // Use the correct index 7 for eis_id
-                        if (!courseIDMap) courseIDMap = {};
-                        courseIDMap[course] = row[7];
-                    }
-                });
-
-                console.log("Course info loaded successfully:", window.courseInfoMap);
-            } catch (error) {
-                console.error("Error fetching course info:", error);
+            } catch (e) {
+                console.error('Error fetching course info:', e);
             }
         }
 
