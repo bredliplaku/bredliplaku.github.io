@@ -6272,27 +6272,25 @@
 
         /**
          * Handle auth button click to sign in.
-         * This version uses a full-page redirect, which is more reliable than a popup.
          */
         function handleAuthClick(e) {
             if (e) e.preventDefault();
 
-            // Save the current course hash so we can return to it after login
-            sessionStorage.setItem('redirect_hash', window.location.hash);
+            const loadingIndicator = document.getElementById('app-loading');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'flex';
+                loadingIndicator.classList.remove('hidden');
+                loadingIndicator.style.opacity = '1';
+            }
+            document.body.classList.add('is-loading');
 
-            // Get the exact current URL as the redirect URI
-            const redirectUri = window.location.origin + window.location.pathname;
-
-            // Create the Google OAuth URL
-            const scopes = encodeURIComponent('openid ' + SCOPES);
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-                `client_id=${CLIENT_ID}&` +
-                `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-                `response_type=token&` +
-                `scope=${scopes}`;
-
-            // Redirect the user to the Google sign-in page
-            window.location.href = authUrl;
+            if (tokenClient) {
+                // This will open the Google sign-in pop-up
+                tokenClient.requestAccessToken();
+            } else {
+                console.error("Auth client is not ready.");
+                showNotification('error', 'Auth Error', 'Authentication service is not ready. Please try again in a moment.');
+            }
         }
 
         /**
@@ -7644,79 +7642,22 @@
 
 
         /**
-                 * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
-                 */
+         * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
+         * This function now forces ALL ADMINS to use the backend API.
+         */
         async function syncLogsWithSheet() {
             // Basic conditions check
             if (!currentCourse || !isOnline || !isSignedIn) {
                 return;
             }
 
-            // CRITICAL: Non-global admins sync via backend API
-            if (isAdmin && !isGlobalAdmin) {
-                // This call is correct and already handles its own logic.
+            // This is the fix. We no longer check if the user is Global Admin.
+            // If the user is any kind of admin, they must use the backend.
+            if (isAdmin) {
                 return syncViaBackendAPI();
             }
 
-            // From here on, only GLOBAL ADMINS execute
-            if (!isGlobalAdmin || !courseData[currentCourse]) {
-                return;
-            }
-
-            const currentData = courseData[currentCourse];
-
-            try {
-                // --- A) Sync Tombstones UP to the server ---
-                // We must do this *before* syncing logs
-                if (currentData.tombstones.size > 0) {
-                    const serverTombs = await fetchTombstonesForCourse(currentCourse);
-                    const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
-
-                    if (newTombsToAppend.length > 0) {
-                        const tombstoneRows = newTombsToAppend.map(id => [currentCourse, id, new Date().toISOString()]);
-                        await gapi.client.sheets.spreadsheets.values.append({
-                            spreadsheetId: LOGS_SPREADSHEET_ID,
-                            range: 'DELETED_LOG_IDS!A:C',
-                            valueInputOption: 'USER_ENTERED',
-                            insertDataOption: 'INSERT_ROWS',
-                            resource: { values: tombstoneRows }
-                        });
-                        console.log(`Pushed ${newTombsToAppend.length} new tombstones to server.`);
-                    }
-                }
-
-                // --- B) Sync Merged Logs UP to the server ---
-                const sheetData = currentData.logs.map(toSheetRow);
-                const sheetName = getSheetNameForCourse(currentCourse);
-                const formattedSheetName = formatSheetName(sheetName);
-                const fullRange = `${formattedSheetName}!A2:G`;
-
-                // Clear the sheet
-                await gapi.client.sheets.spreadsheets.values.clear({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: fullRange
-                });
-
-                // Write the new data
-                if (sheetData.length > 0) {
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: fullRange,
-                        valueInputOption: 'USER_ENTERED',
-                        resource: { values: sheetData }
-                    });
-                }
-
-                console.log(`Synced ${sheetData.length} logs to ${sheetName}.`);
-
-                // Clear local tombstones *only after* a successful sync
-                currentData.tombstones.clear();
-                saveCourseToLocalStorage(currentCourse);
-
-            } catch (error) {
-                console.error('Error during global admin sync:', error);
-                throw error; // Let the caller handle the UI notification.
-            }
+            // Non-admins (students) do nothing.
         }
 
         async function syncViaBackendAPI(courseName) {
