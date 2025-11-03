@@ -3559,7 +3559,7 @@
         let currentCourse = ''; // Currently selected course
         let availableCourses = []; // Will be populated from spreadsheet
         let isOnline = navigator.onLine;
-        let syncLock = null; // Will hold the Promise when sync is running
+        let syncLock = null;
         let isInitializing = true;
         let isChangingCourses = false;
         let pendingNotifications = [];
@@ -3679,19 +3679,13 @@
    * Acquires the sync lock. Returns a function to release it.
    */
         async function acquireSyncLock() {
-            // Wait for any existing sync to complete, WITH TIMEOUT
+            // Wait for any existing sync to complete
             if (syncLock) {
                 console.log('Waiting for existing sync to complete...');
                 try {
-                    await Promise.race([
-                        syncLock,
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Sync lock timeout')), 10000)
-                        )
-                    ]);
+                    await syncLock;
                 } catch (e) {
-                    console.log('Previous sync timed out or failed, clearing lock...');
-                    syncLock = null;
+                    console.log('Previous sync failed, continuing...');
                 }
             }
 
@@ -3699,7 +3693,7 @@
             let releaseLock;
             syncLock = new Promise((resolve) => {
                 releaseLock = () => {
-                    syncLock = null;
+                    syncLock = null; // Clear the lock
                     resolve();
                 };
             });
@@ -6325,8 +6319,7 @@
             document.body.classList.add('is-loading');
 
             if (tokenClient) {
-                // This will open the Google sign-in pop-up
-                tokenClient.requestAccessToken();
+                tokenClient.requestAccessToken({ prompt: 'select_account' });
             } else {
                 console.error("Auth client is not ready.");
                 showNotification('error', 'Auth Error', 'Authentication service is not ready. Please try again in a moment.');
@@ -6651,48 +6644,22 @@
             return todayStr;
         }
 
-        // REPLACEMENT FUNCTION
         function handleSignoutClick() {
-            if (isAdminForCourse(currentCourse)) {
-                // --- LECTURER MODE LOGIC ---
-                localStorage.removeItem('gapi_token');
-                isSignedIn = false;
-                isAdmin = false;
-                currentUser = null;
-
-                // Switch to scanner tab if currently on database tab
-                const databaseTab = document.querySelector('.tab[data-tab="database-tab"]');
-                const scannerTab = document.querySelector('.tab[data-tab="scanner-tab"]');
-                const databaseTabContent = document.getElementById('database-tab');
-                const scannerTabContent = document.getElementById('scanner-tab');
-                const courseButtons = document.getElementById('course-buttons-container');
-
-                // If on database tab, switch to scanner tab
-                if (databaseTabContent && databaseTabContent.classList.contains('active')) {
-                    // Hide database tab content
-                    databaseTabContent.classList.remove('active');
-                    // Show scanner tab content
-                    if (scannerTabContent) scannerTabContent.classList.add('active');
-
-                    // Update tab buttons
-                    if (databaseTab) databaseTab.classList.remove('active');
-                    if (scannerTab) scannerTab.classList.add('active');
-
-                    // Show course buttons since we're back on scanner tab
-                    if (courseButtons) courseButtons.style.display = 'flex';
-                }
-
-                // The current course and its data remain in memory for scanning.
-                updateAuthUI(); // Updates only the auth-related UI parts.
-                showNotification('info', 'Session Locked', `Scanning for '${currentCourse}' remains active.`);
-
-            } else {
-                // --- STANDARD STUDENT SIGN-OUT ---
-                // For students, the simplest and cleanest way to sign out is to clear the token and reload.
-                localStorage.removeItem('gapi_token');
-                localStorage.removeItem('last_active_course');
-                window.location.reload();
+            const token = gapi.client.getToken();
+            if (token) {
+                // This tells Google to invalidate the token
+                google.accounts.oauth2.revoke(token.access_token, () => {
+                    console.log('Token revoked.');
+                });
+                gapi.client.setToken(null);
             }
+
+            // Clear local storage
+            localStorage.removeItem('gapi_token');
+            localStorage.removeItem('last_active_course');
+
+            // Reload the page to force a fresh state
+            window.location.reload();
         }
 
         // Update sync status indicator
