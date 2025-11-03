@@ -3679,13 +3679,19 @@
    * Acquires the sync lock. Returns a function to release it.
    */
         async function acquireSyncLock() {
-            // Wait for any existing sync to complete
+            console.log('acquireSyncLock called, current syncLock:', syncLock);
+
+            // Wait for any existing sync to complete, WITH 5 SECOND TIMEOUT
             if (syncLock) {
                 console.log('Waiting for existing sync to complete...');
                 try {
-                    await syncLock;
+                    await Promise.race([
+                        syncLock,
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Sync lock timeout')), 5000))
+                    ]);
                 } catch (e) {
-                    console.log('Previous sync failed, continuing...');
+                    console.log('Previous sync timed out or failed:', e.message);
+                    syncLock = null;  // Force clear stuck lock
                 }
             }
 
@@ -3693,11 +3699,13 @@
             let releaseLock;
             syncLock = new Promise((resolve) => {
                 releaseLock = () => {
-                    syncLock = null; // Clear the lock
+                    console.log('Releasing sync lock');
+                    syncLock = null;
                     resolve();
                 };
             });
 
+            console.log('Sync lock acquired');
             return releaseLock;
         }
 
@@ -7205,6 +7213,8 @@
          * Fetches and updates both database and logs.
          */
         async function syncData(courseName) {
+            console.log('🔄 syncData CALLED with course:', courseName);  // ← ADD THIS LINE
+
             if (!courseName || !isOnline || !isSignedIn) {
                 if (courseName) console.warn(`Sync for ${courseName} skipped: not ready.`);
                 return;
