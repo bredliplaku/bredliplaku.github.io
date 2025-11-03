@@ -2205,6 +2205,7 @@
                 padding 0.5s ease-in-out;
             max-height: 1000px;
             opacity: 1;
+            overflow-y: auto;
         }
 
         #pending-registrations-view.is-hidden {
@@ -3685,7 +3686,7 @@
         }
 
         /**
-         * NEW: Finds and removes all data related to this app from localStorage.
+         * Finds and removes all data related to this app from localStorage.
          */
         function clearAllAppData() {
             const keysToRemove = [];
@@ -3722,7 +3723,7 @@
         }
 
         /**
-         * NEW: Adds a +1 hour log to the latest entry for every student present on a given day.
+         * Adds a +1 hour log to the latest entry for every student present on a given day.
          * @param {string} dateStr - The date string in "DD-MM-YYYY" format.
          */
         function addPlusOneHourToDay(dateStr) {
@@ -3798,7 +3799,7 @@
             };
             newLog = touchLogForEdit(newLog, currentUser?.email);
 
-            // FIX: Add log to the correct course data array
+            // Add log to the correct course data array
             courseData[currentCourse].logs.unshift(newLog);
 
             saveAndMarkChanges(currentCourse);
@@ -3869,7 +3870,7 @@
                         return;
                     }
 
-                    // UPDATED: Prevent non-global admins AND non-admins from accessing database tab
+                    // Prevent non-global admins AND non-admins from accessing database tab
                     if (tabId === 'database-tab' && !isGlobalAdmin) {
                         return; // Only global admins can access database tab
                     }
@@ -5205,7 +5206,7 @@
         }
 
         /**
-         * REFACTORED: Saves the data for a single, specified course to local storage.
+         * Saves the data for a single, specified course to local storage.
          * @param {string} courseName - The name of the course to save.
          */
         function saveCourseToLocalStorage(courseName) {
@@ -5283,7 +5284,7 @@
 
                     updateAuthUI();
 
-                    // NEW: Check for pending changes on login
+                    // Check for pending changes on login
                     if (isAdmin) {
                         const lastSaveTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`) || '0');
                         const lastSyncTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`) || '0');
@@ -5481,7 +5482,7 @@
         }
 
         /**
- * NEW: Show registration dialog with pre-filled UID
+ * Show registration dialog with pre-filled UID
  * Used when scanning unknown UID
  */
         function showRegisterUIDDialogWithPrefill(prefillUid) {
@@ -5850,7 +5851,7 @@
                         timestampCell.style.fontSize = '0.9em';
                         row.appendChild(timestampCell);
 
-                        // NEW: Sent By
+                        // Sent By
                         const sentByCell = document.createElement('td');
                         sentByCell.textContent = reg.sentBy || 'Unknown';
                         sentByCell.style.fontSize = '0.9em';
@@ -7102,7 +7103,7 @@
         }
 
         /**
-         * NEW: Background loads remaining logs for a Course Admin
+         * Background loads remaining logs for a Course Admin
          */
         async function loadRemainingCourseAdminLogs() {
             const remainingCourses = availableCourses.filter(c => c !== currentCourse);
@@ -7121,7 +7122,7 @@
         }
 
         /**
-         * NEW: Background loads remaining logs for a Student
+         * Background loads remaining logs for a Student
          */
         async function loadRemainingStudentLogs() {
             const remainingCourses = availableCourses.filter(c => c !== currentCourse);
@@ -7140,7 +7141,7 @@
         }
 
         /**
-         * NEW: Loads data for a single course from local storage.
+         * Loads data for a single course from local storage.
          * @param {string} courseName - The name of the course to load.
          * @returns {Promise<{logs: Array, tombstones: Set}>}
          */
@@ -7811,7 +7812,7 @@
                     uid: String(uid || ''),
                     timestamp: tsISO ? Date.parse(tsISO) : 0,
                     id,
-                    // FIX: Robustly check for boolean TRUE or string 'true'
+                    // Robustly check for boolean TRUE or string 'true'
                     manual: manual === true || manual === 'true' || manual === 'TRUE',
                     version: version != null ? Number(version) : 0,
                     updatedAt: updISO ? Date.parse(updISO) : 0,
@@ -7845,7 +7846,7 @@
                 log.uid || '',
                 new Date(Number(log.timestamp || Date.now())).toISOString(),
                 log.id,
-                // FIX: Write an explicit string for 100% reliability with Google Sheets.
+                // Write an explicit string for 100% reliability with Google Sheets.
                 log.manual ? 'TRUE' : 'FALSE',
                 Number(log.version || 0),
                 new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
@@ -7893,7 +7894,6 @@
             serverLogs = Array.isArray(serverLogs) ? serverLogs : [];
             localLogs = Array.isArray(localLogs) ? localLogs : [];
 
-            // --- THIS IS THE FIX ---
             // We create the 'deleted' set by combining the two tombstone sets from the function signature.
             const deleted = new Set([...localTombstones, ...serverTombstones]);
 
@@ -7933,7 +7933,7 @@
         }
 
         /**
- * NEW: Centralized function to save course data and flag it for auto-sync.
+ * Centralized function to save course data and flag it for auto-sync.
  */
         function saveAndMarkChanges(courseName) {
             saveCourseToLocalStorage(courseName);
@@ -8068,17 +8068,20 @@
      * ONLY callable by admins.
      */
         async function syncDatabaseToSheet() {
-            // Add checks for admin status, online status, and current course context
-            if (!isAdmin || !isOnline || !currentCourse) {
+            // Add checks for admin status, online status
+            if (!isGlobalAdmin || !isOnline) { // Only global admins can sync the whole DB
+                console.warn("Skipping DB sync: not a global admin or offline.");
                 return;
             }
 
             try {
                 // Call the Web App using POST, parameters go in payload
+                // databaseMap is the global variable holding the frontend state
                 const resultData = await callWebApp('syncDatabase_Admin', { databaseData: databaseMap }, 'POST');
-                // No need for resp.result..., callWebApp returns the data directly
+
                 if (resultData && resultData.result === 'success') {
                     console.log(`Successfully synced ${resultData.count} database entries via script.`);
+                    invalidateDatabaseCache(); // Invalidate cache after successful push
                 } else {
                     throw new Error(resultData ? resultData.message : 'Unknown error during database sync.');
                 }
@@ -8086,7 +8089,7 @@
             } catch (error) {
                 console.error('Error syncing database via script:', error);
                 showNotification('error', 'Database Sync Error', `Failed to sync database: ${error.message}`);
-                // Rethrow the error if needed by calling functions
+                // Rethrow the error to be caught by the caller (e.g., completeAction)
                 throw error;
             }
         }
@@ -8197,10 +8200,8 @@
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
-            // --- START: NEW LOGIC ---
             // State tracker for the NFC scan session
             let activeNfcSession = { controller: null, button: null };
-            // --- END: NEW LOGIC ---
 
             dialog.innerHTML = `
         <h3 class="dialog-title">Add New Student</h3>
@@ -8226,10 +8227,8 @@
             document.body.appendChild(dialogBackdrop);
 
             const close = () => {
-                // --- START: NEW LOGIC ---
                 // Ensure any active scan is stopped when the dialog closes
                 if (activeNfcSession.controller) activeNfcSession.controller.abort();
-                // --- END: NEW LOGIC ---
                 if (document.body.contains(dialogBackdrop)) {
                     document.body.removeChild(dialogBackdrop);
                 }
@@ -8241,7 +8240,6 @@
             const scanBtn = dialog.querySelector('.scan-uid-btn');
 
             if (scanBtn) {
-                // --- START: NEW ADVANCED NFC LOGIC ---
                 scanBtn.addEventListener('click', () => {
                     // Check if the clicked button is already the active one
                     if (activeNfcSession.button === scanBtn) {
@@ -8263,17 +8261,17 @@
                         activeNfcSession = { controller, button: scanBtn };
                     }
                 });
-                // --- END: NEW ADVANCED NFC LOGIC ---
             }
 
             document.getElementById('cancel-add-btn').addEventListener('click', close);
 
+            // --- REPLACED Event Listener ---
             document.getElementById('confirm-add-btn').addEventListener('click', async () => {
                 const nameInput = document.getElementById('add-name');
                 const emailInput = document.getElementById('add-email');
                 const uidInput = document.getElementById('add-uid');
 
-                // --- Validation (no changes) ---
+                // --- Validation ---
                 clearInputError(nameInput);
                 clearInputError(emailInput);
                 clearInputError(uidInput);
@@ -8287,35 +8285,68 @@
                 if (!isValid) return;
                 // --- End Validation ---
 
-                // This function will be called to finalize any change
-                const completeAction = async () => {
-                    if (isOnline) {
-                        await syncDatabaseToSheet(); // Push changes
-                        invalidateDatabaseCache();  // Dump local cache
-                        await fetchDatabaseFromSheet(); // Pull fresh data
+                const submissionData = {
+                    name: name,
+                    email: email,
+                    uid: uid,
+                    sentBy: {
+                        name: currentUser?.name || '',
+                        email: currentUser?.email || ''
                     }
-                    window.buildUIDToPrimaryUidMap(); // Rebuild map
-                    updateUI(); // Refresh UI
-                    close(); // Close the dialog
                 };
 
-                const match = findDuplicateInDatabase({ name, email, uid });
+                // Check for local duplicates first
+                const match = findDuplicateInDatabase(submissionData);
                 if (match) {
-                    // DUPLICATE FOUND: Show the warning dialog
-                    // We pass 'completeAction' as the callback
-                    showDuplicateWarningForNewEntry({ name, email, uid }, [match.duplicate], completeAction);
-                    close(); // Close the 'Add New Student' dialog
+                    // Duplicate found. Define the optimistic-UI callback for the warning dialog.
+                    const completeAction = () => {
+                        // This callback will be triggered by the warning dialog *after* it updates
+                        // the local databaseMap.
+                        window.buildUIDToPrimaryUidMap();
+                        updateUI(); // Refresh UI immediately
+
+                        // Now, sync the *entire* database in the background.
+                        if (isOnline) {
+                            // This now calls the NEW fast function
+                            syncDatabaseToSheet().catch(err => {
+                                console.error("Background sync failed:", err);
+                                showNotification('error', 'Sync Failed', 'Changes saved locally but failed to sync.');
+                            });
+                        }
+                    };
+
+                    showDuplicateWarningForNewEntry(submissionData, [match.duplicate], completeAction);
+                    close(); // Close the current 'Add' dialog
                     return;
                 }
 
-                // NO DUPLICATE: Add to local map first
-                const existingKeys = Object.keys(databaseMap).map(Number);
-                const newDbKey = existingKeys.length > 0 ? Math.max(...existingKeys) + 1 : 1;
-                databaseMap[newDbKey] = { name, email, uids: [uid] };
-                showNotification('success', 'Entry Added', `Added ${name} to the database.`);
+                // NO DUPLICATE: Use the fast backend call `addEntryToDatabase_Admin`
+                const confirmBtn = document.getElementById('confirm-add-btn');
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Adding...';
 
-                // Finalize by pushing/pulling
-                await completeAction();
+                try {
+                    const result = await callWebApp('addEntryToDatabase_Admin', submissionData, 'POST');
+
+                    if (result && result.result === 'success') {
+                        showNotification('success', 'Added to Database', `${name} has been added.`);
+
+                        // The entry was added on the backend. Invalidate our local cache
+                        // and re-fetch the *entire* database to get the new entry with its proper key.
+                        invalidateDatabaseCache();
+                        await fetchDatabaseFromSheet(); // This is the fast backend call 'getDatabase'
+
+                        window.buildUIDToPrimaryUidMap();
+                        updateUI(); // Re-render everything with the new data
+                        close(); // 
+                    } else {
+                        throw new Error(result?.message || 'Failed to add entry');
+                    }
+                } catch (error) {
+                    showNotification('error', 'Submission Failed', error.message);
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = 'Add Student';
+                }
             });
         }
 
@@ -8933,10 +8964,10 @@
                 const timeObj = new Date(log.timestamp);
                 const formattedTime = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
 
-                // --- START FIX ---
+
                 // Check if the log is manual and add the class if it is.
                 const manualClass = (log.manual === true || log.manual === 'true') ? 'manual-timestamp-input' : '';
-                // --- END FIX ---
+
 
                 timestampFields += `
 <div class="timestamp-edit-group" data-log-id="${log.id}">
@@ -9095,14 +9126,12 @@
                         const newTimestampObj = new Date(year, month - 1, day, hours, minutes, 0);
                         log.timestamp = newTimestampObj.getTime();
 
-                        // --- FIX STARTS HERE ---
                         // Check if the input field had the manual class and update the log data
                         if (timeInput.classList.contains('manual-timestamp-input')) {
                             log.manual = true;
                         } else {
                             log.manual = false;
                         }
-                        // --- FIX ENDS HERE ---
 
                         touchLogForEdit(log, currentUser?.email);
                     }
@@ -9151,7 +9180,7 @@
         function confirmDeleteLog(group) {
             if (!isAdmin) return;
 
-            // FIX: This line was missing.
+            // This line was missing.
             const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
 
             if (group.originalLogs.length > 1) {
@@ -9181,7 +9210,7 @@
         }
 
         /**
-         * REFACTORED: Clear logs for the currently selected course.
+         * Clear logs for the currently selected course.
          */
         function clearLogs() {
             if (!isAdmin || !currentCourse || !courseData[currentCourse]) return;
@@ -9417,7 +9446,7 @@
                 let newCount = 0;
                 importedLogs.forEach(log => {
                     if (!existingIds.has(log.id)) {
-                        // FIX: Push to the correct course's log array.
+                        // Push to the correct course's log array.
                         logsForCurrentCourse.push(log);
                         newCount++;
                     }
@@ -9437,7 +9466,7 @@
 
             // Replace option
             document.getElementById('replace-logs-btn').addEventListener('click', () => {
-                // FIX: Replace the logs for the current course only.
+                // Replace the logs for the current course only.
                 courseData[currentCourse].logs = [...importedLogs].sort((a, b) => b.timestamp - a.timestamp);
                 saveCourseToLocalStorage(currentCourse);
 
@@ -9697,7 +9726,7 @@
                         addUserBtn.setAttribute('aria-label', `Register student with UID ${group.uid}`);
                         addUserBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
 
-                        // NEW: Open registration dialog instead of direct database add
+                        // Open registration dialog instead of direct database add
                         addUserBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
                             showRegisterUIDDialogWithPrefill(group.uid);
@@ -9730,7 +9759,7 @@
         }
 
         /**
-         * NEW: Loads data for all non-active courses in the background.
+         * Loads data for all non-active courses in the background.
          */
         async function loadRemainingCoursesInBackground() {
             if (!isAdmin) return;
@@ -10007,7 +10036,7 @@
             updateDatabaseStatus();
             updatePageTitle();
 
-            // --- START FIX ---
+
             // This logic ensures the course buttons are correctly hidden when on the database tab.
             const activeTabId = document.querySelector('.tab.active')?.dataset.tab;
             const courseButtonsContainer = document.getElementById('course-buttons-container');
