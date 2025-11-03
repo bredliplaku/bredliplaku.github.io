@@ -3679,13 +3679,19 @@
    * Acquires the sync lock. Returns a function to release it.
    */
         async function acquireSyncLock() {
-            // Wait for any existing sync to complete
+            // Wait for any existing sync to complete, WITH TIMEOUT
             if (syncLock) {
                 console.log('Waiting for existing sync to complete...');
                 try {
-                    await syncLock;
+                    await Promise.race([
+                        syncLock,
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Sync lock timeout')), 10000)
+                        )
+                    ]);
                 } catch (e) {
-                    console.log('Previous sync failed, continuing...');
+                    console.log('Previous sync timed out or failed, clearing lock...');
+                    syncLock = null;
                 }
             }
 
@@ -3693,7 +3699,7 @@
             let releaseLock;
             syncLock = new Promise((resolve) => {
                 releaseLock = () => {
-                    syncLock = null; // Clear the lock
+                    syncLock = null;
                     resolve();
                 };
             });
