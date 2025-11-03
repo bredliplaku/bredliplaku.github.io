@@ -3539,7 +3539,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyrDRIiMtAyRYe6K8kfaG3HkYvXDUW-mWM1qrUSqpbO9RehrFFclTclDHDW4vxFGTC23A/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwCCeQfpDeki41re6fcHI-GzrFdwH_LEyAROZPWQjh7ZLiTQsq1SLoO7jKlIbzR6pJW8w/exec';
 
         // App state
         let courseData = {};
@@ -4878,6 +4878,21 @@
             setupEnhancedSyncButton();
             setupAuthStateTracking();
 
+            // Override syncLogsWithSheet to track sync status
+            const originalSyncLogs = syncLogsWithSheet;
+            syncLogsWithSheet = async function () {
+                try {
+                    await originalSyncLogs.call(this);
+
+                    // On successful sync, update the last sync time in localStorage
+                    localStorage.setItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`, Date.now().toString());
+                    pendingChanges = false;
+
+                    return true;
+                } catch (error) {
+                    throw error;
+                }
+            };
         }
 
         function processPendingNotifications() {
@@ -4932,14 +4947,18 @@
                     return false;
                 }
 
+                // Set the token for gapi, which callWebApp will use
                 gapi.client.setToken(tokenObj);
 
-                await gapi.client.request({
-                    path: 'https://www.googleapis.com/oauth2/v3/userinfo'
-                });
+                // Ping the backend to validate the token
+                // callWebApp automatically includes the token
+                await callWebApp('ping', {}, 'GET');
 
+                // If the ping succeeds, the token is valid
                 return true;
             } catch (error) {
+                // If ping fails (e.g., auth error), the token is bad
+                console.warn('Token restore failed:', error.message);
                 localStorage.removeItem('gapi_token');
                 return false;
             }
@@ -5114,22 +5133,9 @@
 
                         // 7. Load logs for the *first* course
                         if (currentCourse) {
-                            if (isGlobalAdmin || isAdmin) {
-                                // CONSOLIDATED ADMIN LOGIC
-                                let serverLogs, serverTombs;
-
-                                if (isGlobalAdmin) {
-                                    // Global admin uses the original call
-                                    const result = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
-                                    serverLogs = result.logs;
-                                    serverTombs = new Set(result.tombstones);
-                                } else {
-                                    // Non-global admin uses the other call, but now we correctly destructure the object
-                                    const result = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
-                                    serverLogs = result.logs;
-                                    serverTombs = new Set(result.tombstones);
-                                }
-
+                            if (isGlobalAdmin) {
+                                // Call backend for logs AND tombstones
+                                const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: currentCourse }, 'GET');
                                 const localData = await loadCourseFromLocalStorage(currentCourse);
                                 const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
                                 const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
@@ -5138,11 +5144,14 @@
                                 saveCourseToLocalStorage(currentCourse);
 
                                 // Load remaining in background
-                                if (isGlobalAdmin) {
-                                    setTimeout(loadRemainingCoursesInBackground, 1000);
-                                } else {
-                                    setTimeout(loadRemainingCourseAdminLogs, 1000);
-                                }
+                                setTimeout(loadRemainingCoursesInBackground, 1000);
+
+                            } else if (isAdmin) {
+                                // This logic stays the same
+                                const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
+                                studentLogCache[currentCourse] = serverLogs;
+                                courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
+                                setTimeout(loadRemainingCourseAdminLogs, 1000);
 
                             } else {
                                 // This logic stays the same
@@ -6202,25 +6211,9 @@
 
             // Add context parameters needed by Apps Script
             payload.logsSpreadsheetId = LOGS_SPREADSHEET_ID;
-
-            // Only add courseName if this action actually needs it
-            const actionsNeedingCourse = [
-                'getCourseLogs_Admin',
-                'getCourseLogs_Admin',
-                'getStudentLogs',
-                'syncCourseLogs_Admin',
-                'appendLog_Admin',
-                'getPendingRegistrations',
-                'approveRegistration',
-                'rejectRegistration'
-            ];
-
-            if (actionsNeedingCourse.includes(action)) {
-                if (!('courseName' in payload)) {
-                    payload.courseName = currentCourse || '';
-                }
+            if (!('courseName' in payload)) { // Check if courseName is not already set
+                payload.courseName = currentCourse || '';
             }
-
             payload.access_token = token;
 
             if (method === 'GET') {
@@ -7010,7 +7003,7 @@
                 try {
                     // Now, fetch the data for this specific course
                     if (isGlobalAdmin) {
-                        const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
+                        const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
                         const localData = await loadCourseFromLocalStorage(courseName);
                         const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombs);
                         const allTombstones = new Set([...localData.tombstones, ...serverTombs]);
@@ -7118,19 +7111,12 @@
                         // If successful, update last check time
                         lastAuthCheck = Date.now();
                     } catch (error) {
-                        // Check if this is an auth error.
-                        // "Failed to fetch" is the new error from a 302 redirect (expired session).
-                        if (error.message.includes('Failed to fetch') ||
-                            error.message.includes('Authorization failed') ||
-                            error.message.includes('Token error')) {
-
-                            console.warn('Authentication session expired or failed. Signing out.');
+                        // Check if this is an auth error (based on our backend's error)
+                        if (error.message.includes('Authorization failed') || error.message.includes('Token error')) {
+                            console.warn('Authentication token expired. Signing out.');
                             // Just sign the user out. This clears the token and updates the UI.
                             handleSignoutClick();
                             showNotification('warning', 'Session Expired', 'Please sign in again to continue.');
-                        } else {
-                            // Log other unexpected errors
-                            console.error('Auth state check error:', error);
                         }
                     }
                 }
@@ -7264,7 +7250,7 @@
 
                         if (isGlobalAdmin) {
                             // Call backend for logs AND tombstones
-                            const { logs, tombstones } = await callWebApp('getCourseLogs_Admin', { courseName: syncCourseName }, 'GET');
+                            const { logs, tombstones } = await callWebApp('getCourseData_Admin', { courseName: syncCourseName }, 'GET');
                             serverLogs = logs;
                             serverTombstones = new Set(tombstones); // Ensure it's a Set
                         } else if (isAdmin) {
@@ -7625,97 +7611,28 @@
             }
         }
 
-
         /**
-         * Syncs the logs for the CURRENTLY SELECTED course with its Google Sheet.
-         * This function is for GLOBAL ADMINS ONLY.
+         * Syncs logs (and tombstones for global admins) via the backend.
          */
-        async function syncLogsWithSheet(courseName) { // <-- 1. IT NOW ACCEPTS THE courseName
+        async function syncLogsWithSheet(courseName) {
             // Basic conditions check
-            if (!courseName || !isOnline || !isSignedIn) { // <-- 2. IT USES courseName HERE
-                console.warn(`Global admin sync for ${courseName} skipped: not ready.`);
+            if (!courseName || !isOnline || !isSignedIn || !isAdmin) {
                 return;
             }
 
-            // CRITICAL: Non-global admins sync via backend API
-            if (isAdmin && !isGlobalAdmin) {
-                return syncViaBackendAPI(courseName); // <-- 3. IT PASSES courseName HERE
-            }
-
-            // From here on, only GLOBAL ADMINS execute
-            if (!isGlobalAdmin || !courseData[courseName]) { // <-- 4. IT USES courseName HERE
-                console.warn(`Global admin sync for ${courseName} skipped: no data.`);
-                return;
-            }
-
-            const currentData = courseData[courseName]; // <-- 5. IT USES courseName HERE
-
+            // The backend's syncCourseLogs_Admin will handle both
+            // global and non-global admins correctly.
             try {
-                // --- A) Sync Tombstones UP to the server ---
-                if (currentData.tombstones.size > 0) {
-                    const serverTombs = await fetchTombstonesForCourse(courseName); // <-- 6. IT USES courseName HERE
-                    const newTombsToAppend = [...currentData.tombstones].filter(id => !serverTombs.has(id));
+                await syncViaBackendAPI(courseName); // This is the single point of truth now
 
-                    if (newTombsToAppend.length > 0) {
-                        const tombstoneRows = newTombsToAppend.map(id => [courseName, id, new Date().toISOString()]); // <-- 7. IT USES courseName HERE
-                        await gapi.client.sheets.spreadsheets.values.append({
-                            spreadsheetId: LOGS_SPREADSHEET_ID,
-                            range: 'DELETED_LOG_IDS!A:C',
-                            valueInputOption: 'USER_ENTERED',
-                            insertDataOption: 'INSERT_ROWS',
-                            resource: { values: tombstoneRows }
-                        });
-                        console.log(`Pushed ${newTombsToAppend.length} new tombstones to server.`);
-                    }
+                // Clear local tombstones *after* a successful sync
+                if (courseData[courseName]) {
+                    courseData[courseName].tombstones.clear();
                 }
-
-                // --- B) Sync Merged Logs UP to the server ---
-                const sheetData = currentData.logs.map(log => {
-                    return [
-                        log.uid || '',
-                        new Date(Number(log.timestamp || Date.now())).toISOString(),
-                        log.id,
-                        log.manual ? 'TRUE' : 'FALSE',
-                        Number(log.version || 0),
-                        new Date(Number(log.updatedAt || log.timestamp || Date.now())).toISOString(),
-                        String(log.updatedBy || '')
-                    ];
-                });
-
-                const sheetName = getSheetNameForCourse(courseName); // <-- 8. IT USES courseName HERE
-                const formattedSheetName = formatSheetName(sheetName);
-                const fullRange = `${formattedSheetName}!A2:G`;
-
-                // Clear the sheet
-                await gapi.client.sheets.spreadsheets.values.clear({
-                    spreadsheetId: LOGS_SPREADSHEET_ID,
-                    range: fullRange
-                });
-
-                // Write the new data
-                if (sheetData.length > 0) {
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: LOGS_SPREADSHEET_ID,
-                        range: fullRange,
-                        valueInputOption: 'USER_ENTERED',
-                        resource: { values: sheetData }
-                    });
-                }
-
-                console.log(`Synced ${sheetData.length} logs to ${sheetName}.`);
-
-                // --- C) THIS IS THE LOGIC THAT WAS IN THE BROKEN OVERRIDE ---
-                // It now runs here, correctly, *after* a successful sync.
-                localStorage.setItem(`${LOGS_STORAGE_KEY}_${courseName}_last_sync`, Date.now().toString());
-                pendingChanges = false;
-                // --- END NEW LOGIC ---
-
-                // Clear local tombstones *only after* a successful sync
-                currentData.tombstones.clear();
-                saveCourseToLocalStorage(courseName); // <-- 9. IT USES courseName HERE
+                saveCourseToLocalStorage(courseName);
 
             } catch (error) {
-                console.error('Error during global admin sync:', error);
+                console.error('Error during syncLogsWithSheet wrapper:', error);
                 throw error; // Let the caller handle the UI notification.
             }
         }
@@ -7723,19 +7640,17 @@
         async function syncViaBackendAPI(courseName) {
             try {
                 const logsToSync = courseData[courseName]?.logs || [];
-                const tombstonesToSync = Array.from(courseData[courseName]?.tombstones || []);
 
-                // Only stop if there's nothing to add AND nothing to delete.
-                if (logsToSync.length === 0 && tombstonesToSync.length === 0) {
-                    console.log('No logs or tombstones to sync.');
-                    return; // Now this is correct.
+                if (logsToSync.length === 0) {
+                    console.log('No logs to sync');
+                    return;
                 }
 
                 // Call backend to sync logs AND tombstones
                 const result = await callWebApp('syncCourseLogs_Admin', {
                     courseName: courseName,
                     logs: logsToSync,
-                    tombstones: tombstonesToSync // Pass the array we already made
+                    tombstones: Array.from(courseData[courseName]?.tombstones || [])  // ✅ CORRECT!
                 }, 'POST');
 
                 if (result && result.result === 'success') {
@@ -9344,7 +9259,7 @@
 
             const remainingCoursePromises = remainingCourses.map(async (courseName) => {
                 try {
-                    const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseLogs_Admin', { courseName: courseName }, 'GET');
+                    const { logs: serverLogs, tombstones: serverTombs } = await callWebApp('getCourseData_Admin', { courseName: courseName }, 'GET');
                     const localData = await loadCourseFromLocalStorage(courseName);
 
                     // Combine all known tombstones (from local storage and the server).
