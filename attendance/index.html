@@ -7574,35 +7574,32 @@
                         } else if (isAdmin) {
                             // Non-Global Admin: Fetch logs via Backend API
                             serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: currentCourse }, 'GET');
-                            // Non-global admins don't fetch server tombstones
+                            // Backend is source of truth - don't merge with stale local storage
+                            localData = { logs: [], tombstones: new Set() };
                         }
                         // Students don't PULL/PUSH logs during manual sync/refresh
                     } catch (pullError) {
                         console.error(`Initial log fetch failed for ${currentCourse}:`, pullError);
-                        throw new Error(`Could not fetch latest logs. ${pullError.message}`); // Stop sync if initial pull fails
+                        throw new Error(`Could not fetch latest logs. ${pullError.message}`);
                     }
 
                     // --- 3b: MERGE (If Admin) ---
                     let logsToPush = [];
-                    if (isAdmin) { // Only admins merge and push
+                    if (isAdmin) {
                         const combinedTombstones = new Set([...localData.tombstones, ...serverTombstones]);
-                        const mergedLogs = mergeLogs(serverLogs, localData.logs, combinedTombstones); // Use combined tombstones for merge
+                        const mergedLogs = mergeLogs(serverLogs, localData.logs, combinedTombstones);
 
-                        // Prepare the data to be pushed
                         logsToPush = mergedLogs;
 
-                        // Update local state temporarily with merged data before push
                         courseData[currentCourse] = {
                             logs: mergedLogs,
-                            // Global admins will sync local tombstones UP, Non-global clear them after push
                             tombstones: isGlobalAdmin ? localData.tombstones : new Set()
                         };
-                        // Don't save locally yet, wait for final pull
                     } else {
-                        // For students, just display the server logs (they don't merge/push)
-                        logsToPush = serverLogs; // This won't be pushed, just used for local update later
+                        // Students: Just use server logs directly, no merge needed
+                        logsToPush = serverLogs;
                         courseData[currentCourse] = { logs: serverLogs, tombstones: new Set() };
-                        saveCourseToLocalStorage(currentCourse); // Students save the pulled state
+                        saveCourseToLocalStorage(currentCourse);
                     }
 
 
