@@ -4209,7 +4209,9 @@
             }
 
             // Regular course access check (non-global admins and students)
-            if (!availableCourses.includes(hash) && !guestCourse) {
+            // We add a check to ensure this *only* runs for non-global admins
+            // or if the guestCourse logic hasn't already handled it.
+            if (!isGlobalAdmin && !availableCourses.includes(hash) && !guestCourse) {
                 console.warn('Access denied to course:', hash);
                 showNotification('error', 'Access Denied', 'You do not have access to this course.');
 
@@ -4840,37 +4842,26 @@
         function checkAuthRedirect() {
             if (window.location.hash && window.location.hash.includes('access_token=')) {
 
-                // 1. Get the original course hash we saved before leaving
                 const originalHash = sessionStorage.getItem('redirect_hash');
-                sessionStorage.removeItem('redirect_hash'); // Clean up immediately
+                sessionStorage.removeItem('redirect_hash');
 
-                // 2. Parse the authentication token from the URL
                 const params = {};
                 window.location.hash.substring(1).split('&').forEach(pair => {
                     const [key, value] = pair.split('=');
                     params[key] = decodeURIComponent(value);
                 });
 
-                // 3. Clean the URL, but restore the original course hash
+                // Clean the URL, but restore the original course hash
                 if (history.replaceState) {
-                    // Replace the URL with the base path plus the original hash
                     history.replaceState(null, null, window.location.pathname + (originalHash || ''));
                 } else {
-                    // Fallback for older browsers
                     window.location.hash = originalHash || '';
                 }
 
                 if (params.access_token) {
-                    const processToken = () => {
-                        if (typeof gapi !== 'undefined' && gapi.client) {
-                            gapi.client.setToken({ access_token: params.access_token });
-                            localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
-                            isSignedIn = true;
-                        } else {
-                            setTimeout(processToken, 100);
-                        }
-                    };
-                    processToken();
+                    // JUST save to localStorage. DO NOT try to init gapi.
+                    localStorage.setItem('gapi_token', JSON.stringify({ access_token: params.access_token }));
+                    // We saved the token. initGoogleApi will now find it on its own.
                 }
             }
         }
@@ -5141,20 +5132,10 @@
                 }
 
                 // 4. Process Available Courses from boot data
-                const fetchedCourseDict = bootData.courses;
+                const fetchedCourseDict = bootData.courses; // This IS the filtered map
                 if (fetchedCourseDict && typeof fetchedCourseDict === 'object') {
                     courseDictionary = fetchedCourseDict;
-                    let allCourses = Object.keys(courseDictionary);
-
-                    if (isAdmin) {
-                        if (adminCourses.includes('*')) {
-                            availableCourses = allCourses;
-                        } else {
-                            availableCourses = allCourses.filter(course => adminCourses.includes(course));
-                        }
-                    } else {
-                        availableCourses = allCourses;
-                    }
+                    availableCourses = Object.keys(courseDictionary);
 
                     const filteredDict = {};
                     availableCourses.forEach(course => {
@@ -5178,6 +5159,25 @@
                     }
                 }
 
+                // 5. Process Database (from boot data)
+                if (bootData.database) {
+                    databaseMap = bootData.database;
+                    databaseCache = bootData.database; // Pre-fill cache
+                    databaseCacheTime = Date.now();
+                    window.buildUIDToPrimaryUidMap();
+                    updateDatabaseStatus();
+                }
+
+                // 6. Process Course Info (from boot data)
+                if (bootData.courseInfo) {
+                    courseInfoMap = bootData.courseInfo;
+                    Object.entries(courseInfoMap).forEach(([courseName, metadata]) => {
+                        if (metadata && metadata.eis_id) {
+                            courseIDMap[courseName] = metadata.eis_id;
+                        }
+                    });
+                }
+
                 // --- PHASE 2: SHOW THE APP ---
                 // We have everything we need to draw the main screen
                 isInitializing = false;
@@ -5195,20 +5195,8 @@
                 // --- PHASE 3: BACKGROUND DATA LOADING ---
                 (async () => {
                     try {
-                        // 5. Load the database
-                        databaseLoadPromise = fetchDatabaseFromSheet().then(() => {
-                            window.buildUIDToPrimaryUidMap();
-                            updateDatabaseStatus();
-                        });
 
-                        // 6. Load course info
-                        if (isAdmin) {
-                            fetchCourseInfo().catch(err =>
-                                console.error('Background course info load failed:', err)
-                            );
-                        }
-
-                        // 7. Load logs for the *first* course (UNIFIED LOGIC)
+                        // 5. Load logs for the *first* course (UNIFIED LOGIC)
                         if (currentCourse) {
                             // This single 'if/else' block now handles all user types
                             if (isAdmin) { // Covers BOTH global and non-global admins
@@ -5227,7 +5215,6 @@
                             }
                         }
 
-                        // 7. Refresh the UI *again* with the new log data
                         updateUI(); // This will populate the log list for the first course
 
                         if (isAdmin) {
@@ -6539,7 +6526,6 @@
                 if (isAdmin) {
                     // --- ADMIN REFRESH (Full Sync) ---
                     await syncData(); // Admins run the full sync
-                    showNotification('success', 'Refresh Complete', 'Data synced with server.');
 
                 } else {
                     // --- STUDENT REFRESH (Course List + Current Logs) ---
@@ -6591,7 +6577,6 @@
 
                         // 4. Update the entire UI (including the log list)
                         updateUI();
-                        showNotification('success', 'Refresh Complete', 'Your courses and attendance are up to date.');
 
                     } else {
                         throw new Error("Could not fetch course list.");
@@ -8918,34 +8903,24 @@
                 // Case 1: Deleting just the latest timestamp
                 const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
 
-                if (isGlobalAdmin) {
-                    // Global admin: Use local tombstone system (already fast)
-                    addToTombstones(latestLog.id);
-                    courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
-                    saveAndMarkChanges(currentCourse);
-                    updateUI();
-                    showNotification('delete', 'Timestamp Deleted', 'Log removed.'); // ⬅️ Added notification
-                    if (isOnline && isSignedIn) syncLogsWithSheet();
-                } else {
-                    // 1. Optimistic UI Update: Remove the log locally first.
-                    courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
-                    updateUI(); // Update UI immediately (FAST!)
+                // 1. Optimistic UI Update: Remove the log locally first.
+                courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
+                updateUI(); // Update UI immediately (FAST!)
 
-                    // 2. Call backend in the background.
-                    deleteLogViaBackend(latestLog.id)
-                        .then(() => {
-                            // Success! Show notification.
-                            showNotification('delete', 'Timestamp Deleted', 'Log removed.');
-                        })
-                        .catch(err => {
-                            // 3. Handle Failure: Revert the change.
-                            console.error('Delete failed, reverting UI:', err);
-                            showNotification('error', 'Delete Failed', 'Could not delete log, restoring.');
-                            // Add the log back and refresh
-                            courseData[currentCourse].logs.unshift(latestLog);
-                            updateUI(); // Refresh UI again to show the restored log
-                        });
-                }
+                // 2. Call backend in the background.
+                deleteLogViaBackend(latestLog.id)
+                    .then(() => {
+                        // Success! Show notification.
+                        showNotification('delete', 'Timestamp Deleted', 'Log removed.');
+                    })
+                    .catch(err => {
+                        // 3. Handle Failure: Revert the change.
+                        console.error('Delete failed, reverting UI:', err);
+                        showNotification('error', 'Delete Failed', 'Could not delete log, restoring.');
+                        // Add the log back and refresh
+                        courseData[currentCourse].logs.unshift(latestLog);
+                        updateUI(); // Refresh UI again to show the restored log
+                    });
 
             } else if (group.originalLogs.length === 1) {
                 // Case 2: Deleting the last timestamp (show confirmation)
@@ -8958,34 +8933,23 @@
                         const idsToRemove = group.originalLogs.map(log => log.id);
                         const removedLogs = logsForCurrentCourse.filter(log => idsToRemove.includes(log.id)); // Store what we're removing
 
-                        if (isGlobalAdmin) {
-                            // Global admin: Use local tombstone system (already fast)
-                            idsToRemove.forEach(id => addToTombstones(id));
-                            courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
-                            saveAndMarkChanges(currentCourse);
-                            updateUI();
-                            showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
-                            if (isOnline && isSignedIn) syncLogsWithSheet();
-                        } else {
-                            // 1. Optimistic UI Update
-                            courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
-                            updateUI();
-                            showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
+                        // 1. Optimistic UI Update
+                        courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
+                        updateUI();
+                        showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
 
-                            // 2. Call backend in the background
-                            Promise.all(idsToRemove.map(id => deleteLogViaBackend(id)))
-                                .then(() => {
-                                    // Success!
-                                })
-                                .catch(err => {
-                                    // 3. Handle Failure: Revert
-                                    console.error('Bulk delete failed, reverting UI:', err);
-                                    showNotification('error', 'Delete Failed', 'Could not delete entry, restoring.');
-                                    courseData[currentCourse].logs.unshift(...removedLogs); // Add them back
-                                    updateUI();
-                                });
-
-                        }
+                        // 2. Call backend in the background
+                        Promise.all(idsToRemove.map(id => deleteLogViaBackend(id)))
+                            .then(() => {
+                                // Success!
+                            })
+                            .catch(err => {
+                                // 3. Handle Failure: Revert
+                                console.error('Bulk delete failed, reverting UI:', err);
+                                showNotification('error', 'Delete Failed', 'Could not delete entry, restoring.');
+                                courseData[currentCourse].logs.unshift(...removedLogs); // Add them back
+                                updateUI();
+                            });
                     }
                 });
             }
