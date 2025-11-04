@@ -3778,7 +3778,7 @@
          * @param {Object} group - The log group to add the time to.
          */
         /**
-         * CORRECTED: Adds a new log entry one hour after the latest existing entry.
+         * Adds a new log entry one hour after the latest existing entry.
          */
         function addPlusOneHourLog(group) {
             if (!isAdmin) return;
@@ -9102,12 +9102,21 @@
                     isDestructive: true,
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
-                        idsToRemove.forEach(id => addToTombstones(id));
-                        courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
-                        saveAndMarkChanges(currentCourse);
-                        updateUI();
-                        showNotification('delete', 'Entry Deleted', 'All timestamps were deleted.');
-                        if (isOnline && isSignedIn) syncLogsWithSheet();
+
+                        if (isGlobalAdmin) {
+                            idsToRemove.forEach(id => addToTombstones(id));
+                            courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
+                            saveAndMarkChanges(currentCourse);
+                            updateUI();
+                            showNotification('delete', 'Entry Deleted', 'All timestamps were deleted.');
+                            if (isOnline && isSignedIn) syncLogsWithSheet();
+                        } else {
+                            Promise.all(idsToRemove.map(id => deleteLogViaBackend(id))).then(() => {
+                                courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToRemove.includes(log.id));
+                                updateUI();
+                                showNotification('delete', 'Entry Deleted', 'All timestamps were deleted.');
+                            });
+                        }
                     }
                 });
             });
@@ -9194,21 +9203,32 @@
         }
 
         /**
-         * CORRECTED: Confirms deletion of the latest log or the entire group.
+         * Confirms deletion of the latest log or the entire group.
          */
         function confirmDeleteLog(group) {
             if (!isAdmin) return;
 
-            // This line was missing.
             const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
 
             if (group.originalLogs.length > 1) {
                 const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
-                addToTombstones(latestLog.id);
-                courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
-                saveAndMarkChanges(currentCourse);
-                updateUI();
-                if (isOnline && isSignedIn) syncLogsWithSheet();
+
+                if (isGlobalAdmin) {
+                    // Global admin: Use local tombstone system
+                    addToTombstones(latestLog.id);
+                    courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
+                    saveAndMarkChanges(currentCourse);
+                    updateUI();
+                    if (isOnline && isSignedIn) syncLogsWithSheet();
+                } else {
+                    // Non-global admin: Delete via backend with tombstone
+                    deleteLogViaBackend(latestLog.id).then(() => {
+                        // Remove from local state after backend confirms
+                        courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
+                        updateUI();
+                    });
+                }
+
             } else if (group.originalLogs.length === 1) {
                 showConfirmationDialog({
                     title: 'Delete all logs for this date?',
@@ -9217,14 +9237,48 @@
                     isDestructive: true,
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
-                        idsToRemove.forEach(id => addToTombstones(id));
-                        courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
-                        saveAndMarkChanges(currentCourse);
-                        updateUI();
-                        showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
-                        if (isOnline && isSignedIn) syncLogsWithSheet();
+
+                        if (isGlobalAdmin) {
+                            // Global admin: Use local tombstone system
+                            idsToRemove.forEach(id => addToTombstones(id));
+                            courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
+                            saveAndMarkChanges(currentCourse);
+                            updateUI();
+                            showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
+                            if (isOnline && isSignedIn) syncLogsWithSheet();
+                        } else {
+                            // Non-global admin: Delete via backend with tombstones
+                            Promise.all(idsToRemove.map(id => deleteLogViaBackend(id))).then(() => {
+                                courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
+                                updateUI();
+                                showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
+                            });
+                        }
                     }
                 });
+            }
+        }
+
+        /**
+         * Delete a log via backend API (for non-global admins)
+         * This ensures tombstones are written to DELETED_LOG_IDS sheet
+         */
+        async function deleteLogViaBackend(logId) {
+            try {
+                const result = await callWebApp('deleteLog_Admin', {
+                    courseName: currentCourse,
+                    logId: logId
+                }, 'POST');
+
+                if (result && result.result === 'success') {
+                    return true;
+                } else {
+                    throw new Error(result?.message || 'Delete failed');
+                }
+            } catch (error) {
+                console.error('Backend delete error:', error);
+                showNotification('error', 'Delete Failed', error.message);
+                throw error;
             }
         }
 
