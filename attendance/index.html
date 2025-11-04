@@ -3581,6 +3581,7 @@
         let initialPullDone = false;
         let avatarClickCount = 0;
         let lastAvatarClickTime = 0;
+        let guestCourse = null; // Track the course global admin is "visiting" but not officially admin of
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -4132,19 +4133,34 @@
         }
 
         function handleRouting() {
-            // Add this guard clause at the beginning.
-            // 'isInitializing' is set to false when the loading animation disappears.
             if (isInitializing) {
                 return;
             }
 
             const hash = window.location.hash.replace('#', '');
 
-            // Check if user has access to this course
-            if (hash && !availableCourses.includes(hash)) {
-                console.warn('Access denied to course:', hash);
-                showNotification('error', 'Access Denied', 'You do not have access to this course.');
-                // Redirect to first available course
+            // If no hash and we have a guest course, clear it
+            if (!hash && guestCourse) {
+                const oldGuestCourse = guestCourse;
+                guestCourse = null;
+
+                // Unload the guest course data
+                if (courseData[oldGuestCourse]) {
+                    delete courseData[oldGuestCourse];
+                    if (studentLogCache[oldGuestCourse]) {
+                        delete studentLogCache[oldGuestCourse];
+                    }
+                }
+
+                populateCourseButtons();
+                return;
+            }
+
+            // Check if this is a valid course that exists in the dictionary
+            const courseExists = courseDictionary && courseDictionary[hash];
+
+            if (!courseExists) {
+                // Course doesn't exist at all
                 if (availableCourses.length > 0) {
                     window.location.hash = availableCourses[0];
                 } else {
@@ -4153,8 +4169,66 @@
                 return;
             }
 
-            // Only change course if the hash is valid and different from the current one.
-            if (hash && availableCourses.includes(hash) && hash !== currentCourse) {
+            // Global admin special logic
+            if (isGlobalAdmin && hash) {
+                const isOfficialCourse = adminCourses.includes('*') || adminCourses.includes(hash);
+
+                if (!isOfficialCourse) {
+                    // This is a guest course visit
+                    if (guestCourse !== hash) {
+                        // Switching to a new guest course
+                        const oldGuestCourse = guestCourse;
+                        guestCourse = hash;
+
+                        // Unload the old guest course if it exists
+                        if (oldGuestCourse && courseData[oldGuestCourse]) {
+                            delete courseData[oldGuestCourse];
+                            if (studentLogCache[oldGuestCourse]) {
+                                delete studentLogCache[oldGuestCourse];
+                            }
+                        }
+
+                        populateCourseButtons();
+                    }
+                    // Allow the course change to proceed
+                    if (hash !== currentCourse) {
+                        handleCourseChange(hash);
+                    }
+                    return;
+                } else {
+                    // Switching to an official course, clear guest if any
+                    if (guestCourse) {
+                        const oldGuestCourse = guestCourse;
+                        guestCourse = null;
+
+                        // Unload the guest course
+                        if (courseData[oldGuestCourse]) {
+                            delete courseData[oldGuestCourse];
+                            if (studentLogCache[oldGuestCourse]) {
+                                delete studentLogCache[oldGuestCourse];
+                            }
+                        }
+
+                        populateCourseButtons();
+                    }
+                }
+            }
+
+            // Regular course access check (non-global admins and students)
+            if (!availableCourses.includes(hash) && !guestCourse) {
+                console.warn('Access denied to course:', hash);
+                showNotification('error', 'Access Denied', 'You do not have access to this course.');
+
+                if (availableCourses.length > 0) {
+                    window.location.hash = availableCourses[0];
+                } else {
+                    window.location.hash = '';
+                }
+                return;
+            }
+
+            // Proceed with course change if different
+            if (hash && hash !== currentCourse) {
                 handleCourseChange(hash);
             }
         }
@@ -8529,15 +8603,23 @@
         }
 
         /**
-         * Fetch course information from COURSE_INFO sheet
-         * @returns {Promise} A promise that resolves when course info is fetched
-         */
+ * Fetch course information from COURSE_INFO sheet
+ * @returns {Promise} A promise that resolves when course info is fetched
+ */
         async function fetchCourseInfo() {
             try {
                 const result = await callWebApp('getCourseInfo', {}, 'GET');
                 if (result) {
                     courseInfoMap = result;
+
+                    Object.entries(result).forEach(([courseName, metadata]) => {
+                        if (metadata && metadata.eis_id) {
+                            courseIDMap[courseName] = metadata.eis_id;
+                        }
+                    });
+
                     console.log('Course info loaded:', courseInfoMap);
+                    console.log('Course ID map populated:', courseIDMap);
                 }
             } catch (e) {
                 console.error('Error fetching course info:', e);
@@ -10436,12 +10518,22 @@
 
             courseButtonsContainer.innerHTML = '';
 
-            // availableCourses is already filtered in onSuccessfulAuth, use it directly
             let coursesToDisplay = availableCourses;
+
+            // For global admins, add the guest course if they're visiting one
+            if (isGlobalAdmin && guestCourse && !coursesToDisplay.includes(guestCourse)) {
+                coursesToDisplay = [...coursesToDisplay, guestCourse];
+            }
 
             coursesToDisplay.forEach(course => {
                 const button = document.createElement('div');
                 button.className = 'course-button' + (currentCourse === course ? ' active' : '');
+
+                // Mark guest courses visually (optional)
+                if (course === guestCourse) {
+                    button.classList.add('btn-orange'); // Use the orange style for guest courses
+                }
+
                 button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace(/_/g, ' ')}`;
                 button.addEventListener('click', () => selectCourseButton(course));
                 courseButtonsContainer.appendChild(button);
