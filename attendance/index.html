@@ -4132,99 +4132,79 @@
 
             const hash = window.location.hash.replace('#', '');
 
-            // If no hash and we have a guest course, clear it
-            if (!hash && guestCourse) {
+            // If no hash, go to default course
+            if (!hash) {
+                // If we were on a guest course, clear it
+                if (guestCourse) {
+                    const oldGuestCourse = guestCourse;
+                    guestCourse = null;
+                    if (courseData[oldGuestCourse]) delete courseData[oldGuestCourse];
+                    populateCourseButtons();
+                }
+
+                const defaultCourse = (currentCourse && availableCourses.includes(currentCourse)) ? currentCourse : (availableCourses.length > 0 ? availableCourses[0] : '');
+                if (defaultCourse) {
+                    // Use replaceState to avoid firing hashchange again
+                    history.replaceState(null, null, '#' + defaultCourse);
+                    if (currentCourse !== defaultCourse) {
+                        handleCourseChange(defaultCourse);
+                    }
+                }
+                return;
+            }
+
+            // Optimization: If hash is already the active course, do nothing.
+            if (hash === currentCourse) {
+                return;
+            }
+
+            // --- New Logic Flow ---
+
+            // Case 1: Is it an official, available course? (Fastest check)
+            if (availableCourses.includes(hash)) {
+                if (guestCourse) {
+                    // We are switching from a guest course to an official one
+                    const oldGuestCourse = guestCourse;
+                    guestCourse = null;
+                    if (courseData[oldGuestCourse]) delete courseData[oldGuestCourse];
+                    populateCourseButtons();
+                }
+                handleCourseChange(hash); // This is an authorized change
+                return;
+            }
+
+            // Case 2: Is it a guest course for a Global Admin?
+            // We check courseInfoMap, which is the *full* list of all courses.
+            if (isGlobalAdmin && courseInfoMap[hash]) {
                 const oldGuestCourse = guestCourse;
-                guestCourse = null;
+                guestCourse = hash; // Set new guest course
 
-                // Unload the guest course data
-                if (courseData[oldGuestCourse]) {
+                // Unload old guest course if it was different
+                if (oldGuestCourse && oldGuestCourse !== hash && courseData[oldGuestCourse]) {
                     delete courseData[oldGuestCourse];
-                    if (studentLogCache[oldGuestCourse]) {
-                        delete studentLogCache[oldGuestCourse];
-                    }
                 }
 
-                populateCourseButtons();
+                populateCourseButtons(); // Redraw buttons to include the new guest one
+                handleCourseChange(hash); // Load the guest course data
                 return;
             }
 
-            // Check if this is a valid course that exists in the dictionary
-            const courseExists = courseDictionary && courseDictionary[hash];
-
-            if (!courseExists) {
-                // Course doesn't exist at all
-                if (availableCourses.length > 0) {
-                    window.location.hash = availableCourses[0];
-                } else {
-                    window.location.hash = '';
-                }
-                return;
-            }
-
-            // Global admin special logic
-            if (isGlobalAdmin && hash) {
-                const isOfficialCourse = adminCourses.includes('*') || adminCourses.includes(hash);
-
-                if (!isOfficialCourse) {
-                    // This is a guest course visit
-                    if (guestCourse !== hash) {
-                        // Switching to a new guest course
-                        const oldGuestCourse = guestCourse;
-                        guestCourse = hash;
-
-                        // Unload the old guest course if it exists
-                        if (oldGuestCourse && courseData[oldGuestCourse]) {
-                            delete courseData[oldGuestCourse];
-                            if (studentLogCache[oldGuestCourse]) {
-                                delete studentLogCache[oldGuestCourse];
-                            }
-                        }
-
-                        populateCourseButtons();
-                    }
-                    // Allow the course change to proceed
-                    if (hash !== currentCourse) {
-                        handleCourseChange(hash);
-                    }
-                    return;
-                } else {
-                    // Switching to an official course, clear guest if any
-                    if (guestCourse) {
-                        const oldGuestCourse = guestCourse;
-                        guestCourse = null;
-
-                        // Unload the guest course
-                        if (courseData[oldGuestCourse]) {
-                            delete courseData[oldGuestCourse];
-                            if (studentLogCache[oldGuestCourse]) {
-                                delete studentLogCache[oldGuestCourse];
-                            }
-                        }
-
-                        populateCourseButtons();
-                    }
-                }
-            }
-
-            // Regular course access check (non-global admins and students)
-            // We add a check to ensure this *only* runs for non-global admins
-            // or if the guestCourse logic hasn't already handled it.
-            if (!isGlobalAdmin && !availableCourses.includes(hash) && !guestCourse) {
+            // Case 3: Is it an unauthorized course for a non-Global Admin?
+            if (!isGlobalAdmin && courseInfoMap[hash]) {
                 console.warn('Access denied to course:', hash);
                 showNotification('error', 'Access Denied', 'You do not have access to this course.');
-
-                if (availableCourses.length > 0) {
-                    window.location.hash = availableCourses[0];
-                } else {
-                    window.location.hash = '';
-                }
+                // Redirect to current (or default) course
+                window.location.hash = currentCourse || (availableCourses.length > 0 ? availableCourses[0] : '');
                 return;
             }
 
-            // Proceed with course change if different
-            if (hash && hash !== currentCourse) {
-                handleCourseChange(hash);
+            // Case 4: The course doesn't exist at all (not in the full map).
+            if (!courseInfoMap[hash]) {
+                console.warn('Course not found:', hash);
+                showNotification('error', 'Not Found', 'The course you tried to access does not exist.');
+                // Redirect to current (or default) course
+                window.location.hash = currentCourse || (availableCourses.length > 0 ? availableCourses[0] : '');
+                return;
             }
         }
 
@@ -5098,7 +5078,7 @@
         }
 
         /**
-         * REPLACED: Loads data in phases for a fast boot
+         * Loads data in phases for a fast boot
          */
         async function onSuccessfulAuth(isRestore = false) {
             isSignedIn = true;
@@ -5147,8 +5127,20 @@
                     // Determine which course to show first
                     const hashCourse = window.location.hash.replace('#', '');
                     const lastActiveCourse = localStorage.getItem('last_active_course');
-                    if (hashCourse && availableCourses.includes(hashCourse)) {
-                        currentCourse = hashCourse;
+
+                    // --- REVISED LOGIC ---
+                    if (hashCourse) {
+                        if (availableCourses.includes(hashCourse)) {
+                            currentCourse = hashCourse; // It's an official course
+                        } else if (isGlobalAdmin) {
+                            // It's not an official course, but user is global admin.
+                            // Treat it as a "guest" course.
+                            currentCourse = hashCourse; // Set it as the current course
+                            guestCourse = hashCourse;   // Also flag it as a guest course
+                        } else {
+                            // Not official, not global admin. Fallback.
+                            currentCourse = (lastActiveCourse && availableCourses.includes(lastActiveCourse)) ? lastActiveCourse : (availableCourses.length > 0 ? availableCourses[0] : null);
+                        }
                     } else if (lastActiveCourse && availableCourses.includes(lastActiveCourse)) {
                         currentCourse = lastActiveCourse;
                     } else if (availableCourses.length > 0) {
@@ -5156,6 +5148,7 @@
                     } else {
                         currentCourse = null;
                     }
+                    // --- END REVISED LOGIC ---
                 }
 
                 // 5. Process Database (from boot data)
