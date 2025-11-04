@@ -5154,11 +5154,9 @@
                     let allCourses = Object.keys(courseDictionary);
 
                     if (isAdmin) {
-                        if (isGlobalAdmin) {
-                            // Global admins get ALL courses
+                        if (adminCourses.includes('*')) {
                             availableCourses = allCourses;
                         } else {
-                            // Non-global admins (lecturers) get only their specific courses
                             availableCourses = allCourses.filter(course => adminCourses.includes(course));
                         }
                     } else {
@@ -5192,6 +5190,7 @@
                 isInitializing = false;
                 showMainContent();
                 updateAuthUI();
+                handleRouting();
                 populateCourseButtons(); // This will draw the course buttons
                 updatePageTitle(); // Set the page title
 
@@ -9210,25 +9209,40 @@
             const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
 
             if (group.originalLogs.length > 1) {
+                // Case 1: Deleting just the latest timestamp
                 const latestLog = group.originalLogs.reduce((latest, log) => log.timestamp > latest.timestamp ? log : latest);
 
                 if (isGlobalAdmin) {
-                    // Global admin: Use local tombstone system
+                    // Global admin: Use local tombstone system (already fast)
                     addToTombstones(latestLog.id);
                     courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
                     saveAndMarkChanges(currentCourse);
                     updateUI();
+                    showNotification('delete', 'Timestamp Deleted', 'Log removed.'); // ⬅️ Added notification
                     if (isOnline && isSignedIn) syncLogsWithSheet();
                 } else {
-                    // Non-global admin: Delete via backend with tombstone
-                    deleteLogViaBackend(latestLog.id).then(() => {
-                        // Remove from local state after backend confirms
-                        courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
-                        updateUI();
-                    });
+                    // 1. Optimistic UI Update: Remove the log locally first.
+                    courseData[currentCourse].logs = logsForCurrentCourse.filter(log => log.id !== latestLog.id);
+                    updateUI(); // Update UI immediately (FAST!)
+
+                    // 2. Call backend in the background.
+                    deleteLogViaBackend(latestLog.id)
+                        .then(() => {
+                            // Success! Show notification.
+                            showNotification('delete', 'Timestamp Deleted', 'Log removed.');
+                        })
+                        .catch(err => {
+                            // 3. Handle Failure: Revert the change.
+                            console.error('Delete failed, reverting UI:', err);
+                            showNotification('error', 'Delete Failed', 'Could not delete log, restoring.');
+                            // Add the log back and refresh
+                            courseData[currentCourse].logs.unshift(latestLog);
+                            updateUI(); // Refresh UI again to show the restored log
+                        });
                 }
 
             } else if (group.originalLogs.length === 1) {
+                // Case 2: Deleting the last timestamp (show confirmation)
                 showConfirmationDialog({
                     title: 'Delete all logs for this date?',
                     message: `This will remove all logs for ${group.name} on this date. This is the last timestamp.`,
@@ -9236,9 +9250,10 @@
                     isDestructive: true,
                     onConfirm: () => {
                         const idsToRemove = group.originalLogs.map(log => log.id);
+                        const removedLogs = logsForCurrentCourse.filter(log => idsToRemove.includes(log.id)); // Store what we're removing
 
                         if (isGlobalAdmin) {
-                            // Global admin: Use local tombstone system
+                            // Global admin: Use local tombstone system (already fast)
                             idsToRemove.forEach(id => addToTombstones(id));
                             courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
                             saveAndMarkChanges(currentCourse);
@@ -9246,12 +9261,24 @@
                             showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
                             if (isOnline && isSignedIn) syncLogsWithSheet();
                         } else {
-                            // Non-global admin: Delete via backend with tombstones
-                            Promise.all(idsToRemove.map(id => deleteLogViaBackend(id))).then(() => {
-                                courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
-                                updateUI();
-                                showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
-                            });
+                            // 1. Optimistic UI Update
+                            courseData[currentCourse].logs = logsForCurrentCourse.filter(log => !idsToRemove.includes(log.id));
+                            updateUI();
+                            showNotification('delete', 'Entry Deleted', `All timestamps for ${group.name} were deleted.`);
+
+                            // 2. Call backend in the background
+                            Promise.all(idsToRemove.map(id => deleteLogViaBackend(id)))
+                                .then(() => {
+                                    // Success!
+                                })
+                                .catch(err => {
+                                    // 3. Handle Failure: Revert
+                                    console.error('Bulk delete failed, reverting UI:', err);
+                                    showNotification('error', 'Delete Failed', 'Could not delete entry, restoring.');
+                                    courseData[currentCourse].logs.unshift(...removedLogs); // Add them back
+                                    updateUI();
+                                });
+
                         }
                     }
                 });
