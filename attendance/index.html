@@ -3643,6 +3643,14 @@
         }
 
         /**
+         * Pauses execution for a specified number of milliseconds.
+         * @param {number} ms - The number of milliseconds to sleep.
+         */
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        /**
  * Check admin status from server
  */
         async function checkAdminStatus() {
@@ -7155,20 +7163,31 @@
         }
 
         /**
-         * Background loads remaining logs for a Course Admin
+         * Background loads remaining logs for a Course Admin... SLOWLY, to avoid rate-limits.
          */
         async function loadRemainingCourseAdminLogs() {
             const remainingCourses = availableCourses.filter(c => c !== currentCourse);
-            for (const course of remainingCourses) {
+
+            // Use a standard for loop so we can 'await' inside it
+            for (let i = 0; i < remainingCourses.length; i++) {
+                const course = remainingCourses[i];
                 try {
                     // Check if already in cache (in case of fast-switching)
                     if (!studentLogCache[course]) {
+                        // Await the fetch for this single course
                         const serverLogs = await callWebApp('getCourseLogs_Admin', { courseName: course }, 'GET');
                         studentLogCache[course] = serverLogs;
                         courseData[course] = { logs: serverLogs, tombstones: new Set() };
                     }
+
+                    // Wait 1.5 seconds before fetching the next course.
+                    // This respects the Google Apps Script rate limit.
+                    await sleep(1500);
+
                 } catch (err) {
                     console.error(`Failed to background load logs for ${course}:`, err);
+                    // If one fails, wait a bit and try the next one
+                    await sleep(1500);
                 }
             }
         }
