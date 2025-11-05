@@ -3538,7 +3538,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzn-smxPZTMA6yoSM6fkvSB9djOv_AMskWMmv5OSflsFAbrigfRwBckz9ib7gFJt7bObA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxijfLGBGQwfOdhSW08bvEXj4X-2U3IjCy35Wxh98ouOApvA7sgBb6dzdzVjPp52w-fNw/exec';
 
         // App state
         let courseData = {};
@@ -5898,12 +5898,18 @@
         title="Approve Registration">
         <i class="fa-solid fa-check"></i>
     </button>
-    <button class="btn-icon btn-red reject-reg-btn"
+    <button class="btn-icon btn-orange reject-reg-btn"
         data-row="${reg.rowNumber}"
         data-name="${reg.name}"
         data-email="${reg.email}"
         title="Reject Registration">
-        <i class="fa-solid fa-times"></i>
+        <i class="fa-solid fa-ban"></i>
+    </button>
+    <button class="btn-icon btn-red delete-reg-btn"
+        data-row="${reg.rowNumber}"
+        data-name="${reg.name}"
+        title="Delete Registration">
+        <i class="fa-solid fa-trash"></i>
     </button>
 `;
                         actionsCell.appendChild(actionsWrapper);
@@ -5945,6 +5951,44 @@
 
                     showRejectDialog({ rowNumber, name, email });
                 });
+            });
+
+            // Delete buttons
+            document.querySelectorAll('.delete-reg-btn').forEach(btn => {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    const rowNumber = this.dataset.row;
+                    const name = this.dataset.name;
+
+                    showDeleteDialog({ rowNumber, name });
+                });
+            });
+        }
+
+        /**
+         * Shows a simple confirmation dialog to delete a pending registration without sending an email.
+         */
+        function showDeleteDialog(registration) {
+            showConfirmationDialog({
+                title: 'Delete Registration?',
+                message: `Are you sure you want to delete the pending registration for "${registration.name}"?<br><br><strong>This will not send an email.</strong>`,
+                confirmText: 'Delete',
+                isDestructive: true,
+                onConfirm: () => {
+                    // Call the new backend action
+                    callWebApp('deleteRegistration', { rowNumber: registration.rowNumber }, 'POST')
+                        .then(result => {
+                            if (result && result.result === 'success') {
+                                showNotification('delete', 'Deleted', `Registration for ${registration.name} was deleted.`);
+                                fetchAndDisplayRegistrations(); // Refresh the list
+                            } else {
+                                throw new Error(result ? result.message : 'Delete failed.');
+                            }
+                        })
+                        .catch(err => {
+                            showNotification('error', 'Delete Failed', err.message);
+                        });
+                }
             });
         }
 
