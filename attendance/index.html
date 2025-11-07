@@ -1429,6 +1429,21 @@
             gap: 3px;
         }
 
+        /* Fixes for Absence Request Dialog */
+        #request-hours-group {
+            gap: 4px 2px !important;
+            /* Tighter spacing for many buttons */
+        }
+
+        #request-hours-group .toggle-button {
+            flex-grow: 1;
+            flex-basis: 18%;
+            /* Allow 5 buttons per row */
+            padding-left: 5px;
+            padding-right: 5px;
+            min-width: 50px;
+        }
+
         .actions-cell .btn-icon {
             width: 30px;
             height: 30px;
@@ -2791,6 +2806,11 @@
                 /* Remove bottom margin from inner form group */
             }
 
+            .dialog-content table {
+                display: block;
+                width: 100%;
+            }
+
             .comparison-grid .field-action {
                 justify-content: flex-start;
                 /* Align checkbox/select to the left */
@@ -3585,7 +3605,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxpMNwdtNyILjvd7AjVNgF1lpaTbzC2f0kLlvQHP_2Qan5EZGf8NXzg0rXTQkNwFV3nQA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyzZHiiqK2b6R5I84dEl5gSHefqyXDv09DJDf-Wa8k6jlVBv6kLYGPRo8x6ZxuhYQNrEg/exec';
 
         // App state
         let courseData = {};
@@ -4868,7 +4888,7 @@
             ).join('');
 
             dialog.innerHTML = `
-<h3 class="dialog-title">Request Absence Permission</h3>
+<h3 class="dialog-title">Request Permission</h3>
 <div class="dialog-content">
     <p>Your request will be sent to the lecturer for approval.</p>
     
@@ -5009,7 +5029,7 @@
                 try {
                     const result = await callWebApp('submitAbsenceRequest', payload, 'POST');
                     if (result && result.result === 'success') {
-                        showNotification('success', 'Request Sent', 'Your absence request has been submitted for approval.');
+                        showNotification('success', 'Request Sent', 'Your permission request has been submitted for approval.');
                         closeDialog();
                     } else {
                         throw new Error(result?.message || 'Submission failed.');
@@ -6632,7 +6652,7 @@
                 })
                 .catch(error => {
                     console.error('Error fetching pending absences:', error);
-                    showNotification('error', 'Fetch Failed', 'Could not load pending absence requests.');
+                    showNotification('error', 'Fetch Failed', 'Could not load pending permission requests.');
                 });
         }
 
@@ -6669,11 +6689,10 @@
         }
 
         // --- Dialogs for Admin Actions ---
-
         function showApproveAbsenceDialog(data) {
             showConfirmationDialog({
                 title: 'Approve Absence?',
-                message: `Are you sure you want to approve this absence for <strong>${data.studentName}</strong>?<br><br>This will add manual logs to the course sheet.`,
+                message: `Are you sure you want to approve this permission for <strong>${data.studentName}</strong>?<br><br>This will add manual logs to the course sheet.`,
                 confirmText: 'Approve',
                 isDestructive: false,
                 onConfirm: () => {
@@ -6681,39 +6700,30 @@
                         .then(result => {
                             if (result && result.result === 'success') {
                                 showNotification('success', 'Approved', `Absence for ${data.studentName} approved.`);
-                                fetchAndDisplayAbsences(); // Refresh the list
+                                fetchAndDisplayAbsences(); // Refresh the admin list
+
+                                if (result.newLogs && result.newLogs.length > 0) {
+                                    const courseName = result.newLogs[0].course || currentCourse; // Get course from logs if possible
+
+                                    // Check if the logs belong to the currently viewed course
+                                    if (courseData[courseName]) {
+                                        // Add new logs to the local data
+                                        courseData[courseName].logs.unshift(...result.newLogs);
+                                        // Re-sort logs
+                                        courseData[courseName].logs.sort((a, b) => b.timestamp - a.timestamp);
+
+                                        // If we are on that course's tab, update the UI
+                                        if (courseName === currentCourse) {
+                                            updateLogsList();
+                                        }
+                                    }
+                                }
+
                             } else {
                                 throw new Error(result?.message || 'Approval failed.');
                             }
                         })
                         .catch(err => showNotification('error', 'Approval Failed', err.message));
-                }
-            });
-        }
-
-        function showRejectAbsenceDialog(data) {
-            // This re-uses the logic from the registration dialog
-            showPromptDialog({
-                title: 'Reject Absence Request',
-                message: `Enter a brief reason for rejecting this request for ${data.studentName}. This will be emailed.`,
-                initialValue: 'Your request for absence was not approved. Please see me for details.',
-                confirmText: 'Reject & Send Email',
-                onConfirm: (message) => {
-                    callWebApp('rejectAbsenceRequest', {
-                        requestID: data.requestID,
-                        studentName: data.studentName,
-                        studentEmail: data.studentEmail,
-                        rejectionMessage: message
-                    }, 'POST')
-                        .then(result => {
-                            if (result && result.result === 'success') {
-                                showNotification('success', 'Rejected', `Rejection email sent to ${data.studentName}.`);
-                                fetchAndDisplayAbsences(); // Refresh the list
-                            } else {
-                                throw new Error(result?.message || 'Rejection failed.');
-                            }
-                        })
-                        .catch(err => showNotification('error', 'Rejection Failed', err.message));
                 }
             });
         }
@@ -6725,7 +6735,7 @@
                 confirmText: 'Delete',
                 isDestructive: true,
                 onConfirm: () => {
-                    callWebApp('deleteAbsenceRequest', { requestID: data.requestID }, 'POST')
+                    callWebApp('deleteAbsenceRequest', { requestID: data.requestId }, 'POST')
                         .then(result => {
                             if (result && result.result === 'success') {
                                 showNotification('delete', 'Deleted', `Request from ${data.studentName} was deleted.`);
@@ -6986,6 +6996,9 @@
                 if (isAdmin) {
                     // --- ADMIN REFRESH (Full Sync) ---
                     await syncData(); // Admins run the full sync
+
+                    fetchAndDisplayRegistrations();
+                    fetchAndDisplayAbsences();
 
                 } else {
                     // --- STUDENT REFRESH (Course List + Current Logs) ---
@@ -7328,12 +7341,18 @@
                         chip.appendChild(userName);
 
                         // --- START OF REVAMPED CLICK LISTENER ---
-                        chip.addEventListener('click', () => {
+                        chip.addEventListener('click', async () => {
                             if (isSignedIn && !isAdmin && currentUser) {
 
                                 let uidContent; // Will hold the HTML for the UID list
+                                let absenceContent = `
+                                    <h5 style="margin-top: 15px; margin-bottom: 10px; font-family: 'Google Sans', sans-serif; 
+                                               border-bottom: 1px solid var(--primary-dark); padding-bottom: 5px; color: var(--text-color);">
+                                        My Permission Requests
+                                    </h5>
+                                    <p style="font-size: 0.9em; text-align: center; opacity: 0.7; margin: 10px 0 0 0;">Loading requests...</p>`;
 
-                                // Find UIDs
+                                // --- 1. Find UIDs (Local) ---
                                 let userUIDs = [];
                                 for (const dbKey in databaseMap) {
                                     const entry = databaseMap[dbKey];
@@ -7346,7 +7365,6 @@
                                 // Generate UID list HTML
                                 if (userUIDs.length > 0) {
                                     const listItems = userUIDs.map(uid =>
-                                        // Use inline styles that respect theme variables
                                         `<li style="font-family: monospace; 
                                                      background: var(--background-color); 
                                                      padding: 5px 10px; 
@@ -7354,15 +7372,14 @@
                                                      border: 1px solid #c5cae9;
                                                      color: var(--text-color);
                                                      opacity: 0.9;
-                                                     user-select: none; /* NON-SELECTABLE */
-                                                     -webkit-user-select: none; /* Safari */
-                                                     -moz-user-select: none; /* Firefox */
-                                                     -ms-user-select: none; /* IE */
+                                                     user-select: none;
+                                                     -webkit-user-select: none;
+                                                     -moz-user-select: none;
+                                                     -ms-user-select: none;
                                                      ">
                                            ${uid}
                                          </li>`
                                     ).join('');
-                                    // Use flexbox for the list
                                     uidContent = `<ul style="list-style: none; padding-left: 0; margin: 0; 
                                                            display: flex; flex-wrap: wrap; gap: 5px;">
                                                       ${listItems}
@@ -7371,7 +7388,7 @@
                                     uidContent = `<p style="font-size: 0.9em; text-align: center; opacity: 0.7; margin: 10px 0 0 0;">No UIDs found in database.</p>`;
                                 }
 
-                                // Generate final dialog HTML
+                                // --- 2. Show Dialog Immediately with Loaders ---
                                 const profileMessage = `
                                     <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 20px;">
                                         <a href="https://myaccount.google.com/" target="_blank" rel="noopener noreferrer" title="Manage your Google Account"
@@ -7391,12 +7408,13 @@
                                         Registered UIDs
                                     </h5>
                                     ${uidContent}
+                                    
+                                    <div id="student-absence-list">${absenceContent}</div>
                                 `;
 
-                                // Call the dialog function (title is ignored)
-                                showAlertDialog('Your Profile', profileMessage);
+                                showAlertDialog('Your Profile', profileMessage); // This shows the dialog
 
-                                // Add hover effect for the new clickable image
+                                // Add hover effect
                                 const dialogImgLink = document.querySelector('.dialog-backdrop a[title="Manage your Google Account"]');
                                 if (dialogImgLink) {
                                     dialogImgLink.addEventListener('mouseover', () => {
@@ -7405,6 +7423,59 @@
                                     dialogImgLink.addEventListener('mouseout', () => {
                                         dialogImgLink.style.borderColor = 'transparent';
                                     });
+                                }
+
+                                // --- 3. Fetch Absence Data and Update Dialog ---
+                                try {
+                                    const requests = await callWebApp('getStudentAbsenceRequests', {}, 'GET');
+                                    const listContainer = document.getElementById('student-absence-list');
+
+                                    if (!listContainer) return; // Dialog was closed
+
+                                    if (!requests || requests.length === 0) {
+                                        absenceContent = `<h5 ...>My Permission Requests</h5>
+                                                      <p style="font-size: 0.9em; text-align: center; opacity: 0.7; margin: 10px 0 0 0;">You have not submitted any requests.</p>`;
+                                    } else {
+                                        // Build a table
+                                        const rows = requests.map(req => {
+                                            let statusColor = 'var(--text-color)';
+                                            if (req.status === 'Approved') statusColor = 'var(--success-color)';
+                                            if (req.status === 'Rejected') statusColor = 'var(--danger-color)';
+                                            if (req.status === 'Pending') statusColor = 'var(--warning-color)';
+
+                                            return `
+                                                <tr style="border-bottom: 1px solid #444;">
+                                                    <td style="padding: 6px 2px;"><strong style="color: ${statusColor};">${req.status}</strong></td>
+                                                    <td style="padding: 6px 2px;">${req.absenceDate}</td>
+                                                    <td style="padding: 6px 2px;">${req.course.replace(/_/g, ' ')}</td>
+                                                    <td style="padding: 6px 2px;">${req.hours}</td>
+                                                </tr>
+                                                ${req.adminNotes ? `
+                                                <tr style="border-bottom: 1px solid #444;">
+                                                    <td colspan="4" style="padding: 0 2px 6px 15px; font-size: 0.9em; opacity: 0.8;">
+                                                        <em>↳ Admin: ${req.adminNotes}</em>
+                                                    </td>
+                                                </tr>` : ''}
+                                            `;
+                                        }).join('');
+
+                                        absenceContent = `
+                                            <h5 style="margin-top: 15px; ...">My Permission Requests</h5>
+                                            <div style="max-height: 150px; overflow-y: auto; border: 1px solid #444; border-radius: 8px; padding: 5px 10px;">
+                                                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                                                    ${rows}
+                                                </table>
+                                            </div>
+                                        `;
+                                    }
+                                    listContainer.innerHTML = absenceContent;
+
+                                } catch (err) {
+                                    const listContainer = document.getElementById('student-absence-list');
+                                    if (listContainer) {
+                                        listContainer.innerHTML = `<h5 ...>My Permission Requests</h5>
+                                            <p style="font-size: 0.9em; text-align: center; color: var(--danger-color); margin: 10px 0 0 0;">Could not load requests.</p>`;
+                                    }
                                 }
                             }
                         });
