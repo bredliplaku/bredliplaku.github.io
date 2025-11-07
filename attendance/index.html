@@ -946,6 +946,16 @@
             color: #f0f0f0;
         }
 
+        /* This hides the new button by default */
+        #request-permission-btn {
+            display: none !important;
+        }
+
+        /* This shows it ONLY for signed-in non-admins */
+        body:not(.is-admin) #user-container #request-permission-btn {
+            display: inline-flex !important;
+        }
+
         .in-page-notifications {
             position: fixed;
             bottom: 20px;
@@ -3303,6 +3313,10 @@
                         <button id="register-uid-btn" class="btn-sm" title="Register your Student ID Card"><i
                                 class="fa-solid fa-address-card"></i>Register Student ID</button>
 
+                        <button id="request-permission-btn" class="btn-sm btn-orange" title="Request Permission"
+                            style="display: none;">
+                            <i class="fa-solid fa-file-circle-question"></i>Request Permission
+                        </button>
                         <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
                         <span id="user-name"></span>
 
@@ -3417,7 +3431,9 @@
 
         <!-- Database Tab -->
         <div id="database-tab" class="tab-content">
+        
             <div id="pending-registrations-view" class="is-hidden">
+        
                 <div class="module" style="margin-top:20px">
                     <div class="module-header">
                         <span class="module-title"><i class="fa-solid fa-inbox"></i> Pending Registrations</span>
@@ -3436,6 +3452,33 @@
                                     </tr>
                                 </thead>
                                 <tbody id="registrations-tbody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="pending-absences-view" class="is-hidden">
+                <div class="module" style="margin-top:20px">
+                    <div class="module-header">
+                        <span class="module-title"><i class="fa-solid fa-file-circle-question"></i> Pending Absence
+                            Requests</span>
+                    </div>
+                    <div class="module-content">
+                        <div class="table-container">
+                            <table class="database-table">
+                                <thead>
+                                    <tr>
+                                        <th>Student</th>
+                                        <th>Course</th>
+                                        <th>Date</th>
+                                        <th>Hours</th>
+                                        <th>Reason</th>
+                                        <th>Description</th>
+                                        <th class="actions-header">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="absences-tbody">
                                 </tbody>
                             </table>
                         </div>
@@ -3463,7 +3506,7 @@
                             <option value="email-desc">Email (Z-A)</option>
                         </select>
                     </div>
-
+        
                     <div class="database-controls">
                         <div class="entry-count">Database entries: <span id="db-entry-count">0</span></div>
                         <div class="database-actions">
@@ -3477,15 +3520,15 @@
                                 title="Clear Database"><i class="fas fa-trash"></i></button>
                         </div>
                     </div>
-
+        
                     <div class="table-container">
                         <table class="database-table">
                             <thead>
                                 <tr>
                                     <th class="sortable" data-sort="name">Name <i class="sort-icon fas fa-sort-up"></i>
                                     </th>
-                                    <th class="sortable uid-column" data-sort="uid">UID <i
-                                            class="sort-icon fas fa-sort"></i></th>
+                                    <th class="sortable uid-column" data-sort="uid">UID <i class="sort-icon fas fa-sort"></i>
+                                    </th>
                                     <th class="sortable email-column" data-sort="email">Email <i
                                             class="sort-icon fas fa-sort"></i></th>
                                     <th class="admin-only actions-header" style="display: none;">Actions</th>
@@ -3538,7 +3581,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwBPrAAzlizT6zxQEv25O2CojR349nazzDNT4J0kZE2I1nwirnyfnr-bT6rw2hJGFjYfA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxpMNwdtNyILjvd7AjVNgF1lpaTbzC2f0kLlvQHP_2Qan5EZGf8NXzg0rXTQkNwFV3nQA/exec';
 
         // App state
         let courseData = {};
@@ -3920,6 +3963,9 @@
 
             const registerUidBtn = document.getElementById('register-uid-btn');
             if (registerUidBtn) registerUidBtn.addEventListener('click', showRegisterUIDDialog);
+
+            const requestPermissionBtn = document.getElementById('request-permission-btn');
+            if (requestPermissionBtn) requestPermissionBtn.addEventListener('click', showRequestPermissionDialog);
 
             const scanBtn = document.getElementById('scan-button');
             if (scanBtn) {
@@ -4783,6 +4829,192 @@
                     mainContent.style.overflow = 'visible';
                     mainContent.classList.add('fade-in');
                 }, 250); // This must match the CSS transition duration
+            });
+        }
+
+        /**
+ * Shows the dialog for students to request an excused absence.
+ */
+        function showRequestPermissionDialog() {
+            if (!isSignedIn || isAdmin || !currentUser) return;
+
+            document.body.style.overflow = 'hidden';
+
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
+
+            // --- Create Course Dropdown Options ---
+            // Use courseInfoMap for the full list of courses
+            const allCourses = Object.keys(courseInfoMap).sort();
+            const courseOptions = allCourses.map(courseName =>
+                `<option value="${courseName}">${courseName.replace(/_/g, ' ')}</option>`
+            ).join('');
+
+            // --- Create Hour Toggle Buttons ---
+            const hoursList = [
+                '8:40', '9:40', '10:40', '11:40', '12:40', '13:40', '14:40', '15:40',
+                '16:00', '17:00', '18:00', '19:00', '20:00'
+            ];
+            const hourButtons = hoursList.map(hour =>
+                `<button type="button" class="toggle-button" data-value="${hour}">${hour}</button>`
+            ).join('');
+
+            dialog.innerHTML = `
+<h3 class="dialog-title">Request Absence Permission</h3>
+<div class="dialog-content">
+    <p>Your request will be sent to the lecturer for approval.</p>
+    
+    <div class="form-group">
+        <label>Name:</label>
+        <input class="form-control" value="${currentUser.name}" disabled>
+    </div>
+    <div class="form-group">
+        <label>Email:</label>
+        <input class="form-control" value="${currentUser.email}" disabled>
+    </div>
+    
+    <hr style="margin: 20px 0;">
+    
+    <div class="form-group">
+        <label for="request-course">Course*:</label>
+        <select id="request-course" class="form-control">
+            <option value="" disabled selected>-- Select a course --</option>
+            ${courseOptions}
+        </select>
+    </div>
+    
+    <div class="form-group">
+        <label for="request-date">Date*:</label>
+        <input type="date" id="request-date" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+    </div>
+    
+    <div class="form-group" style="align-items: flex-start;">
+        <label>Hours*:</label>
+        <div id="request-hours-group" class="toggle-button-group" style="flex-wrap: wrap; gap: 4px;">
+            ${hourButtons}
+        </div>
+    </div>
+    
+    <div class="form-group">
+        <label for="request-reason-type">Reason*:</label>
+        <select id="request-reason-type" class="form-control">
+            <option value="" disabled selected>-- Select a reason --</option>
+            <option value="Medical">Medical / Sickness</option>
+            <option value="Family">Family Reason</option>
+            <option value="Transport">Transport (Car broke down, traffic)</option>
+            <option value="Other">Other (Specify below)</option>
+        </select>
+    </div>
+    
+    <div class="form-group" id="request-description-group" style="display: none;">
+        <label for="request-description">Description*:</label>
+        <textarea id="request-description" class="form-control" rows="4" 
+            placeholder="Please provide details (e.g., doctor's note reference, traffic incident details...)"
+            minlength="20"></textarea>
+    </div>
+    
+</div>
+<div class="dialog-actions">
+    <button id="cancel-request-btn" class="btn-red">Cancel</button>
+    <button id="submit-request-btn" class="btn-green">Submit Request</button>
+</div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
+
+            const reasonSelect = dialog.querySelector('#request-reason-type');
+            const descriptionGroup = dialog.querySelector('#request-description-group');
+            const descriptionInput = dialog.querySelector('#request-description');
+
+            // Show/hide description box based on reason
+            reasonSelect.addEventListener('change', () => {
+                const reason = reasonSelect.value;
+                if (reason === 'Medical' || reason === 'Transport' || reason === 'Other') {
+                    descriptionGroup.style.display = 'flex';
+                    descriptionInput.setAttribute('required', 'true');
+                    if (reason === 'Other') {
+                        descriptionInput.setAttribute('minlength', '20');
+                    } else {
+                        descriptionInput.removeAttribute('minlength');
+                    }
+                } else {
+                    descriptionGroup.style.display = 'none';
+                    descriptionInput.removeAttribute('required');
+                }
+            });
+
+            // Handle hour button selection (multi-select)
+            dialog.querySelector('#request-hours-group').addEventListener('click', (e) => {
+                if (e.target.classList.contains('toggle-button')) {
+                    e.target.classList.toggle('active');
+                }
+            });
+
+            dialog.querySelector('#cancel-request-btn').addEventListener('click', closeDialog);
+
+            dialog.querySelector('#submit-request-btn').addEventListener('click', async () => {
+                const submitBtn = dialog.querySelector('#submit-request-btn');
+
+                // --- 1. Collect Data & Validate ---
+                const course = dialog.querySelector('#request-course').value;
+                const date = dialog.querySelector('#request-date').value;
+                const reasonType = dialog.querySelector('#request-reason-type').value;
+                const description = descriptionInput.value;
+                const selectedHours = Array.from(dialog.querySelectorAll('#request-hours-group .toggle-button.active'))
+                    .map(btn => btn.dataset.value);
+
+                // Simple Validation
+                let errors = [];
+                if (!course) errors.push('Please select a course.');
+                if (!date) errors.push('Please select a date.');
+                if (selectedHours.length === 0) errors.push('Please select at least one hour.');
+                if (!reasonType) errors.push('Please select a reason.');
+                if (descriptionGroup.style.display === 'flex' && description.trim().length < (reasonType === 'Other' ? 20 : 5)) {
+                    errors.push(`Description must be at least ${reasonType === 'Other' ? 20 : 5} characters.`);
+                }
+
+                if (errors.length > 0) {
+                    showNotification('error', 'Missing Information', errors.join('<br>'));
+                    return;
+                }
+
+                // --- 2. Prepare Payload ---
+                const payload = {
+                    name: currentUser.name,
+                    email: currentUser.email,
+                    course: course,
+                    absenceDate: date,
+                    hours: selectedHours.join(', '),
+                    reasonType: reasonType,
+                    description: description.trim()
+                };
+
+                // --- 3. Submit to Backend ---
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
+
+                try {
+                    const result = await callWebApp('submitAbsenceRequest', payload, 'POST');
+                    if (result && result.result === 'success') {
+                        showNotification('success', 'Request Sent', 'Your absence request has been submitted for approval.');
+                        closeDialog();
+                    } else {
+                        throw new Error(result?.message || 'Submission failed.');
+                    }
+                } catch (err) {
+                    showNotification('error', 'Submission Failed', err.message);
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = 'Submit Request';
+                }
             });
         }
 
@@ -6317,9 +6549,187 @@
             // Refresh pending registrations list
             fetchAndDisplayRegistrations();
 
+            fetchAndDisplayAbsences();
+
             // Fetch the latest database and then update the table
             fetchDatabaseFromSheet().then(() => {
                 updateDatabaseList();
+            });
+        }
+
+        function fetchAndDisplayAbsences() {
+            if (!isAdmin) return;
+
+            const tbody = document.getElementById('absences-tbody');
+            const pendingView = document.getElementById('pending-absences-view');
+
+            if (!tbody || !pendingView) return;
+
+            callWebApp('getPendingAbsences', {}, 'GET')
+                .then(requests => {
+                    tbody.innerHTML = ''; // Clear old data
+
+                    if (!requests || requests.length === 0) {
+                        pendingView.classList.add('is-hidden'); // Hide section if empty
+                        return;
+                    }
+
+                    pendingView.classList.remove('is-hidden'); // Show section
+
+                    requests.forEach(req => {
+                        const row = document.createElement('tr');
+
+                        // Truncate long descriptions
+                        const description = req.description.length > 50
+                            ? req.description.substring(0, 50) + '...'
+                            : req.description;
+
+                        row.innerHTML = `
+                    <td>
+                        <div>${req.name}</div>
+                        <small>${req.email}</small>
+                    </td>
+                    <td>${req.course.replace(/_/g, ' ')}</td>
+                    <td>${req.absenceDate}</td>
+                    <td>${req.hours}</td>
+                    <td>${req.reasonType}</td>
+                    <td title="${req.description}">${description}</td>
+                    <td class="actions-cell">
+                        <div class="actions-cell-content">
+                            <button class="btn-icon btn-green approve-absence-btn" 
+                                title="Approve Request"
+                                data-request-id="${req.requestID}"
+                                data-student-name="${req.name}">
+                                <i class="fa-solid fa-check"></i>
+                            </button>
+                            <button class="btn-icon btn-orange reject-absence-btn"
+                                title="Reject Request"
+                                data-request-id="${req.requestID}"
+                                data-student-name="${req.name}"
+                                data-student-email="${req.email}">
+                                <i class="fa-solid fa-ban"></i>
+                            </button>
+                            <button class="btn-icon btn-red delete-absence-btn"
+                                title="Delete Request"
+                                data-request-id="${req.requestID}"
+                                data-student-name="${req.name}">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                `;
+                        tbody.appendChild(row);
+                    });
+
+                    // Attach listeners for the new buttons
+                    attachAbsenceActionListeners();
+                })
+                .catch(error => {
+                    console.error('Error fetching pending absences:', error);
+                    showNotification('error', 'Fetch Failed', 'Could not load pending absence requests.');
+                });
+        }
+
+        /**
+         * Attaches click listeners to the approve/reject/delete absence buttons.
+         */
+        function attachAbsenceActionListeners() {
+            // Approve buttons
+            document.querySelectorAll('.approve-absence-btn').forEach(btn => {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    const data = { ...this.dataset }; // Clone data
+                    showApproveAbsenceDialog(data);
+                });
+            });
+
+            // Reject buttons
+            document.querySelectorAll('.reject-absence-btn').forEach(btn => {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    const data = { ...this.dataset }; // Clone data
+                    showRejectAbsenceDialog(data);
+                });
+            });
+
+            // Delete buttons
+            document.querySelectorAll('.delete-absence-btn').forEach(btn => {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    const data = { ...this.dataset }; // Clone data
+                    showDeleteAbsenceDialog(data);
+                });
+            });
+        }
+
+        // --- Dialogs for Admin Actions ---
+
+        function showApproveAbsenceDialog(data) {
+            showConfirmationDialog({
+                title: 'Approve Absence?',
+                message: `Are you sure you want to approve this absence for <strong>${data.studentName}</strong>?<br><br>This will add manual logs to the course sheet.`,
+                confirmText: 'Approve',
+                isDestructive: false,
+                onConfirm: () => {
+                    callWebApp('approveAbsenceRequest', { requestID: data.requestID }, 'POST')
+                        .then(result => {
+                            if (result && result.result === 'success') {
+                                showNotification('success', 'Approved', `Absence for ${data.studentName} approved.`);
+                                fetchAndDisplayAbsences(); // Refresh the list
+                            } else {
+                                throw new Error(result?.message || 'Approval failed.');
+                            }
+                        })
+                        .catch(err => showNotification('error', 'Approval Failed', err.message));
+                }
+            });
+        }
+
+        function showRejectAbsenceDialog(data) {
+            // This re-uses the logic from the registration dialog
+            showPromptDialog({
+                title: 'Reject Absence Request',
+                message: `Enter a brief reason for rejecting this request for ${data.studentName}. This will be emailed.`,
+                initialValue: 'Your request for absence was not approved. Please see me for details.',
+                confirmText: 'Reject & Send Email',
+                onConfirm: (message) => {
+                    callWebApp('rejectAbsenceRequest', {
+                        requestID: data.requestID,
+                        studentName: data.studentName,
+                        studentEmail: data.studentEmail,
+                        rejectionMessage: message
+                    }, 'POST')
+                        .then(result => {
+                            if (result && result.result === 'success') {
+                                showNotification('success', 'Rejected', `Rejection email sent to ${data.studentName}.`);
+                                fetchAndDisplayAbsences(); // Refresh the list
+                            } else {
+                                throw new Error(result?.message || 'Rejection failed.');
+                            }
+                        })
+                        .catch(err => showNotification('error', 'Rejection Failed', err.message));
+                }
+            });
+        }
+
+        function showDeleteAbsenceDialog(data) {
+            showConfirmationDialog({
+                title: 'Delete Request?',
+                message: `Are you sure you want to delete this pending request from <strong>${data.studentName}</strong>?<br><br><strong>This action is permanent and sends no email.</strong>`,
+                confirmText: 'Delete',
+                isDestructive: true,
+                onConfirm: () => {
+                    callWebApp('deleteAbsenceRequest', { requestID: data.requestID }, 'POST')
+                        .then(result => {
+                            if (result && result.result === 'success') {
+                                showNotification('delete', 'Deleted', `Request from ${data.studentName} was deleted.`);
+                                fetchAndDisplayAbsences(); // Refresh the list
+                            } else {
+                                throw new Error(result?.message || 'Delete failed.');
+                            }
+                        })
+                        .catch(err => showNotification('error', 'Delete Failed', err.message));
+                }
             });
         }
 
