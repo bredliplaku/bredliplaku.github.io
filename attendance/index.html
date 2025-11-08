@@ -2449,12 +2449,17 @@
             /* Space between buttons */
             overflow-x: auto;
             /* Allow horizontal scrolling */
-            flex-shrink: 1;
-            /* Allow this container to shrink */
+
+            /* This allows the container to shrink on mobile */
             min-width: 0;
-            /* IMPORTANT: Allows shrinking */
-            position: relative;
-            /* For the fade-out overlay */
+
+            /* This creates space for the button shadows */
+            padding-bottom: 10px;
+            margin-bottom: -10px;
+
+            /* This creates a fade-out *only* when scrolling */
+            -webkit-mask-image: linear-gradient(to right, white 95%, transparent 100%);
+            mask-image: linear-gradient(to right, white 95%, transparent 100%);
 
             /* Hide scrollbar */
             scrollbar-width: none;
@@ -2472,37 +2477,6 @@
             /* Keep text on one line */
             flex-shrink: 0;
             /* Don't let buttons shrink */
-        }
-
-        /* Smart Fade-out Overlay - shows only on mobile */
-        @media (max-width: 768px) {
-            .student-actions-scroll::after {
-                content: '';
-                position: absolute;
-                top: 0;
-                right: 0;
-                bottom: 0;
-                width: 30px;
-
-                /* The gradient: transparent to background color */
-                background: linear-gradient(to right,
-                        rgba(244, 244, 244, 0),
-                        /* --background-color light mode */
-                        rgba(244, 244, 244, 1) 70%);
-
-                pointer-events: none;
-                /* Don't block clicks */
-                /* This ensures the fade appears on top of the scrolling content */
-                z-index: 1;
-            }
-
-            /* Dark mode overlay */
-            .dark-mode .student-actions-scroll::after {
-                background: linear-gradient(to right,
-                        rgba(0, 0, 0, 0),
-                        /* --background-color dark mode */
-                        rgba(0, 0, 0, 1) 70%);
-            }
         }
 
         .sync-auth-container {
@@ -3755,7 +3729,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbx3BiNgaQOh1etpnAmTAGpEUya9QsPbjaLh-LoAaChSDKOSTzYSsLc2zuWTHifh6UqSqA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzMa9QMI-xGo1p7zIiM3s3ZM6t0bF_-N1Wv0BeWjEAx8Bu4gqvQScja5lpXApOJqn10Ig/exec';
 
         // App state
         let courseData = {};
@@ -6984,10 +6958,11 @@
             // --- 2. Create Default Message (with FIRST NAME) ---
             const firstName = data.studentName ? data.studentName.split(' ')[0] : 'Student';
             const greeting = `Dear ${firstName},`;
-            const defaultMessage = `${greeting}\n\nYour absence request has been partially approved. You have been excused for the hours listed above.\n\nGet well,\nBredli`;
 
-            // ... (rest of the function's HTML innerHTML = ...)
-            // ... (rest of the function... down to the button listeners)
+            // --- FIX: Default message is now empty ---
+            const defaultMessage = "";
+
+            // --- 3. Build Dialog HTML ---
             dialog.innerHTML = `
 <h3 class="dialog-title">Approve Permission Request</h3>
 <div class="dialog-content">
@@ -7004,7 +6979,7 @@
 
     <div class="form-group" style="align-items: flex-start;">
         <label for="approve-message-area">Email Message:</label>
-        <textarea id="approve-message-area" class="form-control" rows="6">${defaultMessage}</textarea>
+        <textarea id="approve-message-area" class="form-control" rows="6" placeholder="Optional: Add a custom message...">${defaultMessage}</textarea>
     </div>
     <div style="text-align: right; font-size: 0.8em; opacity: 0.7;">
         An approval email will be sent.
@@ -7035,19 +7010,6 @@
             hoursGroup.addEventListener('click', (e) => {
                 if (e.target.classList.contains('toggle-button')) {
                     e.target.classList.toggle('active');
-
-                    // Update the default message based on selection
-                    const approvedHours = Array.from(hoursGroup.querySelectorAll('.toggle-button.active'));
-                    if (approvedHours.length === originalHours.length) {
-                        // All hours selected
-                        messageArea.value = `${greeting}\n\nYour permission request has been approved for all requested hours.\n\nGet well,\nBredli`;
-                    } else if (approvedHours.length === 0) {
-                        // No hours selected
-                        messageArea.value = `${greeting}\n\nYour permission request was reviewed, but unfortunately no hours were approved. Please see me for details.\n\nBest,\nBredli`;
-                    } else {
-                        // Partial approval
-                        messageArea.value = `${greeting}\n\nYour permission request has been partially approved. You have been excused for ${approvedHours.length} of the ${originalHours.length} hours you requested.\n\nGet well,\nBredli`;
-                    }
                 }
             });
 
@@ -7057,9 +7019,9 @@
                 const approvedHours = Array.from(hoursGroup.querySelectorAll('.toggle-button.active'))
                     .map(btn => btn.dataset.value);
 
-                const message = messageArea.value;
+                const message = messageArea.value; // Get the message (it can be empty)
 
-                // --- THIS IS THE FIX ---
+                // --- THIS IS YOUR REQUESTED FIX ---
                 // Do not allow submission if no hours are selected.
                 if (approvedHours.length === 0) {
                     showNotification('warning', 'No Hours Selected', 'You must select at least one hour to approve. To deny all hours, please use the "Reject" button.');
@@ -7067,13 +7029,9 @@
                 }
                 // --- END OF FIX ---
 
-                if (!message) {
-                    showInputError(messageArea, "Message cannot be empty.");
-                    return;
-                }
+                // --- FIX: Removed the check for empty message ---
 
                 // --- 5. Show Loading State ---
-                // ... (rest of the function)
                 confirmBtn.disabled = true;
                 cancelBtn.disabled = true;
                 confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Approving...';
@@ -7083,14 +7041,14 @@
                     requestID: data.requestId,
                     studentName: data.studentName,
                     studentEmail: data.studentEmail,
-                    originalHours: originalHours.join(', '), // Send original list
-                    approvedHours: approvedHours.join(', '), // Send only approved list
-                    customMessage: message
+                    originalHours: originalHours.join(', '),
+                    approvedHours: approvedHours.join(', '),
+                    customMessage: message // Send the message (empty or not)
                 }, 'POST')
                     .then(result => {
                         if (result && result.result === 'success') {
                             showNotification('success', 'Approved', `Permission for ${data.studentName} approved.`);
-                            fetchAndDisplayAbsences(); // Refresh the admin list
+                            fetchAndDisplayAbsences();
 
                             if (result.newLogs && result.newLogs.length > 0) {
                                 const courseName = result.newLogs[0].course || currentCourse;
@@ -7102,14 +7060,13 @@
                                     }
                                 }
                             }
-                            closeDialog(); // Close on success
+                            closeDialog();
                         } else {
                             throw new Error(result?.message || 'Approval failed.');
                         }
                     })
                     .catch(err => {
                         showNotification('error', 'Approval Failed', err.message);
-                        // Re-enable buttons on failure
                         confirmBtn.disabled = false;
                         cancelBtn.disabled = false;
                         confirmBtn.innerHTML = 'Approve Selected';
@@ -7128,18 +7085,16 @@
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
-            // --- FIX: Use First Name ---
-            const firstName = data.studentName ? data.studentName.split(' ')[0] : 'Student';
-            const greeting = `Dear ${firstName},`;
-            const defaultMessage = `${greeting}\n\nYour recent absence request was not approved. Please see me for details.\n\nBest,\nBredli`;
+            // --- FIX: Default message is now empty ---
+            const defaultMessage = "";
 
             dialog.innerHTML = `
 <h3 class="dialog-title">Reject Absence Request</h3>
 <div class="dialog-content">
-    <p>Enter a brief reason for rejecting this request for <strong>${data.studentName}</strong>. This will be emailed.</p>
+    <p>This will reject the request for <strong>${data.studentName}</strong>. The student will be notified by email.</p>
     <div class="form-group" style="margin-top: 15px;">
-        <label for="reject-message-area">Message:</label>
-        <textarea id="reject-message-area" class="form-control" rows="6">${defaultMessage}</textarea>
+        <label for="reject-message-area">Reason:</label>
+        <textarea id="reject-message-area" class="form-control" rows="6" placeholder="Optional: Add a reason for rejection...">${defaultMessage}</textarea>
     </div>
 </div>
 <div class="dialog-actions">
@@ -7165,12 +7120,9 @@
 
             confirmBtn.addEventListener('click', () => {
                 const message = messageArea.value;
-                if (!message) {
-                    showInputError(messageArea, "Message cannot be empty.");
-                    return;
-                }
 
-                // --- THIS IS THE NEW LOADING STATE ---
+                // --- FIX: Removed the check for empty message ---
+
                 confirmBtn.disabled = true;
                 cancelBtn.disabled = true;
                 confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sending...';
@@ -7179,20 +7131,19 @@
                     requestID: data.requestId,
                     studentName: data.studentName,
                     studentEmail: data.studentEmail,
-                    rejectionMessage: message
+                    rejectionMessage: message // Send the message (empty or not)
                 }, 'POST')
                     .then(result => {
                         if (result && result.result === 'success') {
                             showNotification('success', 'Rejected', `Rejection email sent to ${data.studentName}.`);
-                            fetchAndDisplayAbsences(); // Refresh the list
-                            closeDialog(); // Close on success
+                            fetchAndDisplayAbsences();
+                            closeDialog();
                         } else {
                             throw new Error(result?.message || 'Rejection failed.');
                         }
                     })
                     .catch(err => {
                         showNotification('error', 'Rejection Failed', err.message);
-                        // Re-enable buttons on failure
                         confirmBtn.disabled = false;
                         cancelBtn.disabled = false;
                         confirmBtn.innerHTML = 'Reject & Send Email';
