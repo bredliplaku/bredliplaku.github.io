@@ -187,6 +187,23 @@
             background-color: rgba(251, 140, 0, 0.2);
         }
 
+        /* Container for time pills in dialogs */
+        .dialog-time-pill-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 10px;
+            background-color: var(--background-color);
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            min-height: 40px;
+        }
+
+        .dark-mode .dialog-time-pill-container {
+            background-color: #333;
+            border-color: #555;
+        }
+
         @keyframes backdrop-fade-out {
             from {
                 opacity: 1;
@@ -2442,43 +2459,6 @@
             color: var(--text-color);
         }
 
-        .student-actions-scroll {
-            display: flex;
-            /* Use flex for the buttons inside */
-            gap: 10px;
-            /* Space between buttons */
-            overflow-x: auto;
-            /* Allow horizontal scrolling */
-
-            /* This allows the container to shrink on mobile */
-            min-width: 0;
-
-            /* This creates space for the button shadows */
-            padding-bottom: 10px;
-            margin-bottom: -10px;
-
-            /* This creates a fade-out *only* when scrolling */
-            -webkit-mask-image: linear-gradient(to right, white 95%, transparent 100%);
-            mask-image: linear-gradient(to right, white 95%, transparent 100%);
-
-            /* Hide scrollbar */
-            scrollbar-width: none;
-            /* Firefox */
-        }
-
-        .student-actions-scroll::-webkit-scrollbar {
-            display: none;
-            /* Chrome, Safari */
-        }
-
-        /* Ensure buttons inside the scroll-wrapper don't wrap their own text */
-        .student-actions-scroll button {
-            white-space: nowrap;
-            /* Keep text on one line */
-            flex-shrink: 0;
-            /* Don't let buttons shrink */
-        }
-
         .sync-auth-container {
             display: flex;
             justify-content: space-between;
@@ -3176,6 +3156,13 @@
                 margin-bottom: 0;
             }
 
+            .user-info {
+                flex-wrap: wrap;
+                /* This will make the buttons wrap to the next line */
+                justify-content: flex-end;
+                /* Keep items aligned to the right */
+            }
+
             /* Hide user name on mobile */
             .user-info #user-name {
                 display: none;
@@ -3447,25 +3434,20 @@
                 </div>
                 <div id="user-container" style="display: none">
                     <div class="user-info">
-
-                        <div class="student-actions-scroll">
-                            <button id="register-uid-btn" class="btn-sm" title="Register your Student ID Card">
-                                <i class="fa-solid fa-address-card"></i>
-                                <span class="btn-text">Register Student ID</span>
-                            </button>
-                            <button id="request-permission-btn" class="btn-sm btn-orange"
-                                title="Request Absence Permission" style="display: none;">
-                                <i class="fa-solid fa-file-circle-question"></i>
-                                <span class="btn-text"> Request Permission</span>
-                            </button>
-                        </div>
-
+                        <button id="request-permission-btn" class="btn-sm btn-orange" title="Request Absence Permission"
+                            style="display: none;">
+                            <i class="fa-solid fa-hand-point-up"></i>
+                            <span class="btn-text"> Request for Permission</span>
+                        </button>
+                        <button id="register-uid-btn" class="btn-sm" title="Register your Student ID Card">
+                            <i class="fa-solid fa-address-card"></i>
+                            <span class="btn-text">Register Student ID</span>
+                        </button>
                         <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
                         <span id="user-name"></span>
                         <button id="logout-btn" class="btn-red btn-icon" title="Sign Out">
                             <i class="fa-solid fa-right-from-bracket"></i>
                         </button>
-
                     </div>
                 </div>
             </div>
@@ -3729,7 +3711,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzMa9QMI-xGo1p7zIiM3s3ZM6t0bF_-N1Wv0BeWjEAx8Bu4gqvQScja5lpXApOJqn10Ig/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwkTHr6vCpcbOlHknsY_sNmH8g4dDxm6-NMHqUz0lZh9mJ6o8Y79Jw-YwlXXoz5nZHb/exec';
 
         // App state
         let courseData = {};
@@ -4736,6 +4718,21 @@
         }
 
         /**
+ * Converts a comma-separated string of hours into HTML pills.
+ * @param {string} hoursString - e.g., "8:40, 9:40"
+ * @returns {string} - HTML string of <span class="time-tag">...</span>
+ */
+        function formatHoursAsPills(hoursString) {
+            if (!hoursString) return 'N/A';
+
+            return hoursString.split(',')
+                .map(hour => hour.trim())
+                .filter(hour => hour)
+                .map(hour => `<span class="time-tag">${hour}</span>`)
+                .join(' ');
+        }
+
+        /**
      * Direct EIS Export function with interactive UI, performance fixes, and dynamic sections.
      */
         async function showDirectEisExportDialog(prefilledDateStr = null) {
@@ -4961,6 +4958,29 @@
         function showRequestPermissionDialog() {
             if (!isSignedIn || isAdmin || !currentUser) return;
 
+            // --- NEW: Date Restriction Logic ---
+            const getLocalDateString = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            const today = new Date();
+            const minDate = new Date(today);
+            const maxDate = new Date(today);
+
+            minDate.setDate(today.getDate() - 7); // 7 days in the past
+            maxDate.setDate(today.getDate() + 7); // 7 days in the future
+
+            const minDateStr = getLocalDateString(minDate);
+            const maxDateStr = getLocalDateString(maxDate);
+            const todayStr = getLocalDateString(today);
+            // --- END NEW LOGIC ---
+
+            const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+            const MAX_FILE_SIZE_MB = MAX_FILE_SIZE / 1024 / 1024;
+
             document.body.style.overflow = 'hidden';
 
             const dialogBackdrop = document.createElement('div');
@@ -4970,13 +4990,13 @@
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
-            // --- Create Course Dropdown Options ---
+            // Create Course Dropdown Options
             const allCourses = Object.keys(courseInfoMap).sort();
             const courseOptions = allCourses.map(courseName =>
                 `<option value="${courseName}">${courseName.replace(/_/g, ' ')}</option>`
             ).join('');
 
-            // --- Create Hour Toggle Buttons ---
+            // Create Hour Toggle Buttons
             const hoursList = [
                 '8:40', '9:40', '10:40', '11:40', '12:40', '13:40', '14:40', '15:40',
                 '16:00', '17:00', '18:00', '19:00', '20:00'
@@ -4985,15 +5005,12 @@
                 `<button type="button" class="toggle-button" data-value="${hour}">${hour}</button>`
             ).join('');
 
-            // --- NEW: Revamped HTML with Disclaimer and Categories ---
             dialog.innerHTML = `
-<h3 class="dialog-title">Request Absence Permission</h3>
+<h3 class="dialog-title">Request for Permission</h3>
 <div class="dialog-content">
     
     <div class="dialog-disclaimer">
         <i class="fas fa-info-circle"></i> <strong>Please Note:</strong> As per university regulations, all absences are considered unexcused. This form is a professional courtesy to formally document your reason, which will be reviewed at my discretion.
-        <br><br>
-        If your request is rejected, it is not a personal matter. For official or long-term permissions, please contact the <strong>Dean of Students Office</strong>.
     </div>
     
     <div class="form-group" style="align-items: flex-start;">
@@ -5017,8 +5034,11 @@
     
     <div class="form-group" style="align-items: flex-start;">
         <label for="request-date">Date*:</label>
-        <input type="date" id="request-date" class="form-control form-group-control" value="${new Date().toISOString().split('T')[0]}">
-    </div>
+        <input type="date" id="request-date" class="form-control form-group-control" 
+               value="${todayStr}" 
+               min="${minDateStr}" 
+               max="${maxDateStr}">
+        </div>
     
     <div class="form-group" style="align-items: flex-start;">
         <label>Hours*:</label>
@@ -5038,6 +5058,14 @@
             <option value="Family Emergency">Family Emergency</option>
             <option value="Other">Other...</option>
         </select>
+    </div>
+    
+    <div class="form-group" id="request-file-upload-group" style="align-items: flex-start; display: none;">
+        <label for="request-file-upload">Medical Note*:</label>
+        <div class="form-group-control">
+            <input type="file" id="request-file-upload" class="form-control" accept=".pdf">
+            <small style="opacity: 0.7; margin-top: 5px; display: block;">PDF only. Max size: 10 MB.</small>
+        </div>
     </div>
     
     <div class="form-group" id="request-explanation-group" style="align-items: flex-start; display: none;">
@@ -5065,6 +5093,7 @@
             const explanationInput = dialog.querySelector('#request-explanation');
             const explanationLabel = explanationGroup.querySelector('label');
             const submitBtn = dialog.querySelector('#submit-request-btn');
+            const fileUploadGroup = dialog.querySelector('#request-file-upload-group'); // <-- NEW
 
             // --- NEW: Dynamic Logic for all categories ---
             reasonSelect.addEventListener('change', () => {
@@ -5076,17 +5105,20 @@
                 let infoBox = false;
 
                 // Reset state
+                explanationInput.value = '';
                 explanationInput.disabled = false;
                 explanationInput.classList.remove('info-box');
                 explanationLabel.innerHTML = 'Explanation*:';
+                fileUploadGroup.style.display = 'none'; // <-- NEW: Hide file input
 
                 switch (reason) {
                     case 'Calling Sick':
-                        placeholder = "Please describe your condition. A doctor's note may be required later. (Min 50 chars)";
-                        minLength = 50;
+                        placeholder = "Please link a PDF or image of your medical note.";
+                        minLength = 10;
+                        fileUploadGroup.style.display = 'flex';
                         break;
                     case 'Transportation Problem':
-                        placeholder = "Please provide specific details about the transportation issue (what, where, when). (Min 100 chars)";
+                        placeholder = "Please provide specific details about the transportation issue.";
                         minLength = 100;
                         break;
                     case 'Student Activity':
@@ -5094,10 +5126,10 @@
                         minLength = 0;
                         isRequired = false;
                         disableSubmit = true;
-                        infoBox = true; // Use the special info box style
+                        infoBox = true;
                         break;
                     case 'Academic Activity':
-                        placeholder = "Please provide the official name, website, time, and location of the academic activity. (Min 50 chars)";
+                        placeholder = "Please provide the official name, website, time, and location of the academic activity.";
                         minLength = 50;
                         break;
                     case 'Family Emergency':
@@ -5107,16 +5139,15 @@
                         explanationLabel.innerHTML = 'Explanation:'; // No asterisk
                         break;
                     case 'Other':
-                        placeholder = "You must provide a highly detailed justification for this absence. (Min 500 chars)";
+                        placeholder = "Please provide the reason for this absence.";
                         minLength = 500;
                         break;
                     default:
                         explanationGroup.style.display = 'none';
-                        submitBtn.disabled = false; // Re-enable if switching from a disabled reason
+                        submitBtn.disabled = false;
                         return;
                 }
 
-                // Show the box for all reasons
                 explanationGroup.style.display = 'flex';
                 explanationInput.placeholder = placeholder;
 
@@ -5128,11 +5159,10 @@
 
                 if (infoBox) {
                     explanationInput.classList.add('info-box');
-                    explanationInput.value = placeholder; // Set the value directly
+                    explanationInput.value = placeholder;
                     explanationInput.disabled = true;
                 }
 
-                // Handle submit button
                 submitBtn.disabled = disableSubmit;
                 submitBtn.title = disableSubmit ? "This reason must be handled via the Dean of Students Office." : "Submit Request";
             });
@@ -5146,16 +5176,20 @@
 
             dialog.querySelector('#cancel-request-btn').addEventListener('click', closeDialog);
 
-            dialog.querySelector('#submit-request-btn').addEventListener('click', async () => {
-                // --- 1. Collect Data & Validate ---
+            // --- NEW: `async` function to handle file reading ---
+            submitBtn.addEventListener('click', async () => {
+
+                // --- 1. Collect Data ---
                 const course = dialog.querySelector('#request-course').value;
                 const date = dialog.querySelector('#request-date').value;
                 const reasonType = dialog.querySelector('#request-reason-type').value;
                 const explanation = explanationInput.value;
                 const selectedHours = Array.from(dialog.querySelectorAll('#request-hours-group .toggle-button.active'))
                     .map(btn => btn.dataset.value);
+                const fileInput = dialog.querySelector('#request-file-upload'); // <-- NEW
+                const file = fileInput.files[0]; // <-- NEW
 
-                // Simple Validation
+                // --- 2. Validation ---
                 let errors = [];
                 if (!course) errors.push('Please select a course.');
                 if (!date) errors.push('Please select a date.');
@@ -5167,12 +5201,30 @@
                     errors.push(`Explanation must be at least ${minLength} characters.`);
                 }
 
+                // --- NEW: File Validation ---
+                if (reasonType === 'Calling Sick' && !file) {
+                    errors.push('A medical note (PDF) is required for this reason.');
+                }
+                if (file) {
+                    if (file.type !== 'application/pdf') {
+                        errors.push('Attachment must be a PDF file.');
+                    }
+                    if (file.size > MAX_FILE_SIZE) {
+                        errors.push(`File is too large. Max size is ${MAX_FILE_SIZE_MB} MB.`);
+                    }
+                }
+                // --- END: File Validation ---
+
                 if (errors.length > 0) {
                     showNotification('error', 'Missing Information', errors.join('<br>'));
                     return;
                 }
 
-                // --- 2. Prepare Payload ---
+                // --- 3. Show Loading State ---
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
+
+                // --- 4. Prepare Payload (and read file) ---
                 const payload = {
                     name: currentUser.name,
                     email: currentUser.email,
@@ -5183,14 +5235,37 @@
                     description: explanation.trim()
                 };
 
-                // --- 3. Submit to Backend ---
-                submitBtn.disabled = true;
+                // --- NEW: File Reading as Promise ---
+                if (file) {
+                    submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Uploading file...';
+                    try {
+                        const base64String = await new Promise((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.onerror = error => reject(error);
+                            reader.readAsDataURL(file); // Reads as Base64
+                        });
+
+                        payload.fileData = base64String;
+                        payload.fileName = file.name;
+                        payload.fileType = file.type;
+
+                    } catch (err) {
+                        showNotification('error', 'File Read Error', 'Could not read the selected file.');
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = 'Submit Request';
+                        return;
+                    }
+                }
+                // --- END: File Reading ---
+
+                // --- 5. Submit to Backend ---
                 submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
 
                 try {
                     const result = await callWebApp('submitAbsenceRequest', payload, 'POST');
                     if (result && result.result === 'success') {
-                        showNotification('success', 'Request Sent', 'Your absence request has been submitted for approval.');
+                        showNotification('success', 'Request Sent', 'Your permission request has been submitted for approval.');
                         closeDialog();
                     } else {
                         throw new Error(result?.message || 'Submission failed.');
@@ -6268,120 +6343,67 @@
         }
 
         function fetchAndDisplayRegistrations() {
-            if (!currentCourse) {
-                console.warn('Cannot fetch registrations: no course selected');
-                return;
-            }
-
-            if (!isAdmin) {
-                console.warn('Only admins can view pending registrations');
-                return;
-            }
+            if (!currentCourse) return;
+            if (!isAdmin) return;
 
             let tbody = document.getElementById('registrations-tbody');
+            if (!tbody) return;
 
-            // Create tbody if it doesn't exist
-            if (!tbody) {
-                const table = document.querySelector('#admin-tab .database-table');
-                if (!table) {
-                    console.error('Pending registrations table not found in HTML');
-                    return;
-                }
-                tbody = document.createElement('tbody');
-                tbody.id = 'registrations-tbody';
-                table.appendChild(tbody);
+            // --- NEW: Find the <thead> to update columns ---
+            const thead = tbody.closest('table').querySelector('thead tr');
+            if (thead) {
+                // Remove Actions column
+                thead.innerHTML = `
+            <th>Name</th>
+            <th class="uid-column">UID</th>
+            <th>Email</th>
+            <th>Timestamp</th>
+            <th>Sent By</th>
+        `;
             }
 
             callWebApp('getPendingRegistrations', { courseName: currentCourse }, 'GET')
                 .then(registrations => {
                     tbody.innerHTML = '';
-
                     const pendingView = document.getElementById('pending-registrations-view');
-                    const pendingModule = pendingView?.closest('.module');
-
-                    tbody.innerHTML = '';
 
                     if (!registrations || registrations.length === 0) {
-                        // Hide entire section when empty
                         if (pendingView) pendingView.classList.add('is-hidden');
                         return;
                     }
 
-                    // Show section when there are registrations
                     if (pendingView) pendingView.classList.remove('is-hidden');
 
                     registrations.forEach(reg => {
                         const row = document.createElement('tr');
-
-                        // Name
-                        const nameCell = document.createElement('td');
-                        nameCell.textContent = reg.name || 'N/A';
-                        row.appendChild(nameCell);
-
-                        // UID
-                        const uidCell = document.createElement('td');
-                        uidCell.innerHTML = `<span class="uid-badge">${reg.uid || 'N/A'}</span>`;
-                        row.appendChild(uidCell);
-
-                        // Email
-                        const emailCell = document.createElement('td');
-                        emailCell.textContent = reg.email || 'N/A';
-                        emailCell.style.fontSize = '0.9em';
-                        row.appendChild(emailCell);
+                        // --- NEW: Make row clickable and add data ---
+                        row.className = 'clickable-request-row'; // Use same class for style
+                        row.dataset.row = reg.rowNumber;
+                        row.dataset.name = reg.name;
+                        row.dataset.uid = reg.uid;
+                        row.dataset.email = reg.email;
+                        row.dataset.timestamp = reg.timestamp;
+                        row.dataset.sentBy = reg.sentBy;
 
                         // Timestamp
-                        const timestampCell = document.createElement('td');
+                        let formattedTimestamp = 'N/A';
                         if (reg.timestamp) {
                             const date = new Date(reg.timestamp);
-                            timestampCell.textContent = date.toLocaleString();
-                        } else {
-                            timestampCell.textContent = 'N/A';
+                            formattedTimestamp = date.toLocaleString();
                         }
-                        timestampCell.style.fontSize = '0.9em';
-                        row.appendChild(timestampCell);
 
-                        // Sent By
-                        const sentByCell = document.createElement('td');
-                        sentByCell.textContent = reg.sentBy || 'Unknown';
-                        sentByCell.style.fontSize = '0.9em';
-                        row.appendChild(sentByCell);
-
-                        // Actions
-                        const actionsCell = document.createElement('td');
-                        actionsCell.className = 'actions-cell';
-                        const actionsWrapper = document.createElement('div');
-                        actionsWrapper.className = 'actions-cell-content';
-                        actionsWrapper.innerHTML = `
-    <button class="btn-icon btn-green approve-reg-btn" 
-        data-row="${reg.rowNumber}" 
-        data-name="${reg.name}"
-        data-uid="${reg.uid}"
-        data-email="${reg.email}"
-        title="Approve Registration">
-        <i class="fa-solid fa-check"></i>
-    </button>
-    <button class="btn-icon btn-orange reject-reg-btn"
-        data-row="${reg.rowNumber}"
-        data-name="${reg.name}"
-        data-email="${reg.email}"
-        title="Reject Registration">
-        <i class="fa-solid fa-ban"></i>
-    </button>
-    <button class="btn-icon btn-red delete-reg-btn"
-        data-row="${reg.rowNumber}"
-        data-name="${reg.name}"
-        title="Delete Registration">
-        <i class="fa-solid fa-trash"></i>
-    </button>
-`;
-                        actionsCell.appendChild(actionsWrapper);
-                        row.appendChild(actionsCell);
-
+                        row.innerHTML = `
+                    <td>${reg.name || 'N/A'}</td>
+                    <td><span class="uid-badge">${reg.uid || 'N/A'}</span></td>
+                    <td style="font-size: 0.9em;">${reg.email || 'N/A'}</td>
+                    <td style="font-size: 0.9em;">${formattedTimestamp}</td>
+                    <td style="font-size: 0.9em;">${reg.sentBy || 'Unknown'}</td>
+                `; // No actions cell
                         tbody.appendChild(row);
                     });
 
-                    // Attach event listeners
-                    attachRegistrationActionListeners();
+                    // Attach new event listeners
+                    attachRegistrationRowListeners(); // New function
                 })
                 .catch(error => {
                     console.error('Error fetching registrations:', error);
@@ -6389,41 +6411,96 @@
                 });
         }
 
-        function attachRegistrationActionListeners() {
-            // Approve buttons
-            document.querySelectorAll('.approve-reg-btn').forEach(btn => {
-                btn.addEventListener('click', function (e) {
+        /**
+         * Attaches click listeners to the clickable pending registration rows.
+         */
+        function attachRegistrationRowListeners() {
+            document.querySelectorAll('#registrations-tbody .clickable-request-row').forEach(row => {
+                row.addEventListener('click', function (e) {
                     e.stopPropagation();
-                    const rowNumber = parseInt(this.dataset.row, 10); // <-- FIX IS HERE
-                    const name = this.dataset.name;
-                    const uid = this.dataset.uid;
-                    const email = this.dataset.email;
-
-                    showApproveDialog({ rowNumber, name, uid, email });
+                    const data = { ...this.dataset };
+                    // Parse row number back to an integer
+                    data.rowNumber = parseInt(data.row, 10);
+                    showRegistrationDetailsDialog(data);
                 });
             });
+        }
 
-            // Reject buttons
-            document.querySelectorAll('.reject-reg-btn').forEach(btn => {
-                btn.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    const rowNumber = parseInt(this.dataset.row, 10); // <-- FIX IS HERE
-                    const name = this.dataset.name;
-                    const email = this.dataset.email;
+        /**
+         * Shows a dialog with all details for a registration request.
+         */
+        function showRegistrationDetailsDialog(data) {
+            document.body.style.overflow = 'hidden';
 
-                    showRejectDialog({ rowNumber, name, email });
-                });
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
+
+            const formattedTimestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'N/A';
+
+            dialog.innerHTML = `
+<h3 class="dialog-title">Review Registration</h3>
+<div class="dialog-content">
+    <div class="form-group" style="align-items: flex-start;">
+        <label>Student:</label>
+        <input class="form-control form-group-control" value="${data.name}" disabled>
+    </div>
+    <div class="form-group" style="align-items: flex-start;">
+        <label>Email:</label>
+        <input class="form-control form-group-control" value="${data.email}" disabled>
+    </div>
+    <div class="form-group" style="align-items: flex-start;">
+        <label>UID:</label>
+        <div class="form-group-control dialog-time-pill-container" style="padding-top: 13px; padding-bottom: 13px;">
+            <span class="uid-badge" style="font-size: 1.1em; padding: 8px 10px;">${data.uid}</span>
+        </div>
+    </div>
+    <div class="form-group" style="align-items: flex-start;">
+        <label>Sent By:</label>
+        <input class="form-control form-group-control" value="${data.sentBy}" disabled>
+    </div>
+    <div class="form-group" style="align-items: flex-start;">
+        <label>Timestamp:</label>
+        <input class="form-control form-group-control" value="${formattedTimestamp}" disabled>
+    </div>
+</div>
+<div class="dialog-actions">
+    <button id="cancel-details-btn" class="btn-blue">Cancel</button>
+    <button id="delete-details-btn" class="btn-red">Delete</button>
+    <button id="reject-details-btn" class="btn-orange">Reject</button>
+    <button id="approve-details-btn" class="btn-green">Approve</button>
+</div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const closeDialog = () => {
+                if (document.body.contains(dialogBackdrop)) {
+                    document.body.removeChild(dialogBackdrop);
+                }
+                document.body.style.overflow = '';
+            };
+
+            // --- Wire up buttons ---
+            dialog.querySelector('#cancel-details-btn').addEventListener('click', closeDialog);
+
+            // These buttons just call the *existing* dialog functions
+            dialog.querySelector('#approve-details-btn').addEventListener('click', () => {
+                closeDialog();
+                showApproveDialog(data); // data = { rowNumber, name, uid, email }
             });
 
-            // Delete buttons
-            document.querySelectorAll('.delete-reg-btn').forEach(btn => {
-                btn.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    const rowNumber = parseInt(this.dataset.row, 10);
-                    const name = this.dataset.name;
+            dialog.querySelector('#reject-details-btn').addEventListener('click', () => {
+                closeDialog();
+                showRejectDialog(data); // data = { rowNumber, name, email }
+            });
 
-                    showDeleteDialog({ rowNumber, name });
-                });
+            dialog.querySelector('#delete-details-btn').addEventListener('click', () => {
+                closeDialog();
+                showDeleteDialog(data); // data = { rowNumber, name }
             });
         }
 
@@ -6787,19 +6864,18 @@
 
             if (!tbody || !pendingView) return;
 
-            // --- NEW: Find the <thead> to update columns ---
             const thead = tbody.closest('table').querySelector('thead tr');
             if (thead) {
-                // Remove Description and Actions columns
+                // Add "Actions" column back, remove "Description"
                 thead.innerHTML = `
             <th>Student</th>
             <th>Course</th>
             <th>Date</th>
             <th>Hours</th>
             <th>Reason</th>
+            <th class="actions-header">Actions</th>
         `;
             }
-            // --- END NEW ---
 
             callWebApp('getPendingAbsences', {}, 'GET')
                 .then(requests => {
@@ -6814,8 +6890,7 @@
 
                     requests.forEach(req => {
                         const row = document.createElement('tr');
-                        // --- NEW: Add all data to the row for the dialog ---
-                        row.className = 'clickable-request-row'; // Add class for listener
+                        row.className = 'clickable-request-row';
                         row.dataset.requestId = req.requestID;
                         row.dataset.studentName = req.name;
                         row.dataset.studentEmail = req.email;
@@ -6824,7 +6899,7 @@
                         row.dataset.hours = req.hours;
                         row.dataset.reasonType = req.reasonType;
                         row.dataset.description = req.description;
-                        // --- END NEW ---
+                        row.dataset.attachmentUrl = req.attachmentURL || ''; // Add attachment URL
 
                         row.innerHTML = `
                     <td>
@@ -6833,14 +6908,25 @@
                     </td>
                     <td>${req.course.replace(/_/g, ' ')}</td>
                     <td>${req.absenceDate}</td>
-                    <td>${req.hours}</td>
+                    <td class="times-cell">${formatHoursAsPills(req.hours)}</td>
                     <td>${req.reasonType}</td>
-                `; // Removed Description and Actions
+                    <td class="actions-cell">
+                        <div class="actions-cell-content">
+                            <button class="btn-icon btn-red delete-absence-btn"
+                                title="Delete Request"
+                                data-request-id="${req.requestID}"
+                                data-student-name="${req.name}">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                `;
                         tbody.appendChild(row);
                     });
 
-                    // --- NEW: Attach listeners to the rows ---
+                    // Add listeners for both rows AND buttons
                     attachPermissionRowListeners();
+                    attachAbsenceActionListeners(); // Add this back
                 })
                 .catch(error => {
                     console.error('Error fetching pending absences:', error);
@@ -6854,9 +6940,29 @@
         function attachPermissionRowListeners() {
             document.querySelectorAll('.clickable-request-row').forEach(row => {
                 row.addEventListener('click', function (e) {
+                    // --- FIX: Do not open dialog if a button inside the row was clicked ---
+                    if (e.target.closest('button')) {
+                        return;
+                    }
+                    // --- END OF FIX ---
+
                     e.stopPropagation();
-                    const data = { ...this.dataset }; // Clone all data from the row
+                    const data = { ...this.dataset };
                     showPermissionDetailsDialog(data);
+                });
+            });
+        }
+
+        /**
+         * Attaches click listeners to the approve/reject/delete absence buttons.
+         */
+        function attachAbsenceActionListeners() {
+            // Delete buttons (Approve/Reject are now in the dialog)
+            document.querySelectorAll('.delete-absence-btn').forEach(btn => {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    const data = { ...this.dataset }; // Clone data
+                    showDeleteAbsenceDialog(data);
                 });
             });
         }
@@ -6891,7 +6997,9 @@
     </div>
     <div class="form-group" style="align-items: flex-start;">
         <label>Hours:</label>
-        <input class="form-control form-group-control" value="${data.hours}" disabled>
+        <div class="form-group-control dialog-time-pill-container">
+            ${formatHoursAsPills(data.hours)}
+        </div>
     </div>
     <div class="form-group" style="align-items: flex-start;">
         <label>Reason:</label>
@@ -6903,8 +7011,7 @@
     </div>
 </div>
 <div class="dialog-actions">
-    <button id="cancel-details-btn" class="btn-blue">Cancel</button>
-    <button id="delete-details-btn" class="btn-red">Delete</button>
+    <button id="cancel-details-btn" class="btn-red">Cancel</button>
     <button id="reject-details-btn" class="btn-orange">Reject</button>
     <button id="approve-details-btn" class="btn-green">Approve</button>
 </div>`;
@@ -6930,11 +7037,6 @@
             dialog.querySelector('#reject-details-btn').addEventListener('click', () => {
                 closeDialog();
                 showRejectAbsenceDialog(data);
-            });
-
-            dialog.querySelector('#delete-details-btn').addEventListener('click', () => {
-                closeDialog();
-                showDeleteAbsenceDialog(data);
             });
         }
 
@@ -7043,7 +7145,8 @@
                     studentEmail: data.studentEmail,
                     originalHours: originalHours.join(', '),
                     approvedHours: approvedHours.join(', '),
-                    customMessage: message // Send the message (empty or not)
+                    customMessage: message,
+                    courseName: data.course
                 }, 'POST')
                     .then(result => {
                         if (result && result.result === 'success') {
@@ -7089,7 +7192,7 @@
             const defaultMessage = "";
 
             dialog.innerHTML = `
-<h3 class="dialog-title">Reject Absence Request</h3>
+<h3 class="dialog-title">Reject Permission Request</h3>
 <div class="dialog-content">
     <p>This will reject the request for <strong>${data.studentName}</strong>. The student will be notified by email.</p>
     <div class="form-group" style="margin-top: 15px;">
@@ -7131,7 +7234,8 @@
                     requestID: data.requestId,
                     studentName: data.studentName,
                     studentEmail: data.studentEmail,
-                    rejectionMessage: message // Send the message (empty or not)
+                    rejectionMessage: message,
+                    courseName: data.course
                 }, 'POST')
                     .then(result => {
                         if (result && result.result === 'success') {
