@@ -3711,7 +3711,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwkTHr6vCpcbOlHknsY_sNmH8g4dDxm6-NMHqUz0lZh9mJ6o8Y79Jw-YwlXXoz5nZHb/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxrFlVwu7mh7pbNE24R0ite8kI2SByX05Nqn1ArrgH85vmroywR7gZuUxY24v1RLDWCQw/exec';
 
         // App state
         let courseData = {};
@@ -4958,7 +4958,6 @@
         function showRequestPermissionDialog() {
             if (!isSignedIn || isAdmin || !currentUser) return;
 
-            // --- NEW: Date Restriction Logic ---
             const getLocalDateString = (date) => {
                 const year = date.getFullYear();
                 const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -4976,7 +4975,6 @@
             const minDateStr = getLocalDateString(minDate);
             const maxDateStr = getLocalDateString(maxDate);
             const todayStr = getLocalDateString(today);
-            // --- END NEW LOGIC ---
 
             const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
             const MAX_FILE_SIZE_MB = MAX_FILE_SIZE / 1024 / 1024;
@@ -5104,24 +5102,31 @@
                 let disableSubmit = false;
                 let infoBox = false;
 
-                // Reset state
-                explanationInput.value = '';
+                // --- Reset state ---
+                explanationInput.value = ''; // Clear any old text
                 explanationInput.disabled = false;
                 explanationInput.classList.remove('info-box');
                 explanationLabel.innerHTML = 'Explanation*:';
-                fileUploadGroup.style.display = 'none'; // <-- NEW: Hide file input
+
+                // Hide both groups by default
+                fileUploadGroup.style.display = 'none';
+                explanationGroup.style.display = 'none';
+
+                submitBtn.disabled = false; // Re-enable submit by default
 
                 switch (reason) {
                     case 'Calling Sick':
-                        placeholder = "Please link a PDF or image of your medical note.";
-                        minLength = 10;
                         fileUploadGroup.style.display = 'flex';
+                        isRequired = false; // No explanation text required
+                        minLength = 0;
                         break;
                     case 'Transportation Problem':
+                        explanationGroup.style.display = 'flex'; // Show explanation
                         placeholder = "Please provide specific details about the transportation issue.";
                         minLength = 100;
                         break;
                     case 'Student Activity':
+                        explanationGroup.style.display = 'flex'; // Show explanation (as info box)
                         placeholder = "For Student Activities, I must receive an official confirmation email from the Dean of Students Office. This form cannot be used to submit this type of request.";
                         minLength = 0;
                         isRequired = false;
@@ -5129,26 +5134,27 @@
                         infoBox = true;
                         break;
                     case 'Academic Activity':
+                        explanationGroup.style.display = 'flex'; // Show explanation
                         placeholder = "Please provide the official name, website, time, and location of the academic activity.";
                         minLength = 50;
                         break;
                     case 'Family Emergency':
+                        explanationGroup.style.display = 'flex'; // Show explanation
                         placeholder = "You may add an optional, non-confidential explanation here.";
                         isRequired = false;
                         minLength = 0;
                         explanationLabel.innerHTML = 'Explanation:'; // No asterisk
                         break;
                     case 'Other':
+                        explanationGroup.style.display = 'flex'; // Show explanation
                         placeholder = "Please provide the reason for this absence.";
                         minLength = 500;
                         break;
                     default:
-                        explanationGroup.style.display = 'none';
-                        submitBtn.disabled = false;
                         return;
                 }
 
-                explanationGroup.style.display = 'flex';
+                // This logic now only runs if a case was matched
                 explanationInput.placeholder = placeholder;
 
                 if (isRequired) {
@@ -6864,15 +6870,17 @@
 
             if (!tbody || !pendingView) return;
 
+            // --- Find the <thead> to update columns ---
             const thead = tbody.closest('table').querySelector('thead tr');
             if (thead) {
-                // Add "Actions" column back, remove "Description"
+                // Add "Attachment" and "Actions" columns, remove "Description"
                 thead.innerHTML = `
             <th>Student</th>
             <th>Course</th>
             <th>Date</th>
             <th>Hours</th>
             <th>Reason</th>
+            <th>Attachment</th>
             <th class="actions-header">Actions</th>
         `;
             }
@@ -6882,15 +6890,16 @@
                     tbody.innerHTML = ''; // Clear old data
 
                     if (!requests || requests.length === 0) {
-                        pendingView.classList.add('is-hidden');
+                        pendingView.classList.add('is-hidden'); // Hide section if empty
                         return;
                     }
 
-                    pendingView.classList.remove('is-hidden');
+                    pendingView.classList.remove('is-hidden'); // Show section
 
                     requests.forEach(req => {
                         const row = document.createElement('tr');
-                        row.className = 'clickable-request-row';
+                        // --- Add all data to the row for the dialog ---
+                        row.className = 'clickable-request-row'; // Add class for listener
                         row.dataset.requestId = req.requestID;
                         row.dataset.studentName = req.name;
                         row.dataset.studentEmail = req.email;
@@ -6901,6 +6910,17 @@
                         row.dataset.description = req.description;
                         row.dataset.attachmentUrl = req.attachmentURL || ''; // Add attachment URL
 
+                        // --- Create Attachment Link ---
+                        const attachmentLink = req.attachmentURL
+                            ? `<a href="${req.attachmentURL}" target="_blank" rel="noopener noreferrer" 
+                         class="btn-sm btn-blue" style="text-decoration: none; padding: 5px 8px;"
+                         title="Open Attached File"
+                         onclick="(e) => e.stopPropagation()"> 
+                         <i class="fa-solid fa-file-pdf"></i> View PDF
+                       </a>`
+                            : 'N/A';
+                        // --- END NEW ---
+
                         row.innerHTML = `
                     <td>
                         <div>${req.name}</div>
@@ -6910,6 +6930,7 @@
                     <td>${req.absenceDate}</td>
                     <td class="times-cell">${formatHoursAsPills(req.hours)}</td>
                     <td>${req.reasonType}</td>
+                    <td>${attachmentLink}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
                             <button class="btn-icon btn-red delete-absence-btn"
