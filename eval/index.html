@@ -774,11 +774,13 @@
         // TODO: REPLACE with your Google Sheet ID
         // 1. Create a new Google Sheet
         // 2. Share it with your API's Service Account (if using) OR make it editable by "anyone with the link" (less secure, for testing)
-        // 3. Get the ID from the URL
+        // 3. Get the ID from the URL: https://docs.google.com/spreadsheets/d/THIS_IS_THE_ID/edit
         const SPREADSHEET_ID = '1pZOi5YodqixNRw0tjJGTz7nsRV65P8v6GK9ZXS7c3uc';
 
         // This is the sheet that will store all the raw form data
         const DATA_SHEET_NAME = 'Submissions';
+        // This is the new sheet that will store all the scoring rules
+        const CONFIG_SHEET_NAME = 'CONFIG';
 
         // Scopes required for Google Auth and Google Sheets API
         const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
@@ -788,93 +790,15 @@
         let gsiClient; // Google Sign-In Client
         let currentUser; // Store user profile
         let notificationTimeout;
+        // This will be populated from the CONFIG sheet instead of being hard-coded
+        let globalScoringLogic = {};
 
         // === SCORING LOGIC (from Score.csv) ===
         // This object acts as our "backend" rules engine
-        const SCORING_LOGIC = {
-            // Section 3: Teaching
-            '3.1-undergrad-years': { points: 2, category: 'teaching' },
-            '3.1-grad-years': { points: 2, category: 'teaching' }, // Assuming same as undergrad, adjust if needed
-            '3.1-integrated-years': { points: 2, category: 'teaching' }, // Assuming same, adjust if needed
-            '3.2-undergrad-ects': { points: 1, category: 'teaching' },
-            '3.3-grad-ects': { points: 1.2, category: 'teaching' },
-            '3.4-integrated-ects': { points: 1.1, category: 'teaching' },
-            '3.5-student-avg': { points: 4, category: 'teaching' },
-            '3.6-student-num-avg': { points: 0.1, category: 'teaching' },
-
-            // Section 4: Supervising
-            '4.1-bachelor': { points: 1, category: 'teaching' },
-            '4.2-pm': { points: 1.2, category: 'teaching' },
-            '4.3-msc': { points: 2, category: 'teaching' },
-            '4.4-phd': { points: 10, category: 'teaching' },
-
-            // Section 5: Publications
-            '5.1-q1': { points: 26, category: 'research' },
-            '5.2-q2': { points: 24, category: 'research' },
-            '5.3-q3': { points: 22, category: 'research' },
-            '5.4-other-indexed': { points: 20, category: 'research' },
-            '5.5-other-journals': { points: 4, category: 'research' },
-            '5.6-monograph-indexed': { points: 8, category: 'research' },
-            '5.7-monograph-other': { points: 4, category: 'research' },
-            '5.8-book-indexed': { points: 25, category: 'research' },
-            '5.9-chapter-indexed': { points: 10, category: 'research' },
-            '5.10-book-local': { points: 15, category: 'research' }, // Renamed 5.1 in form to 5.10
-            '5.11-chapter-local': { points: 8, category: 'research' },
-
-            // Section 6: Academic Engagements
-            '6.1-conf-intl-proceedings': { points: 3, category: 'research' },
-            '6.2-conf-local-proceedings': { points: 2, category: 'research' },
-            '6.3-committee-indexed': { points: 5, category: 'research' },
-            '6.4-committee-other': { points: 3, category: 'research' },
-            '6.5-editor-indexed': { points: 10, category: 'research' },
-            '6.6-editor-other': { points: 6, category: 'research' },
-            '6.7-reviewer-indexed': { points: 10, category: 'research' },
-            '6.8-reviewer-other': { points: 3, category: 'research' },
-            '6.9-keynote-intl': { points: 5, category: 'research' },
-
-            // Section 7: Innovations and Collaborations
-            '7.1-award-intl': { points: 15, category: 'innovation' },
-            '7.2-award-local': { points: 8, category: 'innovation' },
-            '7.3-patent': { points: 40, category: 'innovation' },
-            '7.4-project-eu': { points: 15, category: 'innovation' },
-            '7.5-project-local': { points: 6, category: 'innovation' },
-            '7.6-new-business': { points: 25, category: 'innovation' },
-            '7.7-service-agreement': { points: 10, category: 'innovation' },
-
-            // Section 8: International Academic Engagement
-            '8.1-research-partner': { points: 8, category: 'international' },
-            '8.2-engagement-eu': { points: 2, category: 'international' },
-
-            // Section 9: Institutional Contribution
-            '9.1-design-ug': { points: 3, category: 'administration' },
-            '9.2-design-g': { points: 5, category: 'administration' },
-            '9.3-design-isc': { points: 4, category: 'administration' },
-            '9.4-vice-rector': { points: 12, category: 'administration' },
-            '9.5-dean': { points: 10, category: 'administration' },
-            '9.6-hod': { points: 8, category: 'administration' },
-            '9.7-boards': { points: 3, category: 'administration' },
-            '9.8-committees': { points: 3, category: 'administration' },
-            '9.9-drafting': { points: 3, category: 'administration' },
-            '9.10-publications': { points: 6, category: 'administration' }, // Renamed 9.1 in form to 9.10
-            '9.11-employment': { points: 1, category: 'administration' },
-            '9.12-promo': { points: 8, category: 'administration' },
-            '9.13-registration': { points: 5, category: 'administration' },
-            '9.14-activities-prof': { points: 3, category: 'administration' },
-            '9.15-activities-club': { points: 2, category: 'administration' },
-            '9.16-advisor': { points: 0.1, category: 'administration' },
-
-            // Section 10: Professional Contribution
-            '10.1-innovation-transfer': { points: 3, category: 'professional' },
-            '10.2-expertise': { points: 3, category: 'professional' },
-            '10.3-artistic': { points: 3, category: 'professional' },
-            '10.4-edu-programs': { points: 3, category: 'professional' },
-            '10.5-project-proposal': { points: 3, category: 'professional' },
-            '10.6-advisory': { points: 3, category: 'professional' },
-            '10.7-society': { points: 3, category: 'professional' },
-
-            // Section 11: Other Contributions (Points are assigned by admin)
-            '11-other': { points: 1, category: 'administration' } // Handled specially
-        };
+        /* * REMOVED: The hard-coded SCORING_LOGIC object is gone.
+         * It will now be loaded dynamically from the 'CONFIG' sheet
+         * into the 'globalScoringLogic' variable.
+         */
 
         // === INITIALIZATION ===
         window.addEventListener('load', initApp);
@@ -947,10 +871,21 @@
 
             // 4. Check for existing session
             google.accounts.id.prompt((notification) => {
-                if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+                // FedCM-compatible way to check if prompt was suppressed or skipped
+                const notDisplayedReason = notification.getNotDisplayedReason();
+                const skippedReason = notification.getSkippedReason();
+
+                if (notDisplayedReason) {
+                    console.warn(`One Tap prompt not displayed: ${notDisplayedReason}`);
                     // Prompt not shown, user is likely not signed in
                     updateAuthUI(false);
+                } else if (skippedReason) {
+                    console.warn(`One Tap prompt skipped: ${skippedReason}`);
+                    // User actively skipped, so we know they are not signed in
+                    updateAuthUI(false);
                 }
+                // If neither, the prompt is shown or they are auto-signed-in,
+                // and the handleCredentialResponse callback will fire.
             });
         }
 
@@ -975,15 +910,34 @@
             const tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
-                callback: (tokenResponse) => {
+                callback: async (tokenResponse) => {
                     if (tokenResponse.error) {
                         console.error('Error getting token', tokenResponse.error);
                         showNotification('error', 'Auth Error', 'Failed to get required permissions.');
                         return;
                     }
-                    // Now we have the access token and permissions
+
+                    // === MODIFIED DYNAMIC LOADING FLOW ===
+
+                    // 1. Update the UI to show the user is logged in *immediately*.
+                    // This prevents the "stuck" feeling if the config fails.
                     updateAuthUI(true, currentUser);
-                    handleHashChange(); // Load the correct view
+                    showLoader(true);
+
+                    // 2. Load the scoring configuration from the spreadsheet
+                    const configLoaded = await loadScoringConfig();
+
+                    if (configLoaded) {
+                        // 3. If successful, load the correct app view
+                        handleHashChange(); // Load the correct view
+                        showNotification('success', 'Ready', 'Scoring rules loaded successfully.');
+                    } else {
+                        // 4. If failed, just show an error. The user is already logged in.
+                        showNotification('error', 'Config Error', 'Failed to load scoring rules. App cannot start.');
+                        // We do not call handleHashChange, so the app remains on the "empty" view.
+                    }
+                    showLoader(false);
+                    // === END MODIFIED FLOW ===
                 },
             });
 
@@ -1025,6 +979,7 @@
                 updateAuthUI(false);
                 currentUser = null;
                 gapiClient.setToken(null);
+                globalScoringLogic = {}; // Clear the loaded config
                 window.location.hash = ''; // Go to default state
                 document.getElementById('evaluation-form').reset();
             });
@@ -1504,6 +1459,68 @@
             }
         }
 
+        /**
+         * NEW FUNCTION
+         * Loads the scoring rules from the 'CONFIG' sheet in the spreadsheet.
+         * Populates the global 'globalScoringLogic' object.
+         * Returns true on success, false on failure.
+         */
+        async function loadScoringConfig() {
+            if (!gapiClient) {
+                console.error('GAPI client not ready for config load');
+                return false;
+            }
+
+            try {
+                // Read columns A:C (ItemID, Points, Category)
+                const range = `${CONFIG_SHEET_NAME}!A:C`;
+                const response = await gapiClient.sheets.spreadsheets.values.get({
+                    spreadsheetId: SPREADSHEET_ID,
+                    range: range,
+                });
+
+                const rows = response.result.values || [];
+                if (rows.length <= 1) { // Only header or empty
+                    console.error('CONFIG sheet is empty or has no rules.');
+                    return false;
+                }
+
+                globalScoringLogic = {}; // Clear any old config
+                let rulesLoaded = 0;
+
+                // Start from 1 to skip header row
+                for (let i = 1; i < rows.length; i++) {
+                    const [id, points, category] = rows[i];
+
+                    if (id && points && category) {
+                        // Check if points is a valid number
+                        const parsedPoints = parseFloat(points);
+                        if (!isNaN(parsedPoints)) {
+                            globalScoringLogic[id] = {
+                                points: parsedPoints,
+                                category: category.toLowerCase().trim()
+                            };
+                            rulesLoaded++;
+                        } else {
+                            console.warn(`Skipping rule "${id}": Invalid points value "${points}"`);
+                        }
+                    }
+                }
+
+                if (rulesLoaded > 0) {
+                    console.log(`Successfully loaded ${rulesLoaded} scoring rules.`);
+                    return true;
+                } else {
+                    console.error('No valid rules were loaded from the CONFIG sheet.');
+                    return false;
+                }
+
+            } catch (err) {
+                console.error('Fatal error loading scoring config', err);
+                return false;
+            }
+        }
+
         // === SCORING & ADMIN DASHBOARD ===
 
         /**
@@ -1560,7 +1577,7 @@
 
             // 3. Dynamic fields (Counts of items)
             // Init all counts to 0
-            Object.keys(SCORING_LOGIC).forEach(key => {
+            Object.keys(globalScoringLogic).forEach(key => {
                 if (!quantities[key]) quantities[key] = 0;
             });
 
@@ -1605,7 +1622,7 @@
             };
 
             for (const key in quantities) {
-                const rule = SCORING_LOGIC[key];
+                const rule = globalScoringLogic[key];
                 if (rule) {
                     const quantity = quantities[key] || 0;
                     const points = rule.points * quantity;
