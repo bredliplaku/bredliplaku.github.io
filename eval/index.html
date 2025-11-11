@@ -198,6 +198,14 @@
             border-radius: 8px;
             font-size: 0.95rem;
             transition: border-color 0.2s, box-shadow 0.2s;
+            background-color: #fff;
+            /* Ensure select has bg */
+        }
+
+        .form-input[readonly] {
+            background-color: #f8f9fa;
+            color: #5f6368;
+            cursor: not-allowed;
         }
 
         .form-input:focus {
@@ -595,7 +603,11 @@
         <div id="login-screen">
             <h1>Welcome to the Performance Portal</h1>
             <p>Please sign in with your Google account to access your evaluation form and the admin dashboard.</p>
-            <div id="gsi-button-container"></div>
+            <!-- NEW: Custom Sign-In Button -->
+            <button id="custom-signin-btn" class="btn btn-primary">
+                <i class="fa-brands fa-google"></i>
+                Sign in with Google
+            </button>
         </div>
 
         <!-- App Content (Hidden by default) -->
@@ -625,15 +637,74 @@
                             <div class="form-input-grid" style="grid-template-columns: 1fr 1fr 1fr;">
                                 <div class="form-group">
                                     <label class="form-label" for="1.2-rank">Academic Rank</label>
-                                    <input type="text" id="1.2-rank" class="form-input">
+                                    <!-- UPDATED: Readonly as per Excel -->
+                                    <input type="text" id="1.2-rank" class="form-input" readonly
+                                        placeholder="Auto-filled from Section 2">
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label" for="1.4-faculty">Faculty</label>
-                                    <input type="text" id="1.4-faculty" class="form-input">
+                                    <!-- UPDATED: Select dropdown -->
+                                    <select id="1.4-faculty" class="form-input">
+                                        <option value="">Select Faculty...</option>
+                                        <option value="Architecture and Engineering">Architecture and Engineering
+                                        </option>
+                                        <option value="Law and Social Sciences">Law and Social Sciences</option>
+                                        <option value="Economics and Administrative Sciences">Economics and
+                                            Administrative Sciences</option>
+                                        <!-- Add other faculties as needed -->
+                                    </select>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label" for="1.5-department">Department</label>
-                                    <input type="text" id="1.5-department" class="form-input">
+                                    <!-- UPDATED: Select dropdown -->
+                                    <select id="1.5-department" class="form-input">
+                                        <option value="">Select Department...</option>
+                                        <option value="Economics">Economics</option>
+                                        <option value="Business Administration">Business Administration</option>
+                                        <option value="Architecture">Architecture</option>
+                                        <option value="Civil Engineering">Civil Engineering</option>
+                                        <option value="Computer Engineering">Computer Engineering</option>
+                                        <option value="Software Engineering">Software Engineering</option>
+                                        <option value="Law">Law</option>
+                                        <option value="Political Science and International Relations">Political Science
+                                            and International Relations</option>
+                                        <!-- Add other departments as needed -->
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- NEW: 2. Qualifications -->
+                    <details class="card">
+                        <summary>
+                            <h2>2. Qualifications (Year Completed)</h2>
+                            <i class="fa-solid fa-chevron-right chevron"></i>
+                        </summary>
+                        <div class="card-body">
+                            <p class="text-sm text-gray-600 mb-4">Enter the year you completed your highest
+                                qualification. Your Academic Rank will be auto-filled.</p>
+                            <div class="form-input-grid">
+                                <div class="form-group">
+                                    <label class="form-label" for="2.1-msc">Master of Science (MSc)</label>
+                                    <input type="number" id="2.1-msc" class="form-input qualification-year" min="1950"
+                                        max="2099" placeholder="e.g., 2010">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="2.2-phd">Doctor of Philosophy (PhD)</label>
+                                    <input type="number" id="2.2-phd" class="form-input qualification-year" min="1950"
+                                        max="2099" placeholder="e.g., 2014">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="2.3-assoc-prof">Associate Professor (Assoc. Prof.
+                                        Dr.)</label>
+                                    <input type="number" id="2.3-assoc-prof" class="form-input qualification-year"
+                                        min="1950" max="2099" placeholder="e.g., 2018">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="2.4-prof">Professor (Prof. Dr.)</label>
+                                    <input type="number" id="2.4-prof" class="form-input qualification-year" min="1950"
+                                        max="2099" placeholder="e.g., 2022">
                                 </div>
                             </div>
                         </div>
@@ -1232,7 +1303,7 @@
         const CONFIG_SHEET_NAME = 'CONFIG';
 
         // Scopes needed for the app
-        const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+        const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email openid';
 
         // === GLOBAL STATE ===
         let gapiInstance = null;
@@ -1250,7 +1321,7 @@
             notificationMessage: document.getElementById('notification-message'),
             loginScreen: document.getElementById('login-screen'),
             appContent: document.getElementById('app-content'),
-            gsiButton: document.getElementById('gsi-button-container'),
+            customSigninBtn: document.getElementById('custom-signin-btn'), // NEW: Custom sign-in button
             userMenu: document.getElementById('user-menu'),
             userAvatar: document.getElementById('user-avatar'),
             dropdownMenu: document.getElementById('dropdown-menu'),
@@ -1262,6 +1333,9 @@
             form: document.getElementById('evaluation-form'),
             saveBtn: document.getElementById('save-btn'),
             saveStatus: document.getElementById('save-status'),
+            // NEW: Qualification inputs
+            qualificationInputs: document.querySelectorAll('.qualification-year'),
+            academicRankInput: document.getElementById('1.2-rank'),
             // Dynamic Lists
             addCourseBtn: document.getElementById('add-course-btn'),
             courseList: document.getElementById('course-list'),
@@ -1337,7 +1411,7 @@
         window.addEventListener('load', init);
 
         function init() {
-            // Set up GSI button
+            // Set up GSI / GAPI clients
             setTimeout(() => {
                 if (typeof google !== 'undefined') {
                     initGoogleApi();
@@ -1345,18 +1419,15 @@
                     console.error('Google GSI library not loaded.');
                     showNotification('error', 'Load Error', 'Could not load Google Sign-In. Please refresh.');
                 }
-            }, 500); // Wait a bit for GSI to load
-
-            // Set up GAPI client
-            setTimeout(() => {
                 if (typeof gapi !== 'undefined') {
                     gapi.load('client', initGapiClient);
                 } else {
                     console.error('Google API client not loaded.');
                 }
-            }, 500);
+            }, 500); // Wait a bit for libraries to load
 
             // App event listeners
+            dom.customSigninBtn.addEventListener('click', handleAuthClick); // NEW
             dom.signOutBtn.addEventListener('click', handleSignOut);
             window.addEventListener('hashchange', handleHashChange);
 
@@ -1393,28 +1464,38 @@
             });
             dom.pubList.addEventListener('change', updatePublicationTotals);
 
+            // NEW: Listen to changes on qualification year inputs
+            dom.qualificationInputs.forEach(input => {
+                input.addEventListener('input', updateAcademicRank);
+            });
+
             // Auto-save on form change
             dom.form.addEventListener('input', debounce(autoSave, 2000));
         }
 
+        // UPDATED: Init Google API Client
         function initGoogleApi() {
-            google.accounts.id.initialize({
-                client_id: CLIENT_ID,
-                callback: handleCredentialResponse,
-                auto_select: false // Removed auto sign-in
-            });
-            google.accounts.id.renderButton(
-                dom.gsiButton,
-                { theme: "outline", size: "large", type: "standard", text: "signin_with" }
-            );
-            // We removed the prompt() call to disable One Tap
+            try {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: SCOPES,
+                    callback: handleTokenResponse, // This is the single callback
+                });
+            } catch (error) {
+                console.error("Error initializing Google Token Client", error);
+                showNotification('error', 'Auth Error', 'Could not initialize Google Sign-In.');
+            }
         }
 
         async function initGapiClient() {
             try {
+                // Also load oauth2 discovery doc
                 await gapi.client.init({
                     apiKey: API_KEY,
-                    discoveryDocs: ["https://sheets.googleapis.com/$discovery/rest?version=v4"],
+                    discoveryDocs: [
+                        "https://sheets.googleapis.com/$discovery/rest?version=v4",
+                        "https://www.googleapis.com/discovery/v1/apis/oauth2/v2/rest"
+                    ],
                 });
                 gapiInstance = gapi;
             } catch (error) {
@@ -1423,77 +1504,88 @@
             }
         }
 
-        // === AUTHENTICATION ===
+        // === AUTHENTICATION (REBUILT) ===
 
-        function handleCredentialResponse(response) {
+        function handleAuthClick() {
             showLoader(true);
-            const credential = response.credential;
-            // Decode JWT to get user info
-            currentUser = parseJwt(credential);
-
-            // Set the *correct* token for GAPI client
-            gapi.client.setToken({ access_token: credential });
-
-            // Initialize the token client for *future* scope requests
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                callback: async (tokenResponse) => {
-                    if (tokenResponse.error) {
-                        console.error('Error getting token', tokenResponse.error);
-                        showNotification('error', 'Auth Error', 'Failed to get required permissions.');
-                        showLoader(false);
-                        return;
-                    }
-
-                    // This token has the *scopes*, so set it
-                    gapi.client.setToken(tokenResponse);
-
-                    // 1. Load scoring config
-                    const configLoaded = await loadScoringConfig();
-
-                    if (configLoaded) {
-                        // 2. Load user data
-                        await loadUserData();
-                        // 3. Update UI
-                        updateAuthUI(true, currentUser);
-                        handleHashChange(); // Load the correct view
-                    } else {
-                        // Config failed, stop the app
-                        showNotification('error', 'Config Error', 'Failed to load scoring rules. App cannot start.');
-                        handleSignOut(); // Sign out user
-                    }
-                    showLoader(false);
-                },
-            });
-
-            // Request the necessary scopes *immediately* after sign-in
-            requestScopes();
-        }
-
-        function requestScopes() {
-            // Check if we already have the token
-            if (gapi.client.getToken() && gapi.client.getToken().access_token) {
-                // Check if it has the required scopes.
-                // This is a bit of a simplification; in a real app, you'd check token expiry and scopes.
-                // For now, we just request it to be sure.
+            if (tokenClient) {
+                // This call is tied to a user click, so it won't be blocked
                 tokenClient.requestAccessToken();
             } else {
-                tokenClient.requestAccessToken();
+                showNotification('error', 'Auth Error', 'Google client not ready. Please wait a moment and try again.');
+                showLoader(false);
+            }
+        }
+
+        async function handleTokenResponse(tokenResponse) {
+            if (tokenResponse.error) {
+                console.error('Error getting token', tokenResponse.error);
+                showNotification('error', 'Auth Error', 'Failed to get required permissions.');
+                showLoader(false);
+                return;
+            }
+
+            try {
+                // Set the access token for all future GAPI calls
+                gapi.client.setToken(tokenResponse);
+
+                // Get user profile information
+                const profile = await loadUserProfile();
+                if (!profile) {
+                    throw new Error("Could not load user profile.");
+                }
+                currentUser = profile;
+
+                // 1. Load scoring config
+                const configLoaded = await loadScoringConfig();
+
+                if (configLoaded) {
+                    // 2. Load user data
+                    await loadUserData();
+                    // 3. Update UI
+                    updateAuthUI(true, currentUser);
+                    handleHashChange(); // Load the correct view
+                } else {
+                    // Config failed, stop the app
+                    showNotification('error', 'Config Error', 'Failed to load scoring rules. App cannot start.');
+                    handleSignOut(); // Sign out user
+                }
+            } catch (error) {
+                console.error("Error during login process", error);
+                showNotification('error', 'Login Failed', 'An error occurred during login.');
+                handleSignOut();
+            } finally {
+                showLoader(false);
+            }
+        }
+
+        async function loadUserProfile() {
+            try {
+                const response = await gapi.client.oauth2.userinfo.get();
+                return response.result;
+            } catch (error) {
+                console.error("Error loading user profile", error);
+                return null;
             }
         }
 
         function handleSignOut() {
+            showLoader(true);
+            const token = gapi.client.getToken();
+            if (token) {
+                google.accounts.oauth2.revoke(token.access_token, () => {
+                    console.log('Token revoked.');
+                });
+            }
+
             gapi.client.setToken(null);
             tokenClient = null;
             currentUser = null;
             SCORING_LOGIC = {};
             allSubmissions = [];
-            google.accounts.id.disableAutoSelect();
-            google.accounts.id.revoke(dom.dropdownEmail.textContent || '', () => {
-                console.log('User signed out.');
-            });
+
             updateAuthUI(false);
+            showLoader(false);
         }
 
         function updateAuthUI(isSignedIn, user = null) {
@@ -1516,20 +1608,6 @@
                 dom.appContent.style.display = 'none';
                 dom.userMenu.style.display = 'none';
                 window.location.hash = '';
-            }
-        }
-
-        function parseJwt(token) {
-            try {
-                const base64Url = token.split('.')[1];
-                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
-                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                }).join(''));
-                return JSON.parse(jsonPayload);
-            } catch (error) {
-                console.error("Error parsing JWT", error);
-                return null;
             }
         }
 
@@ -1798,6 +1876,30 @@
                     data.dynamicLists.publications.forEach(pub => addPublicationItem(pub));
                 }
             }
+
+            // NEW: After populating, update the rank
+            updateAcademicRank();
+        }
+
+        // NEW: Update Academic Rank based on Qualification inputs
+        function updateAcademicRank() {
+            const yearProf = document.getElementById('2.4-prof').valueAsNumber || 0;
+            const yearAssoc = document.getElementById('2.3-assoc-prof').valueAsNumber || 0;
+            const yearPhD = document.getElementById('2.2-phd').valueAsNumber || 0;
+            const yearMSc = document.getElementById('2.1-msc').valueAsNumber || 0;
+
+            let rank = "";
+            if (yearProf > 1950) {
+                rank = "Professor";
+            } else if (yearAssoc > 1950) {
+                rank = "Associate Professor";
+            } else if (yearPhD > 1950) {
+                rank = "Doctor (PhD)";
+            } else if (yearMSc > 1950) {
+                rank = "Master (MSc)";
+            }
+
+            dom.academicRankInput.value = rank;
         }
 
         // === DYNAMIC ITEM LOGIC ===
@@ -1931,8 +2033,10 @@
                 const rule = SCORING_LOGIC[id];
                 if (rule) {
                     const points = (value || 0) * rule.points;
-                    scores[rule.category] += points;
-                    scores.total += points;
+                    if (scores.hasOwnProperty(rule.category)) {
+                        scores[rule.category] += points;
+                        scores.total += points;
+                    }
                 }
             }
 
@@ -1989,12 +2093,12 @@
                     <td class="rank-col">${index + 1}</td>
                     <td class="user-col">${staff.name}</td>
                     <td class="score-col">${staff.total.toFixed(2)}</td>
-                    <td>${staff.teaching.toFixed(2)}</td>
-                    <td>${staff.research.toFixed(2)}</td>
-                    <td>${staff.administration.toFixed(2)}</td>
-                    <td>${staff.innovation.toFixed(2)}</td>
-                    <td>${staff.international.toFixed(2)}</td>
-                    <td>${staff.professional.toFixed(2)}</td>
+                    <td>${(staff.teaching || 0).toFixed(2)}</td>
+                    <td>${(staff.research || 0).toFixed(2)}</td>
+                    <td>${(staff.administration || 0).toFixed(2)}</td>
+                    <td>${(staff.innovation || 0).toFixed(2)}</td>
+                    <td>${(staff.international || 0).toFixed(2)}</td>
+                    <td>${(staff.professional || 0).toFixed(2)}</td>
                 `;
                 dom.rankingTableBody.appendChild(tr);
             });
