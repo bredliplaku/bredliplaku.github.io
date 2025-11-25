@@ -5073,12 +5073,33 @@
         }
 
         /**
- * Shows the dialog for students to request an excused absence.
+ * Adds or subtracts business days (skipping Sat/Sun) to a date.
+ * @param {Date} startDate - The starting date.
+ * @param {number} days - Number of business days to add (positive) or subtract (negative).
+ * @returns {Date} The calculated date.
  */
+        function addBusinessDays(startDate, days) {
+            let count = 0;
+            const currentDate = new Date(startDate);
+            const direction = days > 0 ? 1 : -1;
+
+            while (count < Math.abs(days)) {
+                currentDate.setDate(currentDate.getDate() + direction);
+                const day = currentDate.getDay();
+                if (day !== 0 && day !== 6) { // 0 is Sunday, 6 is Saturday
+                    count++;
+                }
+            }
+            return currentDate;
+        }
+
+        /**
+  * Shows the dialog for students to request an excused absence.
+  */
         function showRequestPermissionDialog() {
             if (!isSignedIn || isAdmin || !currentUser) return;
 
-            // --- Date Restriction Logic ---
+            // --- Date Restriction Logic (Business Days) ---
             const getLocalDateString = (date) => {
                 const year = date.getFullYear();
                 const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -5087,16 +5108,17 @@
             };
 
             const today = new Date();
-            const minDate = new Date(today);
-            const maxDate = new Date(today);
 
-            minDate.setDate(today.getDate() - 7); // 7 days in the past
-            maxDate.setDate(today.getDate() + 7); // 7 days in the future
+            // Configuration: How many business days in past/future?
+            const daysInPast = 10;   // e.g., 2 weeks for medical notes
+            const daysInFuture = 10; // e.g., 2 weeks for planned events
+
+            const minDate = addBusinessDays(today, -daysInPast);
+            const maxDate = addBusinessDays(today, daysInFuture);
 
             const minDateStr = getLocalDateString(minDate);
             const maxDateStr = getLocalDateString(maxDate);
             const todayStr = getLocalDateString(today);
-            // --- END Date Logic ---
 
             const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
             const MAX_FILE_SIZE_MB = MAX_FILE_SIZE / 1024 / 1024;
@@ -5125,28 +5147,23 @@
                 `<button type="button" class="toggle-button" data-value="${hour}">${hour}</button>`
             ).join('');
 
-            // --- HTML with RE-ORDERED fields ---
             dialog.innerHTML = `
 <h3 class="dialog-title">Request for Permission</h3>
 <div class="dialog-content">
     
     <div class="dialog-disclaimer">
-        <i class="fas fa-info-circle"></i> <strong>Please Note:</strong> As per university regulations, all absences are considered unexcused. This form is a professional courtesy to formally document your reason, which will be reviewed at my discretion.
+        <i class="fas fa-info-circle"></i> <strong>Please Note:</strong> As per university regulations, all absences are considered unexcused. This form is a professional courtesy to formally document your reason.
     </div>
     
     <div class="form-group" style="align-items: flex-start;">
         <label>Name:</label>
         <input class="form-control form-group-control" value="${currentUser.name}" disabled>
     </div>
-    <div class="form-group" style="align-items: flex-start;">
-        <label>Email:</label>
-        <input class="form-control form-group-control" value="${currentUser.email}" disabled>
-    </div>
     
     <hr style="margin: 20px 0;">
     
     <div class="form-group" style="align-items: flex-start;">
-        <label for="request-course">Course*:</label>
+        <label for="request-course">Course <span style="color:var(--danger-color)">*</span>:</label>
         <select id="request-course" class="form-control form-group-control">
             <option value="" disabled selected>Select a Course</option>
             ${courseOptions}
@@ -5154,22 +5171,27 @@
     </div>
     
     <div class="form-group" style="align-items: flex-start;">
-        <label for="request-date">Date*:</label>
-        <input type="date" id="request-date" class="form-control form-group-control" 
-               value="${todayStr}" 
-               min="${minDateStr}" 
-               max="${maxDateStr}">
+        <label for="request-date">Date <span style="color:var(--danger-color)">*</span>:</label>
+        <div class="form-group-control">
+            <input type="date" id="request-date" class="form-control" 
+                   value="${todayStr}" 
+                   min="${minDateStr}" 
+                   max="${maxDateStr}">
+            <small style="color: var(--primary-color); display: block; margin-top: 5px; font-size: 0.85em;">
+                <i class="fa-regular fa-calendar"></i> You can request permission for the last ${daysInPast} or upcoming ${daysInFuture} business days.
+            </small>
+        </div>
     </div>
     
     <div class="form-group" style="align-items: flex-start;">
-        <label>Hours*:</label>
+        <label>Hours <span style="color:var(--danger-color)">*</span>:</label>
         <div id="request-hours-group" class="toggle-button-group form-group-control" style="flex-wrap: wrap;">
             ${hourButtons}
         </div>
     </div>
     
     <div class="form-group" style="align-items: flex-start;">
-        <label for="request-reason-type">Reason*:</label>
+        <label for="request-reason-type">Reason <span style="color:var(--danger-color)">*</span>:</label>
         <select id="request-reason-type" class="form-control form-group-control">
             <option value="" disabled selected>Select a Reason</option>
             <option value="Calling Sick">Calling Sick</option>
@@ -5181,8 +5203,10 @@
         </select>
     </div>
     
+    <div id="reason-help-text" style="display: none; background-color: #e3f2fd; color: #0d47a1; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9em; line-height: 1.4;"></div>
+
     <div class="form-group" id="request-explanation-group" style="align-items: flex-start; display: none;">
-        <label for="request-explanation">Explanation:</label>
+        <label for="request-explanation" id="request-explanation-label">Explanation:</label>
         <textarea id="request-explanation" class="form-control form-group-control" rows="4" 
             placeholder=""></textarea>
     </div>
@@ -5190,8 +5214,10 @@
     <div class="form-group" id="request-file-upload-group" style="align-items: flex-start; display: none;">
         <label id="request-file-label" for="request-file-upload">Attachment:</label>
         <div class="form-group-control">
-           <input type="file" id="request-file-upload" class="form-control" accept=".pdf,image/png,image/jpeg,image/heic,image/heif,image/gif,image/webp">
-           <small id="request-file-help" style="opacity: 0.7; margin-top: 5px; display: block;">Maximum file size: 10 MB</small>
+           <input type="file" id="request-file-upload" class="form-control" accept=".pdf,image/png,image/jpeg,image/jpg,image/heic,image/heif,image/gif,image/webp">
+           <small id="request-file-help" style="opacity: 0.7; margin-top: 5px; display: block;">
+                Accepted: PDF, PNG, JPG, HEIC, WEBP (Max 10MB)
+           </small>
         </div>
     </div>
     
@@ -5204,8 +5230,6 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- (The rest of the function remains identical, no changes needed to the logic) ---
-            // ... (logic for closeDialog, reasonSelect.addEventListener, etc.) ...
             const closeDialog = () => {
                 document.body.removeChild(dialogBackdrop);
                 document.body.style.overflow = '';
@@ -5214,9 +5238,11 @@
             const reasonSelect = dialog.querySelector('#request-reason-type');
             const explanationGroup = dialog.querySelector('#request-explanation-group');
             const explanationInput = dialog.querySelector('#request-explanation');
-            const explanationLabel = explanationGroup.querySelector('label');
+            const explanationLabel = dialog.querySelector('#request-explanation-label');
             const submitBtn = dialog.querySelector('#submit-request-btn');
             const fileUploadGroup = dialog.querySelector('#request-file-upload-group');
+            const fileUploadLabel = dialog.querySelector('#request-file-label');
+            const reasonHelpText = dialog.querySelector('#reason-help-text');
 
             // --- Dynamic Logic for all categories ---
             reasonSelect.addEventListener('change', () => {
@@ -5226,75 +5252,81 @@
                 let isRequired = true;
                 let disableSubmit = false;
                 let infoBox = false;
-
-                // --- Get the new file elements ---
-                const fileUploadLabel = dialog.querySelector('#request-file-label');
+                let helpMessage = ''; // New variable for help text
 
                 // --- Reset state ---
-                explanationInput.value = ''; // Clear any old text
+                explanationInput.value = '';
                 explanationInput.disabled = false;
                 explanationInput.classList.remove('info-box');
-                explanationLabel.innerHTML = 'Explanation*:'; // Default to required
 
-                fileUploadGroup.style.display = 'none'; // Hide file upload by default
-                explanationGroup.style.display = 'none'; // Hide explanation by default
+                fileUploadGroup.style.display = 'none';
+                explanationGroup.style.display = 'none';
+                reasonHelpText.style.display = 'none';
 
-                submitBtn.disabled = false; // Re-enable submit by default
+                submitBtn.disabled = false;
 
                 switch (reason) {
                     case 'Calling Sick':
-                        // FIX: Show file upload, HIDE explanation
+                        // Show file upload, HIDE explanation text area
                         fileUploadGroup.style.display = 'flex';
-                        fileUploadLabel.innerHTML = 'Medical Note*:'; // Required
-                        explanationGroup.style.display = 'none'; // Hide explanation
-                        isRequired = false; // Explanation is not required
-                        minLength = 0;
+                        fileUploadLabel.innerHTML = 'Medical Doc <span style="color:var(--danger-color)">*</span>:';
+                        explanationGroup.style.display = 'none';
+                        isRequired = false; // Explanation text not required
+
+                        // Specific Help Text for Sick Leave
+                        helpMessage = `<i class="fas fa-file-medical"></i> <strong>Requirement:</strong> Please attach a medical note, medical check report, or any relevant document.<br><br><em>If you do not have it currently, please submit this form as soon as you obtain it.</em>`;
                         break;
 
                     case 'Transportation Problem':
+                        explanationGroup.style.display = 'flex';
+                        explanationLabel.innerHTML = 'Details <span style="color:var(--danger-color)">*</span>:';
+                        fileUploadGroup.style.display = 'flex';
+                        fileUploadLabel.innerHTML = 'Photo (Optional):';
+                        placeholder = "Please provide details about the transportation issue (bus line, time, location, etc).";
+                        minLength = 50;
+                        break;
+
                     case 'Academic Activity':
+                        explanationGroup.style.display = 'flex';
+                        explanationLabel.innerHTML = 'Details <span style="color:var(--danger-color)">*</span>:';
+                        fileUploadGroup.style.display = 'flex';
+                        fileUploadLabel.innerHTML = 'Proof (Optional):';
+                        placeholder = "Please provide the official name, website, time, and location of the academic activity.";
+                        minLength = 50;
+                        break;
+
                     case 'Family Emergency':
-                    case 'Other':
-                        // FIX: Show explanation AND optional attachment
                         explanationGroup.style.display = 'flex';
                         fileUploadGroup.style.display = 'flex';
-                        fileUploadLabel.innerHTML = 'Attachment:'; // Optional
+                        fileUploadLabel.innerHTML = 'Attachment (Optional):';
 
-                        // Set rules for the explanation field
-                        if (reason === 'Transportation Problem') {
-                            placeholder = "Please provide details about the transportation issue.";
-                            minLength = 100;
-                        } else if (reason === 'Academic Activity') {
-                            placeholder = "Please provide the official name, website, time, and location of the academic activity.";
-                            minLength = 50;
-                        } else if (reason === 'Family Emergency') {
-                            placeholder = "You may add an optional, non-confidential explanation here.";
-                            isRequired = false;
-                            minLength = 0;
-                            explanationLabel.innerHTML = 'Explanation:'; // No asterisk
-                        } else if (reason === 'Other') {
-                            placeholder = "You must provide a detailed justification for this absence.";
-                            minLength = 500;
-                        }
+                        explanationLabel.innerHTML = 'Explanation (Optional):';
+                        placeholder = "You may add an optional, non-confidential explanation here.";
+                        isRequired = false;
+                        minLength = 0;
+                        break;
+
+                    case 'Other':
+                        explanationGroup.style.display = 'flex';
+                        explanationLabel.innerHTML = 'Justification <span style="color:var(--danger-color)">*</span>:';
+                        fileUploadGroup.style.display = 'flex';
+                        fileUploadLabel.innerHTML = 'Attachment (Optional):';
+                        placeholder = "You must provide a detailed justification for this absence.";
+                        minLength = 50;
                         break;
 
                     case 'Student Activity':
-                        // This reason is special: explanation only, no file, submit disabled
                         explanationGroup.style.display = 'flex';
-                        fileUploadGroup.style.display = 'none'; // No attachment
-                        placeholder = "For Student Activities, I must receive an official confirmation email from the Dean of Students Office.";
+                        explanationLabel.innerHTML = 'Procedure:';
+                        fileUploadGroup.style.display = 'none';
+                        placeholder = "For Student Activities, I must receive an official confirmation email directly from the Dean of Students Office.";
                         minLength = 0;
                         isRequired = false;
                         disableSubmit = true;
                         infoBox = true;
                         break;
-
-                    default:
-                        // All groups are already hidden by the reset
-                        return;
                 }
 
-                // This logic now only runs if a case was matched
                 explanationInput.placeholder = placeholder;
 
                 if (isRequired) {
@@ -5309,11 +5341,15 @@
                     explanationInput.disabled = true;
                 }
 
+                if (helpMessage) {
+                    reasonHelpText.innerHTML = helpMessage;
+                    reasonHelpText.style.display = 'block';
+                }
+
                 submitBtn.disabled = disableSubmit;
-                submitBtn.title = disableSubmit ? "This reason must be handled via the Dean of Students Office." : "Submit";
             });
 
-            // Handle hour button selection (multi-select)
+            // Handle hour button selection
             dialog.querySelector('#request-hours-group').addEventListener('click', (e) => {
                 if (e.target.classList.contains('toggle-button')) {
                     e.target.classList.toggle('active');
@@ -5322,9 +5358,7 @@
 
             dialog.querySelector('#cancel-request-btn').addEventListener('click', closeDialog);
 
-            // --- `async` function to handle file reading ---
             submitBtn.addEventListener('click', async () => {
-
                 // --- 1. Collect Data ---
                 const course = dialog.querySelector('#request-course').value;
                 const date = dialog.querySelector('#request-date').value;
@@ -5343,20 +5377,23 @@
                 if (!reasonType) errors.push('Please select a reason.');
 
                 const minLength = parseInt(explanationInput.getAttribute('minlength') || '0', 10);
-                if (minLength > 0 && explanation.trim().length < minLength) {
+                // Only validate length if field is enabled and not optional
+                if (!explanationInput.disabled && minLength > 0 && explanation.trim().length < minLength) {
                     errors.push(`Explanation must be at least ${minLength} characters.`);
                 }
 
                 if (reasonType === 'Calling Sick' && !file) {
-                    errors.push('A medical note is required for this reason.');
+                    errors.push('A medical document is required. If you do not have it yet, please submit this form once you have it.');
                 }
+
                 if (file) {
                     // Check file type
-                    const allowedTypes = ['.pdf', 'image/png', 'image/jpeg', 'image/heic', 'image/heif', 'image/gif', 'image/webp'];
-                    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+                    const allowedTypes = ['.pdf', '.png', '.jpg', '.jpeg', '.heic', '.heif', '.gif', '.webp'];
+                    const fileNameLower = file.name.toLowerCase();
+                    const hasValidExtension = allowedTypes.some(ext => fileNameLower.endsWith(ext));
 
-                    if (!allowedTypes.includes(file.type) && !allowedTypes.includes(fileExtension)) {
-                        errors.push('Invalid file type. Please upload a PDF or common image file.');
+                    if (!hasValidExtension) {
+                        errors.push('Invalid file type. Accepted formats: PDF, PNG, JPG, HEIC, WEBP.');
                     }
 
                     if (file.size > MAX_FILE_SIZE) {
@@ -5373,7 +5410,7 @@
                 submitBtn.disabled = true;
                 submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
 
-                // --- 4. Prepare Payload (and read file) ---
+                // --- 4. Prepare Payload ---
                 const payload = {
                     name: currentUser.name,
                     email: currentUser.email,
@@ -5391,17 +5428,17 @@
                             const reader = new FileReader();
                             reader.onload = () => resolve(reader.result);
                             reader.onerror = error => reject(error);
-                            reader.readAsDataURL(file); // Reads as Base64
+                            reader.readAsDataURL(file);
                         });
 
                         payload.fileData = base64String;
                         payload.fileName = file.name;
-                        payload.fileType = file.type || 'application/octet-stream'; // Fallback for unknown types like HEIC
+                        payload.fileType = file.type || 'application/octet-stream';
 
                     } catch (err) {
                         showNotification('error', 'File Read Error', 'Could not read the selected file.');
                         submitBtn.disabled = false;
-                        submitBtn.innerHTML = 'Submit';
+                        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Submit';
                         return;
                     }
                 }
@@ -5420,7 +5457,7 @@
                 } catch (err) {
                     showNotification('error', 'Submission Failed', err.message);
                     submitBtn.disabled = false;
-                    submitBtn.innerHTML = 'Submit';
+                    submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Submit';
                 }
             });
         }
@@ -7021,7 +7058,10 @@
                     requests.forEach(req => {
                         const row = document.createElement('tr');
                         row.className = 'clickable-request-row';
-                        // --- All data is still saved to the row ---
+
+                        // FIX: Handle property casing safely (attachmentURL vs attachmentUrl)
+                        const fileUrl = req.attachmentURL || req.attachmentUrl || '';
+
                         row.dataset.requestId = req.requestID;
                         row.dataset.studentName = req.name;
                         row.dataset.studentEmail = req.email;
@@ -7030,45 +7070,44 @@
                         row.dataset.hours = req.hours;
                         row.dataset.reasonType = req.reasonType;
                         row.dataset.description = req.description;
-                        row.dataset.attachmentUrl = req.attachmentUrl || ''; // Attachment URL is still here
+                        row.dataset.attachmentUrl = fileUrl; // Store normalized URL
 
-                        // Create Attachment Cell Content ---
-                        let attachmentCellHtml = '<small>N/A</small>'; // Default if no attachment
-                        if (req.attachmentUrl) {
+                        // Create Attachment Cell Content
+                        let attachmentCellHtml = '<small style="opacity:0.5">No File</small>';
+                        if (fileUrl) {
                             attachmentCellHtml = `
-                                <a href="${req.attachmentUrl}" target="_blank" rel="noopener noreferrer" 
-                                   class="btn-blue btn-icon" 
-                                   style="width: 30px; height: 30px; border-radius: 4px;" 
-                                   title="View Attachment"
-                                   onclick="event.stopPropagation()"> <i class="fa-solid fa-eye"></i>
-                                </a>`;
+                        <a href="${fileUrl}" target="_blank" rel="noopener noreferrer" 
+                           class="btn-blue btn-icon" 
+                           style="width: 30px; height: 30px; border-radius: 4px;" 
+                           title="View Attachment"
+                           onclick="event.stopPropagation()"> <i class="fa-solid fa-paperclip"></i>
+                        </a>`;
                         }
 
                         row.innerHTML = `
-                    <td>
-                        <div>${req.name}</div>
-                        <small>${req.email}</small>
-                    </td>
-                    <td>${req.course.replace(/_/g, ' ')}</td>
-                    <td>${req.absenceDate}</td>
-                    <td class="times-cell">${formatHoursAsPills(req.hours)}</td>
-                    <td>${req.reasonType}</td>
-                    <td style="text-align: center;">${attachmentCellHtml}</td>
-                    <td class="actions-cell">
-                        <div class="actions-cell-content">
-                            <button class="btn-icon btn-red delete-absence-btn"
-                                title="Delete Request"
-                                data-request-id="${req.requestID}"
-                                data-student-name="${req.name}">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
-                        </div>
-                    </td>
-                `;
+            <td>
+                <div>${req.name}</div>
+                <small>${req.email}</small>
+            </td>
+            <td>${req.course.replace(/_/g, ' ')}</td>
+            <td>${req.absenceDate}</td>
+            <td class="times-cell">${formatHoursAsPills(req.hours)}</td>
+            <td>${req.reasonType}</td>
+            <td style="text-align: center;">${attachmentCellHtml}</td>
+            <td class="actions-cell">
+                <div class="actions-cell-content">
+                    <button class="btn-icon btn-red delete-absence-btn"
+                        title="Delete Request"
+                        data-request-id="${req.requestID}"
+                        data-student-name="${req.name}">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </td>
+        `;
                         tbody.appendChild(row);
                     });
 
-                    // Add listeners for both rows AND buttons
                     attachPermissionRowListeners();
                     attachAbsenceActionListeners();
                 })
