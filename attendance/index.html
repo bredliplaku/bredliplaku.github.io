@@ -5119,38 +5119,41 @@
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
-            dialog.style.maxWidth = '800px'; // Wider for settings
+            dialog.style.maxWidth = '800px';
             dialog.setAttribute('role', 'dialog');
 
+            // Added link to Google Account on profile picture
             dialog.innerHTML = `
-        <h3 class="dialog-title"><i class="fas fa-cogs"></i> Global Settings</h3>
-        <div class="dialog-content">
-            <div class="profile-header-section">
-                <img src="${currentUser.picture}" class="profile-avatar-large" style="width:60px;height:60px;">
-                <div style="text-align:center;">
-                    <h4 style="margin:0;">${escapeHtml(currentUser.name)}</h4>
-                    <span style="font-size:0.8em; background:var(--primary-color); color:white; padding:2px 6px; border-radius:4px;">Global Admin</span>
-                </div>
-            </div>
-
-            <div class="form-section-title">Manage Courses</div>
-            <p style="font-size:0.9em; opacity:0.7;">Click a course to edit its details or assign admins.</p>
-            
-            <div id="settings-course-grid" class="settings-grid">
-                <div class="loading-spinner"></div>
-            </div>
+<h3 class="dialog-title"><i class="fas fa-cogs"></i> Global Settings</h3>
+<div class="dialog-content">
+    <div class="profile-header-section">
+        <a href="https://myaccount.google.com/" target="_blank" title="Manage Google Account">
+            <img src="${currentUser.picture}" class="profile-avatar-large" style="width:60px;height:60px; cursor:pointer;">
+        </a>
+        <div style="text-align:center;">
+            <h4 style="margin:0;">${escapeHtml(currentUser.name)}</h4>
+            <span style="font-size:0.8em; background:var(--primary-color); color:white; padding:2px 6px; border-radius:4px;">Global Admin</span>
         </div>
-        <div class="dialog-actions">
-            <button id="close-settings-btn" class="btn-blue">Close</button>
-        </div>`;
+    </div>
+
+    <div class="form-section-title">Manage Courses</div>
+    <p style="font-size:0.9em; opacity:0.7;">Click a course to edit its details or assign admins.</p>
+    
+    <div id="settings-course-grid" class="settings-grid">
+        <div class="loading-spinner"></div>
+    </div>
+</div>
+<div class="dialog-actions">
+    <button id="close-settings-btn" class="btn-blue">Close</button>
+</div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
             const grid = dialog.querySelector('#settings-course-grid');
 
-            // Fetch fresh data
-            await fetchCourseInfo(); // Updates global courseInfoMap
+            // Fetch fresh data to ensure we have the latest
+            await fetchCourseInfo();
 
             grid.innerHTML = '';
 
@@ -5158,24 +5161,26 @@
             const addCard = document.createElement('div');
             addCard.className = 'course-card add-course-card';
             addCard.innerHTML = `<div><i class="fas fa-plus-circle"></i> Add Course</div>`;
-            addCard.onclick = () => showCourseEditorDialog(null); // null = new course
+            addCard.onclick = () => showCourseEditorDialog(null);
             grid.appendChild(addCard);
 
             // List Existing Courses
             Object.entries(courseInfoMap).sort().forEach(([name, data]) => {
                 const card = document.createElement('div');
                 card.className = 'course-card';
-                const admins = data.admin_emails ? data.admin_emails.split(',').length : 0;
+                // Handle potentially empty admin strings safely
+                const adminList = data.admin_emails ? data.admin_emails.toString().split(',') : [];
+                const adminCount = adminList.filter(e => e.trim()).length;
 
                 card.innerHTML = `
-            <div class="course-card-header">
-                <span>${escapeHtml(name.replace(/_/g, ' '))}</span>
-                <i class="fas fa-pencil-alt" style="opacity:0.5; font-size:0.8em;"></i>
-            </div>
-            <div class="course-card-detail"><i class="far fa-calendar"></i> ${data.start_date ? new Date(data.start_date).toLocaleDateString() : 'N/A'}</div>
-            <div class="course-card-detail"><i class="fas fa-clock"></i> ${escapeHtml(data.default_hours)}h (${escapeHtml(data.default_category)})</div>
-            <div class="course-card-admins" title="${escapeHtml(data.admin_emails)}"><i class="fas fa-user-shield"></i> ${admins} Admins</div>
-        `;
+    <div class="course-card-header">
+        <span>${escapeHtml(name.replace(/_/g, ' '))}</span>
+        <i class="fas fa-pencil-alt" style="opacity:0.5; font-size:0.8em;"></i>
+    </div>
+    <div class="course-card-detail"><i class="far fa-calendar"></i> ${data.start_date ? new Date(data.start_date).toLocaleDateString() : 'N/A'}</div>
+    <div class="course-card-detail"><i class="fas fa-clock"></i> ${escapeHtml(data.default_hours || 0)}h (${escapeHtml(data.default_category || '-')})</div>
+    <div class="course-card-admins" title="${escapeHtml(data.admin_emails || '')}"><i class="fas fa-user-shield"></i> ${adminCount} Admins</div>
+`;
                 card.onclick = () => showCourseEditorDialog(name, data);
                 grid.appendChild(card);
             });
@@ -5192,66 +5197,159 @@
             const title = isNew ? 'Add New Course' : `Edit ${escapeHtml(courseName.replace(/_/g, ' '))}`;
 
             // Defaults
-            const data = courseData || {
-                start_date: new Date().toISOString().split('T')[0],
-                end_date: '',
-                holiday_weeks: 0,
-                default_hours: 2,
-                default_category: 'theory',
-                eis_id: '',
-                default_section: 'ALL',
-                admin_emails: ''
-            };
+            const data = courseData || {};
+            const val = (v) => v !== undefined && v !== null ? v : '';
 
-            // Convert dates for input
-            const formatDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
+            const formatDate = (d) => {
+                if (!d) return '';
+                try { return new Date(d).toISOString().split('T')[0]; }
+                catch (e) { return ''; }
+            };
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
-            dialogBackdrop.style.zIndex = "10002"; // Higher than settings
+            dialogBackdrop.style.zIndex = "10002";
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
+            const currentCategory = val(data.default_category).toLowerCase() || 'theory';
+            const currentSectionFull = val(data.default_section) || 'ALL';
+
+            let [secType, secChar] = currentSectionFull.split(' ');
+            if (currentSectionFull === 'ALL') secType = 'ALL';
+
+            // --- PERMISSION LOGIC ---
+            // If NOT global admin, certain fields are disabled (read-only)
+            const isDisabled = isGlobalAdmin ? '' : 'disabled';
+            const lockStyle = isGlobalAdmin ? '' : 'background-color: #f0f0f0; cursor: not-allowed;';
+
+            // EIS ID Warning Logic
+            let eisWarningHtml = '';
+            if (!isGlobalAdmin) {
+                eisWarningHtml = `
+        <div style="font-size:0.8em; color:var(--warning-color); margin-top:4px; display:flex; align-items:center; gap:5px;">
+            <i class="fas fa-exclamation-triangle"></i> 
+            Warning: Changing this may break EIS synchronisation.
+        </div>`;
+            }
+
             dialog.innerHTML = `
-        <h3 class="dialog-title">${title}</h3>
-        <div class="dialog-content">
-            <div class="form-group">
-                <label>Course Name (Sheet Name)*</label>
-                <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_101">
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group"><label>Start Date</label><input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.start_date)}"></div>
-                <div class="form-group"><label>End Date</label><input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.end_date)}"></div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group"><label>Def. Hours</label><input type="number" id="edit-c-hours" class="form-control" value="${data.default_hours}"></div>
-                <div class="form-group"><label>Holiday Wks</label><input type="number" id="edit-c-holidays" class="form-control" value="${data.holiday_weeks}"></div>
-            </div>
-
-            <div class="form-group">
-                <label>EIS ID</label>
-                <input id="edit-c-eis" class="form-control" value="${escapeHtml(data.eis_id)}" placeholder="12345">
-            </div>
-
-            <div class="form-group">
-                <label>Admins (Emails)</label>
-                <textarea id="edit-c-admins" class="form-control" rows="3" placeholder="comma, separated, emails">${escapeHtml(data.admin_emails || '')}</textarea>
-                <small style="opacity:0.7">Users listed here will have admin access to this course.</small>
-            </div>
-
+<h3 class="dialog-title">${title}</h3>
+<div class="dialog-content">
+    <div class="form-group">
+        <label>Course Name (Sheet)*</label>
+        <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_202">
+    </div>
+    
+    <div class="form-row">
+        <div class="form-group">
+            <label>Start Date ${!isGlobalAdmin ? '<i class="fas fa-lock" style="font-size:0.7em; opacity:0.5;"></i>' : ''}</label>
+            <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.start_date)}" ${isDisabled} style="${lockStyle}">
         </div>
-        <div class="dialog-actions">
-            ${!isNew ? '<button id="delete-course-btn" class="btn-red" style="margin-right:auto;">Delete</button>' : ''}
-            <button id="cancel-edit-c" class="btn-blue">Cancel</button>
-            <button id="save-edit-c" class="btn-green">Save</button>
+        <div class="form-group">
+            <label>End Date ${!isGlobalAdmin ? '<i class="fas fa-lock" style="font-size:0.7em; opacity:0.5;"></i>' : ''}</label>
+            <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.end_date)}" ${isDisabled} style="${lockStyle}">
         </div>
-    `;
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>Holiday Start ${!isGlobalAdmin ? '<i class="fas fa-lock" style="font-size:0.7em; opacity:0.5;"></i>' : ''}</label>
+            <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holiday_start_date)}" ${isDisabled} style="${lockStyle}">
+        </div>
+        <div class="form-group">
+            <label>Holiday Weeks ${!isGlobalAdmin ? '<i class="fas fa-lock" style="font-size:0.7em; opacity:0.5;"></i>' : ''}</label>
+            <input type="number" id="edit-c-holidays" class="form-control" value="${val(data.holiday_weeks)}" ${isDisabled} style="${lockStyle}">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group"><label>Default Hours</label><input type="number" id="edit-c-hours" class="form-control" value="${val(data.default_hours)}"></div>
+        <div class="form-group">
+            <label>EIS ID</label>
+            <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eis_id))}" placeholder="1234">
+            ${eisWarningHtml}
+        </div>
+    </div>
+
+    <div class="form-group" style="margin-top:10px;">
+        <label>Default Category</label>
+        <div id="edit-c-cat-group" class="toggle-button-group form-group-control">
+            <button class="toggle-button ${currentCategory === 'theory' ? 'active' : ''}" data-value="theory">theory</button>
+            <button class="toggle-button ${currentCategory === 'lab' ? 'active' : ''}" data-value="lab">lab</button>
+            <button class="toggle-button ${currentCategory === 'practice' ? 'active' : ''}" data-value="practice">practice</button>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>Default Section</label>
+        <div style="flex-grow:1">
+            <div id="edit-c-sect-type" class="toggle-button-group" style="margin-bottom:5px;">
+                <button class="toggle-button ${secType === 'ALL' ? 'active' : ''}" data-value="ALL">All</button>
+                <button class="toggle-button ${secType === 'Theory' ? 'active' : ''}" data-value="Theory">Theory</button>
+                <button class="toggle-button ${secType === 'Lab' ? 'active' : ''}" data-value="Lab">Lab</button>
+                <button class="toggle-button ${secType === 'Practice' ? 'active' : ''}" data-value="Practice">Practice</button>
+            </div>
+            <div id="edit-c-sect-char" class="toggle-button-group" style="display:${secType === 'ALL' ? 'none' : 'flex'}">
+                <button class="toggle-button btn-char ${secChar === 'A' ? 'active' : ''}" data-value="A">A</button>
+                <button class="toggle-button btn-char ${secChar === 'B' ? 'active' : ''}" data-value="B">B</button>
+                <button class="toggle-button btn-char ${secChar === 'C' ? 'active' : ''}" data-value="C">C</button>
+                <button class="toggle-button btn-char ${secChar === 'D' ? 'active' : ''}" data-value="D">D</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>Admins (Emails) ${!isGlobalAdmin ? '<i class="fas fa-lock" style="font-size:0.7em; opacity:0.5;"></i>' : ''}</label>
+        <textarea id="edit-c-admins" class="form-control" rows="3" placeholder="comma, separated, emails" ${isDisabled} style="${lockStyle}">${escapeHtml(val(data.admin_emails || data.adminEmails))}</textarea>
+        ${isGlobalAdmin ? '<small style="opacity:0.7">Users listed here will have admin access to this course.</small>' : ''}
+    </div>
+
+</div>
+<div class="dialog-actions">
+    ${(!isNew && isGlobalAdmin) ? '<button id="delete-course-btn" class="btn-red" style="margin-right:auto;">Delete</button>' : ''}
+    <button id="cancel-edit-c" class="btn-blue">Cancel</button>
+    <button id="save-edit-c" class="btn-green">Save</button>
+</div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
+
+            // --- Toggles Logic (Same as before) ---
+            const catGroup = dialog.querySelector('#edit-c-cat-group');
+            const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
+            const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
+
+            catGroup.addEventListener('click', (e) => {
+                if (e.target.classList.contains('toggle-button')) {
+                    catGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                }
+            });
+
+            sectTypeGroup.addEventListener('click', (e) => {
+                if (e.target.classList.contains('toggle-button')) {
+                    sectTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    if (e.target.dataset.value === 'ALL') {
+                        sectCharGroup.style.display = 'none';
+                        sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                    } else {
+                        sectCharGroup.style.display = 'flex';
+                        if (!sectCharGroup.querySelector('.active')) {
+                            sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
+                        }
+                    }
+                }
+            });
+
+            sectCharGroup.addEventListener('click', (e) => {
+                if (e.target.classList.contains('toggle-button')) {
+                    sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                }
+            });
 
             const close = () => document.body.removeChild(dialogBackdrop);
             dialog.querySelector('#cancel-edit-c').onclick = close;
@@ -5261,18 +5359,27 @@
                 btn.disabled = true;
                 btn.innerHTML = 'Saving...';
 
+                const cat = catGroup.querySelector('.active')?.dataset.value || 'theory';
+                const sType = sectTypeGroup.querySelector('.active')?.dataset.value || 'ALL';
+                const sChar = sectCharGroup.querySelector('.active')?.dataset.value || '';
+                const finalSection = (sType === 'ALL') ? 'ALL' : `${sType} ${sChar}`.trim();
+
+                // If non-global admin, we must send the ORIGINAL values for the restricted fields
+                // so they don't get wiped out or changed to empty strings.
                 const payload = {
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
-                    startDate: document.getElementById('edit-c-start').value,
-                    endDate: document.getElementById('edit-c-end').value,
-                    holidayWeeks: document.getElementById('edit-c-holidays').value,
                     defaultHours: document.getElementById('edit-c-hours').value,
                     eisId: document.getElementById('edit-c-eis').value,
-                    adminEmails: document.getElementById('edit-c-admins').value,
-                    // Add defaults for others
-                    defaultCategory: 'theory',
-                    defaultSection: 'ALL'
+                    defaultCategory: cat,
+                    defaultSection: finalSection,
+
+                    // Conditional Fields based on Admin Level
+                    startDate: isGlobalAdmin ? document.getElementById('edit-c-start').value : data.start_date,
+                    endDate: isGlobalAdmin ? document.getElementById('edit-c-end').value : data.end_date,
+                    holidayStartDate: isGlobalAdmin ? document.getElementById('edit-c-holiday-start').value : data.holiday_start_date,
+                    holidayWeeks: isGlobalAdmin ? document.getElementById('edit-c-holidays').value : data.holiday_weeks,
+                    adminEmails: isGlobalAdmin ? document.getElementById('edit-c-admins').value : (data.admin_emails || data.adminEmails)
                 };
 
                 try {
@@ -5280,9 +5387,17 @@
                     if (res.result === 'success') {
                         showNotification('success', 'Saved', 'Course updated. Refreshing...');
                         close();
-                        // Close parent and reopen to refresh, or just call refresh
-                        document.querySelector('.dialog-backdrop').remove(); // Close settings
-                        showGlobalSettingsDialog(); // Reopen settings (refreshes data)
+                        if (isGlobalAdmin) {
+                            // If global settings was open beneath this, close and reopen it
+                            const bg = document.querySelector('.dialog-backdrop');
+                            if (bg) bg.remove();
+                            showGlobalSettingsDialog();
+                        } else {
+                            // If admin profile was open beneath this
+                            const bg = document.querySelector('.dialog-backdrop');
+                            if (bg) bg.remove();
+                            showAdminProfileDialog();
+                        }
                     } else {
                         throw new Error(res.message);
                     }
@@ -5293,15 +5408,14 @@
                 }
             };
 
-            if (!isNew) {
+            if (!isNew && isGlobalAdmin) {
                 dialog.querySelector('#delete-course-btn').onclick = () => {
-                    if (confirm('Are you sure? This will remove the entry from COURSE_INFO, but the Sheet tab will remain.')) {
-                        // Call delete logic similar to save but with isDelete: true
-                        // Implemented via same backend function for simplicity
+                    if (confirm('Are you sure? This removes the course from settings but keeps the attendance sheet.')) {
                         callWebApp('saveCourseSettings_Admin', { originalName: courseName, isDelete: true }, 'POST')
                             .then(() => {
                                 close();
-                                document.querySelector('.dialog-backdrop').remove();
+                                const bg = document.querySelector('.dialog-backdrop');
+                                if (bg) bg.remove();
                                 showGlobalSettingsDialog();
                             });
                     }
@@ -5309,39 +5423,86 @@
             }
         }
 
-        // --- 3. Non-Global Admin Profile ---
-        function showAdminProfileDialog() {
+        // --- 3. Non-Global Admin Profile & Settings ---
+        async function showAdminProfileDialog() {
             document.body.style.overflow = 'hidden';
+
+            // Fetch latest course info to ensure we have metadata for the editor
+            await fetchCourseInfo();
+
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            const courseList = availableCourses.map(c => `<li class="profile-uid-badge">${escapeHtml(c.replace(/_/g, ' '))}</li>`).join('');
+            // Filter the global course info map to show only courses this admin manages
+            const myCourses = availableCourses.filter(c => courseInfoMap[c]);
+
+            let courseListHtml = '';
+
+            if (myCourses.length > 0) {
+                courseListHtml = `<div class="settings-grid" style="margin-top:10px;">`;
+                myCourses.forEach(courseName => {
+                    const data = courseInfoMap[courseName];
+                    // Render a clickable card for each course
+                    courseListHtml += `
+            <div class="course-card" id="card-${escapeHtml(courseName)}">
+                <div class="course-card-header">
+                    <span>${escapeHtml(courseName.replace(/_/g, ' '))}</span>
+                    <i class="fas fa-pencil-alt" style="opacity:0.5; font-size:0.8em;"></i>
+                </div>
+                <div class="course-card-detail">
+                    <i class="fas fa-clock"></i> ${escapeHtml(data.default_hours || 0)}h 
+                    (${escapeHtml(data.default_category || '-')})
+                </div>
+                <div class="course-card-detail" style="margin-top:5px; font-size:0.75em; opacity:0.7;">
+                    <i class="fas fa-cog"></i> Click to edit settings
+                </div>
+            </div>`;
+                });
+                courseListHtml += `</div>`;
+            } else {
+                courseListHtml = '<p>No active courses assigned.</p>';
+            }
 
             dialog.innerHTML = `
-        <div class="dialog-content">
-            <div class="profile-header-section">
+    <div class="dialog-content">
+        <div class="profile-header-section">
+            <a href="https://myaccount.google.com/" target="_blank" title="Manage Google Account">
                 <img src="${currentUser.picture}" class="profile-avatar-large">
-                <div style="text-align:center;">
-                    <h3 class="profile-name-large">${escapeHtml(currentUser.name)}</h3>
-                    <p class="profile-email-large">${escapeHtml(currentUser.email)}</p>
-                    <span style="font-size:0.8em; background:var(--secondary-color); color:white; padding:2px 6px; border-radius:4px; margin-top:5px; display:inline-block;">Course Admin</span>
-                </div>
+            </a>
+            <div style="text-align:center;">
+                <h3 class="profile-name-large">${escapeHtml(currentUser.name)}</h3>
+                <p class="profile-email-large">${escapeHtml(currentUser.email)}</p>
+                <span style="font-size:0.8em; background:var(--secondary-color); color:white; padding:2px 6px; border-radius:4px; margin-top:5px; display:inline-block;">Course Admin</span>
             </div>
-
-            <div class="form-section-title">My Courses</div>
-            <ul class="profile-uid-list">
-                ${courseList.length ? courseList : '<p>No active courses assigned.</p>'}
-            </ul>
         </div>
-        <div class="dialog-actions">
-            <button id="close-profile-btn" class="btn-blue">Close</button>
-        </div>`;
+
+        <div class="form-section-title">My Courses</div>
+        <p style="font-size:0.9em; opacity:0.8; margin-bottom:10px;">Select a course to modify default settings.</p>
+        ${courseListHtml}
+    </div>
+    <div class="dialog-actions">
+        <button id="close-profile-btn" class="btn-blue">Close</button>
+    </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
+
+            // Attach click listeners to the cards
+            myCourses.forEach(courseName => {
+                const card = document.getElementById(`card-${courseName}`);
+                if (card) {
+                    card.onclick = () => {
+                        // Close profile dialog temporarily or keep it open? 
+                        // Usually better to close it to avoid stacking dialogs too deep.
+                        document.body.removeChild(dialogBackdrop);
+                        showCourseEditorDialog(courseName, courseInfoMap[courseName]);
+                    };
+                }
+            });
+
             dialog.querySelector('#close-profile-btn').onclick = () => {
                 document.body.removeChild(dialogBackdrop);
                 document.body.style.overflow = '';
@@ -5349,8 +5510,8 @@
         }
 
         /**
-         * Shows the Student Profile Dialog (Revamped Design)
-         */
+ * Shows the Student Profile Dialog (Revamped Design)
+ */
         async function showStudentProfileDialog() {
             // 1. Find UIDs (Local)
             let userUIDs = [];
@@ -5374,24 +5535,27 @@
             }
 
             // 3. Prepare Base HTML
+            // Added: Link to https://myaccount.google.com/ around the avatar
             const profileHtml = `
-        <div class="profile-header-section">
-            <img src="${currentUser.picture}" class="profile-avatar-large" alt="Avatar">
-            <div style="text-align:center;">
-                <h3 class="profile-name-large">${escapeHtml(currentUser.name)}</h3>
-                <p class="profile-email-large">${escapeHtml(currentUser.email)}</p>
-            </div>
-        </div>
+<div class="profile-header-section">
+    <a href="https://myaccount.google.com/" target="_blank" title="Manage Google Account">
+        <img src="${currentUser.picture}" class="profile-avatar-large" alt="Avatar" style="cursor:pointer;">
+    </a>
+    <div style="text-align:center;">
+        <h3 class="profile-name-large">${escapeHtml(currentUser.name)}</h3>
+        <p class="profile-email-large">${escapeHtml(currentUser.email)}</p>
+    </div>
+</div>
 
-        <div class="form-section-title">My Student IDs</div>
-        ${uidContent}
+<div class="form-section-title">My Student IDs</div>
+${uidContent}
 
-        <div class="form-section-title" style="margin-top:20px;">Permission History</div>
-        <div id="student-requests-loader" style="text-align:center; padding:20px; opacity:0.6;">
-            <i class="fas fa-circle-notch fa-spin"></i> Loading requests...
-        </div>
-        <div id="student-requests-list"></div>
-    `;
+<div class="form-section-title" style="margin-top:20px;">Permission History</div>
+<div id="student-requests-loader" style="text-align:center; padding:20px; opacity:0.6;">
+    <i class="fas fa-circle-notch fa-spin"></i> Loading requests...
+</div>
+<div id="student-requests-list"></div>
+`;
 
             // 4. Show Dialog
             showAlertDialog('', profileHtml);
@@ -5421,17 +5585,17 @@
                         }
 
                         return `
-                <div class="req-card ${statusClass}">
-                    <div class="req-header">
-                        <div class="req-course">${escapeHtml(req.course.replace(/_/g, ' '))}</div>
-                        <div class="req-status-pill">${escapeHtml(req.status)}</div>
-                    </div>
-                    <div class="req-details">
-                        <span><i class="far fa-calendar"></i> ${escapeHtml(req.absenceDate)}</span>
-                        <span><i class="far fa-clock"></i> ${escapeHtml(req.hours)}</span>
-                    </div>
-                    ${noteHtml}
-                </div>`;
+        <div class="req-card ${statusClass}">
+            <div class="req-header">
+                <div class="req-course">${escapeHtml(req.course.replace(/_/g, ' '))}</div>
+                <div class="req-status-pill">${escapeHtml(req.status)}</div>
+            </div>
+            <div class="req-details">
+                <span><i class="far fa-calendar"></i> ${escapeHtml(req.absenceDate)}</span>
+                <span><i class="far fa-clock"></i> ${escapeHtml(req.hours)}</span>
+            </div>
+            ${noteHtml}
+        </div>`;
                     }).join('');
 
                     listContainer.innerHTML = cardsHtml;
