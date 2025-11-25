@@ -607,6 +607,116 @@
             overflow: hidden;
         }
 
+        /* --- Feature A: Course Badges --- */
+        .course-button {
+            position: relative;
+            /* For badge positioning */
+            padding-right: 15px;
+            /* Make room */
+        }
+
+        .course-badge {
+            background-color: rgba(57, 73, 171, 0.1);
+            color: var(--primary-color);
+            font-size: 0.75em;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+            font-weight: 600;
+            vertical-align: middle;
+        }
+
+        .course-button.active .course-badge {
+            background-color: rgba(255, 255, 255, 0.3);
+            color: white;
+        }
+
+        /* --- Feature B: Bulk Select Mode --- */
+        .bulk-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--primary-color);
+        }
+
+        .select-column {
+            display: none;
+            width: 40px;
+            text-align: center;
+        }
+
+        /* When table has class 'bulk-mode', show the column */
+        .logs-table.bulk-mode .select-column {
+            display: table-cell;
+        }
+
+        .logs-table.bulk-mode .uid-column {
+            display: none !important;
+        }
+
+        /* Hide UID to make room */
+
+        .bulk-actions-bar {
+            display: none;
+            background: var(--primary-color);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            animation: fadeIn 0.3s;
+        }
+
+        .bulk-actions-bar.visible {
+            display: flex;
+        }
+
+        /* --- Feature 4: Skeleton Loading --- */
+        .skeleton-row td {
+            padding: 15px;
+            border-top: 1px solid #eee;
+        }
+
+        .skeleton-bar {
+            height: 12px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            width: 100%;
+            display: block;
+            animation: shimmer 1.5s infinite linear;
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+        }
+
+        .skeleton-bar.short {
+            width: 40%;
+        }
+
+        .skeleton-bar.medium {
+            width: 70%;
+        }
+
+        /* --- Feature 5: Form Sections & Required Fields --- */
+        .form-section-title {
+            font-size: 0.85em;
+            text-transform: uppercase;
+            color: var(--primary-color);
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-top: 20px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+            padding-bottom: 5px;
+            width: 100%;
+        }
+
+        .form-group.required label::after {
+            content: " *";
+            color: var(--danger-color);
+            font-weight: bold;
+        }
+
         /* .course-button:first-child {
             border-top-left-radius: 18px;
             border-bottom-left-radius: 18px;
@@ -3750,6 +3860,13 @@
                     </div>
                 </div>
                 <div class="module-content">
+                    <div id="bulk-actions-bar" class="bulk-actions-bar">
+                        <span>Select rows to delete</span>
+                        <button onclick="deleteSelectedLogs()" class="btn-white btn-sm"
+                            style="color: var(--danger-color); font-weight:bold; background:white; border:none; border-radius:4px; cursor:pointer;">
+                            <i class="fas fa-trash"></i> Delete Selected
+                        </button>
+                    </div>
                     <div class="filter-container">
                         <input type="text" id="filter-input" class="filter-input" placeholder="Search...">
                         <select id="sort-select" class="sort-dropdown">
@@ -3766,6 +3883,9 @@
                         <div class="logs-count" aria-live="polite"><span id="filtered-count">0</span> logs found
                         </div>
                         <div class="logs-actions">
+                            <button onclick="toggleBulkMode()" class="btn-orange btn-icon admin-only"
+                                style="display: none;" title="Select Multiple"><i
+                                    class="fas fa-check-square"></i></button>
                             <button id="import-btn" class="btn-blue btn-icon admin-only" style="display: none;"
                                 title="Import Logs"><i class="fas fa-file-import"></i></button>
                             <button id="export-btn" class="btn-blue btn-icon admin-only" style="display: none;" disabled
@@ -3998,6 +4118,8 @@
         let initInProgress = false;
         let lastNotificationKey = '';
         let lastNotificationTime = 0;
+        let isBulkMode = false;
+        let selectedLogIds = new Set(); // Stores IDs of selected rows
 
         // DOM Elements
         let tabs, tabContents, importExcelBtn, excelInput, filterInput, sortSelect,
@@ -4024,6 +4146,24 @@
          */
         function sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        function renderTableSkeletons() {
+            const tbody = document.getElementById('logs-tbody');
+            if (!tbody) return;
+
+            let html = '';
+            // Generate 5 skeleton rows
+            for (let i = 0; i < 5; i++) {
+                html += `
+        <tr class="skeleton-row">
+            <td><span class="skeleton-bar medium"></span></td> ${isAdmin ? '<td><span class="skeleton-bar short"></span></td>' : ''} <td><span class="skeleton-bar short"></span></td> <td><span class="skeleton-bar medium"></span></td> ${isAdmin ? '<td><span class="skeleton-bar short"></span></td>' : ''} </tr>`;
+            }
+            tbody.innerHTML = html;
+
+            // Also update the count to "..."
+            const countEl = document.getElementById('filtered-count');
+            if (countEl) countEl.textContent = '...';
         }
 
         /**
@@ -5315,7 +5455,7 @@
         <div class="form-group-control">
            <input type="file" id="request-file-upload" class="form-control" accept=".pdf,image/png,image/jpeg,image/jpg,image/heic,image/heif,image/gif,image/webp">
            <small id="request-file-help" style="opacity: 0.7; margin-top: 5px; display: block;">
-                Max 10MB
+                PDF, PNG, JPG, HEIC, WEBP (Max 10MB)
            </small>
         </div>
     </div>
@@ -5342,13 +5482,12 @@
             const reasonHelpText = dialog.querySelector('#reason-help-text');
             const hoursGroup = dialog.querySelector('#request-hours-group');
 
-            // --- NEW: Reset hours when course changes ---
+            // Reset hours when course changes
             courseSelect.addEventListener('change', () => {
-                // Clear all selected hours to prevent invalid states
                 hoursGroup.querySelectorAll('.toggle-button.active').forEach(btn => btn.classList.remove('active'));
             });
 
-            // --- NEW: Smart Hour Limit Logic ---
+            // Smart Hour Limit Logic
             hoursGroup.addEventListener('click', (e) => {
                 if (e.target.classList.contains('toggle-button')) {
                     const btn = e.target;
@@ -5356,29 +5495,20 @@
 
                     if (!selectedCourse) {
                         showNotification('warning', 'Course Required', 'Please select a course first.');
-                        // Pulse the course selector to draw attention
                         courseSelect.focus();
                         courseSelect.style.borderColor = 'var(--warning-color)';
                         setTimeout(() => courseSelect.style.borderColor = '', 1000);
                         return;
                     }
 
-                    // Logic: If we are trying to ACTIVATE the button (currently inactive)
                     if (!btn.classList.contains('active')) {
-                        // 1. Get Max Hours from Course Info (Default to 2 if missing)
                         const maxHours = parseInt(courseInfoMap[selectedCourse]?.default_hours || 2, 10);
-
-                        // 2. Count currently active buttons
                         const currentCount = hoursGroup.querySelectorAll('.toggle-button.active').length;
-
-                        // 3. Check limit
                         if (currentCount >= maxHours) {
                             showNotification('warning', 'Limit Reached', `This course is only ${maxHours} hours long.`);
-                            return; // Stop here, do not toggle class
+                            return;
                         }
                     }
-
-                    // Toggle state
                     btn.classList.toggle('active');
                 }
             });
@@ -5397,7 +5527,7 @@
                         fileUploadGroup.style.display = 'flex';
                         fileUploadLabel.innerHTML = 'Medical Certificate <span style="color:var(--danger-color)">*</span>:';
                         explanationGroup.style.display = 'none'; isRequired = false;
-                        helpMessage = `<i class="fa-solid fa-briefcase-medical"></i> Please attach a doctor's note, or any relevant document.`;
+                        helpMessage = `<i class="fas fa-file-medical"></i> <strong>Requirement:</strong> Please attach a medical note, medical check report, or any relevant document.<br><br><em>If you do not have it currently, please submit this form as soon as you obtain it.</em>`;
                         break;
                     case 'Transportation Problem':
                         explanationGroup.style.display = 'flex'; explanationLabel.innerHTML = 'Details <span style="color:var(--danger-color)">*</span>:';
@@ -5452,7 +5582,7 @@
                 const minLen = parseInt(explanationInput.getAttribute('minlength') || '0', 10);
                 if (!explanationInput.disabled && minLen > 0 && explanation.trim().length < minLen) errors.push(`Explanation must be at least ${minLen} characters.`);
 
-                // Updated File Validation
+                // Validation for required files
                 if ((reasonType === 'Calling Sick' || reasonType === 'Academic Activity') && !file) {
                     errors.push('A supporting document is required.');
                 }
@@ -8369,11 +8499,9 @@
 
             // Check if data for this course is already loaded in memory
             if (!courseData[currentCourse]) {
-                // Data is NOT loaded. Show a loading state in the table.
-                logsTbody.innerHTML = '';
-                filteredCount.textContent = '0';
-                emptyLogs.innerHTML = `<div class="loading-spinner" style="margin: 20px auto;"></div><p style="text-align: center;">Loading logs for ${courseName.replace(/_/g, ' ')}...</p>`;
-                emptyLogs.style.display = 'block';
+                // --- Feature 4: Render Skeletons instead of Spinner ---
+                renderTableSkeletons();
+                document.getElementById('empty-logs').style.display = 'none';
 
                 try {
                     // ➡️ REPLACED: Unified logic for all admins
@@ -10242,6 +10370,71 @@
             }
         }
 
+        function toggleBulkMode() {
+            isBulkMode = !isBulkMode;
+            selectedLogIds.clear(); // Clear selections on toggle
+
+            const table = document.querySelector('.logs-table');
+            const bulkBar = document.getElementById('bulk-actions-bar');
+            const actionsHeader = document.querySelector('.actions-header');
+            const sortableHeaders = document.querySelectorAll('.logs-table th.sortable');
+
+            if (isBulkMode) {
+                table.classList.add('bulk-mode');
+                bulkBar.classList.add('visible');
+                // Insert Select Header if not present
+                const theadRow = table.querySelector('thead tr');
+                if (!theadRow.querySelector('.select-column-header')) {
+                    const th = document.createElement('th');
+                    th.className = 'select-column select-column-header';
+                    th.innerHTML = '<i class="fas fa-check"></i>';
+                    theadRow.insertBefore(th, theadRow.firstChild);
+                }
+            } else {
+                table.classList.remove('bulk-mode');
+                bulkBar.classList.remove('visible');
+                // Remove header
+                const th = table.querySelector('.select-column-header');
+                if (th) th.remove();
+            }
+            updateLogsList(); // Re-render to show/hide checkboxes
+        }
+
+        function deleteSelectedLogs() {
+            if (selectedLogIds.size === 0) return;
+
+            showConfirmationDialog({
+                title: `Delete ${selectedLogIds.size} entries?`,
+                message: "This will delete all logs associated with the selected rows. This cannot be undone.",
+                confirmText: "Delete All",
+                isDestructive: true,
+                onConfirm: () => {
+                    // 1. Optimistic UI update
+                    // We need to filter out ALL logs that match the selected "Group Keys" or IDs
+                    // Ideally, we collected log IDs. 
+
+                    const idsToDelete = Array.from(selectedLogIds);
+
+                    if (isGlobalAdmin) {
+                        idsToDelete.forEach(id => addToTombstones(id));
+                        courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToDelete.includes(log.id));
+
+                        toggleBulkMode();
+                        saveAndMarkChanges(currentCourse);
+                        updateUI();
+                        if (isOnline && isSignedIn) syncLogsWithSheet();
+                    } else {
+                        // Course Admin: Delete one by one via backend
+                        Promise.all(idsToDelete.map(id => deleteLogViaBackend(id))).then(() => {
+                            courseData[currentCourse].logs = courseData[currentCourse].logs.filter(log => !idsToDelete.includes(log.id));
+                            toggleBulkMode();
+                            updateUI();
+                        });
+                    }
+                }
+            });
+        }
+
         /**
          * Delete a log via backend API (for non-global admins)
          * This ensures tombstones are written to DELETED_LOG_IDS sheet
@@ -10730,6 +10923,38 @@
                 row.dataset.key = group.key;
                 if (group.name === 'Unknown') row.classList.add('unknown-row');
 
+                // --- Feature B: Bulk Checkbox Cell ---
+                if (isBulkMode) {
+                    const selectCell = document.createElement('td');
+                    selectCell.className = 'select-column';
+                    // We use the ID of the *first* log in the group as the value, 
+                    // OR we can collect ALL IDs in the group if clicking deletes the whole group.
+                    // Let's assume deleting the row deletes all logs in that group (like the delete button).
+                    const logIdsInGroup = group.originalLogs.map(l => l.id).join(',');
+
+                    selectCell.innerHTML = `<input type="checkbox" class="bulk-checkbox" value="${logIdsInGroup}">`;
+
+                    const checkbox = selectCell.querySelector('input');
+                    // Check if *any* ID from this group is already selected (simple state retention)
+                    const firstId = group.originalLogs[0].id;
+                    if (selectedLogIds.has(firstId)) checkbox.checked = true;
+
+                    checkbox.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const ids = e.target.value.split(',');
+                        if (e.target.checked) {
+                            ids.forEach(id => selectedLogIds.add(id));
+                        } else {
+                            ids.forEach(id => selectedLogIds.delete(id));
+                        }
+
+                        // Update delete button text
+                        const delBtn = document.querySelector('#bulk-actions-bar button');
+                        if (delBtn) delBtn.innerHTML = `<i class="fas fa-trash"></i> Delete (${selectedLogIds.size})`;
+                    });
+                    row.appendChild(selectCell);
+                }
+
                 const nameCell = document.createElement('td');
                 nameCell.className = 'name-cell name-column';
                 nameCell.textContent = group.name;
@@ -10813,6 +11038,7 @@
                 isChangingCourses = false;
             }
         }
+
 
         /**
  * Calculate the course week for a specific date.
@@ -11509,12 +11735,28 @@
                 const button = document.createElement('div');
                 button.className = 'course-button' + (currentCourse === course ? ' active' : '');
 
-                // Mark guest courses visually (optional)
+                // Mark guest courses visually
                 if (course === guestCourse) {
-                    button.classList.add('btn-orange'); // Use the orange style for guest courses
+                    button.classList.add('btn-orange');
                 }
 
-                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace(/_/g, ' ')}`;
+                // --- Feature A: Calculate Badge Count ---
+                let countHtml = '';
+                // Check log cache or active data
+                let count = 0;
+                if (courseData[course] && courseData[course].logs) {
+                    count = courseData[course].logs.length;
+                } else if (studentLogCache[course]) {
+                    count = studentLogCache[course].length;
+                }
+
+                // Only show badge if there are logs
+                if (count > 0) {
+                    countHtml = `<span class="course-badge">${count}</span>`;
+                }
+                // ----------------------------------------
+
+                button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${course.replace(/_/g, ' ')} ${countHtml}`;
                 button.addEventListener('click', () => selectCourseButton(course));
                 courseButtonsContainer.appendChild(button);
             });
