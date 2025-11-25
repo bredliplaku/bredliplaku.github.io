@@ -635,44 +635,39 @@
 
         .bulk-actions-bar {
             display: none;
-            position: absolute;
-            /* Sits inside the module-content */
-            top: 10px;
-            /* Aligns with where filters usually are */
-            left: 15px;
-            right: 15px;
+            position: fixed;
+            /* Stays on screen while scrolling */
+            top: 20px;
+            /* Distance from top of screen */
+            left: 50%;
+            transform: translateX(-50%) translateY(-150%);
+            /* Start hidden above screen */
+
             background: var(--primary-color);
-            /* Blue background for high visibility */
             color: white;
-            padding: 10px 15px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            padding: 10px 20px;
+            border-radius: 50px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
             align-items: center;
+            gap: 20px;
+            z-index: 11000;
+            /* Higher than everything (dialogs are usually 1000-10000) */
+            min-width: 320px;
             justify-content: space-between;
-            z-index: 100;
-            /* Sit above filters */
-            animation: slideDown 0.2s ease-out;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            /* Bouncy entrance */
         }
 
         .bulk-actions-bar.visible {
             display: flex;
-        }
-
-        @keyframes slideDown {
-            from {
-                transform: translateY(-10px);
-                opacity: 0;
-            }
-
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
+            transform: translateX(-50%) translateY(0);
+            /* Slide into view */
         }
 
         .bulk-actions-group {
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
 
         /* White buttons for contrast on the blue bar */
@@ -682,19 +677,21 @@
             border: 1px solid rgba(255, 255, 255, 0.3);
             width: 36px;
             height: 36px;
+            border-radius: 50%;
         }
 
         .bulk-actions-bar .btn-icon:hover {
             background-color: white;
             color: var(--primary-color);
+            transform: scale(1.1);
         }
 
         .bulk-count-badge {
             background: white;
             color: var(--primary-color);
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.85em;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.9em;
             font-weight: 800;
             margin-right: 5px;
         }
@@ -3944,7 +3941,6 @@
                                         <th>Date</th>
                                         <th>Hours</th>
                                         <th>Reason</th>
-                                        <th>Attachment</th>
                                         <th class="actions-header">Actions</th>
                                     </tr>
                                 </thead>
@@ -7353,22 +7349,22 @@
 
             callWebApp('getPendingAbsences', {}, 'GET')
                 .then(requests => {
-                    tbody.innerHTML = ''; // Clear old data
+                    tbody.innerHTML = '';
 
                     if (!requests || requests.length === 0) {
-                        pendingView.classList.add('is-hidden'); // Hide section if empty
+                        pendingView.classList.add('is-hidden');
                         return;
                     }
 
-                    pendingView.classList.remove('is-hidden'); // Show section
+                    pendingView.classList.remove('is-hidden');
 
                     requests.forEach(req => {
                         const row = document.createElement('tr');
                         row.className = 'clickable-request-row';
 
-                        // FIX: Handle property casing safely (attachmentURL vs attachmentUrl)
                         const fileUrl = req.attachmentURL || req.attachmentUrl || '';
 
+                        // Store data for the dialog
                         row.dataset.requestId = req.requestID;
                         row.dataset.studentName = req.name;
                         row.dataset.studentEmail = req.email;
@@ -7377,30 +7373,18 @@
                         row.dataset.hours = req.hours;
                         row.dataset.reasonType = req.reasonType;
                         row.dataset.description = req.description;
-                        row.dataset.attachmentUrl = fileUrl; // Store normalized URL
+                        row.dataset.attachmentUrl = fileUrl;
 
-                        // Create Attachment Cell Content
-                        let attachmentCellHtml = '<small style="opacity:0.5">No File</small>';
-                        if (fileUrl) {
-                            attachmentCellHtml = `
-                        <a href="${fileUrl}" target="_blank" rel="noopener noreferrer" 
-                           class="btn-blue btn-icon" 
-                           style="width: 30px; height: 30px; border-radius: 4px;" 
-                           title="View Attachment"
-                           onclick="event.stopPropagation()"> <i class="fa-solid fa-paperclip"></i>
-                        </a>`;
-                        }
-
+                        // Row HTML: Removed the Attachment <td>
                         row.innerHTML = `
             <td>
                 <div>${req.name}</div>
-                <small>${req.email}</small>
+                <small style="opacity:0.7">${req.email}</small>
             </td>
             <td>${req.course.replace(/_/g, ' ')}</td>
             <td>${req.absenceDate}</td>
             <td class="times-cell">${formatHoursAsPills(req.hours)}</td>
             <td>${req.reasonType}</td>
-            <td style="text-align: center;">${attachmentCellHtml}</td>
             <td class="actions-cell">
                 <div class="actions-cell-content">
                     <button class="btn-icon btn-red delete-absence-btn"
@@ -7470,26 +7454,46 @@
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
-            // This logic checks for the URL and builds the button
+            // 1. Attachment Logic (Uses new chip style)
             let attachmentHtml = '';
             if (data.attachmentUrl) {
                 attachmentHtml = `
-    <div class="form-group" style="align-items: flex-start;">
-        <label>Attachment:</label>
-        <div class="form-group-control">
-            <a href="${data.attachmentUrl}" target="_blank" rel="noopener noreferrer" class="btn-blue btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
-                <i class="fa-solid fa-eye"></i> View Attachment
-            </a>
-        </div>
-    </div>`;
+        <div class="form-group" style="align-items: center; margin-bottom:15px;">
+            <label>Proof:</label>
+            <div class="form-group-control">
+                <a href="${data.attachmentUrl}" target="_blank" rel="noopener noreferrer" class="btn-attachment">
+                    <i class="fa-solid fa-paperclip"></i> View Document
+                </a>
+            </div>
+        </div>`;
+            } else {
+                // Optional: You can remove this block if you want "No Attachment" to be hidden too
+                attachmentHtml = `
+        <div class="form-group" style="align-items: flex-start; margin-bottom:15px;">
+            <label>Proof:</label>
+            <div class="form-group-control" style="padding-top: 10px; opacity: 0.6;">
+                <small>No document provided.</small>
+            </div>
+        </div>`;
+            }
+
+            // 2. Explanation Logic (Hide if empty or N/A)
+            let explanationHtml = '';
+            if (data.description && data.description.trim() !== '' && data.description !== 'N/A') {
+                explanationHtml = `
+        <div class="form-group" id="request-explanation-group" style="align-items: flex-start;">
+            <label>Details:</label>
+            <textarea class="form-control form-group-control" rows="4" disabled 
+                style="background-color: var(--background-color); opacity: 1;">${data.description}</textarea>
+        </div>`;
             }
 
             dialog.innerHTML = `
-<h3 class="dialog-title">Review Permission Request</h3>
+<h3 class="dialog-title">Review Request</h3>
 <div class="dialog-content">
     <div class="form-group" style="align-items: flex-start;">
         <label>Student:</label>
-        <input class="form-control form-group-control" value="${data.studentName} (${data.studentEmail})" disabled>
+        <input class="form-control form-group-control" value="${data.studentName}" disabled>
     </div>
     <div class="form-group" style="align-items: flex-start;">
         <label>Course:</label>
@@ -7497,12 +7501,11 @@
     </div>
     <div class="form-group" style="align-items: flex-start;">
         <label>Date:</label>
-        <input class="form-control form-group-control" value="${data.absenceDate}" disabled>
-    </div>
-    <div class="form-group" style="align-items: flex-start;">
-        <label>Hours:</label>
-        <div class="form-group-control dialog-time-pill-container">
-            ${formatHoursAsPills(data.hours)}
+        <div class="form-group-control" style="display:flex; gap:10px; align-items:center;">
+            <input class="form-control" style="flex:1" value="${data.absenceDate}" disabled>
+            <div class="dialog-time-pill-container" style="border:none; padding:0; background:transparent;">
+                ${formatHoursAsPills(data.hours)}
+            </div>
         </div>
     </div>
     <div class="form-group" style="align-items: flex-start;">
@@ -7511,14 +7514,11 @@
     </div>
 
     ${attachmentHtml}
+    ${explanationHtml}
 
-    <div class="form-group" id="request-explanation-group" style="align-items: flex-start;">
-        <label for="request-explanation">Explanation:</label>
-        <textarea id="request-explanation" class="form-control form-group-control" rows="4" disabled>${data.description || 'N/A'}</textarea>
-    </div>
 </div>
 <div class="dialog-actions">
-    <button id="cancel-details-btn" class="btn-blue"><i class="fa-solid fa-xmark"></i> Cancel</button>
+    <button id="cancel-details-btn" class="btn-blue"><i class="fa-solid fa-xmark"></i> Close</button>
     <button id="reject-details-btn" class="btn-red"><i class="fa-solid fa-ban"></i> Reject</button>
     <button id="approve-details-btn" class="btn-green"><i class="fa-solid fa-check"></i> Approve</button>
 </div>`;
@@ -7533,12 +7533,11 @@
                 document.body.style.overflow = '';
             };
 
-            // --- Wire up buttons ---
             dialog.querySelector('#cancel-details-btn').addEventListener('click', closeDialog);
 
             dialog.querySelector('#approve-details-btn').addEventListener('click', () => {
-                closeDialog(); // Close this dialog first
-                showApproveAbsenceDialog(data); // Then open the next one
+                closeDialog();
+                showApproveAbsenceDialog(data);
             });
 
             dialog.querySelector('#reject-details-btn').addEventListener('click', () => {
@@ -10612,13 +10611,13 @@
 
             if (action === 'delete') {
                 confirmTitle = `Delete ${selectedLogIds.size} Entries?`;
-                confirmMsg = "This will delete ALL logs for the selected rows. This cannot be undone.";
+                confirmMsg = "Delete all logs for the selected rows? This cannot be undone.";
             } else if (action === 'add1h') {
                 confirmTitle = `Add +1 Hour?`;
-                confirmMsg = `Create NEW entries 1 hour later for the selected rows?`;
+                confirmMsg = `Create new log 1 hour later for the selected rows?`;
             } else if (action === 'sub1h') {
                 confirmTitle = `Remove Latest Hour?`;
-                confirmMsg = `This will delete the LAST timestamp for each selected row. If a student only has 1 hour, the entry will be removed completely.`;
+                confirmMsg = `Delete the last log for each selected row? If a student only has 1 hour, the entry will be removed completely.`;
             }
 
             showConfirmationDialog({
