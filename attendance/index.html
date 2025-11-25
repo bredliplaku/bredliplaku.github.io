@@ -5168,7 +5168,6 @@
                 const card = document.createElement('div');
                 card.className = 'course-card';
 
-                // --- FIX: Robust Admin Counting ---
                 // Handle null, undefined, or mixed property names
                 const rawAdmins = data.admin_emails || data.adminEmails || '';
                 // Split by comma, trim whitespace, filter out empty strings
@@ -5199,19 +5198,25 @@
             const title = isNew ? 'Add New Course' : `Edit ${escapeHtml(courseName.replace(/_/g, ' '))}`;
 
             const data = courseData || {};
-
-            // Helper to safely get string values
             const val = (v) => v !== undefined && v !== null ? v : '';
 
-            // Date formatting helper - CRITICAL for preserving data integrity
+            // --- FIX 1: Timezone-Proof Date Formatter ---
+            // This ensures that whether the input is a String or a Date object, 
+            // it returns a clean "YYYY-MM-DD" string without shifting the day.
             const formatDate = (d) => {
                 if (!d) return '';
+                // If it's already a simple string like "2025-10-06", just return it.
+                if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) return d;
+
                 try {
-                    // Handle Google Apps Script date objects or strings
-                    const dateObj = new Date(d);
-                    // Check if valid date
-                    if (isNaN(dateObj.getTime())) return '';
-                    return dateObj.toISOString().split('T')[0];
+                    const date = new Date(d);
+                    if (isNaN(date.getTime())) return '';
+
+                    // Force Local Time construction to prevent UTC shift
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
                 }
                 catch (e) { return ''; }
             };
@@ -5223,18 +5228,16 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            // Default values for toggles
             const currentCategory = val(data.default_category).toLowerCase() || 'theory';
             const currentSectionFull = val(data.default_section) || 'ALL';
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
-            // --- PERMISSION LOGIC ---
             const isDisabled = isGlobalAdmin ? '' : 'disabled';
             const lockStyle = isGlobalAdmin ? '' : 'background-color: #f0f0f0; cursor: not-allowed;';
 
-            // Match the exact key from your screenshot (Column J: "Admins")
-            const adminsValue = val(data.Admins || data.admin_emails || data.adminEmails);
+            // --- FIX 2: Reliable Admin Value Reading ---
+            const adminsValue = val(data.admin_emails);
 
             let eisWarningHtml = '';
             if (!isGlobalAdmin) {
@@ -5327,7 +5330,6 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Toggles Logic ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
             const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
             const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
@@ -5370,7 +5372,8 @@
                     } else {
                         sectCharGroup.style.display = 'flex';
                         if (!sectCharGroup.querySelector('.active')) {
-                            sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
+                            const btnA = sectCharGroup.querySelector('[data-value="A"]');
+                            if (btnA) btnA.classList.add('active');
                         }
                     }
                     updateSectionButtons();
@@ -5398,7 +5401,6 @@
                 const sChar = sectCharGroup.querySelector('.active')?.dataset.value || '';
                 const finalSection = (sType === 'ALL') ? 'ALL' : `${sType} ${sChar}`.trim();
 
-                // --- PAYLOAD CONSTRUCTION ---
                 const payload = {
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
@@ -5407,18 +5409,16 @@
                     defaultCategory: cat,
                     defaultSection: finalSection,
 
-                    // Security & Data Integrity Fixes:
-                    // For restricted fields (Global Admin Only), we use the Input value if admin.
-                    // If NOT admin, we must send the ORIGINAL data back.
-                    // CRITICAL: We wrap the fallback data in formatDate() to ensure it sends "YYYY-MM-DD"
-                    // string, not a JS Date Object, preventing Sheets data corruption.
+                    // --- FIX 3: Data Preservation for Non-Admins ---
+                    // If Non-Global Admin, we MUST send the ORIGINAL data back, formatted correctly.
+                    // If we don't format it (formatDate), the raw object causes the date shift.
+                    // If we don't send it at all (or send empty), the sheet wipes the cell.
 
                     startDate: isGlobalAdmin ? document.getElementById('edit-c-start').value : formatDate(data.start_date),
                     endDate: isGlobalAdmin ? document.getElementById('edit-c-end').value : formatDate(data.end_date),
                     holidayStartDate: isGlobalAdmin ? document.getElementById('edit-c-holiday-start').value : formatDate(data.holiday_start_date),
                     holidayWeeks: isGlobalAdmin ? document.getElementById('edit-c-holidays').value : val(data.holiday_weeks),
 
-                    // Check 'Admins' (Column J) specifically in the fallback
                     admin_emails: isGlobalAdmin ? document.getElementById('edit-c-admins').value : adminsValue
                 };
 
