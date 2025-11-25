@@ -5122,7 +5122,6 @@
             dialog.style.maxWidth = '800px';
             dialog.setAttribute('role', 'dialog');
 
-            // Added link to Google Account on profile picture
             dialog.innerHTML = `
 <h3 class="dialog-title"><i class="fas fa-cogs"></i> Global Settings</h3>
 <div class="dialog-content">
@@ -5152,7 +5151,7 @@
 
             const grid = dialog.querySelector('#settings-course-grid');
 
-            // Fetch fresh data to ensure we have the latest
+            // Fetch fresh data
             await fetchCourseInfo();
 
             grid.innerHTML = '';
@@ -5168,9 +5167,12 @@
             Object.entries(courseInfoMap).sort().forEach(([name, data]) => {
                 const card = document.createElement('div');
                 card.className = 'course-card';
-                // Handle potentially empty admin strings safely
-                const adminList = data.admin_emails ? data.admin_emails.toString().split(',') : [];
-                const adminCount = adminList.filter(e => e.trim()).length;
+
+                // --- FIX: Robust Admin Counting ---
+                // Handle null, undefined, or mixed property names
+                const rawAdmins = data.admin_emails || data.adminEmails || '';
+                // Split by comma, trim whitespace, filter out empty strings
+                const adminCount = rawAdmins.toString().split(',').map(e => e.trim()).filter(e => e.length > 0).length;
 
                 card.innerHTML = `
     <div class="course-card-header">
@@ -5179,7 +5181,7 @@
     </div>
     <div class="course-card-detail"><i class="far fa-calendar"></i> ${data.start_date ? new Date(data.start_date).toLocaleDateString() : 'N/A'}</div>
     <div class="course-card-detail"><i class="fas fa-clock"></i> ${escapeHtml(data.default_hours || 0)}h (${escapeHtml(data.default_category || '-')})</div>
-    <div class="course-card-admins" title="${escapeHtml(data.admin_emails || '')}"><i class="fas fa-user-shield"></i> ${adminCount} Admins</div>
+    <div class="course-card-admins" title="${escapeHtml(rawAdmins)}"><i class="fas fa-user-shield"></i> ${adminCount} Admins</div>
 `;
                 card.onclick = () => showCourseEditorDialog(name, data);
                 grid.appendChild(card);
@@ -5196,13 +5198,21 @@
             const isNew = !courseName;
             const title = isNew ? 'Add New Course' : `Edit ${escapeHtml(courseName.replace(/_/g, ' '))}`;
 
-            // Defaults
             const data = courseData || {};
+
+            // Helper to safely get string values
             const val = (v) => v !== undefined && v !== null ? v : '';
 
+            // Date formatting helper - CRITICAL for preserving data integrity
             const formatDate = (d) => {
                 if (!d) return '';
-                try { return new Date(d).toISOString().split('T')[0]; }
+                try {
+                    // Handle Google Apps Script date objects or strings
+                    const dateObj = new Date(d);
+                    // Check if valid date
+                    if (isNaN(dateObj.getTime())) return '';
+                    return dateObj.toISOString().split('T')[0];
+                }
                 catch (e) { return ''; }
             };
 
@@ -5213,18 +5223,19 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
+            // Default values for toggles
             const currentCategory = val(data.default_category).toLowerCase() || 'theory';
             const currentSectionFull = val(data.default_section) || 'ALL';
-
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
             // --- PERMISSION LOGIC ---
-            // If NOT global admin, certain fields are disabled (read-only)
             const isDisabled = isGlobalAdmin ? '' : 'disabled';
             const lockStyle = isGlobalAdmin ? '' : 'background-color: #f0f0f0; cursor: not-allowed;';
 
-            // EIS ID Warning Logic
+            // Match the exact key from your screenshot (Column J: "Admins")
+            const adminsValue = val(data.Admins || data.admin_emails || data.adminEmails);
+
             let eisWarningHtml = '';
             if (!isGlobalAdmin) {
                 eisWarningHtml = `
@@ -5302,7 +5313,7 @@
 
     <div class="form-group">
         <label>Admins (Emails) ${!isGlobalAdmin ? '<i class="fas fa-lock" style="font-size:0.7em; opacity:0.5;"></i>' : ''}</label>
-        <textarea id="edit-c-admins" class="form-control" rows="3" placeholder="comma, separated, emails" ${isDisabled} style="${lockStyle}">${escapeHtml(val(data.admin_emails || data.adminEmails))}</textarea>
+        <textarea id="edit-c-admins" class="form-control" rows="3" placeholder="comma, separated, emails" ${isDisabled} style="${lockStyle}">${escapeHtml(adminsValue)}</textarea>
         ${isGlobalAdmin ? '<small style="opacity:0.7">Users listed here will have admin access to this course.</small>' : ''}
     </div>
 
@@ -5316,10 +5327,30 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Toggles Logic (Same as before) ---
+            // --- Toggles Logic ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
             const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
             const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
+
+            const updateSectionButtons = () => {
+                const selectedType = sectTypeGroup.querySelector('.active')?.dataset.value;
+                const selectedChar = sectCharGroup.querySelector('.active')?.dataset.value;
+
+                const btnD = sectCharGroup.querySelector('[data-value="D"]');
+                if (btnD) {
+                    if (selectedType === 'Theory') {
+                        btnD.disabled = true;
+                        if (selectedChar === 'D') btnD.classList.remove('active');
+                    } else {
+                        btnD.disabled = false;
+                    }
+                }
+                const btnTheory = sectTypeGroup.querySelector('[data-value="Theory"]');
+                if (btnTheory) {
+                    btnTheory.disabled = (selectedChar === 'D');
+                }
+            };
+            updateSectionButtons();
 
             catGroup.addEventListener('click', (e) => {
                 if (e.target.classList.contains('toggle-button')) {
@@ -5329,9 +5360,10 @@
             });
 
             sectTypeGroup.addEventListener('click', (e) => {
-                if (e.target.classList.contains('toggle-button')) {
+                if (e.target.classList.contains('toggle-button') && !e.target.disabled) {
                     sectTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
                     e.target.classList.add('active');
+
                     if (e.target.dataset.value === 'ALL') {
                         sectCharGroup.style.display = 'none';
                         sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
@@ -5341,13 +5373,15 @@
                             sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
                         }
                     }
+                    updateSectionButtons();
                 }
             });
 
             sectCharGroup.addEventListener('click', (e) => {
-                if (e.target.classList.contains('toggle-button')) {
+                if (e.target.classList.contains('toggle-button') && !e.target.disabled) {
                     sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
                     e.target.classList.add('active');
+                    updateSectionButtons();
                 }
             });
 
@@ -5364,8 +5398,7 @@
                 const sChar = sectCharGroup.querySelector('.active')?.dataset.value || '';
                 const finalSection = (sType === 'ALL') ? 'ALL' : `${sType} ${sChar}`.trim();
 
-                // If non-global admin, we must send the ORIGINAL values for the restricted fields
-                // so they don't get wiped out or changed to empty strings.
+                // --- PAYLOAD CONSTRUCTION ---
                 const payload = {
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
@@ -5374,12 +5407,19 @@
                     defaultCategory: cat,
                     defaultSection: finalSection,
 
-                    // Conditional Fields based on Admin Level
-                    startDate: isGlobalAdmin ? document.getElementById('edit-c-start').value : data.start_date,
-                    endDate: isGlobalAdmin ? document.getElementById('edit-c-end').value : data.end_date,
-                    holidayStartDate: isGlobalAdmin ? document.getElementById('edit-c-holiday-start').value : data.holiday_start_date,
-                    holidayWeeks: isGlobalAdmin ? document.getElementById('edit-c-holidays').value : data.holiday_weeks,
-                    adminEmails: isGlobalAdmin ? document.getElementById('edit-c-admins').value : (data.admin_emails || data.adminEmails)
+                    // Security & Data Integrity Fixes:
+                    // For restricted fields (Global Admin Only), we use the Input value if admin.
+                    // If NOT admin, we must send the ORIGINAL data back.
+                    // CRITICAL: We wrap the fallback data in formatDate() to ensure it sends "YYYY-MM-DD"
+                    // string, not a JS Date Object, preventing Sheets data corruption.
+
+                    startDate: isGlobalAdmin ? document.getElementById('edit-c-start').value : formatDate(data.start_date),
+                    endDate: isGlobalAdmin ? document.getElementById('edit-c-end').value : formatDate(data.end_date),
+                    holidayStartDate: isGlobalAdmin ? document.getElementById('edit-c-holiday-start').value : formatDate(data.holiday_start_date),
+                    holidayWeeks: isGlobalAdmin ? document.getElementById('edit-c-holidays').value : val(data.holiday_weeks),
+
+                    // Check 'Admins' (Column J) specifically in the fallback
+                    admin_emails: isGlobalAdmin ? document.getElementById('edit-c-admins').value : adminsValue
                 };
 
                 try {
@@ -5388,12 +5428,10 @@
                         showNotification('success', 'Saved', 'Course updated. Refreshing...');
                         close();
                         if (isGlobalAdmin) {
-                            // If global settings was open beneath this, close and reopen it
                             const bg = document.querySelector('.dialog-backdrop');
                             if (bg) bg.remove();
                             showGlobalSettingsDialog();
                         } else {
-                            // If admin profile was open beneath this
                             const bg = document.querySelector('.dialog-backdrop');
                             if (bg) bg.remove();
                             showAdminProfileDialog();
