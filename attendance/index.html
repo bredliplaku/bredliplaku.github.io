@@ -302,7 +302,18 @@
         }
 
         .collapsible-module .module-header {
-            border-radius: 12px 12px 0 0;
+            display: none;
+        }
+
+        .collapsible-module .module {
+            margin-top: 0 !important;
+            /* Remove gap between button and module */
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+            box-shadow: none;
+            /* Blend into the container */
+            border: 1px solid #e0e0e0;
+            border-top: none;
         }
 
         /* Dark Mode */
@@ -4068,9 +4079,9 @@
             .admin-input-wrapper {
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 10px;
                 width: 100%;
-                margin-bottom: 8px;
+                margin-bottom: 10px;
             }
 
             .admin-input-wrapper .input-with-icon {
@@ -4087,8 +4098,12 @@
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
-                min-height: 0;
-                padding: 0;
+                margin-top: 10px;
+                padding: 5px;
+                border: 1px dashed #ccc;
+                /* Visual container */
+                border-radius: 8px;
+                min-height: 45px;
             }
 
             .admin-pill-item {
@@ -4890,8 +4905,7 @@
         <div id="database-tab" class="tab-content">
 
             <div id="pending-registrations-view" class="collapsible-module">
-
-                <div class="module" style="margin-top:20px">
+                <div class="module">
                     <div class="module-header">
                         <span class="module-title"><i class="fa-solid fa-inbox"></i> Pending Registrations</span>
                     </div>
@@ -4908,13 +4922,13 @@
                                         <th class="actions-header">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody id="registrations-tbody">
-                                </tbody>
+                                <tbody id="registrations-tbody"></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
             </div>
+
             <div class="module" style="margin-top:20px">
                 <div class="module-header">
                     <span class="module-title"><i class="fa-solid fa-list-ol"></i> UID Database</span>
@@ -5197,34 +5211,26 @@
                         else statusBadge = `<span style="color:var(--warning-color); font-weight:bold; font-size:0.85em; background:#fff3e0; padding:2px 8px; border-radius:10px;">Pending</span>`;
 
                         return `
-                <div class="request-list-item clickable-hist-row" style="border:1px solid #eee; padding:10px; margin-bottom:8px; border-radius:8px; cursor:pointer;">
-                    <div style="flex-grow:1;">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                            <strong>${escapeHtml(req.studentName)}</strong>
-                            ${statusBadge}
-                        </div>
-                        <div style="font-size:0.9em; color:#666;">
-                            ${escapeHtml(req.course.replace(/_/g, ' '))} &bull; ${escapeHtml(req.absenceDate)}
-                        </div>
-                        <div style="font-size:0.85em; opacity:0.7; margin-top:2px;">
-                            ${escapeHtml(req.reasonType)}
-                        </div>
-                    </div>
-                </div>`;
+        <div class="request-list-item clickable-hist-row" style="border:1px solid #eee; padding:10px; margin-bottom:8px; border-radius:8px; cursor:pointer;">
+            <div style="flex-grow:1;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <strong>${escapeHtml(req.studentName)}</strong>
+                    ${statusBadge}
+                </div>
+                <div style="font-size:0.9em; color:#666;">
+                    ${escapeHtml(req.course.replace(/_/g, ' '))} &bull; ${escapeHtml(req.absenceDate)}
+                </div>
+                <div style="font-size:0.85em; opacity:0.7; margin-top:2px;">
+                    ${escapeHtml(req.reasonType)}
+                </div>
+            </div>
+        </div>`;
                     }).join('');
 
                     // Attach Click Listeners
                     container.querySelectorAll('.clickable-hist-row').forEach((row, index) => {
                         row.onclick = () => {
-                            // Close history? Or stack dialog? Let's stack.
-                            // We assume the index matches the filtered array
-                            // For robustness, better to store ID in dataset, but here we rely on order or direct data passing
-                            // Let's find the specific item in 'filtered' array
-                            // Actually, simpler: just call showPermissionDetailsDialog with the data
-                            const req = history.find(h =>
-                                h.requestID === filtered[index].requestID // Basic matching
-                            ) || filtered[index];
-
+                            const req = history[index]; // Or simpler mapping if using filtered list index
                             showPermissionDetailsDialog({
                                 requestId: req.requestID,
                                 studentName: req.studentName,
@@ -5418,21 +5424,20 @@
             if (!view) return;
 
             // 1. Smart Tab Switching
-            // Find which tab content contains this view
-            const parentTabContent = view.closest('.tab-content');
-            if (parentTabContent && !parentTabContent.classList.contains('active')) {
-                // Find the button that activates this tab
-                const tabId = parentTabContent.id;
-                const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
-                if (tabButton) {
-                    tabButton.click(); // Simulate click to switch tabs/buttons properly
+            // We know Registrations are in 'database-tab' and Absences in 'scanner-tab'
+            let targetTabId = '';
+            if (viewId === 'pending-registrations-view') targetTabId = 'database-tab';
+            else if (viewId === 'pending-absences-view') targetTabId = 'scanner-tab';
+
+            if (targetTabId) {
+                const tabButton = document.querySelector(`.tab[data-tab="${targetTabId}"]`);
+                if (tabButton && !tabButton.classList.contains('active')) {
+                    tabButton.click(); // Switch tabs
                 }
             }
 
-            // 2. Toggle Expansion
+            // 2. Toggle Expansion logic (Keep existing)
             const isExpanded = view.classList.contains('expanded');
-
-            // Close others first (optional, keeps UI clean)
             document.querySelectorAll('.collapsible-module.expanded').forEach(el => {
                 if (el !== view) el.classList.remove('expanded');
             });
@@ -5446,8 +5451,6 @@
             } else {
                 view.classList.add('expanded');
                 chipElement.classList.add('active');
-
-                // Scroll to view smoothly
                 setTimeout(() => {
                     view.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }, 300);
@@ -5968,12 +5971,15 @@
             const formatDate = (d) => {
                 if (!d) return '';
                 if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) return d;
-                try {
-                    const date = new Date(d);
-                    if (isNaN(date.getTime())) return '';
-                    return date.toISOString().split('T')[0];
-                } catch (e) { return ''; }
+                try { return new Date(d).toISOString().split('T')[0]; } catch (e) { return ''; }
             };
+
+            // --- Permission Logic ---
+            // Global Admin can edit everything. Course Admin can ONLY edit Name, Hours, Category, Section.
+            const canEditSensitive = isGlobalAdmin;
+            const disabledAttr = canEditSensitive ? '' : 'disabled';
+            // Visual cue for disabled fields
+            const readOnlyStyle = canEditSensitive ? '' : 'style="background-color:#f9f9f9; color:#777; cursor:not-allowed;"';
 
             // Prepare Admin Emails
             const rawAdmins = val(data.adminEmails);
@@ -5988,23 +5994,18 @@
 
             const currentCategory = val(data.defaultCategory).toLowerCase() || 'theory';
             const currentSectionFull = val(data.defaultSection) || 'ALL';
-
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
-            // --- PERMISSION FLAGS ---
-            const canEditSensitive = isGlobalAdmin; // Only Global Admin can edit sensitive fields
-            const disabledAttr = canEditSensitive ? '' : 'disabled';
-            const readOnlyStyle = canEditSensitive ? '' : 'style="background-color:#f0f0f0; cursor:not-allowed;"';
-
-            // --- Admin Section HTML (Hidden if not global) ---
+            // --- Admin Section (Only visible to Global Admin) ---
             let adminSectionHtml = '';
             if (isGlobalAdmin) {
                 adminSectionHtml = `
+        <hr style="border:0; border-top:1px solid #eee; margin:15px 0;">
         <div class="form-group" style="flex-direction:column; gap:5px; align-items:stretch;">
-            <label style="text-align:left;">Admin Access</label>
+            <label style="text-align:left; font-weight:700;">Admin Access</label>
             <div class="admin-input-wrapper">
-                <div class="input-with-icon">
+                <div class="input-with-icon" style="flex-grow:1;">
                     <i class="fa-solid fa-user-plus"></i>
                     <input type="email" id="new-admin-email" class="form-control" placeholder="Enter email...">
                 </div>
@@ -6015,109 +6016,105 @@
         </div>`;
             }
 
-            // --- Warning for EIS ID (if not global) ---
-            let eisWarning = '';
-            if (!isGlobalAdmin) {
-                eisWarning = `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Contact Global Admin to change.</small>`;
-            }
+            // Warning for EIS ID
+            let eisWarning = !isGlobalAdmin ? `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-lock"></i> Restricted. Contact Global Admin to change.</small>` : '';
 
             dialog.innerHTML = `
-<h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
-<div class="dialog-content">
-    <div class="form-group">
-        <label>Course Name</label>
-        <div class="input-with-icon" style="flex-grow:1;">
-            <i class="fa-solid fa-heading"></i>
-            <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_202">
-        </div>
-    </div>
-    
-    <div class="form-row">
+    <h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
+    <div class="dialog-content">
         <div class="form-group">
-            <label>Start Date</label>
-            <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.startDate)}" ${disabledAttr} ${readOnlyStyle}>
-        </div>
-        <div class="form-group">
-            <label>End Date</label>
-            <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.endDate)}" ${disabledAttr} ${readOnlyStyle}>
-        </div>
-    </div>
-
-    <div class="form-row">
-        <div class="form-group">
-            <label>Holiday Start</label>
-            <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holidayStartDate)}" ${disabledAttr} ${readOnlyStyle}>
-        </div>
-        <div class="form-group">
-            <label>Holiday Weeks</label>
+            <label>Course Name</label>
             <div class="input-with-icon" style="flex-grow:1;">
-                <i class="fa-solid fa-calendar-minus"></i>
-                <input type="number" id="edit-c-holidays" class="form-control" value="${escapeHtml(val(data.holidayWeeks))}" ${disabledAttr} ${readOnlyStyle}>
+                <i class="fa-solid fa-heading"></i>
+                <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_202">
             </div>
         </div>
-    </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label>Start Date</label>
+                <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.startDate)}" ${disabledAttr} ${readOnlyStyle}>
+            </div>
+            <div class="form-group">
+                <label>End Date</label>
+                <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.endDate)}" ${disabledAttr} ${readOnlyStyle}>
+            </div>
+        </div>
 
-    <<div class="form-row">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Holiday Start</label>
+                <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holidayStartDate)}" ${disabledAttr} ${readOnlyStyle}>
+            </div>
+            <div class="form-group">
+                <label>Holiday Weeks</label>
+                <div class="input-with-icon" style="flex-grow:1;">
+                    <i class="fa-solid fa-calendar-minus"></i>
+                    <input type="number" id="edit-c-holidays" class="form-control" value="${escapeHtml(val(data.holidayWeeks))}" ${disabledAttr} ${readOnlyStyle}>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>Hours</label>
+                <div class="input-with-icon" style="flex-grow:1;">
+                    <i class="fa-regular fa-clock"></i>
+                    <input type="number" id="edit-c-hours" class="form-control" value="${escapeHtml(val(data.defaultHours))}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>EIS ID</label>
+                <div class="input-with-icon" style="flex-grow:1;">
+                    <i class="fa-solid fa-fingerprint"></i>
+                    <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345" ${disabledAttr} ${readOnlyStyle}>
+                </div>
+                ${eisWarning}
+            </div>
+        </div>
+
+        <div class="form-group" style="margin-top:10px;">
+            <label>Category</label>
+            <div id="edit-c-cat-group" class="toggle-button-group form-group-control">
+                <button class="toggle-button ${currentCategory === 'theory' ? 'active' : ''}" data-value="theory"><i class="fa-solid fa-book"></i> Theory</button>
+                <button class="toggle-button ${currentCategory === 'lab' ? 'active' : ''}" data-value="lab"><i class="fa-solid fa-desktop"></i> Lab</button>
+                <button class="toggle-button ${currentCategory === 'practice' ? 'active' : ''}" data-value="practice"><i class="fa-solid fa-pen-to-square"></i> Practice</button>
+            </div>
+        </div>
+
         <div class="form-group">
-            <label>Hours</label>
-            <div class="input-with-icon" style="flex-grow:1;">
-                <i class="fa-regular fa-clock"></i>
-                <input type="number" id="edit-c-hours" class="form-control" value="${escapeHtml(val(data.defaultHours))}" ${val(data.defaultHours)}>
+            <label>Section</label>
+            <div style="flex-grow:1">
+                <div id="edit-c-sect-type" class="toggle-button-group" style="margin-bottom:5px;">
+                    <button class="toggle-button ${secType === 'ALL' ? 'active' : ''}" data-value="ALL">All</button>
+                    <button class="toggle-button ${secType === 'Theory' ? 'active' : ''}" data-value="Theory">Theory</button>
+                    <button class="toggle-button ${secType === 'Lab' ? 'active' : ''}" data-value="Lab">Lab</button>
+                    <button class="toggle-button ${secType === 'Practice' ? 'active' : ''}" data-value="Practice">Prac</button>
+                </div>
+                <div id="edit-c-sect-char" class="toggle-button-group" style="display:${secType === 'ALL' ? 'none' : 'flex'}">
+                    <button class="toggle-button btn-char ${secChar === 'A' ? 'active' : ''}" data-value="A">A</button>
+                    <button class="toggle-button btn-char ${secChar === 'B' ? 'active' : ''}" data-value="B">B</button>
+                    <button class="toggle-button btn-char ${secChar === 'C' ? 'active' : ''}" data-value="C">C</button>
+                    <button class="toggle-button btn-char ${secChar === 'D' ? 'active' : ''}" data-value="D">D</button>
+                </div>
             </div>
         </div>
-        <div class="form-group">
-            <label>EIS ID</label>
-            <div class="input-with-icon" style="flex-grow:1;">
-                <i class="fa-solid fa-fingerprint"></i>
-                <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345" ${disabledAttr} ${readOnlyStyle}>
-            </div>
-            ${eisWarning}
-        </div>
+
+        ${adminSectionHtml}
+
     </div>
-
-    <div class="form-group" style="margin-top:10px;">
-        <label>Category</label>
-        <div id="edit-c-cat-group" class="toggle-button-group form-group-control">
-            <button class="toggle-button ${currentCategory === 'theory' ? 'active' : ''}" data-value="theory"><i class="fa-solid fa-book"></i> Theory</button>
-            <button class="toggle-button ${currentCategory === 'lab' ? 'active' : ''}" data-value="lab"><i class="fa-solid fa-desktop"></i> Lab</button>
-            <button class="toggle-button ${currentCategory === 'practice' ? 'active' : ''}" data-value="practice"><i class="fa-solid fa-pen-to-square"></i> Practice</button>
-        </div>
-    </div>
-
-    <div class="form-group">
-        <label>Section</label>
-        <div style="flex-grow:1">
-            <div id="edit-c-sect-type" class="toggle-button-group" style="margin-bottom:5px;">
-                <button class="toggle-button ${secType === 'ALL' ? 'active' : ''}" data-value="ALL">All</button>
-                <button class="toggle-button ${secType === 'Theory' ? 'active' : ''}" data-value="Theory">Theory</button>
-                <button class="toggle-button ${secType === 'Lab' ? 'active' : ''}" data-value="Lab">Lab</button>
-                <button class="toggle-button ${secType === 'Practice' ? 'active' : ''}" data-value="Practice">Prac</button>
-            </div>
-            <div id="edit-c-sect-char" class="toggle-button-group" style="display:${secType === 'ALL' ? 'none' : 'flex'}">
-                <button class="toggle-button btn-char ${secChar === 'A' ? 'active' : ''}" data-value="A">A</button>
-                <button class="toggle-button btn-char ${secChar === 'B' ? 'active' : ''}" data-value="B">B</button>
-                <button class="toggle-button btn-char ${secChar === 'C' ? 'active' : ''}" data-value="C">C</button>
-                <button class="toggle-button btn-char ${secChar === 'D' ? 'active' : ''}" data-value="D">D</button>
-            </div>
-        </div>
-    </div>
-
-    ${adminSectionHtml}
-
-</div>
-<div class="dialog-actions">
-    ${(!isNew && isGlobalAdmin) ? '<button id="delete-course-btn" class="btn-red" style="margin-right:auto;"><i class="fa-solid fa-trash"></i> Delete</button>' : ''}
-    <button id="cancel-edit-c" class="btn-blue"><i class="fa-solid fa-xmark"></i> Cancel</button>
-    <button id="save-edit-c" class="btn-green"><i class="fa-solid fa-floppy-disk"></i> Save</button>
-</div>`;
+    <div class="dialog-actions">
+        ${(!isNew && isGlobalAdmin) ? '<button id="delete-course-btn" class="btn-red" style="margin-right:auto;"><i class="fa-solid fa-trash"></i> Delete</button>' : ''}
+        <button id="cancel-edit-c" class="btn-blue"><i class="fa-solid fa-xmark"></i> Cancel</button>
+        <button id="save-edit-c" class="btn-green"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+    </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Admin Pills Logic ---
+            // --- Admin Logic (Only if Global) ---
             let hiddenAdminInput = null;
             if (isGlobalAdmin) {
-                // Copy the Admin Pills Logic from previous response here
                 const pillsContainer = document.getElementById('admin-pills-list');
                 const newAdminInput = document.getElementById('new-admin-email');
                 const addAdminBtn = document.getElementById('add-admin-btn');
@@ -6129,7 +6126,7 @@
                     pillsContainer.innerHTML = '';
                     adminEmailList.forEach((email, index) => {
                         const pill = document.createElement('div');
-                        pill.className = 'admin-pill-item';
+                        pill.className = 'admin-pill-item'; // Uses new CSS
                         pill.innerHTML = `<i class="fa-solid fa-user" style="font-size:0.8em;"></i> ${escapeHtml(email)} <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>`;
                         pillsContainer.appendChild(pill);
                     });
@@ -6143,12 +6140,20 @@
                     });
                 };
 
-                const addAdmin = () => { /* ... same add logic ... */
+                const addAdmin = () => {
                     const email = newAdminInput.value.trim();
                     if (email && isValidEmail(email)) {
-                        if (!adminEmailList.includes(email)) { adminEmailList.push(email); renderAdminPills(); updateHiddenInput(); newAdminInput.value = ''; }
-                        else { showNotification('warning', 'Duplicate', 'Email already added.'); }
-                    } else if (email) { showNotification('error', 'Invalid Email', 'Please enter a valid email.'); }
+                        if (!adminEmailList.includes(email)) {
+                            adminEmailList.push(email);
+                            renderAdminPills();
+                            updateHiddenInput();
+                            newAdminInput.value = '';
+                        } else {
+                            showNotification('warning', 'Duplicate', 'Email already added.');
+                        }
+                    } else if (email) {
+                        showNotification('error', 'Invalid Email', 'Please enter a valid email.');
+                    }
                 };
                 addAdminBtn.onclick = addAdmin;
                 newAdminInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addAdmin(); });
@@ -6156,69 +6161,36 @@
                 updateHiddenInput();
             }
 
-            // --- Buttons Logic with "Theory D" Restriction ---
+            // --- Toggle Button Logic ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
             const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
             const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
             const charContainer = document.getElementById('edit-c-sect-char');
 
-            // Helper to enforce rules
             const updateSectionLogic = () => {
                 const activeTypeBtn = sectTypeGroup.querySelector('.active');
-                const activeCharBtn = sectCharGroup.querySelector('.active');
                 const activeType = activeTypeBtn ? activeTypeBtn.dataset.value : 'ALL';
-                const activeChar = activeCharBtn ? activeCharBtn.dataset.value : null;
-
-                // Show/Hide char container
-                if (activeType === 'ALL') {
-                    charContainer.style.display = 'none';
-                } else {
-                    charContainer.style.display = 'flex';
-                }
-
-                // Rule: "Theory" cannot be "D"
+                charContainer.style.display = activeType === 'ALL' ? 'none' : 'flex';
                 const btnD = sectCharGroup.querySelector('[data-value="D"]');
-                if (activeType === 'Theory') {
-                    // Disable D
-                    if (btnD) btnD.disabled = true;
-                    // If D was selected, switch to A
-                    if (activeChar === 'D') {
-                        if (activeCharBtn) activeCharBtn.classList.remove('active');
-                        sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
-                    }
-                } else {
-                    // Enable D for Lab/Practice
-                    if (btnD) btnD.disabled = false;
+                if (btnD) btnD.disabled = (activeType === 'Theory');
+                if (activeType === 'Theory' && sectCharGroup.querySelector('.active')?.dataset.value === 'D') {
+                    sectCharGroup.querySelector('.active').classList.remove('active');
+                    sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
                 }
             };
-
-            // Initialize logic
             updateSectionLogic();
 
             catGroup.addEventListener('click', (e) => {
                 const btn = e.target.closest('.toggle-button');
-                if (btn) {
-                    catGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                }
+                if (btn) { catGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
             });
-
             sectTypeGroup.addEventListener('click', (e) => {
                 const btn = e.target.closest('.toggle-button');
-                if (btn && !btn.disabled) {
-                    sectTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    updateSectionLogic(); // Run check
-                }
+                if (btn) { sectTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active')); btn.classList.add('active'); updateSectionLogic(); }
             });
-
             sectCharGroup.addEventListener('click', (e) => {
                 const btn = e.target.closest('.toggle-button');
-                if (btn && !btn.disabled) {
-                    sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    // Logic not strictly needed here as Type drives the restriction, but good for safety
-                }
+                if (btn && !btn.disabled) { sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
             });
 
             const close = () => document.body.removeChild(dialogBackdrop);
@@ -6238,8 +6210,6 @@
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
                     defaultHours: document.getElementById('edit-c-hours').value,
-                    // If restricted, send original data back to be safe, or just send what's in input (which is disabled)
-                    // Since inputs are disabled, .value still works but user can't change it.
                     startDate: document.getElementById('edit-c-start').value,
                     endDate: document.getElementById('edit-c-end').value,
                     holidayStartDate: document.getElementById('edit-c-holiday-start').value,
@@ -6247,7 +6217,6 @@
                     eisId: document.getElementById('edit-c-eis').value,
                     defaultCategory: cat,
                     defaultSection: finalSection,
-                    // Only send admin emails if global admin, otherwise send existing or empty
                     adminEmails: isGlobalAdmin ? hiddenAdminInput.value : (data.adminEmails || '')
                 };
 
@@ -6285,23 +6254,35 @@
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
+            dialog.style.maxWidth = '900px';
+            dialog.style.height = '85vh';
             dialog.setAttribute('role', 'dialog');
 
-            // --- Variables for Bomb ---
-            let avatarClickCount = 0;
-            let lastAvatarClickTime = 0;
+            // --- Header (Unified Look) ---
+            const headerHtml = `
+    <div class="settings-modal-header">
+        <div style="display:flex; align-items:center; gap:15px;">
+            <div style="position:relative; cursor:pointer; width:48px; height:48px;" id="non-admin-profile-pic-container">
+                <img id="profile-avatar-img" src="${currentUser.picture}" style="width:100%; height:100%; border-radius:50%; border:2px solid var(--card-background); box-shadow:0 2px 8px rgba(0,0,0,0.1); object-fit:cover;">
+            </div>
+            <div>
+                <h3 style="margin:0; font-size:1.3em;">My Courses</h3>
+                <div style="font-size:0.85em; opacity:0.7;">${escapeHtml(currentUser.name)}</div>
+            </div>
+        </div>
+        <button id="close-profile-btn" class="btn-icon" style="background:transparent; color:var(--text-color); font-size:1.2em;"><i class="fa-solid fa-xmark"></i></button>
+    </div>`;
 
             const myCourses = availableCourses.filter(c => courseInfoMap[c]);
 
             let courseListHtml = '';
             if (myCourses.length > 0) {
-                courseListHtml = `<div class="modern-course-grid" style="margin-top:15px;">`;
+                courseListHtml = `<div class="modern-course-grid">`;
                 myCourses.forEach(courseName => {
                     const data = courseInfoMap[courseName];
                     const category = (data.defaultCategory || 'theory').toLowerCase();
                     let stripClass = category.includes('theory') ? 'strip-theory' :
                         category.includes('lab') ? 'strip-lab' : 'strip-practice';
-                    const startDate = data.startDate ? new Date(data.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'N/A';
 
                     courseListHtml += `
             <div class="modern-course-card" id="card-${escapeHtml(courseName)}">
@@ -6328,28 +6309,19 @@
             }
 
             dialog.innerHTML = `
-    <div class="dialog-content">
-        <div class="profile-header-section">
-            <div style="position:relative; cursor:default; width:80px; height:80px;" id="non-admin-profile-pic-container">
-                <img id="profile-avatar-img" src="${currentUser.picture}" class="profile-avatar-large">
-            </div>
-            <div style="text-align:center; margin-top:10px;">
-                <h3 class="profile-name-large">${escapeHtml(currentUser.name)}</h3>
-                <p class="profile-email-large">${escapeHtml(currentUser.email)}</p>
-            </div>
-        </div>
-        <div class="form-section-title">My Courses</div>
+    ${headerHtml}
+    <div class="dialog-content" style="overflow-y:auto;">
         ${courseListHtml}
-    </div>
-    <div class="dialog-actions">
-        <button id="close-profile-btn" class="btn-blue">Close</button>
     </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Bomb Logic ---
+            // --- Bomb Logic (Now works because no <a> tag) ---
+            let avatarClickCount = 0;
+            let lastAvatarClickTime = 0;
             const profilePicContainer = dialog.querySelector('#non-admin-profile-pic-container');
+
             profilePicContainer.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const now = Date.now();
@@ -6363,7 +6335,7 @@
                 }
             });
 
-            // Listeners
+            // Listeners for Course Cards
             myCourses.forEach(courseName => {
                 const card = document.getElementById(`card-${courseName}`);
                 if (card) {
@@ -6373,6 +6345,7 @@
                     };
                 }
             });
+
             dialog.querySelector('#close-profile-btn').onclick = () => document.body.removeChild(dialogBackdrop);
         }
 
