@@ -1299,7 +1299,6 @@
             background-color: #333;
         }
 
-        /* Fix for dark mode */
         .dark-mode .refresh-btn {
             color: white;
         }
@@ -5482,12 +5481,14 @@
                 const lowerFilter = filterText.toLowerCase();
 
                 const courses = Object.entries(courseInfoMap).map(([name, data]) => ({
-                    name, ...data, category: (data.default_category || 'theory').toLowerCase()
+                    name,
+                    ...data,
+                    category: (data.defaultCategory || 'theory').toLowerCase() // FIXED
                 }));
 
                 const filtered = courses.filter(c =>
                     c.name.toLowerCase().includes(lowerFilter) ||
-                    (c.eis_id && String(c.eis_id).includes(lowerFilter))
+                    (c.eisId && String(c.eisId).includes(lowerFilter))
                 );
 
                 filtered.sort((a, b) => a.name.localeCompare(b.name));
@@ -5503,7 +5504,7 @@
                     else if (course.category.includes('lab')) stripClass = 'strip-lab';
                     else if (course.category.includes('practice')) stripClass = 'strip-practice';
 
-                    const rawAdmins = course.admin_emails || course.adminEmails || '';
+                    const rawAdmins = course.adminEmails || '';
                     const adminCount = rawAdmins.toString().split(',').map(e => e.trim()).filter(Boolean).length;
 
                     const card = document.createElement('div');
@@ -5513,10 +5514,10 @@
                 <div class="card-body">
                     <div class="card-title-row">
                         <div class="card-course-name">${escapeHtml(course.name.replace(/_/g, ' '))}</div>
-                        ${course.eis_id ? `<span class="card-eis-badge">#${course.eis_id}</span>` : ''}
+                        ${course.eisId ? `<span class="card-eis-badge">#${course.eisId}</span>` : ''} 
                     </div>
                     <div class="card-meta-row">
-                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${course.default_hours || 0}h</div>
+                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${course.defaultHours || 0}h</div>
                         <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${course.category}</div>
                     </div>
                 </div>
@@ -5585,8 +5586,8 @@
                 } catch (e) { return ''; }
             };
 
-            // Prepare Admin Emails
-            const rawAdmins = val(data.admin_emails || data.adminEmails);
+            // FIX: Read 'adminEmails' (CamelCase)
+            const rawAdmins = val(data.adminEmails);
             let adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
 
             const dialogBackdrop = document.createElement('div');
@@ -5596,11 +5597,14 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            const currentCategory = val(data.default_category).toLowerCase() || 'theory';
-            const currentSectionFull = val(data.default_section) || 'ALL';
+            // FIX: Read 'defaultCategory' and 'defaultSection' (CamelCase)
+            const currentCategory = val(data.defaultCategory).toLowerCase() || 'theory';
+            const currentSectionFull = val(data.defaultSection) || 'ALL';
+
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
+            // FIX: Update all value="${...}" to use the new CamelCase keys
             dialog.innerHTML = `
 <h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
 <div class="dialog-content">
@@ -5615,24 +5619,24 @@
     <div class="form-row">
         <div class="form-group">
             <label>Start Date</label>
-            <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.start_date)}">
+            <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.startDate)}">
         </div>
         <div class="form-group">
             <label>End Date</label>
-            <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.end_date)}">
+            <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.endDate)}">
         </div>
     </div>
 
     <div class="form-row">
         <div class="form-group">
             <label>Holiday Start</label>
-            <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holiday_start_date)}">
+            <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holidayStartDate)}">
         </div>
         <div class="form-group">
             <label>Holiday Weeks</label>
             <div class="input-with-icon" style="flex-grow:1;">
                 <i class="fa-solid fa-calendar-minus"></i>
-                <input type="number" id="edit-c-holidays" class="form-control" value="${val(data.holiday_weeks)}">
+                <input type="number" id="edit-c-holidays" class="form-control" value="${val(data.holidayWeeks)}">
             </div>
         </div>
     </div>
@@ -5642,14 +5646,14 @@
             <label>Hours</label>
             <div class="input-with-icon" style="flex-grow:1;">
                 <i class="fa-regular fa-clock"></i>
-                <input type="number" id="edit-c-hours" class="form-control" value="${val(data.default_hours)}">
+                <input type="number" id="edit-c-hours" class="form-control" value="${val(data.defaultHours)}">
             </div>
         </div>
         <div class="form-group">
             <label>EIS ID</label>
             <div class="input-with-icon" style="flex-grow:1;">
                 <i class="fa-solid fa-fingerprint"></i>
-                <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eis_id))}" placeholder="12345">
+                <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345">
             </div>
         </div>
     </div>
@@ -5712,24 +5716,16 @@
             const addAdminBtn = document.getElementById('add-admin-btn');
             const hiddenAdminInput = document.getElementById('edit-c-admins');
 
-            const updateHiddenInput = () => {
-                hiddenAdminInput.value = adminEmailList.join(', ');
-            };
+            const updateHiddenInput = () => { hiddenAdminInput.value = adminEmailList.join(', '); };
 
             const renderAdminPills = () => {
                 pillsContainer.innerHTML = '';
                 adminEmailList.forEach((email, index) => {
                     const pill = document.createElement('div');
                     pill.className = 'admin-pill-item';
-                    pill.innerHTML = `
-                <i class="fa-solid fa-user" style="font-size:0.8em;"></i> 
-                ${escapeHtml(email)}
-                <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>
-            `;
+                    pill.innerHTML = `<i class="fa-solid fa-user" style="font-size:0.8em;"></i> ${escapeHtml(email)} <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>`;
                     pillsContainer.appendChild(pill);
                 });
-
-                // Re-attach delete listeners
                 pillsContainer.querySelectorAll('.remove-pill').forEach(btn => {
                     btn.onclick = (e) => {
                         const idx = parseInt(e.target.dataset.index);
@@ -5748,29 +5744,21 @@
                         renderAdminPills();
                         updateHiddenInput();
                         newAdminInput.value = '';
-                    } else {
-                        showNotification('warning', 'Duplicate', 'Email already added.');
-                    }
-                } else if (email) {
-                    showNotification('error', 'Invalid Email', 'Please enter a valid email.');
-                }
+                    } else { showNotification('warning', 'Duplicate', 'Email already added.'); }
+                } else if (email) { showNotification('error', 'Invalid Email', 'Please enter a valid email.'); }
             };
 
             addAdminBtn.onclick = addAdmin;
-            newAdminInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') addAdmin();
-            });
+            newAdminInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addAdmin(); });
 
-            renderAdminPills(); // Initial render
-            updateHiddenInput(); // Initial sync
+            renderAdminPills();
+            updateHiddenInput();
 
-            // --- Buttons Logic ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
             const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
             const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
 
             catGroup.addEventListener('click', (e) => {
-                // Handle clicks on the button or the icon inside it
                 const btn = e.target.closest('.toggle-button');
                 if (btn) {
                     catGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
@@ -5799,7 +5787,6 @@
                 }
             });
 
-            // --- Save & Close Logic ---
             const close = () => document.body.removeChild(dialogBackdrop);
             dialog.querySelector('#cancel-edit-c').onclick = close;
 
@@ -5824,7 +5811,7 @@
                     endDate: document.getElementById('edit-c-end').value,
                     holidayStartDate: document.getElementById('edit-c-holiday-start').value,
                     holidayWeeks: document.getElementById('edit-c-holidays').value,
-                    adminEmails: hiddenAdminInput.value
+                    adminEmails: hiddenAdminInput.value // Ensure this key is CamelCase
                 };
 
                 try {
@@ -5832,10 +5819,8 @@
                     if (res.result === 'success') {
                         showNotification('success', 'Saved', 'Course updated.');
                         close();
-                        showGlobalSettingsDialog(); // Refresh dashboard
-                    } else {
-                        throw new Error(res.message);
-                    }
+                        showGlobalSettingsDialog();
+                    } else { throw new Error(res.message); }
                 } catch (err) {
                     showNotification('error', 'Save Failed', err.message);
                     btn.disabled = false;
@@ -5877,19 +5862,19 @@
                     const data = courseInfoMap[courseName];
                     // Render a clickable card for each course
                     courseListHtml += `
-            <div class="course-card" id="card-${escapeHtml(courseName)}">
-                <div class="course-card-header">
-                    <span>${escapeHtml(courseName.replace(/_/g, ' '))}</span>
-                    <i class="fas fa-pencil-alt" style="opacity:0.5; font-size:0.8em;"></i>
-                </div>
-                <div class="course-card-detail">
-                    <i class="fas fa-clock"></i> ${escapeHtml(data.default_hours || 0)}h 
-                    (${escapeHtml(data.default_category || '-')})
-                </div>
-                <div class="course-card-detail" style="margin-top:5px; font-size:0.75em; opacity:0.7;">
-                    <i class="fas fa-cog"></i> Click to edit settings
-                </div>
-            </div>`;
+        <div class="course-card" id="card-${escapeHtml(courseName)}">
+            <div class="course-card-header">
+                <span>${escapeHtml(courseName.replace(/_/g, ' '))}</span>
+                <i class="fas fa-pencil-alt" style="opacity:0.5; font-size:0.8em;"></i>
+            </div>
+            <div class="course-card-detail">
+                <i class="fas fa-clock"></i> ${escapeHtml(data.defaultHours || 0)}h 
+                (${escapeHtml(data.defaultCategory || '-')})
+            </div>
+            <div class="course-card-detail" style="margin-top:5px; font-size:0.75em; opacity:0.7;">
+                <i class="fas fa-cog"></i> Click to edit settings
+            </div>
+        </div>`;
                 });
                 courseListHtml += `</div>`;
             } else {
@@ -6694,7 +6679,7 @@ ${uidContent}
                 }
 
                 // Populate Category Buttons (WITH ICONS)
-                const defaultCategory = courseMetadata?.default_category || 'theory';
+                const defaultCategory = courseMetadata?.defaultCategory || 'theory';
                 categoryGroup.innerHTML = `
             <button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">
                 <i class="fa-solid fa-book"></i> Theory
@@ -6706,7 +6691,7 @@ ${uidContent}
                 <i class="fa-solid fa-pen-to-square"></i> Practice
             </button>
         `;
-                customHoursInput.value = parseInt(courseMetadata?.default_hours || 2);
+                customHoursInput.value = parseInt(courseMetadata?.defaultHours || 2);
 
                 // Helper Functions for Section Logic
                 const validateSectionSelection = () => {
@@ -6852,7 +6837,7 @@ ${uidContent}
                 dialog.querySelector('#cancel-export-btn').addEventListener('click', closeDialog);
 
                 // Initialize Section Defaults
-                const defaultSectionFull = courseMetadata?.default_section || 'ALL';
+                const defaultSectionFull = courseMetadata?.defaultSection || 'ALL';
                 let [defaultSectionType, defaultSectionChar] = defaultSectionFull.split(' ');
                 if (defaultSectionFull === 'ALL') defaultSectionType = 'ALL';
 
@@ -7067,7 +7052,7 @@ ${uidContent}
                     }
 
                     if (!btn.classList.contains('active')) {
-                        const maxHours = parseInt(courseInfoMap[selectedCourse]?.default_hours || 2, 10);
+                        const maxHours = parseInt(courseInfoMap[selectedCourse]?.defaultHours || 2, 10);
                         const currentCount = hoursGroup.querySelectorAll('.toggle-button.active').length;
                         if (currentCount >= maxHours) {
                             showNotification('warning', 'Limit Reached', `This course is only ${maxHours} hours long.`);
@@ -7611,8 +7596,8 @@ ${uidContent}
                 if (bootData.courseInfo) {
                     courseInfoMap = bootData.courseInfo;
                     Object.entries(courseInfoMap).forEach(([courseName, metadata]) => {
-                        if (metadata && metadata.eis_id) {
-                            courseIDMap[courseName] = metadata.eis_id;
+                        if (metadata && metadata.eisId) {
+                            courseIDMap[courseName] = metadata.eisId;
                         }
                     });
                 }
@@ -9558,14 +9543,14 @@ ${uidContent}
          * @returns {number|null} Current week number or null if metadata is invalid
          */
         function calculateCurrentWeek(metadata) {
-            if (!metadata || !metadata.start_date) return null;
+            if (!metadata || !metadata.startDate) return null;
 
-            const startDate = new Date(metadata.start_date);
+            const startDate = new Date(metadata.startDate);
             const today = new Date();
-            const holidayWeeks = parseInt(metadata.holiday_weeks || 0);
+            const holidayWeeks = parseInt(metadata.holidayWeeks || 0);
 
             // Get the holiday start date, if it exists
-            const holidayStartDate = metadata.holiday_start_date ? new Date(metadata.holiday_start_date) : null;
+            const holidayStartDate = metadata.holidayStartDate ? new Date(metadata.holidayStartDate) : null;
 
             if (isNaN(startDate.getTime())) return null;
 
@@ -11162,9 +11147,9 @@ ${uidContent}
                     courseInfoMap = result;
                     courseIDMap = {}; // Reset map
                     Object.entries(result).forEach(([courseName, metadata]) => {
-                        if (metadata && metadata.eis_id) {
+                        if (metadata && metadata.eisId) {
                             // Ensure key matches the currentCourse variable exactly (trim just in case)
-                            courseIDMap[courseName.trim()] = metadata.eis_id;
+                            courseIDMap[courseName.trim()] = metadata.eisId;
                         }
                     });
                 }
@@ -12741,11 +12726,11 @@ ${uidContent}
  * @returns {number} The calculated week number.
  */
         function calculateWeekForDate(metadata, forDate) {
-            if (!metadata || !metadata.start_date) return 1;
+            if (!metadata || !metadata.startDate) return 1;
 
-            const startDate = new Date(metadata.start_date);
-            const holidayWeeks = parseInt(metadata.holiday_weeks || 0);
-            const holidayStartDate = metadata.holiday_start_date ? new Date(metadata.holiday_start_date) : null;
+            const startDate = new Date(metadata.startDate);
+            const holidayWeeks = parseInt(metadata.holidayWeeks || 0);
+            const holidayStartDate = metadata.holidayStartDate ? new Date(metadata.holidayStartDate) : null;
 
             if (isNaN(startDate.getTime())) return 1;
 
