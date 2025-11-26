@@ -88,8 +88,10 @@
         .modern-course-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 15px;
-            padding-bottom: 20px;
+            gap: 12px;
+            /* Reduced gap */
+            padding-bottom: 10px;
+            margin-top: 10px;
         }
 
         .modern-course-card {
@@ -104,6 +106,7 @@
             display: flex;
             flex-direction: column;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02);
+            margin-bottom: 0;
         }
 
         .modern-course-card:hover {
@@ -185,6 +188,24 @@
             align-items: center;
             font-size: 0.8em;
             color: #888;
+        }
+
+        .admin-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .admin-pills-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 5px;
+            padding: 5px;
+            min-height: 0;
+            /* Remove fixed height to reduce whitespace */
         }
 
         .admin-pills-container {
@@ -301,10 +322,6 @@
             border-radius: 12px;
         }
 
-        .collapsible-module .module-header {
-            display: none;
-        }
-
         .collapsible-module .module {
             margin-top: 0 !important;
             /* Remove gap between button and module */
@@ -314,6 +331,33 @@
             /* Blend into the container */
             border: 1px solid #e0e0e0;
             border-top: none;
+        }
+
+        .collapsible-module .module-header .module-title {
+            display: none;
+        }
+
+        .collapsible-module .module-header {
+            padding: 5px 15px;
+            min-height: 40px;
+            border-radius: 12px 12px 0 0;
+            /* Restore rounded corners top */
+            background-color: #f5f5f5;
+            /* Lighter background to distinguish from main headers */
+            border-bottom: 1px solid #e0e0e0;
+            color: #333;
+        }
+
+        #non-admin-profile-pic-container,
+        #admin-profile-pic-container {
+            cursor: default !important;
+            /* Forces default cursor */
+        }
+
+        .dark-mode .collapsible-module .module-header {
+            background-color: #252525;
+            border-bottom: 1px solid #444;
+            color: #e0e0e0;
         }
 
         /* Dark Mode */
@@ -389,6 +433,14 @@
             padding-left: 35px !important;
             width: 100%;
             box-sizing: border-box;
+        }
+
+        .admin-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            margin-bottom: 10px;
         }
 
         .admin-pill {
@@ -4922,7 +4974,8 @@
                                         <th class="actions-header">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody id="registrations-tbody"></tbody>
+                                <tbody id="registrations-tbody">
+                                </tbody>
                             </table>
                         </div>
                     </div>
@@ -5049,7 +5102,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbygwEGC10S19j9mXJWeWVBa2_7YezMm62jkxwmWYU_abDBJdhgGZG2UufQOUgcFOofnWQ/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbz26AEOOKwxeko9UcNcfbW_A8KXmCcoGFTyQPIGxp1VPOxTndUtZwF9VTzgdp0AT2D8/exec';
 
         // App state
         let courseData = {};
@@ -5968,22 +6021,20 @@
             const data = courseData || {};
             const val = (v) => v !== undefined && v !== null ? v : '';
 
+            // Helper for Dates
             const formatDate = (d) => {
                 if (!d) return '';
                 if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) return d;
                 try { return new Date(d).toISOString().split('T')[0]; } catch (e) { return ''; }
             };
 
-            // --- Permission Logic ---
-            // Global Admin can edit everything. Course Admin can ONLY edit Name, Hours, Category, Section.
+            // --- PERMISSION LOGIC ---
             const canEditSensitive = isGlobalAdmin;
-            const disabledAttr = canEditSensitive ? '' : 'disabled';
-            // Visual cue for disabled fields
-            const readOnlyStyle = canEditSensitive ? '' : 'style="background-color:#f9f9f9; color:#777; cursor:not-allowed;"';
 
-            // Prepare Admin Emails
-            const rawAdmins = val(data.adminEmails);
-            let adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
+            // If NOT global admin, these attributes block editing
+            const disabledAttr = canEditSensitive ? '' : 'disabled';
+            // Visual styling to make it clear they are read-only
+            const readOnlyStyle = canEditSensitive ? '' : 'style="background-color:#f5f5f5; color:#666; cursor:not-allowed;"';
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
@@ -5997,7 +6048,16 @@
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
-            // --- Admin Section (Only visible to Global Admin) ---
+            // --- Prepare Admin Logic (Variables needed for save) ---
+            let adminEmailList = [];
+            if (isGlobalAdmin) {
+                const rawAdmins = val(data.adminEmails);
+                adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
+            }
+
+            // --- HTML Generation ---
+
+            // 1. Admin Emails Section: ONLY show for Global Admins
             let adminSectionHtml = '';
             if (isGlobalAdmin) {
                 adminSectionHtml = `
@@ -6016,8 +6076,8 @@
         </div>`;
             }
 
-            // Warning for EIS ID
-            let eisWarning = !isGlobalAdmin ? `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-lock"></i> Restricted. Contact Global Admin to change.</small>` : '';
+            // 2. EIS Warning
+            let eisWarning = !isGlobalAdmin ? `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-lock"></i> Global Admin only.</small>` : '';
 
             dialog.innerHTML = `
     <h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
@@ -6112,7 +6172,7 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Admin Logic (Only if Global) ---
+            // --- Render Admin Pills (Only for Global) ---
             let hiddenAdminInput = null;
             if (isGlobalAdmin) {
                 const pillsContainer = document.getElementById('admin-pills-list');
@@ -6126,7 +6186,7 @@
                     pillsContainer.innerHTML = '';
                     adminEmailList.forEach((email, index) => {
                         const pill = document.createElement('div');
-                        pill.className = 'admin-pill-item'; // Uses new CSS
+                        pill.className = 'admin-pill-item'; // Uses the CSS defined in Part 1
                         pill.innerHTML = `<i class="fa-solid fa-user" style="font-size:0.8em;"></i> ${escapeHtml(email)} <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>`;
                         pillsContainer.appendChild(pill);
                     });
@@ -6161,7 +6221,7 @@
                 updateHiddenInput();
             }
 
-            // --- Toggle Button Logic ---
+            // --- Logic for Toggles ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
             const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
             const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
@@ -6171,8 +6231,10 @@
                 const activeTypeBtn = sectTypeGroup.querySelector('.active');
                 const activeType = activeTypeBtn ? activeTypeBtn.dataset.value : 'ALL';
                 charContainer.style.display = activeType === 'ALL' ? 'none' : 'flex';
+
                 const btnD = sectCharGroup.querySelector('[data-value="D"]');
                 if (btnD) btnD.disabled = (activeType === 'Theory');
+
                 if (activeType === 'Theory' && sectCharGroup.querySelector('.active')?.dataset.value === 'D') {
                     sectCharGroup.querySelector('.active').classList.remove('active');
                     sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
@@ -6196,6 +6258,7 @@
             const close = () => document.body.removeChild(dialogBackdrop);
             dialog.querySelector('#cancel-edit-c').onclick = close;
 
+            // --- Save Logic ---
             dialog.querySelector('#save-edit-c').onclick = async (e) => {
                 const btn = e.target;
                 btn.disabled = true;
@@ -6210,6 +6273,8 @@
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
                     defaultHours: document.getElementById('edit-c-hours').value,
+                    // Even if fields are disabled, we send their values. 
+                    // The non-global user cannot change them in UI, so safety is maintained.
                     startDate: document.getElementById('edit-c-start').value,
                     endDate: document.getElementById('edit-c-end').value,
                     holidayStartDate: document.getElementById('edit-c-holiday-start').value,
@@ -6217,6 +6282,8 @@
                     eisId: document.getElementById('edit-c-eis').value,
                     defaultCategory: cat,
                     defaultSection: finalSection,
+                    // CRITICAL: If not global admin, send back the *original* admin string from `data`
+                    // This prevents accidental wiping of admin lists by course admins.
                     adminEmails: isGlobalAdmin ? hiddenAdminInput.value : (data.adminEmails || '')
                 };
 
@@ -6226,7 +6293,7 @@
                         showNotification('success', 'Saved', 'Course updated.');
                         close();
                         if (isGlobalAdmin) showGlobalSettingsDialog();
-                        else showAdminProfileDialog(); // Refresh profile for non-global
+                        else showAdminProfileDialog();
                     } else { throw new Error(res.message); }
                 } catch (err) {
                     showNotification('error', 'Save Failed', err.message);
@@ -6246,9 +6313,8 @@
         }
 
         // --- 3. Non-Global Admin Profile & Settings ---
-        async function showAdminProfileDialog() {
+        function showAdminProfileDialog() {
             document.body.style.overflow = 'hidden';
-            await fetchCourseInfo();
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
@@ -6258,11 +6324,15 @@
             dialog.style.height = '85vh';
             dialog.setAttribute('role', 'dialog');
 
-            // --- Header (Unified Look) ---
+            // --- Variables for Bomb ---
+            let avatarClickCount = 0;
+            let lastAvatarClickTime = 0;
+
+            // --- Header (Unified "Global Settings" Look) ---
             const headerHtml = `
     <div class="settings-modal-header">
         <div style="display:flex; align-items:center; gap:15px;">
-            <div style="position:relative; cursor:pointer; width:48px; height:48px;" id="non-admin-profile-pic-container">
+            <div style="position:relative; width:48px; height:48px; cursor: default;" id="non-admin-profile-pic-container">
                 <img id="profile-avatar-img" src="${currentUser.picture}" style="width:100%; height:100%; border-radius:50%; border:2px solid var(--card-background); box-shadow:0 2px 8px rgba(0,0,0,0.1); object-fit:cover;">
             </div>
             <div>
@@ -6273,55 +6343,21 @@
         <button id="close-profile-btn" class="btn-icon" style="background:transparent; color:var(--text-color); font-size:1.2em;"><i class="fa-solid fa-xmark"></i></button>
     </div>`;
 
-            const myCourses = availableCourses.filter(c => courseInfoMap[c]);
-
-            let courseListHtml = '';
-            if (myCourses.length > 0) {
-                courseListHtml = `<div class="modern-course-grid">`;
-                myCourses.forEach(courseName => {
-                    const data = courseInfoMap[courseName];
-                    const category = (data.defaultCategory || 'theory').toLowerCase();
-                    let stripClass = category.includes('theory') ? 'strip-theory' :
-                        category.includes('lab') ? 'strip-lab' : 'strip-practice';
-
-                    courseListHtml += `
-            <div class="modern-course-card" id="card-${escapeHtml(courseName)}">
-                <div class="card-color-strip ${stripClass}"></div>
-                <div class="card-body">
-                    <div class="card-title-row">
-                        <div class="card-course-name">${escapeHtml(courseName.replace(/_/g, ' '))}</div>
-                        ${data.eisId ? `<span class="card-eis-badge">#${escapeHtml(data.eisId)}</span>` : ''}
-                    </div>
-                    <div class="card-meta-row">
-                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${escapeHtml(data.defaultHours || 0)}h</div>
-                        <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${category}</div>
-                    </div>
-                </div>
-                <div class="card-footer">
-                    <span class="admin-pill"><i class="fa-solid fa-user-tie"></i> Course Admin</span>
-                    <i class="fa-solid fa-pen-to-square"></i>
-                </div>
-            </div>`;
-                });
-                courseListHtml += `</div>`;
-            } else {
-                courseListHtml = `<div class="empty-logs"><p>No active courses assigned.</p></div>`;
-            }
-
+            // --- Initial State: Loading ---
             dialog.innerHTML = `
     ${headerHtml}
-    <div class="dialog-content" style="overflow-y:auto;">
-        ${courseListHtml}
+    <div class="dialog-content" style="overflow-y:auto; position:relative;">
+        <div id="profile-loader" style="display:flex; justify-content:center; align-items:center; height:200px;">
+            <div class="loading-spinner"></div>
+        </div>
+        <div id="profile-content" style="opacity:0; transition:opacity 0.3s;"></div>
     </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Bomb Logic (Now works because no <a> tag) ---
-            let avatarClickCount = 0;
-            let lastAvatarClickTime = 0;
+            // --- Bomb Logic (Attached immediately) ---
             const profilePicContainer = dialog.querySelector('#non-admin-profile-pic-container');
-
             profilePicContainer.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const now = Date.now();
@@ -6335,18 +6371,66 @@
                 }
             });
 
-            // Listeners for Course Cards
-            myCourses.forEach(courseName => {
-                const card = document.getElementById(`card-${courseName}`);
-                if (card) {
-                    card.onclick = () => {
-                        document.body.removeChild(dialogBackdrop);
-                        showCourseEditorDialog(courseName, courseInfoMap[courseName]);
-                    };
-                }
-            });
+            const close = () => document.body.removeChild(dialogBackdrop);
+            dialog.querySelector('#close-profile-btn').onclick = close;
 
-            dialog.querySelector('#close-profile-btn').onclick = () => document.body.removeChild(dialogBackdrop);
+            // --- Async Data Fetch ---
+            (async () => {
+                await fetchCourseInfo(); // Fetch data while spinner shows
+
+                const myCourses = availableCourses.filter(c => courseInfoMap[c]);
+                let html = '';
+
+                if (myCourses.length > 0) {
+                    html = `<div class="modern-course-grid">`;
+                    myCourses.forEach(courseName => {
+                        const data = courseInfoMap[courseName];
+                        const category = (data.defaultCategory || 'theory').toLowerCase();
+                        let stripClass = category.includes('theory') ? 'strip-theory' :
+                            category.includes('lab') ? 'strip-lab' : 'strip-practice';
+
+                        html += `
+                <div class="modern-course-card" id="card-${escapeHtml(courseName)}">
+                    <div class="card-color-strip ${stripClass}"></div>
+                    <div class="card-body">
+                        <div class="card-title-row">
+                            <div class="card-course-name">${escapeHtml(courseName.replace(/_/g, ' '))}</div>
+                            ${data.eisId ? `<span class="card-eis-badge">#${escapeHtml(data.eisId)}</span>` : ''}
+                        </div>
+                        <div class="card-meta-row">
+                            <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${escapeHtml(data.defaultHours || 0)}h</div>
+                            <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${category}</div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="admin-pill"><i class="fa-solid fa-user-tie"></i> Course Admin</span>
+                        <i class="fa-solid fa-pen-to-square"></i>
+                    </div>
+                </div>`;
+                    });
+                    html += `</div>`;
+                } else {
+                    html = `<div class="empty-logs"><p>No active courses assigned.</p></div>`;
+                }
+
+                const contentDiv = dialog.querySelector('#profile-content');
+                const loaderDiv = dialog.querySelector('#profile-loader');
+
+                contentDiv.innerHTML = html;
+                loaderDiv.style.display = 'none';
+                contentDiv.style.opacity = '1';
+
+                // Attach listeners to cards
+                myCourses.forEach(courseName => {
+                    const card = document.getElementById(`card-${courseName}`);
+                    if (card) {
+                        card.onclick = () => {
+                            close();
+                            showCourseEditorDialog(courseName, courseInfoMap[courseName]);
+                        };
+                    }
+                });
+            })();
         }
 
         /**
