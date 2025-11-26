@@ -282,17 +282,27 @@
             max-height: 0;
             opacity: 0;
             overflow: hidden;
-            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.3s ease-in-out,
-                margin-top 0.3s ease;
             margin-top: 0;
+            /* Use a cubic-bezier for a "pop" effect */
+            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.4s ease,
+                margin 0.4s ease;
         }
 
         .collapsible-module.expanded {
-            max-height: 1000px;
-            /* Arbitrary large number */
+            max-height: 2000px;
+            /* Allow enough space */
             opacity: 1;
-            margin-top: 20px;
+            margin-top: 15px;
+            /* Consistent spacing */
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            /* Add subtle lift */
+            border-radius: 12px;
+        }
+
+        .collapsible-module .module-header {
+            border-radius: 12px 12px 0 0;
         }
 
         /* Dark Mode */
@@ -4058,14 +4068,19 @@
             .admin-input-wrapper {
                 display: flex;
                 align-items: center;
-                gap: 10px;
-                /* Space between input and plus button */
+                gap: 8px;
                 width: 100%;
-                margin-bottom: 10px;
+                margin-bottom: 8px;
             }
 
             .admin-input-wrapper .input-with-icon {
                 flex-grow: 1;
+            }
+
+            .admin-input-wrapper .btn-icon {
+                flex-shrink: 0;
+                width: 42px;
+                height: 42px;
             }
 
             .admin-pills-list {
@@ -5020,7 +5035,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyowWWIh81zWyW-lOSMaVHj2tWUBSVwcW49EHGfdDnz0XXcRJ0yS-EREC7m8_efgmxQFw/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbydGPwebC_K40tMj7lx2J3CSTz3FRfXg-ovwmwW4WSZkEV_Kuz-GIhNR_nadFdCvlcBJA/exec';
 
         // App state
         let courseData = {};
@@ -5220,7 +5235,7 @@
                                 reasonType: req.reasonType,
                                 description: req.description,
                                 attachmentUrl: req.attachmentUrl
-                            });
+                            }, true);
                         };
                     });
                 };
@@ -5400,9 +5415,31 @@
 
         function toggleAdminView(viewId, chipElement) {
             const view = document.getElementById(viewId);
+            if (!view) return;
+
+            // 1. Smart Tab Switching
+            // Find which tab content contains this view
+            const parentTabContent = view.closest('.tab-content');
+            if (parentTabContent && !parentTabContent.classList.contains('active')) {
+                // Find the button that activates this tab
+                const tabId = parentTabContent.id;
+                const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
+                if (tabButton) {
+                    tabButton.click(); // Simulate click to switch tabs/buttons properly
+                }
+            }
+
+            // 2. Toggle Expansion
             const isExpanded = view.classList.contains('expanded');
 
-            // Toggle View
+            // Close others first (optional, keeps UI clean)
+            document.querySelectorAll('.collapsible-module.expanded').forEach(el => {
+                if (el !== view) el.classList.remove('expanded');
+            });
+            document.querySelectorAll('.action-chip.active').forEach(el => {
+                if (el !== chipElement) el.classList.remove('active');
+            });
+
             if (isExpanded) {
                 view.classList.remove('expanded');
                 chipElement.classList.remove('active');
@@ -5410,9 +5447,9 @@
                 view.classList.add('expanded');
                 chipElement.classList.add('active');
 
-                // Scroll to view
+                // Scroll to view smoothly
                 setTimeout(() => {
-                    view.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    view.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }, 300);
             }
         }
@@ -5866,10 +5903,10 @@
                 <div class="card-body">
                     <div class="card-title-row">
                         <div class="card-course-name">${escapeHtml(course.name.replace(/_/g, ' '))}</div>
-                        ${course.eisId ? `<span class="card-eis-badge">#${course.eisId}</span>` : ''} 
+                        ${course.eisId ? `<span class="card-eis-badge">#${escapeHtml(course.eisId)}</span>` : ''}
                     </div>
                     <div class="card-meta-row">
-                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${course.defaultHours || 0}h</div>
+                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${escapeHtml(course.defaultHours || 0)}h</div>
                         <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${course.category}</div>
                     </div>
                 </div>
@@ -5955,6 +5992,35 @@
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
+            // --- PERMISSION FLAGS ---
+            const canEditSensitive = isGlobalAdmin; // Only Global Admin can edit sensitive fields
+            const disabledAttr = canEditSensitive ? '' : 'disabled';
+            const readOnlyStyle = canEditSensitive ? '' : 'style="background-color:#f0f0f0; cursor:not-allowed;"';
+
+            // --- Admin Section HTML (Hidden if not global) ---
+            let adminSectionHtml = '';
+            if (isGlobalAdmin) {
+                adminSectionHtml = `
+        <div class="form-group" style="flex-direction:column; gap:5px; align-items:stretch;">
+            <label style="text-align:left;">Admin Access</label>
+            <div class="admin-input-wrapper">
+                <div class="input-with-icon">
+                    <i class="fa-solid fa-user-plus"></i>
+                    <input type="email" id="new-admin-email" class="form-control" placeholder="Enter email...">
+                </div>
+                <button id="add-admin-btn" class="btn-blue btn-icon"><i class="fa-solid fa-plus"></i></button>
+            </div>
+            <div id="admin-pills-list" class="admin-pills-list"></div>
+            <textarea id="edit-c-admins" style="display:none;"></textarea>
+        </div>`;
+            }
+
+            // --- Warning for EIS ID (if not global) ---
+            let eisWarning = '';
+            if (!isGlobalAdmin) {
+                eisWarning = `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-triangle-exclamation"></i> Contact Global Admin to change.</small>`;
+            }
+
             dialog.innerHTML = `
 <h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
 <div class="dialog-content">
@@ -5969,42 +6035,43 @@
     <div class="form-row">
         <div class="form-group">
             <label>Start Date</label>
-            <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.startDate)}">
+            <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.startDate)}" ${disabledAttr} ${readOnlyStyle}>
         </div>
         <div class="form-group">
             <label>End Date</label>
-            <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.endDate)}">
+            <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.endDate)}" ${disabledAttr} ${readOnlyStyle}>
         </div>
     </div>
 
     <div class="form-row">
         <div class="form-group">
             <label>Holiday Start</label>
-            <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holidayStartDate)}">
+            <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holidayStartDate)}" ${disabledAttr} ${readOnlyStyle}>
         </div>
         <div class="form-group">
             <label>Holiday Weeks</label>
             <div class="input-with-icon" style="flex-grow:1;">
                 <i class="fa-solid fa-calendar-minus"></i>
-                <input type="number" id="edit-c-holidays" class="form-control" value="${val(data.holidayWeeks)}">
+                <input type="number" id="edit-c-holidays" class="form-control" value="${escapeHtml(val(data.holidayWeeks))}" ${disabledAttr} ${readOnlyStyle}>
             </div>
         </div>
     </div>
 
-    <div class="form-row">
+    <<div class="form-row">
         <div class="form-group">
             <label>Hours</label>
             <div class="input-with-icon" style="flex-grow:1;">
                 <i class="fa-regular fa-clock"></i>
-                <input type="number" id="edit-c-hours" class="form-control" value="${val(data.defaultHours)}">
+                <input type="number" id="edit-c-hours" class="form-control" value="${escapeHtml(val(data.defaultHours))}" ${val(data.defaultHours)}>
             </div>
         </div>
         <div class="form-group">
             <label>EIS ID</label>
             <div class="input-with-icon" style="flex-grow:1;">
                 <i class="fa-solid fa-fingerprint"></i>
-                <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345">
+                <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345" ${disabledAttr} ${readOnlyStyle}>
             </div>
+            ${eisWarning}
         </div>
     </div>
 
@@ -6035,22 +6102,7 @@
         </div>
     </div>
 
-    <div class="form-group" style="flex-direction:column; gap:5px; align-items:stretch;">
-        <label style="text-align:left;">Admin Access</label>
-        
-        <div class="admin-input-wrapper">
-            <div class="input-with-icon">
-                <i class="fa-solid fa-user-plus"></i>
-                <input type="email" id="new-admin-email" class="form-control" placeholder="Enter email..." autocomplete="off">
-            </div>
-            <button id="add-admin-btn" class="btn-blue btn-icon" style="border-radius:8px; width:42px; height:42px; flex-shrink:0;">
-                <i class="fa-solid fa-plus"></i>
-            </button>
-        </div>
-        
-        <div id="admin-pills-list" class="admin-pills-list"></div>
-        <textarea id="edit-c-admins" style="display:none;"></textarea>
-    </div>
+    ${adminSectionHtml}
 
 </div>
 <div class="dialog-actions">
@@ -6063,48 +6115,46 @@
             document.body.appendChild(dialogBackdrop);
 
             // --- Admin Pills Logic ---
-            const pillsContainer = document.getElementById('admin-pills-list');
-            const newAdminInput = document.getElementById('new-admin-email');
-            const addAdminBtn = document.getElementById('add-admin-btn');
-            const hiddenAdminInput = document.getElementById('edit-c-admins');
+            let hiddenAdminInput = null;
+            if (isGlobalAdmin) {
+                // Copy the Admin Pills Logic from previous response here
+                const pillsContainer = document.getElementById('admin-pills-list');
+                const newAdminInput = document.getElementById('new-admin-email');
+                const addAdminBtn = document.getElementById('add-admin-btn');
+                hiddenAdminInput = document.getElementById('edit-c-admins');
 
-            const updateHiddenInput = () => { hiddenAdminInput.value = adminEmailList.join(', '); };
+                const updateHiddenInput = () => { hiddenAdminInput.value = adminEmailList.join(', '); };
 
-            const renderAdminPills = () => {
-                pillsContainer.innerHTML = '';
-                adminEmailList.forEach((email, index) => {
-                    const pill = document.createElement('div');
-                    pill.className = 'admin-pill-item';
-                    pill.innerHTML = `<i class="fa-solid fa-user" style="font-size:0.8em;"></i> ${escapeHtml(email)} <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>`;
-                    pillsContainer.appendChild(pill);
-                });
-                pillsContainer.querySelectorAll('.remove-pill').forEach(btn => {
-                    btn.onclick = (e) => {
-                        const idx = parseInt(e.target.dataset.index);
-                        adminEmailList.splice(idx, 1);
-                        renderAdminPills();
-                        updateHiddenInput();
-                    };
-                });
-            };
+                const renderAdminPills = () => {
+                    pillsContainer.innerHTML = '';
+                    adminEmailList.forEach((email, index) => {
+                        const pill = document.createElement('div');
+                        pill.className = 'admin-pill-item';
+                        pill.innerHTML = `<i class="fa-solid fa-user" style="font-size:0.8em;"></i> ${escapeHtml(email)} <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>`;
+                        pillsContainer.appendChild(pill);
+                    });
+                    pillsContainer.querySelectorAll('.remove-pill').forEach(btn => {
+                        btn.onclick = (e) => {
+                            const idx = parseInt(e.target.dataset.index);
+                            adminEmailList.splice(idx, 1);
+                            renderAdminPills();
+                            updateHiddenInput();
+                        };
+                    });
+                };
 
-            const addAdmin = () => {
-                const email = newAdminInput.value.trim();
-                if (email && isValidEmail(email)) {
-                    if (!adminEmailList.includes(email)) {
-                        adminEmailList.push(email);
-                        renderAdminPills();
-                        updateHiddenInput();
-                        newAdminInput.value = '';
-                    } else { showNotification('warning', 'Duplicate', 'Email already added.'); }
-                } else if (email) { showNotification('error', 'Invalid Email', 'Please enter a valid email.'); }
-            };
-
-            addAdminBtn.onclick = addAdmin;
-            newAdminInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addAdmin(); });
-
-            renderAdminPills();
-            updateHiddenInput();
+                const addAdmin = () => { /* ... same add logic ... */
+                    const email = newAdminInput.value.trim();
+                    if (email && isValidEmail(email)) {
+                        if (!adminEmailList.includes(email)) { adminEmailList.push(email); renderAdminPills(); updateHiddenInput(); newAdminInput.value = ''; }
+                        else { showNotification('warning', 'Duplicate', 'Email already added.'); }
+                    } else if (email) { showNotification('error', 'Invalid Email', 'Please enter a valid email.'); }
+                };
+                addAdminBtn.onclick = addAdmin;
+                newAdminInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addAdmin(); });
+                renderAdminPills();
+                updateHiddenInput();
+            }
 
             // --- Buttons Logic with "Theory D" Restriction ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
@@ -6184,19 +6234,21 @@
                 const sChar = sectCharGroup.querySelector('.active')?.dataset.value || '';
                 const finalSection = (sType === 'ALL') ? 'ALL' : `${sType} ${sChar}`.trim();
 
-                // FIX: Ensure payload matches what backend expects (all camelCase)
                 const payload = {
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
                     defaultHours: document.getElementById('edit-c-hours').value,
-                    eisId: document.getElementById('edit-c-eis').value,
-                    defaultCategory: cat,
-                    defaultSection: finalSection,
+                    // If restricted, send original data back to be safe, or just send what's in input (which is disabled)
+                    // Since inputs are disabled, .value still works but user can't change it.
                     startDate: document.getElementById('edit-c-start').value,
                     endDate: document.getElementById('edit-c-end').value,
                     holidayStartDate: document.getElementById('edit-c-holiday-start').value,
                     holidayWeeks: document.getElementById('edit-c-holidays').value,
-                    adminEmails: hiddenAdminInput.value
+                    eisId: document.getElementById('edit-c-eis').value,
+                    defaultCategory: cat,
+                    defaultSection: finalSection,
+                    // Only send admin emails if global admin, otherwise send existing or empty
+                    adminEmails: isGlobalAdmin ? hiddenAdminInput.value : (data.adminEmails || '')
                 };
 
                 try {
@@ -6204,7 +6256,8 @@
                     if (res.result === 'success') {
                         showNotification('success', 'Saved', 'Course updated.');
                         close();
-                        showGlobalSettingsDialog();
+                        if (isGlobalAdmin) showGlobalSettingsDialog();
+                        else showAdminProfileDialog(); // Refresh profile for non-global
                     } else { throw new Error(res.message); }
                 } catch (err) {
                     showNotification('error', 'Save Failed', err.message);
@@ -6226,8 +6279,6 @@
         // --- 3. Non-Global Admin Profile & Settings ---
         async function showAdminProfileDialog() {
             document.body.style.overflow = 'hidden';
-
-            // Fetch latest course info to ensure we have metadata for the editor
             await fetchCourseInfo();
 
             const dialogBackdrop = document.createElement('div');
@@ -6236,43 +6287,33 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            // Filter the global course info map to show only courses this admin manages
+            // --- Variables for Bomb ---
+            let avatarClickCount = 0;
+            let lastAvatarClickTime = 0;
+
             const myCourses = availableCourses.filter(c => courseInfoMap[c]);
 
             let courseListHtml = '';
-
             if (myCourses.length > 0) {
-                // Use the 'modern-course-grid' class for consistent layout
                 courseListHtml = `<div class="modern-course-grid" style="margin-top:15px;">`;
-
                 myCourses.forEach(courseName => {
                     const data = courseInfoMap[courseName];
-
-                    // Determine Color Strip based on Category
                     const category = (data.defaultCategory || 'theory').toLowerCase();
-                    let stripClass = 'strip-default';
-                    if (category.includes('theory')) stripClass = 'strip-theory';
-                    else if (category.includes('lab')) stripClass = 'strip-lab';
-                    else if (category.includes('practice')) stripClass = 'strip-practice';
-
-                    // Format Start Date for display
+                    let stripClass = category.includes('theory') ? 'strip-theory' :
+                        category.includes('lab') ? 'strip-lab' : 'strip-practice';
                     const startDate = data.startDate ? new Date(data.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'N/A';
 
-                    // Render the MODERN card
                     courseListHtml += `
             <div class="modern-course-card" id="card-${escapeHtml(courseName)}">
                 <div class="card-color-strip ${stripClass}"></div>
                 <div class="card-body">
                     <div class="card-title-row">
                         <div class="card-course-name">${escapeHtml(courseName.replace(/_/g, ' '))}</div>
-                        ${data.eisId ? `<span class="card-eis-badge">#${data.eisId}</span>` : ''}
+                        ${data.eisId ? `<span class="card-eis-badge">#${escapeHtml(data.eisId)}</span>` : ''}
                     </div>
                     <div class="card-meta-row">
-                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${data.defaultHours || 0}h</div>
+                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${escapeHtml(data.defaultHours || 0)}h</div>
                         <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${category}</div>
-                    </div>
-                    <div class="card-meta-row" style="margin-top:8px;">
-                        <div class="card-meta-item"><i class="fa-regular fa-calendar"></i> Starts: ${startDate}</div>
                     </div>
                 </div>
                 <div class="card-footer">
@@ -6283,27 +6324,21 @@
                 });
                 courseListHtml += `</div>`;
             } else {
-                courseListHtml = `
-        <div class="empty-logs">
-            <i class="fa-solid fa-folder-open" style="font-size: 2.5em; color: #ccc; margin-bottom: 10px;"></i>
-            <p>No active courses assigned.</p>
-        </div>`;
+                courseListHtml = `<div class="empty-logs"><p>No active courses assigned.</p></div>`;
             }
 
             dialog.innerHTML = `
     <div class="dialog-content">
         <div class="profile-header-section">
-            <a href="https://myaccount.google.com/" target="_blank" title="Manage Google Account">
-                <img src="${currentUser.picture}" class="profile-avatar-large">
-            </a>
-            <div style="text-align:center;">
+            <div style="position:relative; cursor:default; width:80px; height:80px;" id="non-admin-profile-pic-container">
+                <img id="profile-avatar-img" src="${currentUser.picture}" class="profile-avatar-large">
+            </div>
+            <div style="text-align:center; margin-top:10px;">
                 <h3 class="profile-name-large">${escapeHtml(currentUser.name)}</h3>
                 <p class="profile-email-large">${escapeHtml(currentUser.email)}</p>
             </div>
         </div>
-
         <div class="form-section-title">My Courses</div>
-        <p style="font-size:0.9em; opacity:0.8; margin-bottom:10px;">Select a course to modify default settings.</p>
         ${courseListHtml}
     </div>
     <div class="dialog-actions">
@@ -6313,22 +6348,32 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // Attach click listeners to the cards
+            // --- Bomb Logic ---
+            const profilePicContainer = dialog.querySelector('#non-admin-profile-pic-container');
+            profilePicContainer.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const now = Date.now();
+                if (now - lastAvatarClickTime > 1000) avatarClickCount = 0;
+                lastAvatarClickTime = now;
+                avatarClickCount++;
+                if (avatarClickCount === 5) {
+                    profilePicContainer.innerHTML = `<div style="width:100%; height:100%; border-radius:50%; background:#f44336; display:flex; align-items:center; justify-content:center; color:white; font-size:2em;"><i class="fa-solid fa-bomb"></i></div>`;
+                    profilePicContainer.onclick = () => { if (confirm("Clear local cache?")) clearAllAppData(); };
+                    avatarClickCount = 0;
+                }
+            });
+
+            // Listeners
             myCourses.forEach(courseName => {
                 const card = document.getElementById(`card-${courseName}`);
                 if (card) {
                     card.onclick = () => {
-                        // Close profile dialog to avoid stacking
                         document.body.removeChild(dialogBackdrop);
                         showCourseEditorDialog(courseName, courseInfoMap[courseName]);
                     };
                 }
             });
-
-            dialog.querySelector('#close-profile-btn').onclick = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = '';
-            };
+            dialog.querySelector('#close-profile-btn').onclick = () => document.body.removeChild(dialogBackdrop);
         }
 
         /**
@@ -8689,6 +8734,16 @@ ${uidContent}
 
             const formattedTimestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'N/A';
 
+            let actionsHtml = '';
+            if (isReadOnly) {
+                actionsHtml = `<button id="cancel-details-btn" class="btn-blue">Close</button>`;
+            } else {
+                actionsHtml = `
+    <button id="cancel-details-btn" class="btn-blue"><i class="fa-solid fa-xmark"></i> Close</button>
+    <button id="reject-details-btn" class="btn-red"><i class="fa-solid fa-ban"></i> Reject</button>
+    <button id="approve-details-btn" class="btn-green"><i class="fa-solid fa-check"></i> Approve</button>`;
+            }
+
             dialog.innerHTML = `
 <h3 class="dialog-title">Review Registration</h3>
 <div class="dialog-content">
@@ -8716,10 +8771,7 @@ ${uidContent}
     </div>
 </div>
 <div class="dialog-actions">
-    <button id="cancel-details-btn" class="btn-blue"><i class="fa-solid fa-xmark"></i> Cancel</button>
-    <button id="delete-details-btn" class="btn-red"><i class="fa-solid fa-trash-can"></i> Delete</button>
-    <button id="reject-details-btn" class="btn-red"><i class="fa-solid fa-ban"></i> Reject</button>
-    <button id="approve-details-btn" class="btn-green"><i class="fa-solid fa-check"></i> Approve</button>
+    ${actionsHtml}
 </div>`;
 
             dialogBackdrop.appendChild(dialog);
@@ -9230,7 +9282,7 @@ ${uidContent}
         /**
          * Shows a dialog with all details for a permission request.
          */
-        function showPermissionDetailsDialog(data) {
+        function showPermissionDetailsDialog(data, isReadOnly = false) {
             document.body.style.overflow = 'hidden';
 
             const dialogBackdrop = document.createElement('div');
@@ -9312,15 +9364,17 @@ ${uidContent}
 
             dialog.querySelector('#cancel-details-btn').addEventListener('click', closeDialog);
 
-            dialog.querySelector('#approve-details-btn').addEventListener('click', () => {
-                closeDialog();
-                showApproveAbsenceDialog(data);
-            });
+            if (!isReadOnly) {
+                dialog.querySelector('#approve-details-btn').addEventListener('click', () => {
+                    closeDialog();
+                    showApproveAbsenceDialog(data);
+                });
 
-            dialog.querySelector('#reject-details-btn').addEventListener('click', () => {
-                closeDialog();
-                showRejectAbsenceDialog(data);
-            });
+                dialog.querySelector('#reject-details-btn').addEventListener('click', () => {
+                    closeDialog();
+                    showRejectAbsenceDialog(data);
+                });
+            }
         }
 
         // --- Dialogs for Admin Actions ---
