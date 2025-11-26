@@ -3937,56 +3937,64 @@
 
             .admin-input-wrapper {
                 display: flex;
-                gap: 8px;
-                /* Clean spacing between input and button */
                 align-items: center;
+                gap: 10px;
+                /* Space between input and plus button */
                 width: 100%;
-                margin-bottom: 8px;
+                margin-bottom: 10px;
+            }
+
+            .admin-input-wrapper .input-with-icon {
+                flex-grow: 1;
             }
 
             .admin-pills-list {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 8px;
-                padding: 0;
                 min-height: 0;
-                /* Remove unnecessary height */
+                padding: 0;
             }
 
             .admin-pill-item {
-                background: #e3f2fd;
+                background-color: #e3f2fd;
                 color: var(--primary-color);
+                border: 1px solid #bbdefb;
                 padding: 6px 12px;
-                /* Better pill padding */
-                border-radius: 20px;
+                border-radius: 50px;
+                /* Fully rounded pill */
                 font-size: 0.9em;
-                display: flex;
+                font-weight: 500;
+                display: inline-flex;
                 align-items: center;
                 gap: 8px;
-                border: 1px solid #bbdefb;
-                transition: background 0.2s;
+                transition: all 0.2s;
             }
 
             .admin-pill-item:hover {
-                background: #bbdefb;
+                background-color: #bbdefb;
             }
 
             .admin-pill-item .remove-pill {
                 cursor: pointer;
                 opacity: 0.6;
-                font-size: 0.9em;
                 display: flex;
                 align-items: center;
-                padding: 2px;
+                justify-content: center;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                transition: all 0.2s;
             }
 
             .admin-pill-item .remove-pill:hover {
                 opacity: 1;
+                background-color: rgba(255, 255, 255, 0.5);
                 color: var(--danger-color);
             }
 
             .dark-mode .admin-pill-item {
-                background: rgba(57, 73, 171, 0.2);
+                background-color: rgba(57, 73, 171, 0.2);
                 border-color: var(--primary-color);
                 color: #c5cae9;
             }
@@ -5478,18 +5486,28 @@
             const renderCourses = (filterText = '') => {
                 const gridContainer = dialog.querySelector('#settings-course-grid');
                 gridContainer.innerHTML = '';
-                const lowerFilter = filterText.toLowerCase();
+
+                // 1. Prepare Search Terms
+                const lowerFilter = filterText.toLowerCase().trim();
+                const strippedFilter = lowerFilter.replace(/\s+/g, ''); // "ce 341" -> "ce341"
 
                 const courses = Object.entries(courseInfoMap).map(([name, data]) => ({
                     name,
                     ...data,
-                    category: (data.defaultCategory || 'theory').toLowerCase() // FIXED
+                    category: (data.defaultCategory || 'theory').toLowerCase()
                 }));
 
-                const filtered = courses.filter(c =>
-                    c.name.toLowerCase().includes(lowerFilter) ||
-                    (c.eisId && String(c.eisId).includes(lowerFilter))
-                );
+                // 2. Improved Search Logic
+                const filtered = courses.filter(c => {
+                    const nameLow = c.name.toLowerCase();
+                    const nameAsText = nameLow.replace(/_/g, ' '); // "ce_101" -> "ce 101"
+                    const nameStripped = nameLow.replace(/_/g, ''); // "ce_101" -> "ce101"
+
+                    return nameLow.includes(lowerFilter) ||       // Exact match
+                        nameAsText.includes(lowerFilter) ||    // Match "CE 101"
+                        nameStripped.includes(strippedFilter) || // Match "CE101"
+                        (c.eisId && String(c.eisId).includes(lowerFilter));
+                });
 
                 filtered.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -5586,7 +5604,7 @@
                 } catch (e) { return ''; }
             };
 
-            // FIX: Read 'adminEmails' (CamelCase)
+            // Prepare Admin Emails
             const rawAdmins = val(data.adminEmails);
             let adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
 
@@ -5597,14 +5615,12 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            // FIX: Read 'defaultCategory' and 'defaultSection' (CamelCase)
             const currentCategory = val(data.defaultCategory).toLowerCase() || 'theory';
             const currentSectionFull = val(data.defaultSection) || 'ALL';
 
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
-            // FIX: Update all value="${...}" to use the new CamelCase keys
             dialog.innerHTML = `
 <h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
 <div class="dialog-content">
@@ -5687,15 +5703,17 @@
 
     <div class="form-group" style="flex-direction:column; gap:5px; align-items:stretch;">
         <label style="text-align:left;">Admin Access</label>
+        
         <div class="admin-input-wrapper">
             <div class="input-with-icon">
                 <i class="fa-solid fa-user-plus"></i>
                 <input type="email" id="new-admin-email" class="form-control" placeholder="Enter email..." autocomplete="off">
             </div>
-            <button id="add-admin-btn" class="btn-blue btn-icon" style="border-radius:8px; width:40px; height:38px; flex-shrink:0;">
+            <button id="add-admin-btn" class="btn-blue btn-icon" style="border-radius:8px; width:42px; height:42px; flex-shrink:0;">
                 <i class="fa-solid fa-plus"></i>
             </button>
         </div>
+        
         <div id="admin-pills-list" class="admin-pills-list"></div>
         <textarea id="edit-c-admins" style="display:none;"></textarea>
     </div>
@@ -5710,7 +5728,7 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Admin List Logic ---
+            // --- Admin Pills Logic ---
             const pillsContainer = document.getElementById('admin-pills-list');
             const newAdminInput = document.getElementById('new-admin-email');
             const addAdminBtn = document.getElementById('add-admin-btn');
@@ -5754,9 +5772,44 @@
             renderAdminPills();
             updateHiddenInput();
 
+            // --- Buttons Logic with "Theory D" Restriction ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
             const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
             const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
+            const charContainer = document.getElementById('edit-c-sect-char');
+
+            // Helper to enforce rules
+            const updateSectionLogic = () => {
+                const activeTypeBtn = sectTypeGroup.querySelector('.active');
+                const activeCharBtn = sectCharGroup.querySelector('.active');
+                const activeType = activeTypeBtn ? activeTypeBtn.dataset.value : 'ALL';
+                const activeChar = activeCharBtn ? activeCharBtn.dataset.value : null;
+
+                // Show/Hide char container
+                if (activeType === 'ALL') {
+                    charContainer.style.display = 'none';
+                } else {
+                    charContainer.style.display = 'flex';
+                }
+
+                // Rule: "Theory" cannot be "D"
+                const btnD = sectCharGroup.querySelector('[data-value="D"]');
+                if (activeType === 'Theory') {
+                    // Disable D
+                    if (btnD) btnD.disabled = true;
+                    // If D was selected, switch to A
+                    if (activeChar === 'D') {
+                        if (activeCharBtn) activeCharBtn.classList.remove('active');
+                        sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
+                    }
+                } else {
+                    // Enable D for Lab/Practice
+                    if (btnD) btnD.disabled = false;
+                }
+            };
+
+            // Initialize logic
+            updateSectionLogic();
 
             catGroup.addEventListener('click', (e) => {
                 const btn = e.target.closest('.toggle-button');
@@ -5771,11 +5824,7 @@
                 if (btn && !btn.disabled) {
                     sectTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
-                    if (btn.dataset.value === 'ALL') {
-                        document.getElementById('edit-c-sect-char').style.display = 'none';
-                    } else {
-                        document.getElementById('edit-c-sect-char').style.display = 'flex';
-                    }
+                    updateSectionLogic(); // Run check
                 }
             });
 
@@ -5784,6 +5833,7 @@
                 if (btn && !btn.disabled) {
                     sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
+                    // Logic not strictly needed here as Type drives the restriction, but good for safety
                 }
             });
 
@@ -5800,6 +5850,7 @@
                 const sChar = sectCharGroup.querySelector('.active')?.dataset.value || '';
                 const finalSection = (sType === 'ALL') ? 'ALL' : `${sType} ${sChar}`.trim();
 
+                // FIX: Ensure payload matches what backend expects (all camelCase)
                 const payload = {
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
@@ -5811,7 +5862,7 @@
                     endDate: document.getElementById('edit-c-end').value,
                     holidayStartDate: document.getElementById('edit-c-holiday-start').value,
                     holidayWeeks: document.getElementById('edit-c-holidays').value,
-                    adminEmails: hiddenAdminInput.value // Ensure this key is CamelCase
+                    adminEmails: hiddenAdminInput.value
                 };
 
                 try {
@@ -5857,28 +5908,52 @@
             let courseListHtml = '';
 
             if (myCourses.length > 0) {
-                courseListHtml = `<div class="settings-grid" style="margin-top:10px;">`;
+                // Use the 'modern-course-grid' class for consistent layout
+                courseListHtml = `<div class="modern-course-grid" style="margin-top:15px;">`;
+
                 myCourses.forEach(courseName => {
                     const data = courseInfoMap[courseName];
-                    // Render a clickable card for each course
+
+                    // Determine Color Strip based on Category
+                    const category = (data.defaultCategory || 'theory').toLowerCase();
+                    let stripClass = 'strip-default';
+                    if (category.includes('theory')) stripClass = 'strip-theory';
+                    else if (category.includes('lab')) stripClass = 'strip-lab';
+                    else if (category.includes('practice')) stripClass = 'strip-practice';
+
+                    // Format Start Date for display
+                    const startDate = data.startDate ? new Date(data.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'N/A';
+
+                    // Render the MODERN card
                     courseListHtml += `
-        <div class="course-card" id="card-${escapeHtml(courseName)}">
-            <div class="course-card-header">
-                <span>${escapeHtml(courseName.replace(/_/g, ' '))}</span>
-                <i class="fas fa-pencil-alt" style="opacity:0.5; font-size:0.8em;"></i>
-            </div>
-            <div class="course-card-detail">
-                <i class="fas fa-clock"></i> ${escapeHtml(data.defaultHours || 0)}h 
-                (${escapeHtml(data.defaultCategory || '-')})
-            </div>
-            <div class="course-card-detail" style="margin-top:5px; font-size:0.75em; opacity:0.7;">
-                <i class="fas fa-cog"></i> Click to edit settings
-            </div>
-        </div>`;
+            <div class="modern-course-card" id="card-${escapeHtml(courseName)}">
+                <div class="card-color-strip ${stripClass}"></div>
+                <div class="card-body">
+                    <div class="card-title-row">
+                        <div class="card-course-name">${escapeHtml(courseName.replace(/_/g, ' '))}</div>
+                        ${data.eisId ? `<span class="card-eis-badge">#${data.eisId}</span>` : ''}
+                    </div>
+                    <div class="card-meta-row">
+                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${data.defaultHours || 0}h</div>
+                        <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${category}</div>
+                    </div>
+                    <div class="card-meta-row" style="margin-top:8px;">
+                        <div class="card-meta-item"><i class="fa-regular fa-calendar"></i> Starts: ${startDate}</div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <span class="admin-pill"><i class="fa-solid fa-user-tie"></i> Course Admin</span>
+                    <i class="fa-solid fa-pen-to-square"></i>
+                </div>
+            </div>`;
                 });
                 courseListHtml += `</div>`;
             } else {
-                courseListHtml = '<p>No active courses assigned.</p>';
+                courseListHtml = `
+        <div class="empty-logs">
+            <i class="fa-solid fa-folder-open" style="font-size: 2.5em; color: #ccc; margin-bottom: 10px;"></i>
+            <p>No active courses assigned.</p>
+        </div>`;
             }
 
             dialog.innerHTML = `
@@ -5890,7 +5965,6 @@
             <div style="text-align:center;">
                 <h3 class="profile-name-large">${escapeHtml(currentUser.name)}</h3>
                 <p class="profile-email-large">${escapeHtml(currentUser.email)}</p>
-                <span style="font-size:0.8em; background:var(--primary-color); color:white; padding:2px 6px; border-radius:4px; margin-top:5px; display:inline-block;">Course Admin</span>
             </div>
         </div>
 
@@ -5910,8 +5984,7 @@
                 const card = document.getElementById(`card-${courseName}`);
                 if (card) {
                     card.onclick = () => {
-                        // Close profile dialog temporarily or keep it open? 
-                        // Usually better to close it to avoid stacking dialogs too deep.
+                        // Close profile dialog to avoid stacking
                         document.body.removeChild(dialogBackdrop);
                         showCourseEditorDialog(courseName, courseInfoMap[courseName]);
                     };
