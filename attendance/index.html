@@ -263,12 +263,14 @@
         /* --- Admin Action Bar (The Fix for Layout Shift) --- */
         .admin-action-bar {
             display: flex;
+            flex-wrap: wrap;
+            /* Allows wrapping */
             gap: 10px;
+            /* Adds gap between chips */
             margin-bottom: 15px;
-            min-height: 50px;
-            /* Reserve space to prevent jump */
             align-items: center;
-            transition: all 0.3s ease;
+            min-height: 0;
+            /* Remove fixed height constraint */
         }
 
         .action-chip {
@@ -289,6 +291,8 @@
             opacity: 0;
             /* Start hidden, fade in */
             animation: fadeIn 0.3s forwards;
+            flex-shrink: 0;
+            margin: 0;
         }
 
         .action-chip:hover {
@@ -350,25 +354,31 @@
             border: 1px solid #e0e0e0;
             overflow: hidden;
 
-            /* Animation Properties */
+            /* Start state: Hidden & Collapsed */
             max-height: 0;
             opacity: 0;
             margin: 0;
+            /* CRITICAL: No margin when hidden */
             padding: 0;
+            /* CRITICAL: No padding when hidden */
+            border-width: 0;
+            /* CRITICAL: No border when hidden */
             visibility: hidden;
-            /* Critical: This hides it from screen readers/clicks when closed */
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 
-            /* Force hidden state overrides */
-            display: block;
+            /* Smooth Transition */
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* Active State */
         .collapsible-module.expanded {
+            /* End state: Visible & Expanded */
             max-height: 800px;
             opacity: 1;
+            margin-bottom: 20px;
+            /* Restore margin only when expanded */
+            border-width: 1px;
+            /* Restore border */
             visibility: visible;
-            margin-bottom: 0;
+
             border-color: var(--primary-color);
             box-shadow: 0 8px 20px rgba(57, 73, 171, 0.15);
         }
@@ -2873,7 +2883,7 @@
             /* 1. Wider Desktop Width */
             width: 95%;
             /* occupy 95% of screen width on small devices */
-            max-width: 750px;
+            max-width: 900px;
 
             /* 2. Vertical Layout Fixes */
             display: flex;
@@ -5487,13 +5497,12 @@
                 return;
             }
 
-            // 1. Enforce Global-Only visibility for Registrations View
-            // Even if HTML exists, hide the DOM element entirely for non-globals
+            // --- FIX: Do not touch style.display. Use classes only. ---
+            // If user is not global admin, ensure the class 'expanded' is removed 
+            // and maybe hide the container via a specific utility class if you want strict security,
+            // but for animation, we rely on the collapsible-module CSS.
             if (!isGlobalAdmin && regView) {
-                regView.style.display = 'none';
                 regView.classList.remove('expanded');
-            } else if (regView) {
-                regView.style.display = 'block'; // Restore for globals
             }
 
             bar.style.display = 'flex';
@@ -5505,7 +5514,7 @@
 
             let html = '';
 
-            // 2. Absences Chip (Visible to all Admins)
+            // 1. Absences Chip
             if (absencesCount > 0) {
                 html += `
         <div class="action-chip has-items" id="chip-absences" onclick="toggleAdminView('pending-absences-view', this)">
@@ -5515,7 +5524,7 @@
         </div>`;
             }
 
-            // 3. Registrations Chip (ONLY for Global Admin)
+            // 2. Registrations Chip (Global Only)
             if (registrationsCount > 0 && isGlobalAdmin) {
                 html += `
         <div class="action-chip has-items" id="chip-registrations" onclick="toggleAdminView('pending-registrations-view', this)">
@@ -5525,16 +5534,15 @@
         </div>`;
             }
 
-            // 4. "All Clean" State
+            // 3. "All Clean" State
             if (html === '') {
-                // If nothing to show, hide the bar or show clean state
                 html = `<div class="action-chip clean"><i class="fa-solid fa-check-circle"></i> All caught up</div>`;
                 setTimeout(() => { if (bar.querySelector('.clean')) bar.innerHTML = ''; }, 3000);
             }
 
             bar.innerHTML = html;
 
-            // Re-apply active class if view is open
+            // Re-apply active class state based on current DOM state
             const absView = document.getElementById('pending-absences-view');
             if (absView && absView.classList.contains('expanded') && document.getElementById('chip-absences')) {
                 document.getElementById('chip-absences').classList.add('active');
@@ -6074,19 +6082,14 @@
             const data = courseData || {};
             const val = (v) => v !== undefined && v !== null ? v : '';
 
-            // Helper for Dates
             const formatDate = (d) => {
                 if (!d) return '';
                 if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) return d;
                 try { return new Date(d).toISOString().split('T')[0]; } catch (e) { return ''; }
             };
 
-            // --- PERMISSION LOGIC ---
             const canEditSensitive = isGlobalAdmin;
-
-            // If NOT global admin, these attributes block editing
             const disabledAttr = canEditSensitive ? '' : 'disabled';
-            // Visual styling to make it clear they are read-only
             const readOnlyStyle = canEditSensitive ? '' : 'style="background-color:#f5f5f5; color:#666; cursor:not-allowed;"';
 
             const dialogBackdrop = document.createElement('div');
@@ -6101,22 +6104,19 @@
             let [secType, secChar] = currentSectionFull.split(' ');
             if (currentSectionFull === 'ALL') secType = 'ALL';
 
-            // --- Prepare Admin Logic (Variables needed for save) ---
             let adminEmailList = [];
             if (isGlobalAdmin) {
                 const rawAdmins = val(data.adminEmails);
                 adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
             }
 
-            // --- HTML Generation ---
-
-            // 1. Admin Emails Section: ONLY show for Global Admins
             let adminSectionHtml = '';
             if (isGlobalAdmin) {
+                // --- FIX: Reduced margin on label ---
                 adminSectionHtml = `
         <hr style="border:0; border-top:1px solid #eee; margin:15px 0;">
         <div class="form-group" style="flex-direction:column; gap:5px; align-items:stretch;">
-            <label style="text-align:left; font-weight:700;">Admin Access</label>
+            <label style="text-align:left; font-weight:700; margin-bottom:5px;"><i class="fa-solid fa-user-shield"></i> Admin Access</label>
             <div class="admin-input-wrapper">
                 <div class="input-with-icon" style="flex-grow:1;">
                     <i class="fa-solid fa-user-plus"></i>
@@ -6129,40 +6129,40 @@
         </div>`;
             }
 
-            // 2. EIS Warning
             let eisWarning = !isGlobalAdmin ? `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-lock"></i> Global Admin only.</small>` : '';
 
+            // --- FIX: Added Icons to Labels ---
             dialog.innerHTML = `
     <h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
     <div class="dialog-content">
         <div class="form-group">
-            <label>Course Name</label>
+            <label><i class="fa-solid fa-heading"></i> Course Name</label>
             <div class="input-with-icon" style="flex-grow:1;">
-                <i class="fa-solid fa-heading"></i>
+                <i class="fa-solid fa-font"></i>
                 <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_202">
             </div>
         </div>
         
         <div class="form-row">
             <div class="form-group">
-                <label>Start Date</label>
+                <label><i class="fa-regular fa-calendar"></i> Start Date</label>
                 <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.startDate)}" ${disabledAttr} ${readOnlyStyle}>
             </div>
             <div class="form-group">
-                <label>End Date</label>
+                <label><i class="fa-regular fa-calendar-check"></i> End Date</label>
                 <input type="date" id="edit-c-end" class="form-control" value="${formatDate(data.endDate)}" ${disabledAttr} ${readOnlyStyle}>
             </div>
         </div>
 
         <div class="form-row">
             <div class="form-group">
-                <label>Holiday Start</label>
+                <label><i class="fa-solid fa-plane-departure"></i> Holiday Start</label>
                 <input type="date" id="edit-c-holiday-start" class="form-control" value="${formatDate(data.holidayStartDate)}" ${disabledAttr} ${readOnlyStyle}>
             </div>
             <div class="form-group">
-                <label>Holiday Weeks</label>
+                <label><i class="fa-solid fa-calendar-minus"></i> Hol. Weeks</label>
                 <div class="input-with-icon" style="flex-grow:1;">
-                    <i class="fa-solid fa-calendar-minus"></i>
+                    <i class="fa-solid fa-hashtag"></i>
                     <input type="number" id="edit-c-holidays" class="form-control" value="${escapeHtml(val(data.holidayWeeks))}" ${disabledAttr} ${readOnlyStyle}>
                 </div>
             </div>
@@ -6170,16 +6170,16 @@
 
         <div class="form-row">
             <div class="form-group">
-                <label>Hours</label>
+                <label><i class="fa-regular fa-clock"></i> Hours</label>
                 <div class="input-with-icon" style="flex-grow:1;">
-                    <i class="fa-regular fa-clock"></i>
+                    <i class="fa-solid fa-hourglass-half"></i>
                     <input type="number" id="edit-c-hours" class="form-control" value="${escapeHtml(val(data.defaultHours))}">
                 </div>
             </div>
             <div class="form-group">
-                <label>EIS ID</label>
+                <label><i class="fa-solid fa-fingerprint"></i> EIS ID</label>
                 <div class="input-with-icon" style="flex-grow:1;">
-                    <i class="fa-solid fa-fingerprint"></i>
+                    <i class="fa-solid fa-id-badge"></i>
                     <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345" ${disabledAttr} ${readOnlyStyle}>
                 </div>
                 ${eisWarning}
@@ -6187,7 +6187,7 @@
         </div>
 
         <div class="form-group" style="margin-top:10px;">
-            <label>Category</label>
+            <label><i class="fa-solid fa-tag"></i> Category</label>
             <div id="edit-c-cat-group" class="toggle-button-group form-group-control">
                 <button class="toggle-button ${currentCategory === 'theory' ? 'active' : ''}" data-value="theory"><i class="fa-solid fa-book"></i> Theory</button>
                 <button class="toggle-button ${currentCategory === 'lab' ? 'active' : ''}" data-value="lab"><i class="fa-solid fa-desktop"></i> Lab</button>
@@ -6196,7 +6196,7 @@
         </div>
 
         <div class="form-group">
-            <label>Section</label>
+            <label><i class="fa-solid fa-users"></i> Section</label>
             <div style="flex-grow:1">
                 <div id="edit-c-sect-type" class="toggle-button-group" style="margin-bottom:5px;">
                     <button class="toggle-button ${secType === 'ALL' ? 'active' : ''}" data-value="ALL">All</button>
@@ -6239,7 +6239,7 @@
                     pillsContainer.innerHTML = '';
                     adminEmailList.forEach((email, index) => {
                         const pill = document.createElement('div');
-                        pill.className = 'admin-pill-item'; // Uses the CSS defined in Part 1
+                        pill.className = 'admin-pill-item';
                         pill.innerHTML = `<i class="fa-solid fa-user" style="font-size:0.8em;"></i> ${escapeHtml(email)} <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>`;
                         pillsContainer.appendChild(pill);
                     });
@@ -6274,7 +6274,6 @@
                 updateHiddenInput();
             }
 
-            // --- Logic for Toggles ---
             const catGroup = dialog.querySelector('#edit-c-cat-group');
             const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
             const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
@@ -6311,7 +6310,6 @@
             const close = () => document.body.removeChild(dialogBackdrop);
             dialog.querySelector('#cancel-edit-c').onclick = close;
 
-            // --- Save Logic ---
             dialog.querySelector('#save-edit-c').onclick = async (e) => {
                 const btn = e.target;
                 btn.disabled = true;
@@ -6326,8 +6324,6 @@
                     originalName: courseName,
                     courseName: document.getElementById('edit-c-name').value,
                     defaultHours: document.getElementById('edit-c-hours').value,
-                    // Even if fields are disabled, we send their values. 
-                    // The non-global user cannot change them in UI, so safety is maintained.
                     startDate: document.getElementById('edit-c-start').value,
                     endDate: document.getElementById('edit-c-end').value,
                     holidayStartDate: document.getElementById('edit-c-holiday-start').value,
@@ -6335,8 +6331,6 @@
                     eisId: document.getElementById('edit-c-eis').value,
                     defaultCategory: cat,
                     defaultSection: finalSection,
-                    // CRITICAL: If not global admin, send back the *original* admin string from `data`
-                    // This prevents accidental wiping of admin lists by course admins.
                     adminEmails: isGlobalAdmin ? hiddenAdminInput.value : (data.adminEmails || '')
                 };
 
@@ -9282,9 +9276,6 @@ ${uidContent}
 
         function renderRegistrationsTable(registrations) {
             const tbody = document.getElementById('registrations-tbody');
-            // Important: We DO NOT toggle classes on the view here anymore. 
-            // The view's visibility is controlled strictly by the Chip Click.
-
             if (!tbody) return;
             tbody.innerHTML = '';
 
@@ -9293,6 +9284,8 @@ ${uidContent}
             registrations.forEach(reg => {
                 const row = document.createElement('tr');
                 row.className = 'clickable-request-row';
+
+                // Store data safely
                 row.dataset.row = reg.rowNumber;
                 row.dataset.name = reg.name;
                 row.dataset.uid = reg.uid;
@@ -9302,15 +9295,37 @@ ${uidContent}
 
                 let formattedTimestamp = reg.timestamp ? new Date(reg.timestamp).toLocaleString() : 'N/A';
 
+                // --- FIX: Added the Actions Cell with Approve/Reject Buttons ---
                 row.innerHTML = `
             <td>${escapeHtml(reg.name) || 'N/A'}</td>
             <td><span class="uid-badge">${escapeHtml(reg.uid) || 'N/A'}</span></td>
             <td style="font-size: 0.9em;">${escapeHtml(reg.email) || 'N/A'}</td>
             <td style="font-size: 0.9em;">${escapeHtml(formattedTimestamp)}</td>
             <td style="font-size: 0.9em;">${escapeHtml(reg.sentBy) || 'Unknown'}</td>
+            <td class="actions-cell">
+                <div class="actions-cell-content">
+                    <button class="btn-icon btn-green approve-reg-btn" title="Approve"><i class="fa-solid fa-check"></i></button>
+                    <button class="btn-icon btn-red reject-reg-btn" title="Reject"><i class="fa-solid fa-ban"></i></button>
+                </div>
+            </td>
         `;
+
+                // Attach inline listeners for buttons to prevent row click
+                const approveBtn = row.querySelector('.approve-reg-btn');
+                approveBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showApproveDialog(reg);
+                });
+
+                const rejectBtn = row.querySelector('.reject-reg-btn');
+                rejectBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showRejectDialog(reg);
+                });
+
                 tbody.appendChild(row);
             });
+
             attachRegistrationRowListeners();
         }
 
