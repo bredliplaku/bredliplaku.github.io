@@ -5353,12 +5353,11 @@
         }
 
         function handleOneTapResponse(response) {
-            // 1. Decode Identity
             const responsePayload = parseJwt(response.credential);
 
             console.log("One Tap Auto-Sign-In Detected");
 
-            // 2. Set User State immediately (Visual Sign-in only)
+            // 1. Set Identity (Visuals only)
             currentUser = {
                 id: responsePayload.sub,
                 name: responsePayload.name,
@@ -5366,12 +5365,22 @@
                 picture: responsePayload.picture
             };
 
-            // We mark as signed in visually, but we DON'T load data yet
-            isSignedIn = true;
-            updateAuthUI();
+            // 2. Show "Verifying Access..." State
+            // We manually hide the login button and show a loading state in the user container
+            document.getElementById('login-container').style.display = 'none';
+            const userContainer = document.getElementById('user-container');
+            userContainer.style.display = 'flex';
 
-            // 3. Request the actual Access Token silently
-            // The data loading will happen in 'handleTokenResponse' when this succeeds.
+            // Inject temporary loading HTML
+            userContainer.innerHTML = `
+        <div class="user-info">
+            <div style="display:flex; align-items:center; gap:10px; color:var(--primary-color);">
+                <i class="fa-solid fa-circle-notch fa-spin"></i> 
+                <span>Verifying access...</span>
+            </div>
+        </div>`;
+
+            // 3. Request the Access Token (This triggers handleTokenResponse)
             if (tokenClient) {
                 tokenClient.requestAccessToken({ prompt: '' });
             }
@@ -8180,18 +8189,25 @@ ${uidContent}
                         client_id: CLIENT_ID,
                         callback: handleOneTapResponse,
                         auto_select: true, // Auto-signin returning users
-                        cancel_on_tap_outside: false
+                        cancel_on_tap_outside: false,
+                        use_fedcm_for_prompt: true
                     });
 
                     google.accounts.id.prompt((notification) => {
-                        if (notification.isNotDisplayed()) {
-                            console.log("One Tap not displayed:", notification.getNotDisplayedReason());
+                        // FedCM might suppress these status methods, so we wrap them
+                        try {
+                            if (notification.isNotDisplayed()) {
+                                console.log("One Tap not displayed:", notification.getNotDisplayedReason());
+                            }
+                        } catch (e) {
+                            // Ignore errors from FedCM migration
                         }
                     });
 
                     isInitializing = false;
                     showMainContent();
-                    updateAuthUI();
+                    // Don't updateAuthUI here, wait for interaction
+                    document.getElementById('login-container').style.display = 'flex';
                 }
 
             } catch (error) {
@@ -8416,48 +8432,61 @@ ${uidContent}
             if (resp.error || !resp.access_token) {
                 console.warn('Silent auth failed or consent missing:', resp);
 
-                // Change "Sign In" button to "Grant Permissions"
+                // Revert to "Grant Permissions" button
+                const loginContainer = document.getElementById('login-container');
+                const userContainer = document.getElementById('user-container');
                 const loginBtn = document.getElementById('login-btn');
+
+                userContainer.style.display = 'none'; // Hide the "Verifying" text
+                loginContainer.style.display = 'flex'; // Show button
+
                 if (loginBtn) {
                     loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Grant Permissions';
-                    loginBtn.classList.remove('btn-blue'); // Optional: remove blue class if needed
-                    loginBtn.style.backgroundColor = "#fb8c00"; // Orange
-
-                    // Force show the login button area
-                    document.getElementById('login-container').style.display = 'flex';
-                    document.getElementById('user-container').style.display = 'none';
+                    loginBtn.style.backgroundColor = "#fb8c00";
                 }
                 return;
             }
 
             // 2. Success - We have the Token!
             try {
-                localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
+                // CRITICAL: Set the token in GAPI immediately so callWebApp can use it
+                gapi.client.setToken(resp);
+                localStorage.setItem('gapi_token', JSON.stringify(resp));
+
                 isSignedIn = true;
 
-                // NOW we check admin status, because we actually have the token
-                fetchUserInfo().then(async () => {
-                    const adminStatus = await checkAdminStatus();
+                // 3. Fetch Data & Check Admin Status
+                // We use promise chaining to ensure sequential execution
+                fetchUserInfo()
+                    .then(() => checkAdminStatus())
+                    .then((status) => {
+                        // Apply Admin Status
+                        isAdmin = status.isAdmin;
+                        isGlobalAdmin = status.isGlobalAdmin;
+                        adminCourses = status.courses;
 
-                    isAdmin = adminStatus.isAdmin;
-                    isGlobalAdmin = adminStatus.isGlobalAdmin;
-                    adminCourses = adminStatus.courses;
+                        // 4. NOW we unlock the UI (Full Refresh)
+                        // This will wipe the "Verifying..." text and render the real profile chip
+                        updateAuthUI();
 
-                    // Update UI with correct permissions
-                    updateAuthUI();
+                        // 5. Load Data based on role
+                        populateCourseButtons();
 
-                    // Load Data
-                    populateCourseButtons();
+                        if (isAdmin) {
+                            refreshAdminViews();
+                        } else {
+                            loadAllCourseLogsForStudent();
+                        }
 
-                    if (isAdmin) {
-                        refreshAdminViews();
-                    } else {
-                        loadAllCourseLogsForStudent();
-                    }
-
-                }).catch(err => {
-                    console.error("User info fetch failed:", err);
-                });
+                        // Update title with count if admin
+                        updatePageTitle();
+                    })
+                    .catch(err => {
+                        console.error("Initialization sequence failed:", err);
+                        // Fallback to student view if admin check crashes (e.g. CORS error)
+                        updateAuthUI();
+                        showNotification('error', 'Connection Error', 'Could not verify admin status. Loaded as student.');
+                    });
 
             } catch (error) {
                 console.error('Error processing token:', error);
