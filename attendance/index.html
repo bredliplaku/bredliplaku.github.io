@@ -5257,7 +5257,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbz2r9rJ6kjpYxn_E8ugCDVhe7E_f4h-0BFly9qSxiOiDt3DFI09GYmCY09AQgNT9dYsog/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbynca6lzdWqWYB28ZeEFIpftyVka2GZU9bJwul_ALAtCILMsuPGPvYcOtTg-oRJFtJ9Mw/exec';
 
         // App state
         let courseData = {};
@@ -13880,6 +13880,8 @@ ${uidContent}
                 }
 
                 try {
+                    // Call Backend to check if this UID belongs to a staff member
+                    // We use fetch directly here to bypass the token check in callWebApp
                     const response = await fetch(BRAIN_URL, {
                         method: 'POST',
                         redirect: 'follow',
@@ -13893,30 +13895,38 @@ ${uidContent}
 
                     const data = await response.json();
 
-                    // --- DEBUG ALERT ---
-                    if (data.result !== 'success') {
-                        alert("Login Failed!\nServer said: " + JSON.stringify(data));
-                        // Show UID fallback so you can check if it matches the sheet
+                    if (data.result === 'success') {
+                        // === IT IS AN ADMIN: LOG THEM IN ===
+                        const fakeGapiToken = { access_token: data.token };
+
+                        // Store the Kiosk token
+                        localStorage.setItem('gapi_token', JSON.stringify(fakeGapiToken));
+
+                        // Set the token for future API calls
+                        gapi.client.setToken(fakeGapiToken);
+
+                        // Set user data from backend response
+                        currentUser = data.user;
+
+                        showNotification('success', 'Session Active', `Welcome, ${currentUser.name}. Session ends in 30m.`);
+
+                        // Boot the app (Load courses, databases, etc.)
+                        onSuccessfulAuth(false);
+
+                    } else {
+                        // === IT IS A STUDENT: SHOW UID ===
+                        // Not an admin, just show the UID on the guest screen
                         lastScannedUID = serialNumber;
                         updateAuthUI();
-                        return;
                     }
 
-                    // === SUCCESS: ADMIN LOGIN ===
-                    const fakeGapiToken = { access_token: data.token };
-                    localStorage.setItem('gapi_token', JSON.stringify(fakeGapiToken));
-                    gapi.client.setToken(fakeGapiToken);
-                    currentUser = data.user;
-                    showNotification('success', 'Session Active', `Welcome, ${currentUser.name}`);
-                    onSuccessfulAuth(false);
-
                 } catch (err) {
-                    // --- NETWORK ERROR ALERT ---
-                    alert("Network/Script Error:\n" + err.message);
+                    console.error("Login check failed", err);
+                    // Fallback to just showing UID on error so the user sees something happened
                     lastScannedUID = serialNumber;
                     updateAuthUI();
                 }
-                return;
+                return; // Stop here, do not process attendance logic below
             }
 
             // ============================================================
