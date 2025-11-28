@@ -5354,32 +5354,41 @@
 
         function handleOneTapResponse(response) {
             const responsePayload = parseJwt(response.credential);
-
             console.log("One Tap Auto-Sign-In Detected for:", responsePayload.email);
 
-            // 1. UI State: Hide Login Button, Show Spinner
             const loginContainer = document.getElementById('login-container');
             const loginBtn = document.getElementById('login-btn');
 
-            // Disable the login button and change its content to a spinner
+            // 1. UI State: Show "Verifying" spinner
             if (loginBtn) {
+                loginBtn.dataset.originalText = loginBtn.innerHTML; // Save original text
                 loginBtn.disabled = true;
                 loginBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Verifying...';
                 loginBtn.style.backgroundColor = "#ccc";
                 loginBtn.style.cursor = "wait";
+
+                // SAFETY VALVE: Reset button after 8 seconds if Google hangs
+                setTimeout(() => {
+                    if (loginBtn.disabled && !isSignedIn) {
+                        console.warn("One Tap timed out. Resetting UI.");
+                        loginBtn.disabled = false;
+                        loginBtn.innerHTML = loginBtn.dataset.originalText || '<i class="fa-solid fa-right-to-bracket"></i> Sign in';
+                        loginBtn.style.backgroundColor = "";
+                        loginBtn.style.cursor = "pointer";
+                    }
+                }, 8000);
             }
-            // Ensure login container is visible (to show the spinner button)
+
             if (loginContainer) loginContainer.style.display = 'flex';
 
-            // 2. Ensure tokenClient is ready before requesting
+            // 2. Request Access Token
             if (tokenClient) {
-                // Pass the email from One Tap as a 'login_hint'.
                 tokenClient.requestAccessToken({
                     prompt: '',
                     login_hint: responsePayload.email
                 });
             } else {
-                console.error("Token Client not initialized yet.");
+                console.error("Token Client not initialized.");
                 // Fallback: reset button if GAPI wasn't ready
                 setTimeout(() => {
                     if (tokenClient) {
@@ -8218,6 +8227,14 @@ ${uidContent}
                 console.error('initGoogleApi error:', error);
                 isInitializing = false;
                 showMainContent();
+
+                // FORCE UI RESET: Ensure login button is visible and clickable
+                const loginBtn = document.getElementById('login-btn');
+                if (loginBtn) {
+                    loginBtn.disabled = false;
+                    loginBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Sign in';
+                    loginBtn.style.cursor = "pointer";
+                }
             } finally {
                 initInProgress = false;
             }
@@ -10512,10 +10529,16 @@ ${uidContent}
                 if (notSignedInMsgElement) notSignedInMsgElement.remove();
 
                 // Show log-related UI elements
+                // Show log-related UI elements
                 if (logsHeader) logsHeader.style.display = 'flex';
                 if (filterContainer) filterContainer.style.display = 'flex';
                 if (tableContainer) tableContainer.style.display = 'block';
-                if (scanHistoryModule) scanHistoryModule.style.display = 'block'; // Show scanner module
+
+                // Only show history module if signed in OR if in Lecturer Mode (has course data)
+                const hasActiveData = isSignedIn || (Object.keys(courseData).length > 0 && currentCourse);
+                if (scanHistoryModule) {
+                    scanHistoryModule.style.display = hasActiveData ? 'block' : 'none';
+                }
 
                 // Show/hide UID columns based on admin status
                 document.querySelectorAll('.uid-column').forEach(col => {
@@ -10563,10 +10586,16 @@ ${uidContent}
                 }
 
                 // Hide log-related UI elements
+                // Hide log-related UI elements
                 if (logsHeader) logsHeader.style.display = 'none';
                 if (filterContainer) filterContainer.style.display = 'none';
                 if (tableContainer) tableContainer.style.display = 'none';
-                if (scanHistoryModule) scanHistoryModule.style.display = 'none'; // Hide scanner module
+
+                // STRICT CHECK: Only keep module visible if in Lecturer Mode (has data)
+                const isLecturerMode = Object.keys(courseData).length > 0 && currentCourse;
+                if (scanHistoryModule) {
+                    scanHistoryModule.style.display = isLecturerMode ? 'block' : 'none';
+                }
             }
 
             // --- Common UI Updates (Run regardless of login state) ---
