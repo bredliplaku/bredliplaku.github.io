@@ -5341,6 +5341,61 @@
             }
         }
 
+        // Helper to decode the Google ID Token
+        function parseJwt(token) {
+            var base64Url = token.split('.')[1];
+            var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+
+            return JSON.parse(jsonPayload);
+        }
+
+        function handleOneTapResponse(response) {
+            // 1. Decode the token to get user info
+            const responsePayload = parseJwt(response.credential);
+
+            console.log("One Tap Sign-In Successful");
+            console.log('ID: ' + responsePayload.sub);
+            console.log('Name: ' + responsePayload.name);
+            console.log('Email: ' + responsePayload.email);
+
+            // 2. Set the current user object
+            currentUser = {
+                id: responsePayload.sub,
+                name: responsePayload.name,
+                email: responsePayload.email,
+                picture: responsePayload.picture
+            };
+
+            // 3. Mark as signed in
+            isSignedIn = true;
+
+            // 4. Update UI immediately (Shows avatar, name, etc.)
+            updateAuthUI();
+
+            // 5. CRITICAL: Request Spreadsheet Access Token Silently
+            // One Tap doesn't give us sheet access. We ask for it now.
+            // prompt: '' tries to do it without a popup if they approved before.
+            if (tokenClient) {
+                tokenClient.requestAccessToken({ prompt: '' });
+            }
+
+            // 6. Check Admin Status immediately
+            checkAdminStatus().then(status => {
+                isAdmin = status.isAdmin;
+                isGlobalAdmin = status.isGlobalAdmin;
+                adminCourses = status.courses;
+                updateAuthUI(); // Update again with admin permissions
+
+                // Load initial data
+                populateCourseButtons();
+                if (isAdmin) refreshAdminViews();
+                else loadAllCourseLogsForStudent();
+            });
+        }
+
         // --- Absence History Logic ---
 
         // 1. Setup Listener
@@ -8117,10 +8172,7 @@ ${uidContent}
          * Set up auth token client and event listeners for login/logout.
          */
         async function initGoogleApi() {
-            if (initInProgress) {
-                return;
-            }
-
+            if (initInProgress) return;
             initInProgress = true;
             isInitializing = true;
 
@@ -8128,38 +8180,54 @@ ${uidContent}
                 await gapiLoaded();
                 await gisLoaded();
 
-                gapi.client.init({
-                }).then(function () {
+                // 1. Initialize GAPI Client (Keep your existing code)
+                await gapi.client.init({});
 
-                    tokenClient = google.accounts.oauth2.initTokenClient({
-                        client_id: CLIENT_ID,
-                        scope: SCOPES,
-                        callback: handleTokenResponse,
-                    });
+                // 2. Initialize Token Client (Keep your existing code)
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: SCOPES,
+                    callback: handleTokenResponse,
+                });
 
+                // --- NEW CODE STARTS HERE ---
 
-                    // Try to restore session
-                    attemptTokenRestore().then(restored => {
-                        if (restored) {
-                            onSuccessfulAuth(true); // true = restored from token
-                        } else {
-                            isInitializing = false;
-                            showMainContent();
-                            updateAuthUI();
-                            populateCourseButtons();
+                // 3. Initialize Google One Tap
+                // This makes the "Reddit-style" popup appear
+                google.accounts.id.initialize({
+                    client_id: CLIENT_ID,
+                    callback: handleOneTapResponse, // The function we created in Step 2
+                    auto_select: true, // This enables "Automatic" sign-in if they visited before
+                    cancel_on_tap_outside: false // Optional: keeps popup open if they click background
+                });
+
+                // 4. Show the Prompt
+                // Only show if we aren't already signed in
+                if (!localStorage.getItem('gapi_token')) {
+                    google.accounts.id.prompt((notification) => {
+                        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+                            console.log("One Tap skipped or suppressed:", notification.getNotDisplayedReason());
                         }
-                    }).catch(err => {
-                        console.error('Token restore or initial data load failed:', err);
-                        console.log('Operating in signed-out mode.');
+                    });
+                }
+                // --- NEW CODE ENDS HERE ---
+
+                // Try to restore session (Keep your existing code)
+                attemptTokenRestore().then(restored => {
+                    if (restored) {
+                        onSuccessfulAuth(true);
+                    } else {
                         isInitializing = false;
                         showMainContent();
                         updateAuthUI();
-                    });
-
+                        populateCourseButtons();
+                    }
                 }).catch(err => {
-                    console.error('GAPI init error:', err);
+                    console.error('Token restore or initial data load failed:', err);
+                    console.log('Operating in signed-out mode.');
                     isInitializing = false;
                     showMainContent();
+                    updateAuthUI();
                 });
 
             } catch (error) {
