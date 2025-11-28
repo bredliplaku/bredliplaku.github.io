@@ -5355,34 +5355,48 @@
         function handleOneTapResponse(response) {
             const responsePayload = parseJwt(response.credential);
 
-            console.log("One Tap Auto-Sign-In Detected");
+            console.log("One Tap Auto-Sign-In Detected for:", responsePayload.email);
 
-            // 1. Set Identity (Visuals only)
-            currentUser = {
-                id: responsePayload.sub,
-                name: responsePayload.name,
-                email: responsePayload.email,
-                picture: responsePayload.picture
-            };
-
-            // 2. Show "Verifying Access..." State
-            // We manually hide the login button and show a loading state in the user container
-            document.getElementById('login-container').style.display = 'none';
+            // 1. Show "Verifying Access..." State immediately
+            const loginContainer = document.getElementById('login-container');
             const userContainer = document.getElementById('user-container');
-            userContainer.style.display = 'flex';
 
-            // Inject temporary loading HTML
-            userContainer.innerHTML = `
+            if (loginContainer) loginContainer.style.display = 'none';
+            if (userContainer) {
+                userContainer.style.display = 'flex';
+                // Inject temporary loading state
+                userContainer.innerHTML = `
         <div class="user-info">
             <div style="display:flex; align-items:center; gap:10px; color:var(--primary-color);">
                 <i class="fa-solid fa-circle-notch fa-spin"></i> 
-                <span>Verifying access...</span>
+                <span>Verifying permissions...</span>
             </div>
         </div>`;
+            }
 
-            // 3. Request the Access Token (This triggers handleTokenResponse)
+            // 2. Ensure tokenClient is ready before requesting
             if (tokenClient) {
-                tokenClient.requestAccessToken({ prompt: '' });
+                // CRITICAL FIX: Pass the email from One Tap as a 'login_hint'.
+                // This ensures we get the Access Token for the SAME account that was clicked.
+                tokenClient.requestAccessToken({
+                    prompt: '',
+                    login_hint: responsePayload.email
+                });
+            } else {
+                console.error("Token Client not initialized yet. Restarting auth flow...");
+                // Fallback: reload page or show login button if GAPI wasn't ready
+                setTimeout(() => {
+                    if (tokenClient) {
+                        tokenClient.requestAccessToken({
+                            prompt: '',
+                            login_hint: responsePayload.email
+                        });
+                    } else {
+                        // Reset UI if it fails completely
+                        if (loginContainer) loginContainer.style.display = 'flex';
+                        if (userContainer) userContainer.style.display = 'none';
+                    }
+                }, 1000);
             }
         }
 
@@ -8428,21 +8442,25 @@ ${uidContent}
          * @param {Object} resp - The token response object.
          */
         function handleTokenResponse(resp) {
-            // 1. Handle Silent Failure (Permissions needed)
+            // 1. Handle Silent Failure / Missing Permissions
             if (resp.error || !resp.access_token) {
                 console.warn('Silent auth failed or consent missing:', resp);
 
-                // Revert to "Grant Permissions" button
+                // Revert to "Grant Permissions" button so user can manually click and approve scopes
                 const loginContainer = document.getElementById('login-container');
                 const userContainer = document.getElementById('user-container');
                 const loginBtn = document.getElementById('login-btn');
 
-                userContainer.style.display = 'none'; // Hide the "Verifying" text
-                loginContainer.style.display = 'flex'; // Show button
+                if (userContainer) userContainer.style.display = 'none'; // Hide "Verifying..."
+                if (loginContainer) loginContainer.style.display = 'flex'; // Show button
 
                 if (loginBtn) {
                     loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Grant Permissions';
-                    loginBtn.style.backgroundColor = "#fb8c00";
+                    loginBtn.style.backgroundColor = "#fb8c00"; // Orange color to indicate action needed
+                    // Remove old listeners to prevent duplicates (optional but safe)
+                    const newBtn = loginBtn.cloneNode(true);
+                    loginBtn.parentNode.replaceChild(newBtn, loginBtn);
+                    newBtn.addEventListener('click', handleAuthClick);
                 }
                 return;
             }
