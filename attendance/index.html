@@ -368,30 +368,51 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
             overflow: hidden;
 
-            /* Hidden State: CRITICAL - strictly 0 size */
+            /* Hidden State */
             max-height: 0;
             opacity: 0;
-            margin: 0;
-            padding: 0;
+            margin-bottom: 0;
+            /* Collapsed margin is 0 */
             border: 0;
             visibility: hidden;
 
+            /* Performance Optimization */
+            will-change: max-height, opacity, margin-bottom;
+
             /* Smooth Transition */
             transition:
-                max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-                margin 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                max-height 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+                /* Decelerate curve */
+                opacity 0.4s ease-in-out,
+                margin-bottom 0.4s cubic-bezier(0.25, 1, 0.5, 1),
                 visibility 0.4s;
         }
 
         .collapsible-module.expanded {
             /* Visible State */
             max-height: 2000px;
-            /* Big enough for content */
             opacity: 1;
             margin-bottom: 20px;
+            /* Expand to 20px */
             border: 1px solid #e0e0e0;
             visibility: visible;
+        }
+
+        .action-chip.fading-out {
+            animation: fadeOutAndSlide 0.5s ease-out forwards;
+        }
+
+
+        @keyframes fadeOutAndSlide {
+            0% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
         }
 
         .collapsible-module .module-content {
@@ -812,6 +833,10 @@
             to {
                 opacity: 1;
             }
+        }
+
+        .spin-animation {
+            animation: spin 1s linear infinite;
         }
 
         @keyframes spin {
@@ -3171,7 +3196,8 @@
         /* ===== Group layout ===== */
         .toggle-button-group {
             display: flex;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            /* Force single line */
             gap: 8px;
             width: 100%;
         }
@@ -3190,11 +3216,9 @@
 
         /* ===== Base button (global) ===== */
         .toggle-button {
-            /* Make them grow to fill width */
-            flex: 1 0 30%;
-            /* Start at 30% width but grow to fill */
-            min-width: 80px;
-            padding: 12px 10px;
+            flex: 1;
+            min-width: 20px;
+            padding: 12px 5px;
             text-align: center;
             justify-content: center;
             font-size: 0.9em;
@@ -3205,6 +3229,10 @@
             border-radius: 8px !important;
             cursor: pointer;
             user-select: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transform: scale(1);
             transition: background-color 0.2s, color 0.2s, border-color 0.2s;
         }
 
@@ -3222,7 +3250,7 @@
             color: #2c3a8e !important;
             border-color: var(--primary-color);
             box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
-            /* Keep inner shadow for active state */
+            transform: scale(0.96);
         }
 
         /* ===== Press (non-active): tactile push ===== */
@@ -3250,13 +3278,12 @@
 
         /* Active + hover: slight emphasis, no layout shift */
         .toggle-button.active:hover {
-            background-color: #e8eaf6;
-            /* unchanged tint */
-            color: #2c3a8e;
+            background-color: #e8eaf6 !important;
+            color: #2c3a8e !important;
             border-color: var(--primary-color);
-            /* stronger outline on hover */
             box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
-            transform: none;
+            transform: scale(0.96) !important;
+            /* KEEP it pressed */
         }
 
         .toggle-button[disabled],
@@ -5562,7 +5589,7 @@
                 return;
             }
 
-            bar.style.display = 'flex'; // Ensure flex layout
+            bar.style.display = 'flex';
 
             if (isLoading) {
                 bar.innerHTML = `<div class="action-chip loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Checking requests...</div>`;
@@ -5592,13 +5619,28 @@
         </div>`;
             }
 
-            // 3. "All Clean" State
+            // 3. "All Clean" State with Fade Out
             if (html === '') {
-                html = `<div class="action-chip clean"><i class="fa-solid fa-check-circle"></i> All caught up</div>`;
-                setTimeout(() => { if (bar.querySelector('.clean')) bar.innerHTML = ''; }, 3000);
-            }
+                // Only show if it wasn't already showing "All caught up" to prevent loop
+                if (!bar.querySelector('.clean')) {
+                    html = `<div class="action-chip clean"><i class="fa-solid fa-check-circle"></i> All caught up</div>`;
+                    bar.innerHTML = html;
 
-            bar.innerHTML = html;
+                    // Trigger Fade Out after 2.5 seconds
+                    setTimeout(() => {
+                        const cleanChip = bar.querySelector('.clean');
+                        if (cleanChip) {
+                            cleanChip.classList.add('fading-out'); // Add CSS animation class
+                            // Remove from DOM after animation finishes (0.5s)
+                            setTimeout(() => {
+                                if (bar.contains(cleanChip)) bar.removeChild(cleanChip);
+                            }, 500);
+                        }
+                    }, 2500);
+                }
+            } else {
+                bar.innerHTML = html;
+            }
         }
 
         function toggleAdminView(viewId, chipElement) {
@@ -10904,10 +10946,11 @@ ${uidContent}
 
             isSyncing = true;
 
-            // Show syncing indicator
+            const syncBtn = document.getElementById('sync-btn');
             const syncIcon = syncBtn.querySelector('i');
             if (syncIcon) {
-                syncIcon.classList.add('fa-spin');
+                // We use classList instead of className to preserve existing classes like fa-solid
+                syncIcon.classList.add('spin-animation');
             }
             syncBtn.disabled = true;
 
@@ -11057,7 +11100,7 @@ ${uidContent}
                 isSyncing = false;
 
                 if (syncIcon) {
-                    syncIcon.classList.remove('fa-spin');
+                    syncIcon.classList.remove('spin-animation');
                 }
 
                 syncBtn.disabled = !isSignedIn || !isOnline;
@@ -12151,48 +12194,55 @@ ${uidContent}
             group.originalLogs.forEach((log, index) => {
                 const timeObj = new Date(log.timestamp);
                 const formattedTime = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
-
-
-                // Check if the log is manual and add the class if it is.
                 const manualClass = (log.manual === true || log.manual === 'true') ? 'manual-timestamp-input' : '';
 
-
                 timestampFields += `
-<div class="timestamp-edit-group" data-log-id="${log.id}">
-    <div class="form-group">
-        <label for="timestamp-time-${index}">Hour ${index + 1}:</label>
-        <input type="time" id="timestamp-time-${index}" class="form-control timestamp-time ${manualClass}" value="${formattedTime}">
-        <button class="delete-time-btn btn-red btn-icon" data-index="${index}" title="Delete Timestamp">
-            <i class="fa-solid fa-trash"></i>
-        </button>
-    </div>
-</div>`;
+        <div class="timestamp-edit-group" data-log-id="${log.id}">
+            <div class="form-group">
+                <label class="dialog-label-fixed">Hour ${index + 1}</label>
+                <div class="input-with-icon" style="flex-grow:1;">
+                    <i class="fa-regular fa-clock"></i>
+                    <input type="time" class="form-control timestamp-time ${manualClass}" value="${formattedTime}">
+                </div>
+                <button class="delete-time-btn btn-red btn-icon" data-index="${index}" title="Delete Timestamp" style="margin-left:10px;">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        </div>`;
             });
 
             dialog.innerHTML = `
-        <h3 class="dialog-title">Edit Log Entry</h3>
-        <div class="dialog-content"><div class="form-group">
-            <label for="edit-name">Name:</label>
+    <h3 class="dialog-title">Edit Log Entry</h3>
+    <div class="dialog-content">
+        <div class="form-group">
+            <label class="dialog-label-fixed" for="edit-name">Name</label>
             <input type="text" id="edit-name" class="form-control" value="${escapeHtml(group.name)}" disabled>
         </div>
         <div class="form-group">
-            <label for="edit-uid">UID:</label>
+            <label class="dialog-label-fixed" for="edit-uid">UID</label>
             <input type="text" id="edit-uid" class="form-control" value="${escapeHtml(group.uid)}" disabled>
         </div>
         <div class="form-group">
-            <label for="edit-date">Date:</label>
+            <label class="dialog-label-fixed" for="edit-date">Date</label>
             <input type="date" id="edit-date" class="form-control" value="${formattedDate}">
         </div>
-        <hr style="border: none; border-top: 1px solid #eee; margin: 10px 0;">
-        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 5px; margin-bottom: 10px;">
-    <button id="add-new-time-btn" class="btn-green btn-sm">Add New Time</button>
-    <button id="delete-all-logs-btn" class="btn-red btn-sm">Delete All</button>
-</div>
-<div id="timestamp-container">${timestampFields}</div>
-</div><div class="dialog-actions">
-    <button id="cancel-edit-log-btn" class="btn-red"><i class="fa-solid fa-xmark"></i> Cancel</button>
-    <button id="save-edit-log-btn" class="btn-green"><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
-</div>`;
+        
+        <hr style="border: none; border-top: 1px solid #eee; margin: 15px 0;">
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <label style="font-weight:700; color:var(--primary-color);">Timestamps</label>
+            <div style="display:flex; gap:5px;">
+                <button id="add-new-time-btn" class="btn-green btn-sm"><i class="fa-solid fa-plus"></i> Time</button>
+                <button id="delete-all-logs-btn" class="btn-red btn-sm"><i class="fa-solid fa-trash"></i> All</button>
+            </div>
+        </div>
+        
+        <div id="timestamp-container">${timestampFields}</div>
+    </div>
+    <div class="dialog-actions">
+        <button id="cancel-edit-log-btn" class="btn-red"><i class="fa-solid fa-xmark"></i> Cancel</button>
+        <button id="save-edit-log-btn" class="btn-green"><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
+    </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
@@ -12220,9 +12270,12 @@ ${uidContent}
                 newTimestampGroup.dataset.isNew = "true"; // Mark it as a new, unsaved entry
                 newTimestampGroup.innerHTML = `
         <div class="form-group">
-            <label for="timestamp-time-${newIndex}">New Time:</label>
-            <input type="time" id="timestamp-time-${newIndex}" class="form-control timestamp-time manual-timestamp-input" value="${newTimeValue}">
-            <button class="delete-time-btn btn-red btn-icon" title="Remove">
+            <label class="dialog-label-fixed">New Time</label>
+            <div class="input-with-icon" style="flex-grow:1;">
+                <i class="fa-regular fa-clock"></i>
+                <input type="time" class="form-control timestamp-time manual-timestamp-input" value="${newTimeValue}">
+            </div>
+            <button class="delete-time-btn btn-red btn-icon" title="Remove" style="margin-left:10px;">
                 <i class="fa-solid fa-trash"></i>
             </button>
         </div>`;
@@ -13209,13 +13262,13 @@ ${uidContent}
                         eisBtn.setAttribute('aria-label', `Add attendance for ${group.date} to EIS`);
                         eisBtn.onclick = (e) => { e.stopPropagation(); showDirectEisExportDialog(dateForButton); };
                         buttonContainer.appendChild(eisBtn);
-                        const bulkAddBtn = document.createElement('button');
-                        bulkAddBtn.className = 'btn-green btn-sm';
-                        bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
-                        bulkAddBtn.title = 'Add +1 Hour to All Students on This Day';
-                        bulkAddBtn.setAttribute('aria-label', `Add a plus one hour log to all students on ${group.date}`);
-                        bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); };
-                        buttonContainer.appendChild(bulkAddBtn);
+                        /* const bulkAddBtn = document.createElement('button');
+                         bulkAddBtn.className = 'btn-green btn-sm';
+                         bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
+                         bulkAddBtn.title = 'Add +1 Hour to All Students on This Day';
+                         bulkAddBtn.setAttribute('aria-label', `Add a plus one hour log to all students on ${group.date}`);
+                         bulkAddBtn.onclick = (e) => { e.stopPropagation(); addPlusOneHourToDay(dateForButton); }; 
+                         buttonContainer.appendChild(bulkAddBtn); */
                         flexWrapper.appendChild(buttonContainer);
                         separatorCell.appendChild(flexWrapper);
                         separatorRow.appendChild(separatorCell);
