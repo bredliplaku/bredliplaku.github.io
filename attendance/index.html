@@ -1668,11 +1668,26 @@
 
         /* The "Stop Scanning" state */
         .big-scan-button.is-scanning {
-            background-color: var(--warning-color);
-            animation: glow-amber 2.5s ease-in-out infinite;
-            transform: scale(0.96);
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
-            font-variation-settings: "wdth" 110, "wght" 750, "slnt" -5;
+            background-color: var(--success-color);
+            /* Green */
+            /* Optional: Green Glow Animation */
+            box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+            animation: pulse-green 2s infinite;
+            transform: scale(0.98);
+        }
+
+        @keyframes pulse-green {
+            0% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+            }
         }
 
         /* Keep the click effect even when in the "Stop" state */
@@ -4234,7 +4249,7 @@
             font-size: 2.5em;
             font-weight: 800;
             font-variant-numeric: tabular-nums;
-            /* Prevents jumping numbers */
+            color: white;
         }
 
         /* Responsive adjustments */
@@ -8171,7 +8186,30 @@ ${uidContent}
             if (nfcSupported) {
                 startScanning();
             }
+
+            // Browsers block sound until the user taps the screen.
+            // We listen for the first touch, play the sound silently, then pause it immediately.
+            // This "tricks" the browser into thinking sound is authorized for the session.
+            const unlockAudio = () => {
+                [successSound, errorSound].forEach(audio => {
+                    // Attempt to play and immediately pause
+                    const promise = audio.play();
+                    if (promise !== undefined) {
+                        promise.then(() => {
+                            audio.pause();
+                            audio.currentTime = 0;
+                        }).catch(e => console.log("Audio unlock waiting..."));
+                    }
+                });
+                // Remove listeners once unlocked
+                document.body.removeEventListener('click', unlockAudio);
+                document.body.removeEventListener('touchstart', unlockAudio);
+            };
+
+            document.body.addEventListener('click', unlockAudio);
+            document.body.addEventListener('touchstart', unlockAudio);
         }
+
 
         function processPendingNotifications() {
             if (pendingNotifications.length > 0) {
@@ -13918,35 +13956,28 @@ ${uidContent}
          * Start NFC scanning.
          */
         async function startScanning() {
-            if (!nfcSupported) {
-                if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-                    showNotification('error', 'NFC Not Supported', 'NFC scanning is only supported in Chrome on Android.');
-                }
-                return;
-            }
+            if (!nfcSupported) return;
 
             try {
-                nfcAbortController = new AbortController();
-                nfcReader = new NDEFReader();
-                await nfcReader.scan({ signal: nfcAbortController.signal });
+                if (!nfcReader) {
+                    nfcAbortController = new AbortController();
+                    nfcReader = new NDEFReader();
+                    await nfcReader.scan({ signal: nfcAbortController.signal });
+
+                    nfcReader.addEventListener("reading", handleNfcReading);
+                    nfcReader.addEventListener("error", handleNfcError);
+                }
 
                 isScanning = true;
 
-                // UI Update logic
+                // UI Update
                 const scanBtn = document.getElementById('scan-button');
                 scanBtn.classList.add('is-scanning');
 
-                // Only show clock if signed in (Lecturer Mode)
-                if (isSignedIn) {
-                    updateScanClock();
-                    scanClockInterval = setInterval(updateScanClock, 1000);
-                } else {
-                    // Guest Mode UI
-                    scanBtn.innerHTML = '<div class="scan-time-display"><span class="scan-time-digits"><i class="fa-solid fa-wifi"></i></span><span class="scan-time-text">Ready to Scan</span></div>';
-                }
-
-                nfcReader.addEventListener("reading", handleNfcReading);
-                nfcReader.addEventListener("error", handleNfcError);
+                // FORCE CLOCK START
+                updateScanClock();
+                if (scanClockInterval) clearInterval(scanClockInterval);
+                scanClockInterval = setInterval(updateScanClock, 1000);
 
             } catch (error) {
                 handleScanningError(error);
@@ -13976,29 +14007,21 @@ ${uidContent}
 
             if (!scanBtn || !scanButtonsContainer) return;
 
-            // Default to hidden
-            scanBtn.style.display = 'none';
+            // Show button if supported
+            scanBtn.style.display = nfcSupported ? 'flex' : 'none';
+            scanButtonsContainer.style.display = nfcSupported ? 'flex' : 'none';
 
-            if (nfcSupported) {
-                // Show the button only for guests or admins
-                if (!isSignedIn || (isSignedIn && isAdmin)) {
-                    scanBtn.style.display = 'flex';
-                    if (isScanning) {
-                        scanBtn.classList.add('is-scanning'); // Use a class for the active state
-                        scanBtn.innerHTML = '<i class="fa-solid fa-circle-stop"></i><b>&nbsp;&nbsp; STOP SCANNING</b>';
-                    } else {
-                        scanBtn.classList.remove('is-scanning');
-                        scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i><b>&nbsp;&nbsp; START SCANNING</b>';
-                    }
-                }
+            if (isScanning) {
+                scanBtn.classList.add('is-scanning');
+                // updateScanClock() handles the text/time display.
+            } else {
+                scanBtn.classList.remove('is-scanning');
+
+                // --- UNIFIED IDLE STATE ---
+                // Always show "START SCANNING" regardless of login status
+                scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i><b>&nbsp;&nbsp; START SCANNING</b>';
             }
-
-            // Hide the parent container if the button itself is hidden
-            scanButtonsContainer.style.display = (scanBtn.style.display === 'none') ? 'none' : 'flex';
         }
-
-
-
 
         /**
  * Handle NFC reading.
@@ -14006,21 +14029,23 @@ ${uidContent}
  * SCENARIO B: If logged in, records attendance for the current course.
  */
         async function handleNfcReading({ serialNumber }) {
-            // 1. Always play success sound immediately for feedback
             playSound(true);
 
+            // Check if we are in "Lecturer Mode" (Offline/Signed Out but have active course data)
+            // If courseData exists for the current course, we assume the lecturer is scanning students.
+            const isLecturerMode = !isSignedIn && currentCourse && courseData[currentCourse];
+
             // ============================================================
-            // SCENARIO A: GUEST / LOGIN CHECK (User is NOT signed in)
+            // SCENARIO A: LOGIN CHECK / GUEST MODE
+            // Run this ONLY if we are NOT signed in AND NOT in Lecturer Mode
             // ============================================================
-            if (!isSignedIn) {
+            if (!isSignedIn && !isLecturerMode) {
                 const notSignedInMsg = document.getElementById('not-signed-in-message');
-                if (notSignedInMsg) {
-                    notSignedInMsg.innerHTML = `<div style="text-align:center;"><i class="fa-solid fa-circle-notch fa-spin" style="font-size:2em; color:var(--primary-color);"></i><p style="margin-top:10px;">Checking ID...</p></div>`;
-                }
+                if (notSignedInMsg) notSignedInMsg.innerHTML = `<div style="text-align:center;">Checking...</div>`;
 
                 try {
+                    const myDeviceId = getDeviceFingerprint();
                     // Call Backend to check if this UID belongs to a staff member
-                    // We use fetch directly here to bypass the token check in callWebApp
                     const response = await fetch(BRAIN_URL, {
                         method: 'POST',
                         redirect: 'follow',
@@ -14028,7 +14053,7 @@ ${uidContent}
                         body: JSON.stringify({
                             action: 'loginWithNfc',
                             uid: serialNumber,
-                            deviceId: getDeviceFingerprint(), // <--- The persistent variable
+                            deviceId: myDeviceId,
                             logsSpreadsheetId: LOGS_SPREADSHEET_ID
                         })
                     });
@@ -14036,71 +14061,54 @@ ${uidContent}
                     const data = await response.json();
 
                     if (data.result === 'success') {
-                        // === IT IS AN ADMIN: LOG THEM IN ===
+                        // === ADMIN LOGIN SUCCESS ===
                         const fakeGapiToken = { access_token: data.token };
-
-                        // Store the Kiosk token
                         localStorage.setItem('gapi_token', JSON.stringify(fakeGapiToken));
-
-                        // Set the token for future API calls
                         gapi.client.setToken(fakeGapiToken);
-
-                        // Set user data from backend response
                         currentUser = data.user;
-
-                        showNotification('success', 'Session Active', `Welcome, ${currentUser.name}. Session ends in 30m.`);
-
-                        // Boot the app (Load courses, databases, etc.)
+                        showNotification('success', 'Session Active', `Welcome, ${currentUser.name}`);
                         onSuccessfulAuth(false);
-
                     } else {
-                        // === IT IS A STUDENT: SHOW UID ===
-                        // Not an admin, just show the UID on the guest screen
+                        // === STUDENT CARD (GUEST MODE) ===
+                        // Just show the UID
                         lastScannedUID = serialNumber;
                         updateAuthUI();
                     }
 
                 } catch (err) {
-                    console.error("Login check failed", err);
-                    // Fallback to just showing UID on error so the user sees something happened
+                    // Network error implies we are offline, show UID
                     lastScannedUID = serialNumber;
                     updateAuthUI();
                 }
-                return; // Stop here, do not process attendance logic below
+                return; // Stop here
             }
 
             // ============================================================
-            // SCENARIO B: ATTENDANCE RECORDING (User IS signed in)
+            // SCENARIO B: ATTENDANCE RECORDING
+            // Runs if Signed In OR in Lecturer Mode
             // ============================================================
 
-            // 1. Prepare Data
             const primaryUid = uidToPrimaryUidMap[serialNumber];
             const finalUid = primaryUid || serialNumber;
-            lastScannedUID = serialNumber; // Crucial for UI updates
+            lastScannedUID = serialNumber;
 
-            // 2. Permission Check (Students cannot scan while logged in)
-            if (!isAdmin) {
-                // playSound(false); // Already played success sound, maybe play error sound?
-                // Note: You might want to play error sound here if strict
+            // Security Check: Only block if we are signed in but NOT an admin
+            // (If isLecturerMode is true, we bypass this because auth is offline)
+            if (isSignedIn && !isAdmin) {
                 showNotification('error', 'Action Not Allowed', 'Only administrators can record attendance.');
                 return;
             }
 
-            // 3. Cooldown Logic
-            if (cooldownUIDs.has(finalUid)) {
-                console.log(`UID ${finalUid} is on cooldown. Scan ignored.`);
-                return;
-            }
+            // Cooldown
+            if (cooldownUIDs.has(finalUid)) return;
             cooldownUIDs.add(finalUid);
             setTimeout(() => { cooldownUIDs.delete(finalUid) }, 2000);
 
-            // 4. Check if Course is Selected
             if (!currentCourse) {
                 showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
                 return;
             }
 
-            // 5. Create Log Entry
             const timestamp = new Date();
             let newLog = {
                 uid: serialNumber,
@@ -14108,19 +14116,19 @@ ${uidContent}
                 id: Date.now() + Math.random().toString(36).substring(2, 11),
                 manual: false
             };
-            newLog = touchLogForEdit(newLog, currentUser?.email);
 
-            // 6. Save to Data Structure
+            // In LecturerMode, currentUser might be null, which is fine
+            newLog = touchLogForEdit(newLog, currentUser?.email || 'Offline Lecturer');
+
             if (!courseData[currentCourse]) {
                 courseData[currentCourse] = { logs: [], tombstones: new Set() };
             }
             courseData[currentCourse].logs.unshift(newLog);
 
-            // 7. Persist and Update UI
             saveAndMarkChanges(currentCourse);
             updateUI();
 
-            // 8. Display Welcome Banner (Overlay or Inline)
+            // Trigger the Welcome Overlay logic (Same as before)
             const name = primaryUid ? databaseMap[primaryUid]?.name : 'Unknown';
             const isMobile = window.innerWidth <= 700;
 
@@ -14131,11 +14139,9 @@ ${uidContent}
                     nameEl.textContent = name;
                     document.body.style.overflow = 'hidden';
                     overlay.style.display = 'flex';
-                    void overlay.offsetWidth; // Force reflow
+                    void overlay.offsetWidth;
                     overlay.classList.add('visible');
-
                     if (window.overlayTimeout) clearTimeout(window.overlayTimeout);
-
                     const hideOverlay = () => {
                         overlay.classList.remove('visible');
                         window.overlayTimeout = setTimeout(() => {
@@ -14148,25 +14154,6 @@ ${uidContent}
                     window.overlayTimeout = setTimeout(hideOverlay, 2500);
                     overlay.onclick = hideOverlay;
                 }
-            } else {
-                let adminWelcomeMsg = document.getElementById('admin-welcome-message');
-                if (!adminWelcomeMsg) {
-                    adminWelcomeMsg = document.createElement('div');
-                    adminWelcomeMsg.id = 'admin-welcome-message';
-                    const courseButtonsContainer = document.getElementById('course-buttons-container');
-                    if (courseButtonsContainer && courseButtonsContainer.nextSibling) {
-                        courseButtonsContainer.parentNode.insertBefore(adminWelcomeMsg, courseButtonsContainer.nextSibling);
-                    }
-                }
-                adminWelcomeMsg.setAttribute('aria-live', 'polite');
-                adminWelcomeMsg.innerHTML = `<h3><i class="fa-solid fa-circle-check"></i> Welcome, <strong>${escapeHtml(name)}</strong>!</h3><p>Your attendance has been recorded.</p>`;
-                adminWelcomeMsg.style.animation = 'none';
-                void adminWelcomeMsg.offsetHeight;
-                adminWelcomeMsg.style.animation = 'fadeIn 0.5s ease-in-out';
-                setTimeout(() => {
-                    adminWelcomeMsg.style.animation = 'fadeOut 0.5s ease-in-out forwards';
-                    setTimeout(() => { if (adminWelcomeMsg) adminWelcomeMsg.remove(); }, 500);
-                }, 5000);
             }
         }
 
@@ -14216,16 +14203,21 @@ ${uidContent}
         function playSound(success) {
             if (!soundEnabled) return;
 
-            try {
-                if (success) {
-                    successSound.currentTime = 0;
-                    successSound.play().catch(e => console.error("Error playing sound:", e));
-                } else {
-                    errorSound.currentTime = 0;
-                    errorSound.play().catch(e => console.error("Error playing sound:", e));
-                }
-            } catch (e) {
-                console.error("Error playing sound:", e);
+            const sound = success ? successSound : errorSound;
+
+            // Reset to start (0) only if the audio metadata is loaded
+            if (sound.readyState >= 1) {
+                sound.currentTime = 0;
+            }
+
+            const playPromise = sound.play();
+
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    // This catches the "DOMException: The play() request was interrupted"
+                    // or "Autoplay is not allowed" errors so they don't stop the app.
+                    console.warn("Audio playback blocked (User needs to tap screen once):", error);
+                });
             }
         }
 
