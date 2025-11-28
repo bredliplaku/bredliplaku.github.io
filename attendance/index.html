@@ -5257,7 +5257,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzfO_QZ1R34mAAaeQrMfg1aHnmCgWxW6dS3OTxWdVr__NHn5aRDVUwjG7ngf2AkjQNpdA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbz2r9rJ6kjpYxn_E8ugCDVhe7E_f4h-0BFly9qSxiOiDt3DFI09GYmCY09AQgNT9dYsog/exec';
 
         // App state
         let courseData = {};
@@ -8099,6 +8099,10 @@ ${uidContent}
                     throw error;
                 }
             };
+            // Automatically start scanning if supported, regardless of login state.
+            if (nfcSupported) {
+                startScanning();
+            }
         }
 
         function processPendingNotifications() {
@@ -10016,6 +10020,18 @@ ${uidContent}
                 const data = await response.json();
 
                 if (data && data.result === 'error') {
+                    // --- NEW: HANDLE SESSION EXPIRY ---
+                    if (data.message === 'KIOSK_SESSION_EXPIRED') {
+                        console.warn("Kiosk session expired. Reloading.");
+                        localStorage.removeItem('gapi_token');
+
+                        // Optional: Show a quick alert before reloading
+                        document.body.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;"><h1>Session Expired</h1><p>Refreshing...</p></div>`;
+
+                        setTimeout(() => window.location.reload(), 1000);
+                        throw new Error("Session expired"); // Stop execution
+                    }
+
                     throw new Error(data.message || 'Script execution failed.');
                 }
                 return data;
@@ -13765,11 +13781,6 @@ ${uidContent}
          * Start NFC scanning.
          */
         async function startScanning() {
-            if ((!currentCourse || currentCourse === 'Default') && isSignedIn) {
-                showNotification('warning', 'No Course Selected', 'Please select a course before starting a scan.');
-                return;
-            }
-
             if (!nfcSupported) {
                 if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
                     showNotification('error', 'NFC Not Supported', 'NFC scanning is only supported in Chrome on Android.');
@@ -13778,41 +13789,30 @@ ${uidContent}
             }
 
             try {
-                // Create a new AbortController for this scanning session.
                 nfcAbortController = new AbortController();
-
-                // When the scan is aborted, log it to the console.
-                nfcAbortController.signal.onabort = () => {
-                    console.log("NFC scan aborted by user.");
-                };
-
                 nfcReader = new NDEFReader();
-
-                // Pass the signal to the scan() method. This allows us to cancel it later.
                 await nfcReader.scan({ signal: nfcAbortController.signal });
 
-                console.log("NFC Scan started successfully.");
                 isScanning = true;
 
+                // UI Update logic
                 const scanBtn = document.getElementById('scan-button');
-                scanBtn.classList.add('is-scanning'); // Apply style first
-                updateScanClock(); // Render immediately
-                scanClockInterval = setInterval(updateScanClock, 1000); // Update every second
+                scanBtn.classList.add('is-scanning');
 
-                const scanButtonsContainer = document.querySelector('.scan-buttons');
-                scanButtonsContainer.style.display = 'flex'; // Ensure visible
+                // Only show clock if signed in (Lecturer Mode)
+                if (isSignedIn) {
+                    updateScanClock();
+                    scanClockInterval = setInterval(updateScanClock, 1000);
+                } else {
+                    // Guest Mode UI
+                    scanBtn.innerHTML = '<div class="scan-time-display"><span class="scan-time-digits"><i class="fa-solid fa-wifi"></i></span><span class="scan-time-text">Ready to Scan</span></div>';
+                }
 
                 nfcReader.addEventListener("reading", handleNfcReading);
                 nfcReader.addEventListener("error", handleNfcError);
 
             } catch (error) {
-                // Check if the error was because we deliberately aborted the scan.
-                if (error.name === 'AbortError') {
-                    // This is expected when the user clicks "Stop". No need to show an error.
-                } else {
-                    // Handle other errors like permission denied.
-                    handleScanningError(error);
-                }
+                handleScanningError(error);
             }
         }
 
@@ -13862,54 +13862,105 @@ ${uidContent}
 
 
         /**
-         * Handle NFC reading with a per-UID cooldown to prevent rapid repeat scans.
-         * @param {Object} event - The NFC reading event.
-         */
+ * Handle NFC reading.
+ * SCENARIO A: If logged out, checks if the card belongs to an Admin to log them in.
+ * SCENARIO B: If logged in, records attendance for the current course.
+ */
         async function handleNfcReading({ serialNumber }) {
+            // 1. Always play success sound immediately for feedback
+            playSound(true);
+
+            // ============================================================
+            // SCENARIO A: GUEST / LOGIN CHECK (User is NOT signed in)
+            // ============================================================
+            if (!isSignedIn) {
+                const notSignedInMsg = document.getElementById('not-signed-in-message');
+                if (notSignedInMsg) {
+                    notSignedInMsg.innerHTML = `<div style="text-align:center;"><i class="fa-solid fa-circle-notch fa-spin" style="font-size:2em; color:var(--primary-color);"></i><p style="margin-top:10px;">Checking ID...</p></div>`;
+                }
+
+                try {
+                    // Call Backend to check if this UID belongs to a staff member
+                    // We use fetch directly here to bypass the token check in callWebApp
+                    const response = await fetch(BRAIN_URL, {
+                        method: 'POST',
+                        redirect: 'follow',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify({
+                            action: 'loginWithNfc',
+                            uid: serialNumber,
+                            logsSpreadsheetId: LOGS_SPREADSHEET_ID
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.result === 'success') {
+                        // === IT IS AN ADMIN: LOG THEM IN ===
+                        const fakeGapiToken = { access_token: data.token };
+
+                        // Store the Kiosk token
+                        localStorage.setItem('gapi_token', JSON.stringify(fakeGapiToken));
+
+                        // Set the token for future API calls
+                        gapi.client.setToken(fakeGapiToken);
+
+                        // Set user data from backend response
+                        currentUser = data.user;
+
+                        showNotification('success', 'Session Active', `Welcome, ${currentUser.name}. Session ends in 30m.`);
+
+                        // Boot the app (Load courses, databases, etc.)
+                        onSuccessfulAuth(false);
+
+                    } else {
+                        // === IT IS A STUDENT: SHOW UID ===
+                        // Not an admin, just show the UID on the guest screen
+                        lastScannedUID = serialNumber;
+                        updateAuthUI();
+                    }
+
+                } catch (err) {
+                    console.error("Login check failed", err);
+                    // Fallback to just showing UID on error so the user sees something happened
+                    lastScannedUID = serialNumber;
+                    updateAuthUI();
+                }
+                return; // Stop here, do not process attendance logic below
+            }
+
+            // ============================================================
+            // SCENARIO B: ATTENDANCE RECORDING (User IS signed in)
+            // ============================================================
+
+            // 1. Prepare Data
             const primaryUid = uidToPrimaryUidMap[serialNumber];
-            const finalUid = primaryUid || serialNumber; // Use primary if found, otherwise the scanned one
+            const finalUid = primaryUid || serialNumber;
+            lastScannedUID = serialNumber; // Crucial for UI updates
 
-            // Set lastScannedUID for all scan events, regardless of mode.
-            // This is crucial for the UI update.
-            lastScannedUID = serialNumber;
-
-            // Handle student users trying to scan
-            if (isSignedIn && !isAdmin) {
-                playSound(false);
+            // 2. Permission Check (Students cannot scan while logged in)
+            if (!isAdmin) {
+                // playSound(false); // Already played success sound, maybe play error sound?
+                // Note: You might want to play error sound here if strict
                 showNotification('error', 'Action Not Allowed', 'Only administrators can record attendance.');
                 return;
             }
 
-            // Cooldown logic to prevent rapid scans
+            // 3. Cooldown Logic
             if (cooldownUIDs.has(finalUid)) {
                 console.log(`UID ${finalUid} is on cooldown. Scan ignored.`);
                 return;
             }
             cooldownUIDs.add(finalUid);
-            setTimeout(() => {
-                cooldownUIDs.delete(finalUid)
-            }, 2000);
+            setTimeout(() => { cooldownUIDs.delete(finalUid) }, 2000);
 
-            // Play success sound immediately
-            playSound(true);
-
-            // Determine if we should save the log.
-            // We save if it's an admin, OR if it's a signed-out user in "Lecturer Mode".
-            const isLecturerMode = !isSignedIn && Object.keys(courseData).length > 0;
-            const shouldSaveLog = isAdmin || isLecturerMode;
-
-            if (!shouldSaveLog) {
-                // This is a true guest. Just update the UI to show their UID and stop.
-                updateAuthUI();
-                return;
-            }
-
-            // --- Log saving logic for Admins and Lecturer Mode ---
+            // 4. Check if Course is Selected
             if (!currentCourse) {
                 showNotification('warning', 'No Course Selected', 'Please select a course before scanning');
                 return;
             }
 
+            // 5. Create Log Entry
             const timestamp = new Date();
             let newLog = {
                 uid: serialNumber,
@@ -13917,17 +13968,19 @@ ${uidContent}
                 id: Date.now() + Math.random().toString(36).substring(2, 11),
                 manual: false
             };
-            newLog = touchLogForEdit(newLog, currentUser?.email); // currentUser will be null in lecturer mode, which is fine.
+            newLog = touchLogForEdit(newLog, currentUser?.email);
 
+            // 6. Save to Data Structure
             if (!courseData[currentCourse]) {
                 courseData[currentCourse] = { logs: [], tombstones: new Set() };
             }
             courseData[currentCourse].logs.unshift(newLog);
 
+            // 7. Persist and Update UI
             saveAndMarkChanges(currentCourse);
             updateUI();
 
-            // Display welcome banner/overlay
+            // 8. Display Welcome Banner (Overlay or Inline)
             const name = primaryUid ? databaseMap[primaryUid]?.name : 'Unknown';
             const isMobile = window.innerWidth <= 700;
 
@@ -13935,38 +13988,24 @@ ${uidContent}
                 const overlay = document.getElementById('scan-announcement-overlay');
                 const nameEl = document.getElementById('scan-announcement-name');
                 if (overlay && nameEl) {
-                    // 1. Update text immediately
                     nameEl.textContent = name;
-
-                    // 2. Show Overlay
                     document.body.style.overflow = 'hidden';
                     overlay.style.display = 'flex';
-
-                    // Force reflow to ensure transition plays if it was hiding
-                    void overlay.offsetWidth;
+                    void overlay.offsetWidth; // Force reflow
                     overlay.classList.add('visible');
 
-                    // 3. Clear existing timeout to prevent premature closing from previous scan
-                    if (window.overlayTimeout) {
-                        clearTimeout(window.overlayTimeout);
-                    }
+                    if (window.overlayTimeout) clearTimeout(window.overlayTimeout);
 
-                    // 4. Define Close Logic
                     const hideOverlay = () => {
                         overlay.classList.remove('visible');
                         window.overlayTimeout = setTimeout(() => {
-                            // Only hide display:none if we haven't started a new scan in the meantime
                             if (!overlay.classList.contains('visible')) {
                                 overlay.style.display = 'none';
                                 document.body.style.overflow = '';
                             }
-                        }, 150); // Match CSS transition time
+                        }, 150);
                     };
-
-                    // 5. Set new timeout
-                    window.overlayTimeout = setTimeout(hideOverlay, 2500); // reduced from 3000 for snappier feel
-
-                    // Re-attach click listener safely
+                    window.overlayTimeout = setTimeout(hideOverlay, 2500);
                     overlay.onclick = hideOverlay;
                 }
             } else {
@@ -13989,7 +14028,6 @@ ${uidContent}
                     setTimeout(() => { if (adminWelcomeMsg) adminWelcomeMsg.remove(); }, 500);
                 }, 5000);
             }
-
         }
 
 
