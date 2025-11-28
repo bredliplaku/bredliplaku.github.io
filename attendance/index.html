@@ -5278,6 +5278,7 @@
         let lastAvatarClickTime = 0;
         let guestCourse = null; // Track the course global admin is "visiting" but not officially admin of
         let scanClockInterval = null;
+        let globalNotificationCount = 0;
 
         // Auto syncing
         let autoSyncInterval = null;
@@ -9336,26 +9337,33 @@ ${uidContent}
         async function refreshAdminViews() {
             if (!isAdmin) return;
 
-            // 1. Show Loading State in the Bar
+            // 1. Show Loading State
             updateAdminDashboardBar(0, 0, true);
 
             try {
-                // 2. Fetch Data in Parallel
+                // 2. Fetch Data
                 const [registrations, absences] = await Promise.all([
                     callWebApp('getPendingRegistrations', {}, 'GET').catch(e => []),
                     callWebApp('getPendingAbsences', {}, 'GET').catch(e => [])
                 ]);
 
-                // 3. Update the Bar with Counts
-                updateAdminDashboardBar(absences.length, registrations.length, false);
+                // Only count registrations if the user is a Global Admin
+                const regCount = isGlobalAdmin ? registrations.length : 0;
+                const absCount = absences.length;
 
-                // 4. Render the Tables (Pass data directly to avoid re-fetching)
+                globalNotificationCount = regCount + absCount;
+                updatePageTitle(); // Trigger title update immediately
+
+                // 3. Update the Bar
+                updateAdminDashboardBar(absCount, registrations.length, false);
+
+                // 4. Render Tables
                 renderRegistrationsTable(registrations);
                 renderAbsencesTable(absences);
 
             } catch (e) {
                 console.error("Error refreshing admin views", e);
-                updateAdminDashboardBar(0, 0, false); // Reset on error
+                updateAdminDashboardBar(0, 0, false);
             }
         }
 
@@ -13599,12 +13607,18 @@ ${uidContent}
         }
 
         function updatePageTitle() {
+            let titlePrefix = '';
+
+            // Only show count for admins if there are pending items
+            if (isAdmin && globalNotificationCount > 0) {
+                titlePrefix = `(${globalNotificationCount}) `;
+            }
+
             if (currentCourse && currentCourse !== 'Default') {
-                // This uses the 'currentCourse' variable, which holds the course name
                 const titleName = currentCourse.replace(/_/g, ' ');
-                document.title = `${titleName} Attendance`;
+                document.title = `${titlePrefix}${titleName} Attendance`;
             } else {
-                document.title = 'Attendance';
+                document.title = `${titlePrefix}Attendance`;
             }
         }
 
