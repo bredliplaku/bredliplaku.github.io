@@ -5357,34 +5357,30 @@
 
             console.log("One Tap Auto-Sign-In Detected for:", responsePayload.email);
 
-            // 1. Show "Verifying Access..." State immediately
+            // 1. UI State: Hide Login Button, Show Spinner
             const loginContainer = document.getElementById('login-container');
-            const userContainer = document.getElementById('user-container');
+            const loginBtn = document.getElementById('login-btn');
 
-            if (loginContainer) loginContainer.style.display = 'none';
-            if (userContainer) {
-                userContainer.style.display = 'flex';
-                // Inject temporary loading state
-                userContainer.innerHTML = `
-        <div class="user-info">
-            <div style="display:flex; align-items:center; gap:10px; color:var(--primary-color);">
-                <i class="fa-solid fa-circle-notch fa-spin"></i> 
-                <span>Verifying permissions...</span>
-            </div>
-        </div>`;
+            // Disable the login button and change its content to a spinner
+            if (loginBtn) {
+                loginBtn.disabled = true;
+                loginBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Verifying...';
+                loginBtn.style.backgroundColor = "#ccc";
+                loginBtn.style.cursor = "wait";
             }
+            // Ensure login container is visible (to show the spinner button)
+            if (loginContainer) loginContainer.style.display = 'flex';
 
             // 2. Ensure tokenClient is ready before requesting
             if (tokenClient) {
-                // CRITICAL FIX: Pass the email from One Tap as a 'login_hint'.
-                // This ensures we get the Access Token for the SAME account that was clicked.
+                // Pass the email from One Tap as a 'login_hint'.
                 tokenClient.requestAccessToken({
                     prompt: '',
                     login_hint: responsePayload.email
                 });
             } else {
-                console.error("Token Client not initialized yet. Restarting auth flow...");
-                // Fallback: reload page or show login button if GAPI wasn't ready
+                console.error("Token Client not initialized yet.");
+                // Fallback: reset button if GAPI wasn't ready
                 setTimeout(() => {
                     if (tokenClient) {
                         tokenClient.requestAccessToken({
@@ -5392,9 +5388,12 @@
                             login_hint: responsePayload.email
                         });
                     } else {
-                        // Reset UI if it fails completely
-                        if (loginContainer) loginContainer.style.display = 'flex';
-                        if (userContainer) userContainer.style.display = 'none';
+                        if (loginBtn) {
+                            loginBtn.disabled = false;
+                            loginBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Sign in';
+                            loginBtn.style.backgroundColor = "";
+                            loginBtn.style.cursor = "pointer";
+                        }
                     }
                 }, 1000);
             }
@@ -8555,9 +8554,6 @@ ${uidContent}
                 // Update user info in UI
                 userName.textContent = currentUser.name;
                 userAvatar.src = currentUser.picture;
-
-                // Check if user is admin
-                isAdmin = ADMIN_EMAILS.includes(currentUser.email);
 
                 return currentUser;
             } catch (error) {
