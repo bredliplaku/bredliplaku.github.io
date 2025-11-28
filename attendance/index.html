@@ -5257,7 +5257,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbynca6lzdWqWYB28ZeEFIpftyVka2GZU9bJwul_ALAtCILMsuPGPvYcOtTg-oRJFtJ9Mw/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzyUSgfC_7ynVKsypJOajxu5RFdqW7l7HQgHeO45sSgwpQzEqPnXNSlzvhs5s6JlB3-PA/exec';
 
         // App state
         let courseData = {};
@@ -5339,6 +5339,18 @@
                 setTimeout(showMainContent, 100); // Short delay for rendering
             } else {
             }
+        }
+
+        /**
+ * Helper to get/create the persistent Device ID
+ */
+        function getDeviceFingerprint() {
+            let deviceId = localStorage.getItem('attendance_device_id');
+            if (!deviceId) {
+                deviceId = crypto.randomUUID();
+                localStorage.setItem('attendance_device_id', deviceId);
+            }
+            return deviceId;
         }
 
         // Helper to decode the Google ID Token
@@ -6095,162 +6107,218 @@
 
         function showGlobalSettingsDialog() {
             document.body.style.overflow = 'hidden';
-
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
-            dialog.style.maxWidth = '900px';
-            dialog.style.height = '85vh';
+            dialog.style.maxWidth = '1000px'; // Wider for tables
+            dialog.style.height = '90vh';
             dialog.setAttribute('role', 'dialog');
 
-            // --- Variables ---
-            let avatarClickCount = 0;
-            let lastAvatarClickTime = 0;
-
-            // --- Header ---
-            const headerHtml = `
-        <div class="settings-modal-header">
-            <div style="display:flex; align-items:center; gap:15px;">
-                <div style="position:relative; cursor:default; width:48px; height:48px;" id="admin-profile-pic-container">
-                    <img id="settings-avatar-img" src="${currentUser.picture}" style="width:100%; height:100%; border-radius:50%; border:2px solid var(--card-background); box-shadow:0 2px 8px rgba(0,0,0,0.1); object-fit:cover;">
-                </div>
-                <div>
-                    <h3 style="margin:0; font-size:1.3em;">Global Settings</h3>
-                    <div style="font-size:0.85em; opacity:0.7;">${escapeHtml(currentUser.name)}</div>
-                </div>
-            </div>
-            <button id="close-settings-btn" class="btn-icon" style="background:transparent; color:var(--text-color); font-size:1.2em;"><i class="fa-solid fa-xmark"></i></button>
-        </div>`;
-
-            // --- Controls ---
-            const controlsHtml = `
-        <div class="settings-controls-bar">
-            <div style="position:relative; flex-grow:1;">
-                <i class="fa-solid fa-search" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#999;"></i>
-                <input type="text" id="course-search-input" class="settings-search-input" style="padding-left:35px;" placeholder="Search courses...">
-            </div>
-            <button id="add-new-course-btn" class="btn-green" style="padding:0 15px; white-space:nowrap; display:flex; align-items:center; justify-content:center; gap:5px;">
-                <i class="fa-solid fa-plus"></i> <span>New Course</span>
-            </button>
-        </div>`;
-
+            // --- HTML STRUCTURE ---
             dialog.innerHTML = `
-        ${headerHtml}
-        <div class="dialog-content" style="overflow-y:auto;">
-            ${controlsHtml}
-            <div id="settings-course-grid" class="modern-course-grid">
-                <div class="dialog-loader-container"><div class="loading-spinner"></div></div>
+    <div class="settings-modal-header">
+        <div style="display:flex; align-items:center; gap:15px;">
+            <h3 style="margin:0; font-size:1.3em;">Global Admin Settings</h3>
+        </div>
+        <button id="close-settings-btn" class="btn-icon" style="background:transparent; color:var(--text-color);"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    
+    <div style="display:flex; gap:10px; padding:15px 24px; border-bottom:1px solid #eee; background:var(--background-color);">
+        <button class="settings-tab-btn active" data-target="sect-courses"><i class="fa-solid fa-book"></i> Courses</button>
+        <button class="settings-tab-btn" data-target="sect-staff"><i class="fa-solid fa-id-badge"></i> Staff Keys</button>
+        <button class="settings-tab-btn" data-target="sect-devices"><i class="fa-solid fa-laptop-medical"></i> Trusted Devices</button>
+    </div>
+
+    <div class="dialog-content" style="padding:0;">
+        <div id="settings-loader" style="padding:50px; text-align:center;"><div class="loading-spinner"></div></div>
+        
+        <div id="sect-courses" class="settings-section" style="padding:20px;">
+            <div class="settings-controls-bar">
+                <input type="text" id="course-search-input" class="settings-search-input" placeholder="Search courses...">
+                <button id="add-new-course-btn" class="btn-green btn-sm"><i class="fa-solid fa-plus"></i> New Course</button>
             </div>
-        </div>`;
+            <div id="settings-course-grid" class="modern-course-grid"></div>
+        </div>
+
+        <div id="sect-staff" class="settings-section" style="display:none; padding:20px;">
+            <div class="settings-controls-bar">
+                <div style="flex-grow:1; font-weight:bold;">Manage NFC Login Access</div>
+                <button id="add-staff-btn" class="btn-green btn-sm"><i class="fa-solid fa-user-plus"></i> Add Staff</button>
+            </div>
+            <div class="table-container">
+                <table class="database-table">
+                    <thead><tr><th>Name</th><th>UID (Card Serial)</th><th>Email</th><th>Action</th></tr></thead>
+                    <tbody id="staff-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="sect-devices" class="settings-section" style="display:none; padding:20px;">
+            <div style="background:#e3f2fd; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <strong><i class="fa-solid fa-circle-info"></i> Current Device</strong><br>
+                    <small style="opacity:0.8;">ID: ${getDeviceFingerprint()}</small>
+                </div>
+                <button id="register-this-device-btn" class="btn-blue"><i class="fa-solid fa-fingerprint"></i> Register This Device</button>
+            </div>
+            <div class="table-container">
+                <table class="database-table">
+                    <thead><tr><th>Device Name</th><th>Registered By</th><th>Date</th><th>Action</th></tr></thead>
+                    <tbody id="devices-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Render Function ---
-            const renderCourses = (filterText = '') => {
-                const gridContainer = dialog.querySelector('#settings-course-grid');
-                gridContainer.innerHTML = '';
+            // --- STYLE FOR TABS (Inject temporarily) ---
+            const style = document.createElement('style');
+            style.innerHTML = `
+        .settings-tab-btn { background:none; border:none; padding:8px 12px; cursor:pointer; font-weight:600; opacity:0.6; border-bottom:3px solid transparent; }
+        .settings-tab-btn.active { opacity:1; border-bottom-color:var(--primary-color); color:var(--primary-color); }
+        .settings-tab-btn:hover { background:rgba(0,0,0,0.05); border-radius:4px 4px 0 0; }
+    `;
+            document.head.appendChild(style);
 
-                // 1. Prepare Search Terms
-                const lowerFilter = filterText.toLowerCase().trim();
-                const strippedFilter = lowerFilter.replace(/\s+/g, ''); // "ce 341" -> "ce341"
+            // --- LOGIC ---
 
-                const courses = Object.entries(courseInfoMap).map(([name, data]) => ({
-                    name,
-                    ...data,
-                    category: (data.defaultCategory || 'theory').toLowerCase()
-                }));
-
-                // 2. Improved Search Logic
-                const filtered = courses.filter(c => {
-                    const nameLow = c.name.toLowerCase();
-                    const nameAsText = nameLow.replace(/_/g, ' '); // "ce_101" -> "ce 101"
-                    const nameStripped = nameLow.replace(/_/g, ''); // "ce_101" -> "ce101"
-
-                    return nameLow.includes(lowerFilter) ||       // Exact match
-                        nameAsText.includes(lowerFilter) ||    // Match "CE 101"
-                        nameStripped.includes(strippedFilter) || // Match "CE101"
-                        (c.eisId && String(c.eisId).includes(lowerFilter));
+            const searchInput = document.getElementById('course-search-input');
+            if (searchInput) {
+                searchInput.addEventListener('input', (e) => {
+                    // "courseInfoMap" is the global variable storing the course data
+                    renderCoursesInSettings(courseInfoMap, e.target.value);
                 });
+            }
 
-                filtered.sort((a, b) => a.name.localeCompare(b.name));
+            // 1. Tab Switching
+            dialog.querySelectorAll('.settings-tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    dialog.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+                    dialog.querySelectorAll('.settings-section').forEach(s => s.style.display = 'none');
+                    btn.classList.add('active');
+                    document.getElementById(btn.dataset.target).style.display = 'block';
+                });
+            });
 
-                if (filtered.length === 0) {
-                    gridContainer.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:20px; opacity:0.6;">No courses found.</div>`;
-                    return;
+            // 2. Load Data
+            const loadSettingsData = async () => {
+                try {
+                    const [courseInfo, globalData] = await Promise.all([
+                        callWebApp('getCourseInfo', {}, 'POST'), // Reuse existing
+                        callWebApp('getGlobalSettingsData', {}, 'POST') // New backend function
+                    ]);
+
+                    document.getElementById('settings-loader').style.display = 'none';
+                    courseInfoMap = courseInfo; // Update global cache
+
+                    // Render Courses (Using your existing render logic logic simplified)
+                    renderCoursesInSettings(courseInfo);
+
+                    // Render Staff
+                    const staffBody = document.getElementById('staff-tbody');
+                    staffBody.innerHTML = globalData.staff.map(s => `
+                <tr>
+                    <td>${escapeHtml(s.name)}</td>
+                    <td style="font-family:monospace;">${escapeHtml(s.uid)}</td>
+                    <td>${escapeHtml(s.email)}</td>
+                    <td><button class="btn-red btn-icon btn-sm" onclick="deleteStaffKey(${s.rowIndex})"><i class="fa-solid fa-trash"></i></button></td>
+                </tr>
+            `).join('');
+
+                    // Render Devices
+                    const deviceBody = document.getElementById('devices-tbody');
+                    const myId = getDeviceFingerprint();
+                    const isRegistered = globalData.devices.some(d => d.id === myId);
+
+                    // Update Register Button State
+                    const regBtn = document.getElementById('register-this-device-btn');
+                    if (isRegistered) {
+                        regBtn.disabled = true;
+                        regBtn.innerHTML = '<i class="fa-solid fa-check"></i> This Device is Trusted';
+                        regBtn.classList.replace('btn-blue', 'btn-green');
+                    }
+
+                    deviceBody.innerHTML = globalData.devices.map(d => `
+                <tr style="${d.id === myId ? 'background:rgba(76, 175, 80, 0.1);' : ''}">
+                    <td><strong>${escapeHtml(d.name)}</strong>${d.id === myId ? ' (This)' : ''}</td>
+                    <td>${escapeHtml(d.owner)}</td>
+                    <td>${escapeHtml(d.date)}</td>
+                    <td><button class="btn-red btn-icon btn-sm" onclick="deleteTrustedDevice(${d.rowIndex})"><i class="fa-solid fa-trash"></i></button></td>
+                </tr>
+            `).join('');
+
+                } catch (e) {
+                    console.error(e);
+                    showNotification('error', 'Error', 'Failed to load settings.');
                 }
+            };
 
-                filtered.forEach(course => {
-                    let stripClass = 'strip-default';
-                    if (course.category.includes('theory')) stripClass = 'strip-theory';
-                    else if (course.category.includes('lab')) stripClass = 'strip-lab';
-                    else if (course.category.includes('practice')) stripClass = 'strip-practice';
+            loadSettingsData();
 
-                    const rawAdmins = course.adminEmails || '';
-                    const adminCount = rawAdmins.toString().split(',').map(e => e.trim()).filter(Boolean).length;
-
-                    const card = document.createElement('div');
-                    card.className = 'modern-course-card';
-                    card.innerHTML = `
-                <div class="card-color-strip ${stripClass}"></div>
-                <div class="card-body">
-                    <div class="card-title-row">
-                        <div class="card-course-name">${escapeHtml(course.name.replace(/_/g, ' '))}</div>
-                        ${course.eisId ? `<span class="card-eis-badge">#${escapeHtml(course.eisId)}</span>` : ''}
-                    </div>
-                    <div class="card-meta-row">
-                        <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${escapeHtml(course.defaultHours || 0)}h</div>
-                        <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${course.category}</div>
-                    </div>
-                </div>
-                <div class="card-footer">
-                    <span class="admin-pill"><i class="fa-solid fa-user-shield"></i> ${adminCount}</span>
-                    <i class="fa-solid fa-pen-to-square"></i>
-                </div>`;
-                    card.onclick = () => showCourseEditorDialog(course.name, courseInfoMap[course.name]);
-                    gridContainer.appendChild(card);
+            // 3. Register Device Action
+            document.getElementById('register-this-device-btn').onclick = () => {
+                showPromptDialog({
+                    title: "Name this Device",
+                    message: "e.g., 'Classroom A-12 Tablet' or 'My Laptop'",
+                    onConfirm: async (name) => {
+                        if (!name) return;
+                        try {
+                            await callWebApp('registerDevice_Admin', {
+                                deviceName: name,
+                                deviceId: getDeviceFingerprint()
+                            }, 'POST');
+                            showNotification('success', 'Registered', 'Device is now trusted.');
+                            loadSettingsData(); // Refresh list
+                        } catch (e) { showNotification('error', 'Error', e.message); }
+                    }
                 });
             };
 
-            const searchInput = dialog.querySelector('#course-search-input');
-            searchInput.addEventListener('input', (e) => renderCourses(e.target.value));
-            dialog.querySelector('#add-new-course-btn').onclick = () => showCourseEditorDialog(null);
+            // 4. Add Staff Action
+            document.getElementById('add-staff-btn').onclick = () => {
+                // Simple prompt flow or custom dialog. Keeping it simple here.
+                // You could reuse your showAddEntryDialog style code here for better UX.
+                const name = prompt("Staff Name:");
+                if (!name) return;
+                const email = prompt("Staff Email:");
+                const uid = prompt("Staff UID (Scan card elsewhere to get code):");
 
-            const close = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = '';
-            };
-            dialog.querySelector('#close-settings-btn').onclick = close;
-            dialogBackdrop.addEventListener('click', (e) => { if (e.target === dialogBackdrop) close(); });
-
-            // --- Easter Egg (Bomb) Logic ---
-            const profilePicContainer = dialog.querySelector('#admin-profile-pic-container');
-            const profileImg = dialog.querySelector('#settings-avatar-img');
-
-            profilePicContainer.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const now = Date.now();
-                if (now - lastAvatarClickTime > 1000) avatarClickCount = 0;
-                lastAvatarClickTime = now;
-                avatarClickCount++;
-
-                if (avatarClickCount === 5) {
-                    // Swap image to Bomb Icon
-                    profilePicContainer.innerHTML = `<div style="width:100%; height:100%; border-radius:50%; background:#f44336; display:flex; align-items:center; justify-content:center; color:white; font-size:1.5em;"><i class="fa-solid fa-bomb"></i></div>`;
-
-                    // Add click listener to the bomb
-                    profilePicContainer.onclick = () => {
-                        if (confirm("Clear local cache and reload?")) clearAllAppData();
-                    };
-                    avatarClickCount = 0;
+                if (name && email && uid) {
+                    callWebApp('manageStaff_Admin', { actionType: 'add', name, email, uid }, 'POST')
+                        .then(() => { showNotification('success', 'Added', 'Staff added.'); loadSettingsData(); });
                 }
-            });
+            };
 
-            fetchCourseInfo().then(() => {
-                renderCourses();
-            });
+            // 5. Close
+            const close = () => document.body.removeChild(dialogBackdrop);
+            document.getElementById('close-settings-btn').onclick = close;
         }
+
+        // Global helpers for the onclick events inside the HTML strings
+        window.deleteStaffKey = (rowIndex) => {
+            if (confirm("Revoke this staff key?")) {
+                callWebApp('manageStaff_Admin', { actionType: 'delete', rowIndex }, 'POST')
+                    .then(() => {
+                        document.querySelector('.dialog').remove();
+                        document.querySelector('.dialog-backdrop').remove();
+                        showGlobalSettingsDialog(); // Reload dialog
+                    });
+            }
+        };
+
+        window.deleteTrustedDevice = (rowIndex) => {
+            if (confirm("Untrust this device?")) {
+                callWebApp('deleteDevice_Admin', { rowIndex }, 'POST')
+                    .then(() => {
+                        document.querySelector('.dialog').remove();
+                        document.querySelector('.dialog-backdrop').remove();
+                        showGlobalSettingsDialog(); // Reload dialog
+                    });
+            }
+        };
 
         // --- 2. Course Editor ---
         function showCourseEditorDialog(courseName, courseData = null) {
@@ -13698,6 +13766,89 @@ ${uidContent}
         }
 
         /**
+ * Renders the course grid within the Global Settings dialog.
+ * Handles styling, admin counts, and search filtering.
+ * @param {Object} courseInfo - The dictionary of course metadata.
+ * @param {string} [filterText=''] - Optional text to filter the list.
+ */
+        function renderCoursesInSettings(courseInfo, filterText = '') {
+            const gridContainer = document.getElementById('settings-course-grid');
+            if (!gridContainer) return;
+
+            gridContainer.innerHTML = '';
+
+            // 1. Prepare Search Terms
+            const lowerFilter = filterText.toLowerCase().trim();
+            const strippedFilter = lowerFilter.replace(/\s+/g, ''); // e.g., "ce 202" -> "ce202"
+
+            // 2. Filter and Sort Data
+            const filteredCourses = Object.entries(courseInfo)
+                .filter(([name, data]) => {
+                    if (!lowerFilter) return true; // Show all if no filter
+
+                    const nameLow = name.toLowerCase();
+                    const nameAsText = nameLow.replace(/_/g, ' ');   // "ce_202" -> "ce 202"
+                    const nameStripped = nameLow.replace(/_/g, '');  // "ce_202" -> "ce202"
+                    const eisId = String(data.eisId || '');
+
+                    return nameLow.includes(lowerFilter) ||
+                        nameAsText.includes(lowerFilter) ||
+                        nameStripped.includes(strippedFilter) ||
+                        eisId.includes(lowerFilter);
+                })
+                .sort((a, b) => a[0].localeCompare(b[0])); // Sort Alphabetically (A-Z)
+
+            // 3. Handle Empty State
+            if (filteredCourses.length === 0) {
+                gridContainer.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:30px; opacity:0.6; font-style:italic;">No courses found matching "${escapeHtml(filterText)}".</div>`;
+                return;
+            }
+
+            // 4. Render Cards
+            filteredCourses.forEach(([courseName, data]) => {
+                // Determine Color Strip based on Category
+                const category = (data.defaultCategory || 'theory').toLowerCase();
+                let stripClass = 'strip-default';
+                if (category.includes('theory')) stripClass = 'strip-theory';
+                else if (category.includes('lab')) stripClass = 'strip-lab';
+                else if (category.includes('practice')) stripClass = 'strip-practice';
+
+                // Calculate Admin Count
+                const rawAdmins = data.adminEmails || '';
+                const adminCount = rawAdmins.toString().split(',').map(e => e.trim()).filter(Boolean).length;
+
+                // Build HTML
+                const card = document.createElement('div');
+                card.className = 'modern-course-card';
+                card.innerHTML = `
+            <div class="card-color-strip ${stripClass}"></div>
+            <div class="card-body">
+                <div class="card-title-row">
+                    <div class="card-course-name">${escapeHtml(courseName.replace(/_/g, ' '))}</div>
+                    ${data.eisId ? `<span class="card-eis-badge">#${escapeHtml(data.eisId)}</span>` : ''}
+                </div>
+                <div class="card-meta-row">
+                    <div class="card-meta-item"><i class="fa-regular fa-clock"></i> ${escapeHtml(data.defaultHours || 0)}h</div>
+                    <div class="card-meta-item" style="text-transform:capitalize;"><i class="fa-solid fa-tag"></i> ${escapeHtml(category)}</div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <span class="admin-pill"><i class="fa-solid fa-user-shield"></i> ${adminCount} Admin${adminCount !== 1 ? 's' : ''}</span>
+                <i class="fa-solid fa-pen-to-square"></i>
+            </div>`;
+
+                // Attach Click Listener -> Opens Editor
+                card.onclick = () => {
+                    // We do NOT close the settings dialog here, so the user can edit 
+                    // and return to the list smoothly. The editor opens on top.
+                    showCourseEditorDialog(courseName, data);
+                };
+
+                gridContainer.appendChild(card);
+            });
+        }
+
+        /**
          * Update database status indicator.
          */
         function updateDatabaseStatus() {
@@ -13861,6 +14012,8 @@ ${uidContent}
         }
 
 
+
+
         /**
  * Handle NFC reading.
  * SCENARIO A: If logged out, checks if the card belongs to an Admin to log them in.
@@ -13889,6 +14042,7 @@ ${uidContent}
                         body: JSON.stringify({
                             action: 'loginWithNfc',
                             uid: serialNumber,
+                            deviceId: getDeviceFingerprint(), // <--- The persistent variable
                             logsSpreadsheetId: LOGS_SPREADSHEET_ID
                         })
                     });
