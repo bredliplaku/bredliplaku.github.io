@@ -5353,47 +5353,26 @@
         }
 
         function handleOneTapResponse(response) {
-            // 1. Decode the token to get user info
+            // 1. Decode Identity
             const responsePayload = parseJwt(response.credential);
 
-            console.log("One Tap Sign-In Successful");
-            console.log('ID: ' + responsePayload.sub);
-            console.log('Name: ' + responsePayload.name);
-            console.log('Email: ' + responsePayload.email);
-
-            // 2. Set the current user object
+            // 2. Set User State immediately (Visual Sign-in)
             currentUser = {
                 id: responsePayload.sub,
                 name: responsePayload.name,
                 email: responsePayload.email,
                 picture: responsePayload.picture
             };
-
-            // 3. Mark as signed in
             isSignedIn = true;
+            updateAuthUI(); // Updates header to show Avatar immediately
 
-            // 4. Update UI immediately (Shows avatar, name, etc.)
-            updateAuthUI();
-
-            // 5. CRITICAL: Request Spreadsheet Access Token Silently
-            // One Tap doesn't give us sheet access. We ask for it now.
-            // prompt: '' tries to do it without a popup if they approved before.
+            // 3. Try to get Sheet Access Silently
+            // We use a try/catch style logic here by relying on the callback
             if (tokenClient) {
+                // prompt: '' means "Do not show popup". 
+                // If consent exists, it succeeds. If not, it fails silently.
                 tokenClient.requestAccessToken({ prompt: '' });
             }
-
-            // 6. Check Admin Status immediately
-            checkAdminStatus().then(status => {
-                isAdmin = status.isAdmin;
-                isGlobalAdmin = status.isGlobalAdmin;
-                adminCourses = status.courses;
-                updateAuthUI(); // Update again with admin permissions
-
-                // Load initial data
-                populateCourseButtons();
-                if (isAdmin) refreshAdminViews();
-                else loadAllCourseLogsForStudent();
-            });
         }
 
         // --- Absence History Logic ---
@@ -8180,55 +8159,38 @@ ${uidContent}
                 await gapiLoaded();
                 await gisLoaded();
 
-                // 1. Initialize GAPI Client (Keep your existing code)
                 await gapi.client.init({});
 
-                // 2. Initialize Token Client (Keep your existing code)
                 tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: CLIENT_ID,
                     scope: SCOPES,
-                    callback: handleTokenResponse,
+                    callback: handleTokenResponse, // This now handles the silent fail gracefully
                 });
 
-                // --- NEW CODE STARTS HERE ---
+                // Try to restore session from LocalStorage first
+                const restored = await attemptTokenRestore();
 
-                // 3. Initialize Google One Tap
-                // This makes the "Reddit-style" popup appear
-                google.accounts.id.initialize({
-                    client_id: CLIENT_ID,
-                    callback: handleOneTapResponse, // The function we created in Step 2
-                    auto_select: true, // This enables "Automatic" sign-in if they visited before
-                    cancel_on_tap_outside: false // Optional: keeps popup open if they click background
-                });
+                if (restored) {
+                    onSuccessfulAuth(true);
+                } else {
+                    // Only show One Tap if we are NOT signed in
+                    google.accounts.id.initialize({
+                        client_id: CLIENT_ID,
+                        callback: handleOneTapResponse,
+                        auto_select: true, // Auto-signin returning users
+                        cancel_on_tap_outside: false
+                    });
 
-                // 4. Show the Prompt
-                // Only show if we aren't already signed in
-                if (!localStorage.getItem('gapi_token')) {
                     google.accounts.id.prompt((notification) => {
-                        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-                            console.log("One Tap skipped or suppressed:", notification.getNotDisplayedReason());
+                        if (notification.isNotDisplayed()) {
+                            console.log("One Tap not displayed:", notification.getNotDisplayedReason());
                         }
                     });
-                }
-                // --- NEW CODE ENDS HERE ---
 
-                // Try to restore session (Keep your existing code)
-                attemptTokenRestore().then(restored => {
-                    if (restored) {
-                        onSuccessfulAuth(true);
-                    } else {
-                        isInitializing = false;
-                        showMainContent();
-                        updateAuthUI();
-                        populateCourseButtons();
-                    }
-                }).catch(err => {
-                    console.error('Token restore or initial data load failed:', err);
-                    console.log('Operating in signed-out mode.');
                     isInitializing = false;
                     showMainContent();
                     updateAuthUI();
-                });
+                }
 
             } catch (error) {
                 console.error('initGoogleApi error:', error);
@@ -8448,51 +8410,53 @@ ${uidContent}
          * @param {Object} resp - The token response object.
          */
         function handleTokenResponse(resp) {
+            // --- 1. Handle Errors (Silent Failure) ---
+            if (resp.error || !resp.access_token) {
+                console.warn('Silent auth failed or consent missing:', resp);
 
-            if (resp.error) {
-                console.error('Token response error:', resp.error);
-                showNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
+                // STOP THE LOOP:
+                // Do NOT log out. Do NOT refresh.
+                // Instead, change the "Sign In" button to "Authorize"
+
+                const loginBtn = document.getElementById('login-btn');
+                if (loginBtn) {
+                    loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Grant Permissions';
+                    loginBtn.title = "We need permission to access the Attendance Sheet";
+                    loginBtn.style.backgroundColor = "#fb8c00"; // Orange to indicate action needed
+                    // Ensure the button is visible even though 'isSignedIn' might be true locally
+                    document.getElementById('login-container').style.display = 'flex';
+                    document.getElementById('user-container').style.display = 'none'; // Hide user bar until fully auth'd
+                }
                 return;
             }
 
-            if (!resp.access_token) {
-                console.error('No access token in response');
-                showNotification('error', 'Auth Error', 'Did not receive access token');
-                return;
-            }
-
+            // --- 2. Success! (We have the token) ---
             try {
+                // Save token
                 localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
                 isSignedIn = true;
 
-                fetchUserInfo().then(async () => {  // ← Added "async"
+                // Fetch User Info (Double check)
+                fetchUserInfo().then(async () => {
                     const adminStatus = await checkAdminStatus();
                     isAdmin = adminStatus.isAdmin;
+                    isGlobalAdmin = adminStatus.isGlobalAdmin;
+                    adminCourses = adminStatus.courses;
 
+                    // Fully unlock UI
                     updateAuthUI();
 
-                    // Check for pending changes on login
-                    if (isAdmin) {
-                        const lastSaveTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_timestamp`) || '0');
-                        const lastSyncTimestamp = parseInt(localStorage.getItem(`${LOGS_STORAGE_KEY}_${currentCourse}_last_sync`) || '0');
+                    // Sync Data
+                    populateCourseButtons();
+                    if (isAdmin) refreshAdminViews();
+                    else loadAllCourseLogsForStudent();
 
-                        if (lastSaveTimestamp > lastSyncTimestamp) {
-                            pendingChanges = true;
-                        }
-
-                        if (pendingChanges) {
-                            console.log("Admin signed in with pending offline changes. Triggering immediate sync.");
-                            showNotification('info', 'Syncing...', 'Syncing offline changes now.');
-                            setTimeout(syncData, 1000);
-                        }
-                    } else {
-                        // For student users
-                        loadAllCourseLogsForStudent();
-                    }
+                }).catch(err => {
+                    console.error("User info fetch failed:", err);
                 });
+
             } catch (error) {
                 console.error('Error processing token:', error);
-                showNotification('error', 'Auth Error', 'Error during sign-in process');
             }
         }
 
