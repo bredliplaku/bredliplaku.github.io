@@ -5356,21 +5356,23 @@
             // 1. Decode Identity
             const responsePayload = parseJwt(response.credential);
 
-            // 2. Set User State immediately (Visual Sign-in)
+            console.log("One Tap Auto-Sign-In Detected");
+
+            // 2. Set User State immediately (Visual Sign-in only)
             currentUser = {
                 id: responsePayload.sub,
                 name: responsePayload.name,
                 email: responsePayload.email,
                 picture: responsePayload.picture
             };
-            isSignedIn = true;
-            updateAuthUI(); // Updates header to show Avatar immediately
 
-            // 3. Try to get Sheet Access Silently
-            // We use a try/catch style logic here by relying on the callback
+            // We mark as signed in visually, but we DON'T load data yet
+            isSignedIn = true;
+            updateAuthUI();
+
+            // 3. Request the actual Access Token silently
+            // The data loading will happen in 'handleTokenResponse' when this succeeds.
             if (tokenClient) {
-                // prompt: '' means "Do not show popup". 
-                // If consent exists, it succeeds. If not, it fails silently.
                 tokenClient.requestAccessToken({ prompt: '' });
             }
         }
@@ -8410,46 +8412,48 @@ ${uidContent}
          * @param {Object} resp - The token response object.
          */
         function handleTokenResponse(resp) {
-            // --- 1. Handle Errors (Silent Failure) ---
+            // 1. Handle Silent Failure (Permissions needed)
             if (resp.error || !resp.access_token) {
                 console.warn('Silent auth failed or consent missing:', resp);
 
-                // STOP THE LOOP:
-                // Do NOT log out. Do NOT refresh.
-                // Instead, change the "Sign In" button to "Authorize"
-
+                // Change "Sign In" button to "Grant Permissions"
                 const loginBtn = document.getElementById('login-btn');
                 if (loginBtn) {
                     loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Grant Permissions';
-                    loginBtn.title = "We need permission to access the Attendance Sheet";
-                    loginBtn.style.backgroundColor = "#fb8c00"; // Orange to indicate action needed
-                    // Ensure the button is visible even though 'isSignedIn' might be true locally
+                    loginBtn.classList.remove('btn-blue'); // Optional: remove blue class if needed
+                    loginBtn.style.backgroundColor = "#fb8c00"; // Orange
+
+                    // Force show the login button area
                     document.getElementById('login-container').style.display = 'flex';
-                    document.getElementById('user-container').style.display = 'none'; // Hide user bar until fully auth'd
+                    document.getElementById('user-container').style.display = 'none';
                 }
                 return;
             }
 
-            // --- 2. Success! (We have the token) ---
+            // 2. Success - We have the Token!
             try {
-                // Save token
                 localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
                 isSignedIn = true;
 
-                // Fetch User Info (Double check)
+                // NOW we check admin status, because we actually have the token
                 fetchUserInfo().then(async () => {
                     const adminStatus = await checkAdminStatus();
+
                     isAdmin = adminStatus.isAdmin;
                     isGlobalAdmin = adminStatus.isGlobalAdmin;
                     adminCourses = adminStatus.courses;
 
-                    // Fully unlock UI
+                    // Update UI with correct permissions
                     updateAuthUI();
 
-                    // Sync Data
+                    // Load Data
                     populateCourseButtons();
-                    if (isAdmin) refreshAdminViews();
-                    else loadAllCourseLogsForStudent();
+
+                    if (isAdmin) {
+                        refreshAdminViews();
+                    } else {
+                        loadAllCourseLogsForStudent();
+                    }
 
                 }).catch(err => {
                     console.error("User info fetch failed:", err);
