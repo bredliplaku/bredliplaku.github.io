@@ -5257,7 +5257,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzyUSgfC_7ynVKsypJOajxu5RFdqW7l7HQgHeO45sSgwpQzEqPnXNSlzvhs5s6JlB3-PA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzR90HMOnBb81U8h-Ccwc7-5S4ambFDHOIMYZSPx_-u5QYI967WR6ZjUshYOup3uURPJg/exec';
 
         // App state
         let courseData = {};
@@ -14013,61 +14013,53 @@ ${uidContent}
             // SCENARIO A: GUEST / LOGIN CHECK (User is NOT signed in)
             // ============================================================
             if (!isSignedIn) {
-                const notSignedInMsg = document.getElementById('not-signed-in-message');
-                if (notSignedInMsg) {
-                    notSignedInMsg.innerHTML = `<div style="text-align:center;"><i class="fa-solid fa-circle-notch fa-spin" style="font-size:2em; color:var(--primary-color);"></i><p style="margin-top:10px;">Checking ID...</p></div>`;
-                }
+        const notSignedInMsg = document.getElementById('not-signed-in-message');
+        if (notSignedInMsg) notSignedInMsg.innerHTML = `<div style="text-align:center;">Checking...</div>`;
 
-                try {
-                    // Call Backend to check if this UID belongs to a staff member
-                    // We use fetch directly here to bypass the token check in callWebApp
-                    const response = await fetch(BRAIN_URL, {
-                        method: 'POST',
-                        redirect: 'follow',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify({
-                            action: 'loginWithNfc',
-                            uid: serialNumber,
-                            deviceId: getDeviceFingerprint(), // <--- The persistent variable
-                            logsSpreadsheetId: LOGS_SPREADSHEET_ID
-                        })
-                    });
+        try {
+            // Get the ID we are sending so we can compare it
+            const myDeviceId = getDeviceFingerprint(); 
+            console.log("Sending Login Request...", { uid: serialNumber, device: myDeviceId });
 
-                    const data = await response.json();
+            const response = await fetch(BRAIN_URL, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    action: 'loginWithNfc',
+                    uid: serialNumber,
+                    deviceId: myDeviceId, 
+                    logsSpreadsheetId: LOGS_SPREADSHEET_ID
+                })
+            });
 
-                    if (data.result === 'success') {
-                        // === IT IS AN ADMIN: LOG THEM IN ===
-                        const fakeGapiToken = { access_token: data.token };
+            const data = await response.json();
 
-                        // Store the Kiosk token
-                        localStorage.setItem('gapi_token', JSON.stringify(fakeGapiToken));
-
-                        // Set the token for future API calls
-                        gapi.client.setToken(fakeGapiToken);
-
-                        // Set user data from backend response
-                        currentUser = data.user;
-
-                        showNotification('success', 'Session Active', `Welcome, ${currentUser.name}. Session ends in 30m.`);
-
-                        // Boot the app (Load courses, databases, etc.)
-                        onSuccessfulAuth(false);
-
-                    } else {
-                        // === IT IS A STUDENT: SHOW UID ===
-                        // Not an admin, just show the UID on the guest screen
-                        lastScannedUID = serialNumber;
-                        updateAuthUI();
-                    }
-
-                } catch (err) {
-                    console.error("Login check failed", err);
-                    // Fallback to just showing UID on error so the user sees something happened
-                    lastScannedUID = serialNumber;
-                    updateAuthUI();
-                }
-                return; // Stop here, do not process attendance logic below
+            if (data.result === 'success') {
+                // === SUCCESS ===
+                const fakeGapiToken = { access_token: data.token };
+                localStorage.setItem('gapi_token', JSON.stringify(fakeGapiToken));
+                gapi.client.setToken(fakeGapiToken);
+                currentUser = data.user;
+                showNotification('success', 'Session Active', `Welcome, ${currentUser.name}`);
+                onSuccessfulAuth(false);
+            } else {
+                // === FAILURE (DEBUGGING) ===
+                // ALERT the specific error so you can see it on mobile
+                alert(`Login Failed!\nReason: ${data.message}\n\nYour Device ID: ${myDeviceId}`);
+                
+                // Show UID on screen as fallback
+                lastScannedUID = serialNumber;
+                updateAuthUI(); 
             }
+
+        } catch (err) {
+            alert("Network Error: " + err.message);
+            lastScannedUID = serialNumber;
+            updateAuthUI();
+        }
+        return;
+    }
 
             // ============================================================
             // SCENARIO B: ATTENDANCE RECORDING (User IS signed in)
