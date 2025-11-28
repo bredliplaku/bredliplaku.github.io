@@ -5374,7 +5374,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyEEMMPZnrxVyscSv65QU9b_NW4xAYl2H_d2KA9xB3dHLVLMGsa2BfFBkcy8NeVszGbcA/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxn06cAfraaEni3WLTZbV5W7pwofcVwZ3K3w7DRBXeDfbOITzzVMqAaJUyp-k5mgmgwgA/exec';
 
         // App state
         let courseData = {};
@@ -6371,14 +6371,23 @@
 
                     // Render Staff
                     const staffBody = document.getElementById('staff-tbody');
-                    staffBody.innerHTML = globalData.staff.map(s => `
+                    staffBody.innerHTML = globalData.staff.map(s => {
+                        const isGlobal = (s.role === 'Global');
+                        const roleBadge = isGlobal
+                            ? `<span style="background:var(--purple-color); color:white; padding:2px 6px; border-radius:4px; font-size:0.8em; margin-left:5px;">GLOBAL</span>`
+                            : ``;
+
+                        return `
                 <tr>
-                    <td style="font-weight:500;">${escapeHtml(s.name)}</td>
+                    <td style="font-weight:500;">
+                        ${escapeHtml(s.name)}
+                        ${roleBadge}
+                    </td>
                     <td><span class="uid-badge">${escapeHtml(s.uid)}</span></td>
                     <td>${escapeHtml(s.email)}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
-                            <button class="btn-blue btn-icon" title="Edit" onclick="editStaffKey('${s.rowIndex}', '${escapeHtml(s.name)}', '${escapeHtml(s.uid)}', '${escapeHtml(s.email)}')">
+                            <button class="btn-blue btn-icon" title="Edit" onclick="editStaffKey('${s.rowIndex}', '${escapeHtml(s.name)}', '${escapeHtml(s.uid)}', '${escapeHtml(s.email)}', '${escapeHtml(s.role || 'Lecturer')}')">
                                 <i class="fa-solid fa-pencil"></i>
                             </button>
                             <button class="btn-red btn-icon" title="Delete" onclick="deleteStaffKey('${s.rowIndex}', '${escapeHtml(s.name)}')">
@@ -6387,7 +6396,7 @@
                         </div>
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
 
                     // Render Devices
                     const deviceBody = document.getElementById('devices-tbody');
@@ -6504,12 +6513,13 @@
         };
 
         // Edit Helper (Already implemented, just ensuring it's wired correctly)
-        window.editStaffKey = (rowIndex, name, uid, email) => {
+        window.editStaffKey = (rowIndex, name, uid, email, role) => {
             showStaffEditorDialog({
                 rowIndex: rowIndex,
                 name: name,
                 uid: uid,
-                email: email
+                email: email,
+                role: role
             });
         };
 
@@ -6541,6 +6551,7 @@
             const nameVal = isEdit ? staffData.name : '';
             const emailVal = isEdit ? staffData.email : '';
             const uidVal = isEdit ? staffData.uid : '';
+            const roleVal = isEdit ? staffData.role : 'Lecturer'; // Default to Lecturer
 
             dialog.innerHTML = `
         <h3 class="dialog-title"><i class="fa-solid ${icon}"></i> ${title}</h3>
@@ -6553,6 +6564,14 @@
             <div class="form-group">
                 <label class="dialog-label-fixed">Email*</label>
                 <input type="email" id="staff-email" class="form-control" placeholder="email@epoka.edu.al" value="${escapeHtml(emailVal)}">
+            </div>
+
+            <div class="form-group">
+                <label class="dialog-label-fixed">Role</label>
+                <select id="staff-role" class="form-control">
+                    <option value="Lecturer" ${roleVal === 'Lecturer' ? 'selected' : ''}>Lecturer (Standard)</option>
+                    <option value="Global" ${roleVal === 'Global' ? 'selected' : ''}>Global Admin (Superuser)</option>
+                </select>
             </div>
 
             <div class="form-group">
@@ -6610,9 +6629,9 @@
                 const name = document.getElementById('staff-name').value.trim();
                 const email = document.getElementById('staff-email').value.trim();
                 const uid = document.getElementById('staff-uid').value.trim();
+                const role = document.getElementById('staff-role').value; // Get Role
                 const btn = e.target;
 
-                // Validation
                 if (!name || !email || !uid) {
                     showNotification('error', 'Missing Info', 'All fields are required.');
                     return;
@@ -6624,21 +6643,18 @@
                 try {
                     const payload = {
                         actionType: isEdit ? 'edit' : 'add',
-                        name, email, uid
+                        name, email, uid, role // Send Role
                     };
                     if (isEdit) payload.rowIndex = staffData.rowIndex;
 
                     await callWebApp('manageStaff_Admin', payload, 'POST');
 
-                    showNotification('success', 'Success', `Staff member ${isEdit ? 'updated' : 'added'}.`);
+                    showNotification('success', 'Success', `Staff member updated.`);
 
-                    // Refresh the Global Settings Dialog behind this one
-                    // We do this by removing the old one and reopening it to fetch fresh data
                     close();
-                    document.querySelector('.dialog-backdrop').remove(); // Remove the Settings dialog too
-                    showGlobalSettingsDialog(); // Reopen fully to refresh
+                    document.querySelector('.dialog-backdrop').remove();
+                    showGlobalSettingsDialog();
 
-                    // Auto-switch back to "Staff" tab
                     setTimeout(() => {
                         const staffTab = document.querySelector('.settings-tab-btn[data-target="sect-staff"]');
                         if (staffTab) staffTab.click();
