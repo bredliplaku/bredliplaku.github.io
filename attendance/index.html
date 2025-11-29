@@ -6450,23 +6450,75 @@
 
             // 4. Action Buttons
             document.getElementById('register-this-device-btn').onclick = () => {
-                showPromptDialog({
-                    title: "Trust this Device",
-                    message: "Give this device a friendly name (e.g., 'Classroom 3 Tablet').",
-                    confirmText: "Trust",
-                    onConfirm: async (name) => {
-                        if (!name) return;
-                        try {
-                            await callWebApp('registerDevice_Admin', {
-                                deviceName: name,
-                                deviceId: getDeviceFingerprint()
-                            }, 'POST');
-                            showNotification('success', 'Registered', 'Device is now trusted.');
-                            document.getElementById('settings-loader').style.display = 'flex'; // Show loader
-                            loadSettingsData(); // Refresh list
-                        } catch (e) { showNotification('error', 'Error', e.message); }
+                // Create a custom dialog instead of generic prompt for better styling/icons
+                const dialogBackdrop = document.createElement('div');
+                dialogBackdrop.className = 'dialog-backdrop';
+                dialogBackdrop.style.zIndex = "10010"; // Higher than settings
+
+                const dialog = document.createElement('div');
+                dialog.className = 'dialog';
+                dialog.setAttribute('role', 'dialog');
+
+                dialog.innerHTML = `
+        <h3 class="dialog-title"><i class="fa-solid fa-laptop-medical"></i> Trust This Device</h3>
+        <div class="dialog-content">
+            <p>Give this device a friendly name (e.g., "Classroom 3 Tablet").</p>
+            <div class="form-group">
+                <label class="dialog-label-fixed">Name</label>
+                <input type="text" id="new-device-name" class="form-control" placeholder="Device Name">
+            </div>
+        </div>
+        <div class="dialog-actions">
+            <button id="cancel-trust-btn" class="btn-red"><i class="fa-solid fa-xmark"></i> Cancel</button>
+            <button id="confirm-trust-btn" class="btn-green"><i class="fa-solid fa-check"></i> Trust</button>
+        </div>
+    `;
+
+                dialogBackdrop.appendChild(dialog);
+                document.body.appendChild(dialogBackdrop);
+
+                // Focus input
+                setTimeout(() => dialog.querySelector('#new-device-name').focus(), 100);
+
+                const closeTrust = () => dialogBackdrop.remove();
+
+                dialog.querySelector('#cancel-trust-btn').onclick = closeTrust;
+
+                dialog.querySelector('#confirm-trust-btn').onclick = async (e) => {
+                    const name = dialog.querySelector('#new-device-name').value.trim();
+                    if (!name) {
+                        showNotification('warning', 'Name Required', 'Please enter a device name.');
+                        return;
                     }
-                });
+
+                    const btn = e.target;
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+
+                    try {
+                        await callWebApp('registerDevice_Admin', {
+                            deviceName: name,
+                            deviceId: getDeviceFingerprint()
+                        }, 'POST');
+
+                        showNotification('success', 'Registered', 'Device is now trusted.');
+
+                        document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
+                        document.body.style.overflow = '';
+
+                        showGlobalSettingsDialog();
+
+                        // Auto-switch to Devices tab
+                        setTimeout(() => {
+                            const tab = document.querySelector('.settings-tab-btn[data-target="sect-devices"]');
+                            if (tab) tab.click();
+                        }, 100);
+
+                    } catch (err) {
+                        showNotification('error', 'Error', err.message);
+                        closeTrust();
+                    }
+                };
             };
 
             document.getElementById('add-staff-btn').onclick = () => showStaffEditorDialog(null);
@@ -6504,15 +6556,20 @@
 
         window.deleteTrustedDevice = (rowIndex, name) => {
             showConfirmationDialog({
-                title: "Untrust Device?",
-                message: `Are you sure you want to remove <strong>${name}</strong>? It will require a Google Login to re-register.`,
-                confirmText: "Untrust",
+                title: '<i class="fa-solid fa-laptop-slash" style="color:var(--danger-color);"></i> Untrust Device?',
+                message: `Are you sure you want to remove <strong>${escapeHtml(name)}</strong>? It will require a Google Login to re-register.`,
+                confirmText: '<i class="fa-solid fa-trash"></i> Untrust', // Added Icon
+                cancelText: '<i class="fa-solid fa-xmark"></i> Cancel',   // Added Icon
                 isDestructive: true,
                 onConfirm: () => {
                     callWebApp('deleteDevice_Admin', { rowIndex }, 'POST')
                         .then(() => {
-                            document.querySelector('.dialog-backdrop').remove();
+                            document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
+                            document.body.style.overflow = '';
+
                             showGlobalSettingsDialog();
+
+                            // Auto-switch back to "Devices" tab
                             setTimeout(() => {
                                 const tab = document.querySelector('.settings-tab-btn[data-target="sect-devices"]');
                                 if (tab) tab.click();
@@ -6523,14 +6580,29 @@
             });
         };
 
-        // Edit Helper (Already implemented, just ensuring it's wired correctly)
-        window.editStaffKey = (rowIndex, name, uid, email, role) => {
-            showStaffEditorDialog({
-                rowIndex: rowIndex,
-                name: name,
-                uid: uid,
-                email: email,
-                role: role
+        window.deleteStaffKey = (rowIndex, name) => {
+            showConfirmationDialog({
+                title: '<i class="fa-solid fa-user-xmark" style="color:var(--danger-color);"></i> Revoke Access?',
+                message: `Are you sure you want to revoke key for <strong>${escapeHtml(name)}</strong>? They will no longer be able to log in via NFC.`,
+                confirmText: '<i class="fa-solid fa-trash"></i> Revoke', // Added Icon
+                cancelText: '<i class="fa-solid fa-xmark"></i> Cancel',   // Added Icon
+                isDestructive: true,
+                onConfirm: () => {
+                    callWebApp('manageStaff_Admin', { actionType: 'delete', rowIndex }, 'POST')
+                        .then(() => {
+                            document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
+                            document.body.style.overflow = '';
+
+                            showGlobalSettingsDialog();
+
+                            // Auto-switch back to "Staff" tab
+                            setTimeout(() => {
+                                const tab = document.querySelector('.settings-tab-btn[data-target="sect-staff"]');
+                                if (tab) tab.click();
+                            }, 100);
+                        })
+                        .catch(err => showNotification('error', 'Error', err.message));
+                }
             });
         };
 
