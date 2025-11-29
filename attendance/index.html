@@ -3222,6 +3222,109 @@
             width: 100%;
         }
 
+        .reason-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            /* 3 Columns */
+            gap: 5px;
+            /* Tiny gap */
+            margin-bottom: 8px;
+        }
+
+        .reason-card {
+            background: var(--card-background);
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            /* Slightly sharper corners */
+            padding: 6px 8px;
+            /* Very minimal padding */
+            cursor: pointer;
+            transition: all 0.2s ease;
+
+            /* Horizontal Layout */
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 8px;
+
+            color: var(--text-color);
+            user-select: none;
+            min-height: 36px;
+            /* Ultra slim height */
+        }
+
+        .reason-card i {
+            font-size: 1em;
+            /* Small Icon */
+            color: #999;
+            transition: color 0.2s;
+            flex-shrink: 0;
+        }
+
+        .reason-card span {
+            font-size: 0.7em;
+            /* Small font to fit 3 cols */
+            font-weight: 700;
+            line-height: 1;
+            text-align: left;
+
+            /* Allow wrapping for long words like "Conference" */
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        /* --- Hover/Active States --- */
+        .reason-card:hover:not(.active) {
+            background-color: #f9f9f9;
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .reason-card:hover:not(.active) i {
+            color: var(--primary-color);
+        }
+
+        .reason-card.active,
+        .reason-card:active {
+            background-color: #e8eaf6;
+            color: #2c3a8e;
+            border-color: var(--primary-color);
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+            transform: scale(0.98);
+        }
+
+        .reason-card.active i {
+            color: var(--primary-color);
+        }
+
+        /* Dark Mode */
+        .dark-mode .reason-card {
+            background: #2c2c2e;
+            border-color: #444;
+            color: #e0e0e0;
+        }
+
+        .dark-mode .reason-card:hover:not(.active) {
+            background-color: #333;
+            border-color: var(--primary-color-light);
+            color: var(--primary-color-light);
+        }
+
+        .dark-mode .reason-card:hover:not(.active) i {
+            color: var(--primary-color-light);
+        }
+
+        .dark-mode .reason-card.active {
+            background-color: #3949ab;
+            color: white;
+            border-color: transparent;
+        }
+
+        .dark-mode .reason-card.active i {
+            color: white;
+        }
+
         .dialog .form-control {
             background-color: #f0f0f0;
             /* Light gray background like screenshot */
@@ -3808,6 +3911,26 @@
 
         .dark-mode .student-profile-header {
             border-bottom-color: var(--primary-color);
+        }
+
+        /* Compact Form Spacing for Dialogs */
+        .dialog-content .form-group {
+            margin-bottom: 8px;
+            /* Was 15px */
+        }
+
+        .dialog-content .form-section-title {
+            margin-top: 10px;
+            /* Was 20px */
+            margin-bottom: 8px;
+            /* Was 15px */
+            font-size: 0.8em;
+        }
+
+        .dialog-disclaimer {
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            font-size: 0.85em;
         }
 
         .request-list-container {
@@ -8150,7 +8273,7 @@ ${uidContent}
         function showRequestPermissionDialog() {
             if (!isSignedIn || isAdmin || !currentUser) return;
 
-            // --- Date Restriction Logic (Business Days) ---
+            // --- Date Restrictions ---
             const getLocalDateString = (date) => {
                 const year = date.getFullYear();
                 const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -8161,271 +8284,300 @@ ${uidContent}
             const today = new Date();
             const daysInPast = 10;
             const daysInFuture = 10;
-
-            const minDate = addBusinessDays(today, -daysInPast);
-            const maxDate = addBusinessDays(today, daysInFuture);
-
-            const minDateStr = getLocalDateString(minDate);
-            const maxDateStr = getLocalDateString(maxDate);
+            const minDateStr = getLocalDateString(addBusinessDays(today, -daysInPast));
+            const maxDateStr = getLocalDateString(addBusinessDays(today, daysInFuture));
             const todayStr = getLocalDateString(today);
 
-            const MAX_FILE_SIZE = 10 * 1024 * 1024;
-            const MAX_FILE_SIZE_MB = MAX_FILE_SIZE / 1024 / 1024;
-
+            // --- HTML Structure ---
             document.body.style.overflow = 'hidden';
-
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
-            dialog.setAttribute('aria-modal', 'true');
 
-            // Dropdown Options
-            const allCourses = Object.keys(courseInfoMap).sort();
-            const courseOptions = allCourses.map(courseName =>
-                `<option value="${escapeHtml(courseName)}">📘 ${courseName.replace(/_/g, ' ')}</option>`
+            // Course Options
+            const courseOptions = Object.keys(courseInfoMap).sort().map(courseName =>
+                `<option value="${escapeHtml(courseName)}">${courseName.replace(/_/g, ' ')}</option>`
             ).join('');
 
             // Hour Buttons
             const hoursList = ['8:40', '9:40', '10:40', '11:40', '12:40', '13:40', '14:40', '15:40', '16:00', '17:00', '18:00', '19:00'];
-            const hourButtons = hoursList.map(hour => `<button type="button" class="toggle-button" data-value="${hour}">${hour}</button>`).join('');
+            const hourButtons = hoursList.map(h => `<button type="button" class="toggle-button" data-value="${h}">${h}</button>`).join('');
 
             dialog.innerHTML = `
-<h3 class="dialog-title"><i class="fa-solid fa-hand"></i> Request Permission</h3>
-<div class="dialog-content">
-    
-    <div class="dialog-disclaimer">
-        <i class="fa-solid fa-circle-info"></i> <strong>Note:</strong> Per university regulations, all absences are unexcused. This form is a professional courtesy.
-    </div>
+        <h3 class="dialog-title"><i class="fa-solid fa-hand-point-up"></i> Request for Permission</h3>
+        <div class="dialog-content">
 
-    <div class="form-section-title">Who & Where</div>
-    
-    <div class="form-group">
-        <label class="dialog-label-fixed">Name</label>
-        <input class="form-control form-group-control" value="${escapeHtml(currentUser.name)}" disabled>
-    </div>
-    
-    <div class="form-group required">
-        <label class="dialog-label-fixed" for="request-course">Course</label>
-        <select id="request-course" class="form-control form-group-control">
-            <option value="" disabled selected>Select a Course</option>
-            ${courseOptions}
-        </select>
-    </div>
+            <div class="dialog-disclaimer">
+                <i class="fa-solid fa-circle-info"></i> Per university regulations, absences are unexcused by default. This request is a professional courtesy.
+            </div>
+            
+            <div class="form-section-title" style="margin-top:0;">Details</div>
+            
+            <div class="form-group required">
+                <label class="dialog-label-fixed">Course</label>
+                <select id="request-course" class="form-control form-group-control">
+                    <option value="" disabled selected>Select Course...</option>
+                    ${courseOptions}
+                </select>
+            </div>
 
-    <div class="form-section-title">When</div>
-    
-    <div class="form-group required" style="align-items:flex-start;">
-        <label class="dialog-label-fixed" for="request-date" style="margin-top:10px;">Date</label>
-        <div class="form-group-control">
-            <input type="date" id="request-date" class="form-control" value="${todayStr}" min="${minDateStr}" max="${maxDateStr}">
-            <small style="color: var(--primary-color); display: block; margin-top: 5px; font-size: 0.85em;">
-                <i class="fa-regular fa-calendar"></i> Limit: Last ${daysInPast} or next ${daysInFuture} business days.
-            </small>
+            <div class="form-group required" style="align-items:flex-start;">
+                <label class="dialog-label-fixed" style="margin-top:10px;">Date</label>
+                <div class="form-group-control">
+                    <input type="date" id="request-date" class="form-control" value="${todayStr}" min="${minDateStr}" max="${maxDateStr}">
+                    <small style="color:#666; font-size:0.8em; display:block; margin-top:4px;">
+                        <i class="fa-solid fa-circle-info"></i> Select the date you were (or will be) absent.
+                    </small>
+                </div>
+            </div>
+
+            <div class="form-group required" style="align-items:flex-start;">
+                <label class="dialog-label-fixed" style="margin-top:10px;">Hours</label>
+                <div id="request-hours-group" class="toggle-button-group form-group-control" style="flex-wrap: wrap;">
+                    ${hourButtons}
+                </div>
+            </div>
+
+            <div class="form-section-title">Reason</div>
+
+            <div id="reason-grid" class="reason-grid">
+                <div class="reason-card" data-value="Medical">
+                    <i class="fa-solid fa-bed"></i>
+                    <span>Calling Sick</span>
+                </div>
+                <div class="reason-card" data-value="Conference">
+                    <i class="fa-solid fa-person-chalkboard"></i>
+                    <span>Academic Event</span>
+                </div>
+                <div class="reason-card" data-value="Official">
+                    <i class="fa-solid fa-person-military-pointing"></i>
+                    <span>Official Appointment</span>
+                </div>
+                <div class="reason-card" data-value="Bus">
+                    <i class="fa-solid fa-bus"></i>
+                    <span>Bus Issue</span>
+                </div>
+                
+                <div class="reason-card" data-value="Club">
+                    <i class="fa-solid fa-people-robbery"></i>
+                    <span>Student Event</span>
+                </div>
+                <div class="reason-card" data-value="Confidential">
+                    <i class="fa-solid fa-user-tie"></i>
+                    <span>Personal Matter</span>
+                </div>
+            </div>
+            
+            <div id="reason-help-text" style="display:none; background-color:#e3f2fd; color:#0d47a1; padding:12px; border-radius:8px; margin-bottom:15px; font-size:0.9em; line-height:1.4; border-left:4px solid #2196F3;"></div>
+
+            <div class="form-group" id="request-file-group" style="display:none; align-items:flex-start;">
+                <label class="dialog-label-fixed" id="request-file-label" style="margin-top:10px;">Document</label>
+                <div class="form-group-control">
+                   <input type="file" id="request-file-upload" class="form-control" accept=".pdf,image/*">
+                   <small style="opacity:0.7;">Max 10MB</small>
+                </div>
+            </div>
+
+            <div class="form-group" id="request-expl-group" style="display:none; align-items:flex-start;">
+                <label class="dialog-label-fixed" id="request-expl-label" style="margin-top:10px;">Details</label>
+                <textarea id="request-explanation" class="form-control form-group-control" rows="3"></textarea>
+            </div>
+
         </div>
-    </div>
-    
-    <div class="form-group required" style="align-items:flex-start;">
-        <label class="dialog-label-fixed" style="margin-top:10px;">Hours</label>
-        <div id="request-hours-group" class="toggle-button-group form-group-control" style="flex-wrap: wrap;">
-            ${hourButtons}
-        </div>
-    </div>
-
-    <div class="form-section-title">Why</div>
-    
-    <div class="form-group required">
-        <label class="dialog-label-fixed" for="request-reason-type">Reason</label>
-        <select id="request-reason-type" class="form-control form-group-control">
-            <option value="" disabled selected>Select a Reason</option>
-            <option value="Calling Sick">🤒 Calling Sick</option>
-            <option value="Transportation Problem">🚌 Transportation Problem</option>
-            <option value="Student Activity">🎓 Student Activity</option>
-            <option value="Academic Activity">📚 Academic Activity</option>
-            <option value="Family Emergency">🚨 Family Emergency</option>
-            <option value="Other">❓ Other...</option>
-        </select>
-    </div>
-    
-    <div id="reason-help-text" style="display: none; background-color: #e3f2fd; color: #0d47a1; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9em; line-height: 1.4;"></div>
-
-    <div class="form-group" id="request-explanation-group" style="align-items: flex-start; display: none;">
-        <label class="dialog-label-fixed" for="request-explanation" id="request-explanation-label" style="margin-top:10px;">Details</label>
-        <textarea id="request-explanation" class="form-control form-group-control" rows="4"></textarea>
-    </div>
-
-    <div class="form-group" id="request-file-upload-group" style="align-items: flex-start; display: none;">
-        <label class="dialog-label-fixed" id="request-file-label" for="request-file-upload" style="margin-top:10px;">File</label>
-        <div class="form-group-control">
-           <input type="file" id="request-file-upload" class="form-control" accept=".pdf,image/png,image/jpeg,image/jpg,image/heic,image/heif,image/gif,image/webp">
-           <small id="request-file-help" style="opacity: 0.7; margin-top: 5px; display: block;">
-                PDF, PNG, JPG, HEIC, WEBP (Max 10MB)
-           </small>
-        </div>
-    </div>
-    
-</div>
-<div class="dialog-actions">
-    <button id="cancel-request-btn" class="btn-red"><i class="fa-solid fa-times"></i> Cancel</button>
-    <button id="submit-request-btn" class="btn-green"><i class="fa-solid fa-check"></i> Submit</button>
-</div>`;
+        <div class="dialog-actions">
+            <button id="cancel-request-btn" class="btn-red"><i class="fa-solid fa-xmark"></i> Cancel</button>
+            <button id="submit-request-btn" class="btn-green" disabled><i class="fa-solid fa-paper-plane"></i> Submit</button>
+        </div>`;
 
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            const closeDialog = () => { document.body.removeChild(dialogBackdrop); document.body.style.overflow = ''; };
+            // --- Variables ---
+            const reasonGrid = document.getElementById('reason-grid');
+            const helpText = document.getElementById('reason-help-text');
+            const fileGroup = document.getElementById('request-file-group');
+            const fileLabel = document.getElementById('request-file-label');
+            const explGroup = document.getElementById('request-expl-group');
+            const explLabel = document.getElementById('request-expl-label');
+            const explInput = document.getElementById('request-explanation');
+            const submitBtn = document.getElementById('submit-request-btn');
+            const hoursGroup = document.getElementById('request-hours-group');
+            const courseSelect = document.getElementById('request-course');
 
-            const courseSelect = dialog.querySelector('#request-course');
-            const reasonSelect = dialog.querySelector('#request-reason-type');
-            const explanationGroup = dialog.querySelector('#request-explanation-group');
-            const explanationInput = dialog.querySelector('#request-explanation');
-            const explanationLabel = dialog.querySelector('#request-explanation-label');
-            const submitBtn = dialog.querySelector('#submit-request-btn');
-            const fileUploadGroup = dialog.querySelector('#request-file-upload-group');
-            const fileUploadLabel = dialog.querySelector('#request-file-label');
-            const reasonHelpText = dialog.querySelector('#reason-help-text');
-            const hoursGroup = dialog.querySelector('#request-hours-group');
+            let selectedReason = null;
 
-            // Reset hours when course changes
+            // --- Hours Logic ---
             courseSelect.addEventListener('change', () => {
-                hoursGroup.querySelectorAll('.toggle-button.active').forEach(btn => btn.classList.remove('active'));
+                hoursGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
             });
 
-            // Smart Hour Limit Logic
             hoursGroup.addEventListener('click', (e) => {
                 if (e.target.classList.contains('toggle-button')) {
-                    const btn = e.target;
-                    const selectedCourse = courseSelect.value;
-
-                    if (!selectedCourse) {
-                        showNotification('warning', 'Course Required', 'Please select a course first.');
-                        courseSelect.focus();
-                        courseSelect.style.borderColor = 'var(--warning-color)';
-                        setTimeout(() => courseSelect.style.borderColor = '', 1000);
+                    if (!courseSelect.value) {
+                        showNotification('warning', 'Missing Info', 'Select a course first.');
                         return;
                     }
-
-                    if (!btn.classList.contains('active')) {
-                        const maxHours = parseInt(courseInfoMap[selectedCourse]?.defaultHours || 2, 10);
-                        const currentCount = hoursGroup.querySelectorAll('.toggle-button.active').length;
-                        if (currentCount >= maxHours) {
-                            showNotification('warning', 'Limit Reached', `This course is only ${maxHours} hours long.`);
-                            return;
-                        }
-                    }
-                    btn.classList.toggle('active');
+                    e.target.classList.toggle('active');
                 }
             });
 
-            // Dynamic Reason Logic
-            reasonSelect.addEventListener('change', () => {
-                const reason = reasonSelect.value;
-                let placeholder = '', minLength = 0, isRequired = true, disableSubmit = false, infoBox = false, helpMessage = '';
+            // --- REASON LOGIC ---
+            reasonGrid.addEventListener('click', (e) => {
+                const card = e.target.closest('.reason-card');
+                if (!card) return;
 
-                explanationInput.value = ''; explanationInput.disabled = false; explanationInput.classList.remove('info-box');
-                fileUploadGroup.style.display = 'none'; explanationGroup.style.display = 'none'; reasonHelpText.style.display = 'none';
+                // Visual Update
+                document.querySelectorAll('.reason-card').forEach(c => c.classList.remove('active'));
+                card.classList.add('active');
+                selectedReason = card.dataset.value;
+
+                // Reset Fields
+                helpText.style.display = 'none';
+                fileGroup.style.display = 'none';
+                explGroup.style.display = 'none';
                 submitBtn.disabled = false;
+                explInput.value = '';
+                explInput.removeAttribute('minlength'); // Reset limits
 
-                switch (reason) {
-                    case 'Calling Sick':
-                        fileUploadGroup.style.display = 'flex';
-                        fileUploadLabel.innerHTML = 'Medical Certificate <span style="color:var(--danger-color)">*</span>:';
-                        explanationGroup.style.display = 'none'; isRequired = false;
-                        helpMessage = `<i class="fa-solid fa-briefcase-medical"></i> <strong>Requirement:</strong> Please attach a doctor's note, or any relevant document.`;
+                // Switch Logic
+                switch (selectedReason) {
+                    case 'Medical':
+                        fileGroup.style.display = 'flex';
+                        fileLabel.innerHTML = 'Medical Report <span style="color:red">*</span>';
+                        helpText.innerHTML = `Please attach your official Medical Report (Raporti Mjekësor).`;
+                        helpText.style.display = 'block';
                         break;
-                    case 'Transportation Problem':
-                        explanationGroup.style.display = 'flex'; explanationLabel.innerHTML = 'Details <span style="color:var(--danger-color)">*</span>:';
-                        fileUploadGroup.style.display = 'flex'; fileUploadLabel.innerHTML = 'Photo:';
-                        placeholder = "Provide bus line, traffic info, time, location..."; minLength = 50;
+
+                    case 'Conference':
+                        fileGroup.style.display = 'flex';
+                        fileLabel.innerHTML = 'Invitation <span style="color:red">*</span>';
+                        helpText.innerHTML = `Please attach your invitation letter.`;
+                        helpText.style.display = 'block';
                         break;
-                    case 'Academic Activity':
-                        explanationGroup.style.display = 'flex'; explanationLabel.innerHTML = 'Details <span style="color:var(--danger-color)">*</span>:';
-                        fileUploadGroup.style.display = 'flex';
-                        fileUploadLabel.innerHTML = 'Supporting Document <span style="color:var(--danger-color)">*</span>:';
-                        placeholder = "Official name, website, time, and location."; minLength = 50;
+
+                    case 'Official':
+                        fileGroup.style.display = 'flex';
+                        fileLabel.innerHTML = 'Document <span style="color:red">*</span>';
+                        helpText.innerHTML = `Please attach your official summon (Court, Embassy, Police).`;
+                        helpText.style.display = 'block';
                         break;
-                    case 'Family Emergency':
-                        explanationGroup.style.display = 'flex'; fileUploadGroup.style.display = 'flex';
-                        fileUploadLabel.innerHTML = 'Attachment:'; explanationLabel.innerHTML = 'Explanation:';
-                        isRequired = false; minLength = 0;
+
+                    case 'Bus':
+                        explGroup.style.display = 'flex';
+                        explLabel.innerHTML = 'Explanation <span style="color:red">*</span>';
+                        explInput.placeholder = "Which line? What time? What happened?";
+                        // --- CHARACTER LIMIT APPLIED HERE ---
+                        explInput.setAttribute('minlength', '20');
+
+                        fileGroup.style.display = 'flex';
+                        fileLabel.innerHTML = 'Photo (Optional)';
+                        helpText.innerHTML = `<strong>Note:</strong> Only applies to the university's bus line.`;
+                        helpText.style.display = 'block';
                         break;
-                    case 'Other':
-                        explanationGroup.style.display = 'flex'; explanationLabel.innerHTML = 'Justification <span style="color:var(--danger-color)">*</span>:';
-                        fileUploadGroup.style.display = 'flex'; fileUploadLabel.innerHTML = 'Attachment:';
-                        placeholder = "Detailed justification required."; minLength = 50;
+
+                    // --- BLOCKED REASONS ---
+                    case 'Club':
+                        submitBtn.disabled = true;
+                        helpText.style.background = '#fff3e0'; // Orange/Yellow
+                        helpText.style.color = '#ef6c00';
+                        helpText.style.borderLeftColor = '#ff9800';
+                        helpText.innerHTML = `<i class="fa-solid fa-ban"></i> We do not process these manually. The Dean of Students Office must send the confirmation email directly to the lecturer.`;
+                        helpText.style.display = 'block';
                         break;
-                    case 'Student Activity':
-                        explanationGroup.style.display = 'flex'; explanationLabel.innerHTML = 'Procedure:';
-                        placeholder = "I must receive an official confirmation email directly from the Dean of Students Office.";
-                        minLength = 0; isRequired = false; disableSubmit = true; infoBox = true;
+
+                    case 'Confidential':
+                        submitBtn.disabled = true;
+                        helpText.style.background = '#fff3e0'; // Orange/Yellow
+                        helpText.style.color = '#ef6c00';
+                        helpText.style.borderLeftColor = '#ff9800';
+                        helpText.innerHTML = `<i class="fa-solid fa-lock"></i> For sensitive personal or family matters, please do not submit a digital request. You may <strong>visit my office</strong> to discuss this in person.`;
+                        helpText.style.display = 'block';
                         break;
                 }
-                explanationInput.placeholder = placeholder;
-                if (isRequired) explanationInput.setAttribute('minlength', minLength.toString()); else explanationInput.removeAttribute('minlength');
-                if (infoBox) { explanationInput.classList.add('info-box'); explanationInput.value = placeholder; explanationInput.disabled = true; }
-                if (helpMessage) { reasonHelpText.innerHTML = helpMessage; reasonHelpText.style.display = 'block'; }
-                submitBtn.disabled = disableSubmit;
             });
 
-            dialog.querySelector('#cancel-request-btn').addEventListener('click', closeDialog);
-
+            // --- Submit Logic ---
             submitBtn.addEventListener('click', async () => {
+                const hours = Array.from(hoursGroup.querySelectorAll('.active')).map(b => b.dataset.value);
+                const date = document.getElementById('request-date').value;
                 const course = courseSelect.value;
-                const date = dialog.querySelector('#request-date').value;
-                const reasonType = reasonSelect.value;
-                const explanation = explanationInput.value;
-                const selectedHours = Array.from(hoursGroup.querySelectorAll('.toggle-button.active')).map(btn => btn.dataset.value);
-                const fileInput = dialog.querySelector('#request-file-upload');
-                const file = fileInput.files[0];
+                const file = document.getElementById('request-file-upload').files[0];
+                const explanation = explInput.value.trim();
 
+                // Validation
                 let errors = [];
-                if (!course) errors.push('Please select a course.');
-                if (!date) errors.push('Please select a date.');
-                if (selectedHours.length === 0) errors.push('Please select at least one hour.');
-                if (!reasonType) errors.push('Please select a reason.');
-                const minLen = parseInt(explanationInput.getAttribute('minlength') || '0', 10);
-                if (!explanationInput.disabled && minLen > 0 && explanation.trim().length < minLen) errors.push(`Explanation must be at least ${minLen} characters.`);
+                if (!course) errors.push("Select a course.");
+                if (hours.length === 0) errors.push("Select at least one hour.");
+                if (!selectedReason) errors.push("Select a reason.");
 
-                // Validation for required files
-                if ((reasonType === 'Calling Sick' || reasonType === 'Academic Activity') && !file) {
-                    errors.push('A supporting document is required.');
-                }
+                // Reason Specific Validation
+                if (selectedReason === 'Medical' && !file) errors.push("Medical report is required.");
+                if (selectedReason === 'Official' && !file) errors.push("Official document is required.");
+                if (selectedReason === 'Conference' && !file) errors.push("Event document is required.");
 
-                if (file) {
-                    // Check file type
-                    const allowedTypes = ['.pdf', '.png', '.jpg', '.jpeg', '.heic', '.heif', '.gif', '.webp'];
-                    const fileNameLower = file.name.toLowerCase();
-                    const hasValidExtension = allowedTypes.some(ext => fileNameLower.endsWith(ext));
-
-                    if (!hasValidExtension) {
-                        errors.push('Invalid file type. Accepted formats: PDF, PNG, JPG, HEIC, WEBP.');
-                    }
-
-                    if (file.size > MAX_FILE_SIZE) {
-                        errors.push(`File is too large. Max size is ${MAX_FILE_SIZE_MB} MB.`);
+                // --- CHARACTER LIMIT CHECK ---
+                if (selectedReason === 'Bus') {
+                    if (explanation.length < 20) {
+                        errors.push("Please explain the bus issue in detail (at least 20 characters).");
                     }
                 }
 
-                if (errors.length > 0) { showNotification('error', 'Missing Info', errors.join('<br>')); return; }
-
-                submitBtn.disabled = true; submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
-
-                const payload = { name: currentUser.name, email: currentUser.email, course: course, absenceDate: date, hours: selectedHours.join(', '), reasonType: reasonType, description: explanation.trim() };
-
-                if (file) {
-                    try {
-                        const base64String = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
-                        payload.fileData = base64String; payload.fileName = file.name; payload.fileType = file.type || 'application/octet-stream';
-                    } catch (e) { showNotification('error', 'File Error', 'Read failed.'); submitBtn.disabled = false; return; }
+                if (errors.length > 0) {
+                    showNotification('error', 'Incomplete Form', errors.join('<br>'));
+                    return;
                 }
 
+                // Prepare Data
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sending...';
+
+                const payload = {
+                    name: currentUser.name,
+                    email: currentUser.email,
+                    course: course,
+                    absenceDate: date,
+                    hours: hours.join(', '),
+                    reasonType: selectedReason,
+                    description: explanation
+                };
+
+                if (file) {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = async () => {
+                        payload.fileData = reader.result;
+                        payload.fileName = file.name;
+                        payload.fileType = file.type;
+                        sendRequest(payload);
+                    };
+                } else {
+                    sendRequest(payload);
+                }
+            });
+
+            async function sendRequest(payload) {
                 try {
                     const res = await callWebApp('submitAbsenceRequest', payload, 'POST');
-                    if (res && res.result === 'success') { showNotification('success', 'Sent', 'Request submitted.'); closeDialog(); }
-                    else throw new Error(res?.message || 'Failed');
-                } catch (e) { showNotification('error', 'Failed', e.message); submitBtn.disabled = false; submitBtn.innerHTML = 'Submit'; }
-            });
+                    if (res.result === 'success') {
+                        showNotification('success', 'Sent', 'Permission request submitted.');
+                        document.body.removeChild(dialogBackdrop);
+                        document.body.style.overflow = '';
+                    } else {
+                        throw new Error(res.message);
+                    }
+                } catch (e) {
+                    showNotification('error', 'Error', e.message);
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit';
+                }
+            }
+
+            dialog.querySelector('#cancel-request-btn').onclick = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
         }
 
         /**
@@ -9198,50 +9350,50 @@ ${uidContent}
         }
 
         /**
- * Show registration dialog with pre-filled UID
- * Used when scanning unknown UID
+ * Show registration dialog with pre-filled UID (for Admin scanning unknown card)
  */
         function showRegisterUIDDialogWithPrefill(prefillUid) {
             document.body.style.overflow = 'hidden';
 
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
-
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
 
+            const actionText = isGlobalAdmin ? 'Add to Database' : 'Submit Request';
+            const infoText = isGlobalAdmin
+                ? 'Add this student directly to the database.'
+                : 'Submit a registration request for approval.';
+
             dialog.innerHTML = `
-        <h3 class="dialog-title">Register Student ID Card</h3>
+        <h3 class="dialog-title"><i class="fa-solid fa-address-card"></i> Register Student</h3>
         <div class="dialog-content">
-            <p style="margin-bottom: 15px; color: #666;">
-                ${isGlobalAdmin
-                    ? 'Fill in the student information to add them to the database.'
-                    : 'Submit a registration request to add this student. The global admin will review and approve it.'}
-            </p>
-            <div class="form-group">
-                <label for="register-name">Full Name <span style="color: red;">*</span></label>
-                <input type="text" id="register-name" class="form-control" 
-                    placeholder="Enter student's full name" required autocomplete="off">
+            
+            <div class="dialog-disclaimer" style="margin-bottom:15px;">
+                <i class="fa-solid fa-circle-info"></i> <strong>New Card:</strong> ${infoText}
             </div>
+
             <div class="form-group">
-                <label for="register-email">Email <span style="color: red;">*</span></label>
-                <input type="email" id="register-email" class="form-control" 
-                    placeholder="student@example.com" required autocomplete="off">
+                <label class="dialog-label-fixed" for="register-name">Name*</label>
+                <input type="text" id="register-name" class="form-control" placeholder="Full Name" autocomplete="off">
             </div>
+
             <div class="form-group">
-                <label for="register-uid">Student ID (UID) <span style="color: red;">*</span></label>
-                <input type="text" id="register-uid" class="form-control" 
-                    value="${escapeHtml(prefillUid)}" readonly style="background-color: #f0f0f0;">
-                <small style="color: #666; font-size: 0.85em;">This UID was detected from scanning.</small>
+                <label class="dialog-label-fixed" for="register-email">Email*</label>
+                <input type="email" id="register-email" class="form-control" placeholder="student@epoka.edu.al" autocomplete="off">
             </div>
+
+            <div class="form-group">
+                <label class="dialog-label-fixed">UID</label>
+                <input type="text" id="register-uid" class="form-control" value="${escapeHtml(prefillUid)}" disabled style="background-color:rgba(0,0,0,0.05); color:var(--text-color); opacity:0.7;">
+            </div>
+
         </div>
         <div class="dialog-actions">
-            <button id="cancel-register-btn" class="btn-orange">Cancel</button>
-            <button id="submit-register-btn" class="btn-green">
-                ${isGlobalAdmin ? 'Add to Database' : 'Submit'}
-            </button>
+            <button id="cancel-register-btn" class="btn-red"><i class="fa-solid fa-xmark"></i> Cancel</button>
+            <button id="submit-register-btn" class="btn-green"><i class="fa-solid fa-check"></i> ${actionText}</button>
         </div>
     `;
 
@@ -9264,7 +9416,6 @@ ${uidContent}
                 // Clear previous errors
                 clearInputError(nameInput);
                 clearInputError(emailInput);
-                clearInputError(uidInput);
 
                 const name = nameInput.value.trim();
                 const email = emailInput.value.trim();
@@ -9280,11 +9431,7 @@ ${uidContent}
                     showInputError(emailInput, 'Email is required');
                     hasError = true;
                 } else if (!isValidEmail(email)) {
-                    showInputError(emailInput, 'Please enter a valid email address');
-                    hasError = true;
-                }
-                if (!uid) {
-                    showInputError(uidInput, 'UID is required');
+                    showInputError(emailInput, 'Invalid email format');
                     hasError = true;
                 }
 
@@ -9292,10 +9439,9 @@ ${uidContent}
 
                 // Disable button and show loading
                 submitBtn.disabled = true;
-                submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Submitting...';
+                submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...';
 
                 try {
-                    // Prepare data with sender info
                     const submissionData = {
                         name: name,
                         email: email,
@@ -9307,12 +9453,12 @@ ${uidContent}
                     };
 
                     if (isGlobalAdmin) {
-                        // Global admins add directly to the database
+                        // Global admins add directly
                         const result = await callWebApp('addEntryToDatabase_Admin', submissionData, 'POST');
                         if (result && result.result === 'success') {
-                            showNotification('success', 'Added to Database', `${name} has been added to the database.`);
-                            invalidateDatabaseCache(); // Invalidate cache
-                            await fetchDatabaseFromSheet(); // Re-fetch
+                            showNotification('success', 'Added', `${name} added to database.`);
+                            invalidateDatabaseCache();
+                            await fetchDatabaseFromSheet();
                             window.buildUIDToPrimaryUidMap();
                             updateUI();
                             closeDialog();
@@ -9320,19 +9466,19 @@ ${uidContent}
                             throw new Error(result?.message || 'Failed to add entry');
                         }
                     } else {
-                        // Non-global admins submit a registration request
+                        // Non-global admins submit request
                         const result = await callWebApp('submitRegistration', submissionData, 'POST');
                         if (result && result.result === 'success') {
-                            showNotification('success', 'Request Submitted', `Registration request for ${name} has been sent for approval.`);
+                            showNotification('success', 'Sent', `Registration request sent for ${name}.`);
                             closeDialog();
                         } else {
                             throw new Error(result?.message || 'Submission failed');
                         }
                     }
                 } catch (error) {
-                    showNotification('error', 'Submission Failed', error.message);
+                    showNotification('error', 'Error', error.message);
                     submitBtn.disabled = false;
-                    submitBtn.innerHTML = isGlobalAdmin ? 'Add to Database' : 'Submit';
+                    submitBtn.innerHTML = `<i class="fa-solid fa-check"></i> ${actionText}`;
                 }
             });
         }
@@ -14317,7 +14463,7 @@ ${uidContent}
                 const titleName = currentCourse.replace(/_/g, ' ');
                 document.title = `${titlePrefix}${titleName} Attendance`;
             } else {
-                document.title = `${titlePrefix}Attendance`;
+                document.title = `${titlePrefix}Smart Attendance`;
             }
         }
 
