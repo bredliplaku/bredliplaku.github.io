@@ -315,6 +315,36 @@
             color: #888;
         }
 
+        /* 1. Container for "Add Admin/Section" Input */
+        .admin-tool-bar {
+            background: rgba(0, 0, 0, 0.03);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            padding: 6px;
+            border-radius: 10px;
+            width: 100%;
+            box-sizing: border-box;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .dark-mode .admin-tool-bar {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: #444;
+        }
+
+        /* 2. The Input inside the toolbar */
+        .admin-tool-bar input.form-control {
+            background-color: white !important;
+            font-size: 0.85em;
+        }
+
+        .dark-mode .admin-tool-bar input.form-control {
+            background-color: #2c2c2e !important;
+            color: white !important;
+            border-color: #555 !important;
+        }
+
         .admin-input-wrapper {
             display: flex;
             align-items: center;
@@ -362,15 +392,22 @@
         }
 
         .admin-pills-list {
+            background-color: #fafafa;
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
             margin-top: 5px;
             padding: 5px;
             min-height: 0;
-            border: 1px dashed transparent;
+            border: 1px solid #eee;
             /* Invisible border to prevent jump */
             transition: border-color 0.2s;
+        }
+
+        .dark-mode .admin-pills-list {
+            background-color: #2c2c2e !important;
+            /* Overrides inline #fafafa if present */
+            border-color: #444 !important;
         }
 
         /* Dark Mode for Admin UI */
@@ -5706,7 +5743,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyFramwyEa5I9BvEYa6F2X2uzr2j7hnaeHxzlsyLt-o1MtOhv5s89nWzrrF_iv6b1Wi4A/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbx7mAVc94Obnqmmbch4Sfsln_VfuU6AwWdwvexXipmir4qA5ku-UMkiYFLqQ8OGl2zibQ/exec';
 
         // App state
         let courseData = {};
@@ -5741,8 +5778,6 @@
         let nfcAbortController = null;
         let initialisedCourses = new Set();
         let initialPullDone = false;
-        let avatarClickCount = 0;
-        let lastAvatarClickTime = 0;
         let guestCourse = null; // Track the course global admin is "visiting" but not officially admin of
         let scanClockInterval = null;
         let globalNotificationCount = 0;
@@ -5891,6 +5926,149 @@
                 if (grp && !map[cat].includes(grp)) map[cat].push(grp);
             });
             return map;
+        }
+
+        /**
+         * Shows a dialog to Add or Edit a Staff Member.
+         */
+        function showStaffEditorDialog(staffData = null) {
+            const isEdit = !!staffData;
+            const title = isEdit ? 'Edit Staff Member' : 'Add Staff Member';
+            const icon = isEdit ? 'fa-user-pen' : 'fa-user-plus';
+            const btnText = isEdit ? 'Save Changes' : 'Add Staff';
+
+            const dialogBackdrop = document.createElement('div');
+            dialogBackdrop.className = 'dialog-backdrop';
+            dialogBackdrop.style.zIndex = "10010";
+
+            const dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.setAttribute('role', 'dialog');
+
+            let activeNfcSession = { controller: null, button: null };
+
+            const nameVal = isEdit ? staffData.name : '';
+            const emailVal = isEdit ? staffData.email : '';
+            const uidVal = isEdit ? staffData.uid : '';
+
+            // FIX: Default to 'Lecturer' if adding new
+            const roleVal = isEdit ? staffData.role : 'Lecturer';
+
+            dialog.innerHTML = `
+        <h3 class="dialog-title"><i class="fa-solid ${icon}"></i> ${title}</h3>
+        <div class="dialog-content">
+            
+            <div class="form-group">
+                <label class="dialog-label-fixed"><i class="fa-solid fa-quote-left"></i> Name*</label>
+                <input type="text" id="staff-name" class="form-control" placeholder="Full Name" value="${escapeHtml(nameVal)}">
+            </div>
+
+            <div class="form-group">
+                <label class="dialog-label-fixed"><i class="fa-solid fa-at"></i> Email*</label>
+                <input type="email" id="staff-email" class="form-control" placeholder="email@epoka.edu.al" value="${escapeHtml(emailVal)}">
+            </div>
+
+            <div class="form-group">
+                <label class="dialog-label-fixed"><i class="fa-solid fa-user-tie"></i> Role</label>
+                <select id="staff-role" class="form-control">
+                    <option value="Global" ${roleVal === 'Global' ? 'selected' : ''}>Administrator</option>
+                    <option value="Lecturer" ${roleVal === 'Lecturer' ? 'selected' : ''}>Lecturer</option>
+                    <option value="Student" ${roleVal === 'Student' ? 'selected' : ''}>Student</option>
+                </select>
+            </div>
+            
+            <div style="margin-left:115px; margin-bottom:15px; font-size:0.85em; color:#666; line-height:1.4;">
+                <strong>Lecturer:</strong> Can login on trusted devices only and manage their courses.<br>
+                <strong>Student:</strong> Can login on any device and only see their attendance.<br>
+            </div>
+
+            <div class="form-group">
+                <label class="dialog-label-fixed"><i class="fa-solid fa-wifi"></i> UID*</label>
+                <div class="admin-tool-bar" style="padding:0; border:none; background:transparent;"> 
+                    <div class="admin-input-wrapper" style="margin:0;">
+                        <input type="text" id="staff-uid" class="form-control" placeholder="AB:CD:12:34" value="${escapeHtml(uidVal)}">
+                        ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-staff-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
+                    </div>
+                </div>
+            </div>
+            
+            <div id="staff-nfc-status" style="margin-top:10px;"></div>
+        </div>
+        <div class="dialog-actions">
+            <button id="cancel-staff-btn" class="btn-red"><i class="fa-solid fa-xmark"></i> Cancel</button>
+            <button id="save-staff-btn" class="btn-green"><i class="fa-solid fa-check"></i> ${btnText}</button>
+        </div>`;
+
+            dialogBackdrop.appendChild(dialog);
+            document.body.appendChild(dialogBackdrop);
+
+            const uidInput = dialog.querySelector('#staff-uid');
+            const statusContainer = dialog.querySelector('#staff-nfc-status');
+            const scanBtn = dialog.querySelector('.scan-staff-uid-btn');
+
+            if (scanBtn) {
+                scanBtn.addEventListener('click', () => {
+                    if (activeNfcSession.button === scanBtn) {
+                        if (activeNfcSession.controller) activeNfcSession.controller.abort();
+                        activeNfcSession = { controller: null, button: null };
+                        scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i>';
+                        statusContainer.innerHTML = '';
+                    } else {
+                        if (activeNfcSession.controller) activeNfcSession.controller.abort();
+                        scanBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+                        const controller = startNfcForInputDialog(uidInput, statusContainer, scanBtn);
+                        activeNfcSession = { controller, button: scanBtn };
+                    }
+                });
+            }
+
+            const close = () => {
+                if (activeNfcSession.controller) activeNfcSession.controller.abort();
+                document.body.removeChild(dialogBackdrop);
+            };
+            dialog.querySelector('#cancel-staff-btn').onclick = close;
+
+            dialog.querySelector('#save-staff-btn').onclick = async (e) => {
+                const name = document.getElementById('staff-name').value.trim();
+                const email = document.getElementById('staff-email').value.trim();
+                const uid = document.getElementById('staff-uid').value.trim();
+                const role = document.getElementById('staff-role').value;
+                const btn = e.target;
+
+                if (!name || !email || !uid) {
+                    showNotification('error', 'Missing Info', 'All fields are required.');
+                    return;
+                }
+
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
+
+                try {
+                    const payload = {
+                        actionType: isEdit ? 'edit' : 'add',
+                        name, email, uid, role
+                    };
+                    if (isEdit) payload.rowIndex = staffData.rowIndex;
+
+                    await callWebApp('manageStaff_Admin', payload, 'POST');
+
+                    showNotification('success', 'Success', `Staff member ${isEdit ? 'updated' : 'added'}.`);
+
+                    document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
+                    document.body.style.overflow = '';
+                    showGlobalSettingsDialog();
+
+                    setTimeout(() => {
+                        const staffTab = document.querySelector('.settings-tab-btn[data-target="sect-staff"]');
+                        if (staffTab) staffTab.click();
+                    }, 100);
+
+                } catch (err) {
+                    showNotification('error', 'Error', err.message);
+                    btn.disabled = false;
+                    btn.innerHTML = `<i class="fa-solid fa-check"></i> ${btnText}`;
+                }
+            };
         }
 
         /**
@@ -7111,22 +7289,31 @@
             dialog.style.height = '85vh';
             dialog.setAttribute('role', 'dialog');
 
+            // --- Variables for Bomb ---
+            let avatarClickCount = 0;
+            let lastAvatarClickTime = 0;
+
             // --- HTML STRUCTURE ---
             dialog.innerHTML = `
-    <h3 class="dialog-title">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span><i class="fa-solid fa-sliders"></i> Global Settings</span>
-            <button id="close-settings-btn" class="btn-icon" style="background:transparent; color:var(--text-color);"><i class="fa-solid fa-xmark"></i></button>
+    <div class="settings-modal-header">
+        <div style="display:flex; align-items:center; gap:15px;">
+            <div style="position:relative; width:48px; height:48px; cursor: default;" id="admin-profile-pic-container">
+                <img id="profile-avatar-img" src="${currentUser.picture}" style="width:100%; height:100%; border-radius:50%; border:2px solid var(--card-background); box-shadow:0 2px 8px rgba(0,0,0,0.1); object-fit:cover;">
+            </div>
+            <div>
+                <h3 style="margin:0; font-size:1.3em;">Global Settings</h3>
+                <div style="font-size:0.85em; opacity:0.7;">Administrator</div>
+            </div>
         </div>
-    </h3>
+        <button id="close-settings-btn" class="btn-icon" style="background:transparent; color:var(--text-color); font-size:1.2em;"><i class="fa-solid fa-xmark"></i></button>
+    </div>
     
     <div class="settings-tabs-container">
         <button class="settings-tab-btn active" data-target="sect-courses">
             <i class="fa-solid fa-book-open"></i> Courses
         </button>
         <button class="settings-tab-btn" data-target="sect-staff">
-            <i class="fa-solid fa-users-gear"></i> Staff Keys
-        </button>
+            <i class="fa-solid fa-user-tie"></i> Staff</button>
         <button class="settings-tab-btn" data-target="sect-devices">
             <i class="fa-solid fa-laptop-code"></i> Trusted Devices
         </button>
@@ -7210,6 +7397,23 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
+            // --- BOMB LOGIC (Restored) ---
+            const profilePicContainer = dialog.querySelector('#admin-profile-pic-container');
+            if (profilePicContainer) {
+                profilePicContainer.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const now = Date.now();
+                    if (now - lastAvatarClickTime > 1000) avatarClickCount = 0;
+                    lastAvatarClickTime = now;
+                    avatarClickCount++;
+                    if (avatarClickCount === 5) {
+                        profilePicContainer.innerHTML = `<div style="width:100%; height:100%; border-radius:50%; background:#f44336; display:flex; align-items:center; justify-content:center; color:white; font-size:2em;"><i class="fa-solid fa-bomb"></i></div>`;
+                        profilePicContainer.onclick = () => { if (confirm("Clear local cache?")) clearAllAppData(); };
+                        avatarClickCount = 0;
+                    }
+                });
+            }
+
             // --- LOGIC ---
 
             // 1. Tab Switching
@@ -7242,7 +7446,6 @@
                         callWebApp('getGlobalSettingsData', {}, 'POST')
                     ]);
 
-                    // FIX: Safe check for loader before accessing style
                     const loader = document.getElementById('settings-loader');
                     if (loader) loader.style.display = 'none';
 
@@ -7251,7 +7454,7 @@
                     // Render Courses
                     renderCoursesInSettings(courseInfo);
 
-                    // Render Staff
+                    // --- RENDER STAFF (Safe Mode) ---
                     const staffBody = document.getElementById('staff-tbody');
                     if (staffBody && globalData.staff) {
                         staffBody.innerHTML = globalData.staff.map(s => {
@@ -7260,6 +7463,7 @@
                                 ? `<span style="background:var(--purple-color); color:white; padding:2px 6px; border-radius:4px; font-size:0.8em; margin-left:5px;">ADMIN</span>`
                                 : ``;
 
+                            // We use DATA attributes instead of onclick to handle quotes safely
                             return `
                 <tr>
                     <td style="font-weight:500;">
@@ -7270,10 +7474,19 @@
                     <td>${escapeHtml(s.email)}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
-                            <button class="btn-blue btn-icon" title="Edit" onclick="editStaffKey('${s.rowIndex}', '${escapeHtml(s.name)}', '${escapeHtml(s.uid)}', '${escapeHtml(s.email)}', '${escapeHtml(s.role || 'Lecturer')}')">
+                            <button class="btn-blue btn-icon edit-staff-btn" 
+                                data-row-index="${s.rowIndex}" 
+                                data-name="${escapeHtml(s.name)}" 
+                                data-uid="${escapeHtml(s.uid)}" 
+                                data-email="${escapeHtml(s.email)}" 
+                                data-role="${escapeHtml(s.role || 'Lecturer')}"
+                                title="Edit">
                                 <i class="fa-solid fa-pencil"></i>
                             </button>
-                            <button class="btn-red btn-icon" title="Delete" onclick="deleteStaffKey('${s.rowIndex}', '${escapeHtml(s.name)}')">
+                            <button class="btn-red btn-icon delete-staff-btn" 
+                                data-row-index="${s.rowIndex}" 
+                                data-name="${escapeHtml(s.name)}"
+                                title="Delete">
                                 <i class="fa-solid fa-trash"></i>
                             </button>
                         </div>
@@ -7281,9 +7494,17 @@
                 </tr>
             `;
                         }).join('');
+
+                        // Attach Staff Listeners
+                        staffBody.querySelectorAll('.edit-staff-btn').forEach(btn => {
+                            btn.onclick = () => window.editStaffKey(btn.dataset.rowIndex, btn.dataset.name, btn.dataset.uid, btn.dataset.email, btn.dataset.role);
+                        });
+                        staffBody.querySelectorAll('.delete-staff-btn').forEach(btn => {
+                            btn.onclick = () => window.deleteStaffKey(btn.dataset.rowIndex, btn.dataset.name);
+                        });
                     }
 
-                    // Render Devices
+                    // --- RENDER DEVICES (Safe Mode) ---
                     const deviceBody = document.getElementById('devices-tbody');
                     if (deviceBody && globalData.devices) {
                         const myId = getDeviceFingerprint();
@@ -7306,19 +7527,26 @@
                     <td>${escapeHtml(d.date)}</td>
                     <td class="actions-cell">
                         <div class="actions-cell-content">
-                            <button class="btn-red btn-icon" title="Remove" onclick="deleteTrustedDevice('${d.rowIndex}', '${escapeHtml(d.name)}')">
+                            <button class="btn-red btn-icon delete-device-btn" 
+                                data-row-index="${d.rowIndex}" 
+                                data-name="${escapeHtml(d.name)}"
+                                title="Remove">
                                 <i class="fa-solid fa-trash"></i>
                             </button>
                         </div>
                     </td>
                 </tr>
             `).join('');
+
+                        // Attach Device Listeners (The Critical Fix)
+                        deviceBody.querySelectorAll('.delete-device-btn').forEach(btn => {
+                            btn.onclick = () => window.deleteTrustedDevice(btn.dataset.rowIndex, btn.dataset.name);
+                        });
                     }
 
                 } catch (e) {
                     console.error(e);
                     showNotification('error', 'Error', 'Failed to load settings: ' + e.message);
-                    // FIX: Safe check for loader in catch block too
                     const loader = document.getElementById('settings-loader');
                     if (loader) loader.style.display = 'none';
                 }
@@ -7495,170 +7723,17 @@
             });
         };
 
-        /**
- * Shows a dialog to Add or Edit a Staff Member.
- * Includes NFC scanning capability and Role selection.
- * @param {Object|null} staffData - Null for new, Object {rowIndex, name, uid, email, role} for edit.
- */
-        function showStaffEditorDialog(staffData = null) {
-            const isEdit = !!staffData;
-            const title = isEdit ? 'Edit Staff Member' : 'Add Staff Member';
-            const icon = isEdit ? 'fa-user-pen' : 'fa-user-plus';
-            const btnText = isEdit ? 'Save Changes' : 'Add Staff';
 
-            // Create backdrop with higher z-index to sit ON TOP of Global Settings
-            const dialogBackdrop = document.createElement('div');
-            dialogBackdrop.className = 'dialog-backdrop';
-            dialogBackdrop.style.zIndex = "10010";
-
-            const dialog = document.createElement('div');
-            dialog.className = 'dialog';
-            dialog.setAttribute('role', 'dialog');
-            dialog.setAttribute('aria-modal', 'true');
-
-            // State for NFC
-            let activeNfcSession = { controller: null, button: null };
-
-            // Prefill data
-            const nameVal = isEdit ? staffData.name : '';
-            const emailVal = isEdit ? staffData.email : '';
-            const uidVal = isEdit ? staffData.uid : '';
-            // Default to 'Student' for new entries
-            const roleVal = isEdit ? staffData.role : 'Student';
-
-            dialog.innerHTML = `
-        <h3 class="dialog-title"><i class="fa-solid ${icon}"></i> ${title}</h3>
-        <div class="dialog-content">
-            
-            <div class="form-group">
-                <label class="dialog-label-fixed"><i class="fa-solid fa-quote-left"></i> Name*</label>
-                <input type="text" id="staff-name" class="form-control" placeholder="Full Name" value="${escapeHtml(nameVal)}">
-            </div>
-
-            <div class="form-group">
-                <label class="dialog-label-fixed"><i class="fa-solid fa-at"></i> Email*</label>
-                <input type="email" id="staff-email" class="form-control" placeholder="email@epoka.edu.al" value="${escapeHtml(emailVal)}">
-            </div>
-
-            <div class="form-group">
-                <label class="dialog-label-fixed"><i class="fa-solid fa-user-tie"></i> Role</label>
-                <select id="staff-role" class="form-control">
-                    <option value="Global" ${roleVal === 'Global' ? 'selected' : ''}>Administrator</option>
-                    <option value="Lecturer" ${roleVal === 'Lecturer' ? 'selected' : ''}>Lecturer</option>
-                    <option value="Student" ${roleVal === 'Student' ? 'selected' : ''}>Student</option>
-                </select>
-            </div>
-            
-            <div style="margin-left:115px; margin-bottom:15px; font-size:0.85em; color:#666; line-height:1.4;">
-                <strong>Lecturer:</strong> Can login on trusted devices only and manage their courses.<br>
-                <strong>Student:</strong> Can login on any device and only see their attendance.<br>
-            </div>
-
-            <div class="form-group">
-                <label class="dialog-label-fixed"><i class="fa-solid fa-wifi"></i> UID*</label>
-                <div class="admin-input-wrapper">
-                    <input type="text" id="staff-uid" class="form-control" placeholder="Type or scan..." value="${escapeHtml(uidVal)}">
-                    ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-staff-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
-                </div>
-            </div>
-            
-            <div id="staff-nfc-status" style="margin-top:10px;"></div>
-        </div>
-        <div class="dialog-actions">
-            <button id="cancel-staff-btn" class="btn-red"><i class="fa-solid fa-xmark"></i> Cancel</button>
-            <button id="save-staff-btn" class="btn-green"><i class="fa-solid fa-check"></i> ${btnText}</button>
-        </div>`;
-
-            dialogBackdrop.appendChild(dialog);
-            document.body.appendChild(dialogBackdrop);
-
-            // --- LOGIC ---
-
-            const uidInput = dialog.querySelector('#staff-uid');
-            const statusContainer = dialog.querySelector('#staff-nfc-status');
-            const scanBtn = dialog.querySelector('.scan-staff-uid-btn');
-
-            // 1. NFC Logic
-            if (scanBtn) {
-                scanBtn.addEventListener('click', () => {
-                    if (activeNfcSession.button === scanBtn) {
-                        // Stop
-                        if (activeNfcSession.controller) activeNfcSession.controller.abort();
-                        activeNfcSession = { controller: null, button: null };
-                        scanBtn.innerHTML = '<i class="fa-solid fa-wifi"></i>';
-                        statusContainer.innerHTML = '';
-                    } else {
-                        // Start
-                        if (activeNfcSession.controller) activeNfcSession.controller.abort();
-                        scanBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
-                        const controller = startNfcForInputDialog(uidInput, statusContainer, scanBtn);
-                        activeNfcSession = { controller, button: scanBtn };
-                    }
-                });
-            }
-
-            // 2. Close Logic
-            const close = () => {
-                if (activeNfcSession.controller) activeNfcSession.controller.abort();
-                document.body.removeChild(dialogBackdrop);
-            };
-            dialog.querySelector('#cancel-staff-btn').onclick = close;
-
-            // 3. Save Logic
-            dialog.querySelector('#save-staff-btn').onclick = async (e) => {
-                const name = document.getElementById('staff-name').value.trim();
-                const email = document.getElementById('staff-email').value.trim();
-                const uid = document.getElementById('staff-uid').value.trim();
-                const role = document.getElementById('staff-role').value; // Get Role
-                const btn = e.target;
-
-                // Validation
-                if (!name || !email || !uid) {
-                    showNotification('error', 'Missing Info', 'All fields are required.');
-                    return;
-                }
-
-                btn.disabled = true;
-                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving...';
-
-                try {
-                    const payload = {
-                        actionType: isEdit ? 'edit' : 'add',
-                        name, email, uid, role // Send Role
-                    };
-                    if (isEdit) payload.rowIndex = staffData.rowIndex;
-
-                    await callWebApp('manageStaff_Admin', payload, 'POST');
-
-                    showNotification('success', 'Success', `Staff member ${isEdit ? 'updated' : 'added'}.`);
-
-                    // 1. Force Close EVERYTHING (Staff Editor + Global Settings)
-                    document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
-                    document.body.style.overflow = ''; // Reset body scroll
-
-                    // 2. Re-open Global Settings Fresh
-                    showGlobalSettingsDialog();
-
-                    // 3. Auto-switch back to "Staff" tab so the user doesn't lose context
-                    setTimeout(() => {
-                        const staffTab = document.querySelector('.settings-tab-btn[data-target="sect-staff"]');
-                        if (staffTab) staffTab.click();
-                    }, 100); // Small delay to allow the new dialog to render
-
-                } catch (err) {
-                    showNotification('error', 'Error', err.message);
-                    btn.disabled = false;
-                    btn.innerHTML = btnText;
-                }
-            };
-        }
-
-        // --- 2. Course Editor ---
+        // --- 2. Course Editor (Merged UI + Logic) ---
+        // --- 2. Course Editor (Renaming Support + Validation) ---
         function showCourseEditorDialog(courseName, courseData = null) {
             const isNew = !courseName;
             const title = isNew ? 'New Course' : 'Edit Course';
             const data = courseData || {};
             const val = (v) => v !== undefined && v !== null ? v : '';
+
+            // 1. LOGIC: Display name with spaces (e.g. "CE 202")
+            const displayCourseName = (courseName || '').replace(/_/g, ' ');
 
             const formatDate = (d) => {
                 if (!d) return '';
@@ -7676,6 +7751,12 @@
                 currentSections = data.availableSections.split(',').map(s => s.trim()).filter(Boolean);
             }
 
+            // Parse existing admins into a Set
+            let currentAdmins = new Set();
+            if (data.adminEmails) {
+                data.adminEmails.split(',').forEach(e => currentAdmins.add(e.trim().toLowerCase()));
+            }
+
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             dialogBackdrop.style.zIndex = "10002";
@@ -7683,40 +7764,34 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            // --- ADMIN ACCESS HTML (Global Only) ---
+            // --- ADMIN ACCESS HTML ---
             let adminSectionHtml = '';
             if (isGlobalAdmin) {
                 adminSectionHtml = `
-        <div class="form-group" style="align-items:flex-start; margin-top: 15px;">
-            <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-user-shield"></i> Admins</label>
-            
-            <div style="flex-grow:1; min-width:0;">
-                <div id="admin-pills-list" class="admin-pills-list" style="width:100%; box-sizing:border-box; min-height:40px; margin-bottom:10px; border:1px solid #eee; background:#fafafa; border-radius:8px; padding:5px; font-size:0.85em;"></div>
-
-                <div style="background:rgba(0,0,0,0.03); padding:6px; border-radius:10px; width:100%; box-sizing:border-box; border:1px solid rgba(0,0,0,0.05); display:flex; gap:10px; align-items:center;">
-                    
-                    <div class="input-with-icon" style="flex-grow:1;">
-                        <i class="fa-solid fa-user-plus"></i>
-                        <input type="email" id="new-admin-email" class="form-control" placeholder="Enter email..." style="background:white; font-size:0.85em;">
-                    </div>
-                    
-                    <button id="add-admin-btn" class="btn-green btn-sm" style="padding:6px 15px; flex-shrink:0; font-size:0.85em;">
-                        <i class="fa-solid fa-plus"></i> Add
-                    </button>
-                </div>
-
-                <textarea id="edit-c-admins" style="display:none;"></textarea>
+        <div class="form-group" style="margin-bottom:5px; margin-top:15px;">
+            <label class="dialog-label-fixed"><i class="fa-solid fa-user-shield"></i> Admins</label>
+            <div class="input-with-icon" style="flex-grow:1;">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="admin-search-input" class="form-control" placeholder="Search...">
             </div>
         </div>
+        
+        <div style="position:relative;">
+            <div id="admin-staff-loader" style="position:absolute; inset:0; display:flex; justify-content:center; align-items:center; z-index:10; background:var(--card-background); border-radius:8px;">
+                <div class="loading-spinner" style="width:30px; height:30px; border-width:3px; margin:0;"></div>
+            </div>
+            <div id="admin-selection-list" class="student-list-container" style="margin-left:115px; height:220px; min-height:180px; margin-bottom:5px;"></div>
+        </div>
+        <div id="admin-count-hint" style="text-align:right; font-size:0.85em; color:var(--primary-color); font-weight:600;">${currentAdmins.size} selected</div>
         <hr style="border:0; border-top:1px solid #eee; margin:15px 0;">`;
             }
 
-            let eisWarning = !isGlobalAdmin ? `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-lock"></i> Global Admin only.</small>` : '';
+            let eisWarning = !isGlobalAdmin ? `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-lock"></i> Admin only.</small>` : '';
 
-            // Generate Buttons A-D (Loop 0 to 4)
+            // Generate Buttons A-D
             let groupButtonsHtml = '';
             for (let i = 0; i < 4; i++) {
-                const char = String.fromCharCode(65 + i); // 65 is 'A'
+                const char = String.fromCharCode(65 + i);
                 groupButtonsHtml += `<div class="course-button" data-val="${char}" style="min-width:35px; padding:6px 0; font-size:0.9em;"><b>${char}</b></div>`;
             }
 
@@ -7728,7 +7803,7 @@
             <label class="dialog-label-fixed"><i class="fa-solid fa-heading"></i> Name</label>
             <div class="input-with-icon" style="flex-grow:1;">
                 <i class="fa-solid fa-font"></i>
-                <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_202">
+                <input id="edit-c-name" class="form-control" value="${escapeHtml(displayCourseName)}" ${disabledAttr} placeholder="e.g. CE 101">
             </div>
         </div>
 
@@ -7755,17 +7830,14 @@
             <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-layer-group"></i> Sections</label>
             
             <div style="flex-grow:1; min-width:0; display:flex; flex-direction:column; gap:10px;">
-                
-                <div id="section-builder-list" class="admin-pills-list" style="width:100%; box-sizing:border-box; min-height:40px; border:1px solid #eee; background:#fafafa; border-radius:8px; padding:5px; font-size:0.85em;"></div>
+                <div id="section-builder-list" class="admin-pills-list" style="width:100%; box-sizing:border-box; min-height:40px; border-radius:8px; padding:5px; font-size:0.85em;"></div>
 
-                <div style="background:rgba(0,0,0,0.03); padding:10px; border-radius:10px; width:100%; box-sizing:border-box; border:1px solid rgba(0,0,0,0.05); display:flex; flex-direction:column; gap:8px; font-size:0.85em;">
-                    
+                <div class="admin-tool-bar" style="flex-direction:column; gap:8px; align-items:stretch; padding:10px;">
                     <div id="new-sec-cat" class="course-buttons-container" style="margin:0; width:100%; display:flex; gap:6px;">
                         <div class="course-button active" data-val="Theory" style="flex:1; text-align:center; padding:6px; font-size:0.85em; min-width:0;"><i class="fa-solid fa-book"></i>&nbsp;Theory</div>
                         <div class="course-button" data-val="Lab" style="flex:1; text-align:center; padding:6px; font-size:0.85em; min-width:0;"><i class="fa-solid fa-desktop"></i>&nbsp;Lab</div>
-                        <div class="course-button" data-val="Practice" style="flex:1; text-align:center; padding:6px; font-size:0.85em; min-width:0;"><i class="fa-solid fa-pen-to-square"></i>&nbsp;Prac</div>
+                        <div class="course-button" data-val="Practice" style="flex:1; text-align:center; padding:6px; font-size:0.85em; min-width:0;"><i class="fa-solid fa-pen-to-square"></i>&nbsp;Practice</div>
                     </div>
-                    
                     <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
                         <div id="new-sec-grp" class="course-buttons-container" style="margin:0; flex-wrap:nowrap; gap:6px; flex:1;">
                             ${groupButtonsHtml}
@@ -7775,7 +7847,6 @@
                         </button>
                     </div>
                 </div>
-
             </div>
         </div>
 
@@ -7823,66 +7894,25 @@
             let newSectionCat = 'Theory';
             let newSectionGrp = 'A';
 
-            // --- SMART LOGIC: Update Disabled States & Auto-Select ---
-            const catOrder = ['Theory', 'Lab', 'Practice'];
-            const grpOrder = ['A', 'B', 'C', 'D'];
-
             const updateAvailableOptions = () => {
-                // 1. Mark existing groups for current category as disabled
-                let anyAvailableInCurrentCat = false;
-
                 Array.from(grpContainer.children).forEach(btn => {
                     const grp = btn.dataset.val;
                     const fullSec = `${newSectionCat} ${grp}`;
-
-                    if (currentSections.includes(fullSec)) {
-                        btn.classList.add('disabled');
-                    } else {
-                        btn.classList.remove('disabled');
-                        anyAvailableInCurrentCat = true;
-                    }
+                    if (currentSections.includes(fullSec)) btn.classList.add('disabled');
+                    else btn.classList.remove('disabled');
                 });
 
-                // 2. Auto-Select Logic
                 const currentGrpBtn = grpContainer.querySelector(`[data-val="${newSectionGrp}"]`);
-
-                // If current selection is taken (disabled)
                 if (currentGrpBtn.classList.contains('disabled')) {
-                    // Find first available group
                     const firstAvailable = grpContainer.querySelector('.course-button:not(.disabled)');
-
                     if (firstAvailable) {
-                        // Auto switch to next group
                         Array.from(grpContainer.children).forEach(b => b.classList.remove('active'));
                         firstAvailable.classList.add('active');
                         newSectionGrp = firstAvailable.dataset.val;
-                    } else {
-                        // Current Category is FULL. Switch Category.
-                        const currentCatIdx = catOrder.indexOf(newSectionCat);
-                        if (currentCatIdx < catOrder.length - 1) {
-                            const nextCat = catOrder[currentCatIdx + 1];
-
-                            // Switch Category UI
-                            Array.from(catContainer.children).forEach(b => {
-                                if (b.dataset.val === nextCat) {
-                                    b.classList.add('active');
-                                    newSectionCat = nextCat;
-                                } else {
-                                    b.classList.remove('active');
-                                }
-                            });
-
-                            // Recursive call to update groups for the new category
-                            updateAvailableOptions();
-                        } else {
-                            // All categories full? (Edge case)
-                            // Just stay put, button handles "Duplicate" error
-                        }
                     }
                 }
             };
 
-            // 1. Render Current Sections
             const renderSections = () => {
                 sectionListContainer.innerHTML = '';
                 currentSections.forEach((sec, index) => {
@@ -7891,19 +7921,15 @@
                     pill.innerHTML = `<b>${sec}</b> <i class="fa-solid fa-times remove-pill" style="margin-left:8px; cursor:pointer; color:var(--danger-color);" data-index="${index}"></i>`;
                     sectionListContainer.appendChild(pill);
                 });
-
                 sectionListContainer.querySelectorAll('.remove-pill').forEach(btn => {
                     btn.onclick = (e) => {
-                        const idx = parseInt(e.target.dataset.index);
-                        currentSections.splice(idx, 1);
-                        renderSections();
-                        updateAvailableOptions(); // Re-evaluate logic on delete
+                        currentSections.splice(parseInt(e.target.dataset.index), 1);
+                        renderSections(); updateAvailableOptions();
                     };
                 });
             };
             renderSections();
 
-            // 2. UI Toggles Logic
             const bindToggleGroup = (container, onClick) => {
                 container.addEventListener('click', (e) => {
                     const btn = e.target.closest('.course-button');
@@ -7911,25 +7937,19 @@
                         Array.from(container.children).forEach(b => b.classList.remove('active'));
                         btn.classList.add('active');
                         onClick(btn.dataset.val);
-                        if (container === catContainer) updateAvailableOptions(); // Recalc when cat changes
+                        if (container === catContainer) updateAvailableOptions();
                     }
                 });
             };
-
             bindToggleGroup(catContainer, (val) => newSectionCat = val);
             bindToggleGroup(grpContainer, (val) => newSectionGrp = val);
-
-            // Initial setup
             grpContainer.querySelector('[data-val="A"]').classList.add('active');
-            updateAvailableOptions(); // Run once on load
+            updateAvailableOptions();
 
-            // 3. Add Button Logic
             addSectionBtn.onclick = () => {
                 const fullSection = `${newSectionCat} ${newSectionGrp}`;
                 if (!currentSections.includes(fullSection)) {
                     currentSections.push(fullSection);
-
-                    // Sort
                     const catOrderMap = { 'Theory': 1, 'Lab': 2, 'Practice': 3 };
                     currentSections.sort((a, b) => {
                         const [catA, grpA] = a.split(' ');
@@ -7937,64 +7957,78 @@
                         if (catOrderMap[catA] !== catOrderMap[catB]) return catOrderMap[catA] - catOrderMap[catB];
                         return grpA.localeCompare(grpB);
                     });
-
-                    renderSections();
-                    updateAvailableOptions(); // Trigger Smart Logic
+                    renderSections(); updateAvailableOptions();
                 } else {
                     showNotification('warning', 'Duplicate', 'Section already exists.');
                 }
             };
 
-            // --- Admin Emails Logic (Global Only) ---
-            let adminEmailList = [];
-            let hiddenAdminInput = null;
+            // --- ADMIN STAFF PICKER LOGIC ---
             if (isGlobalAdmin) {
-                const pillsContainer = document.getElementById('admin-pills-list');
-                const newAdminInput = document.getElementById('new-admin-email');
-                const addAdminBtn = document.getElementById('add-admin-btn');
-                hiddenAdminInput = document.getElementById('edit-c-admins');
-                const rawAdmins = val(data.adminEmails);
-                adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
+                const listContainer = document.getElementById('admin-selection-list');
+                const searchInput = document.getElementById('admin-search-input');
+                const countHint = document.getElementById('admin-count-hint');
+                const loader = document.getElementById('admin-staff-loader');
+                let staffList = [];
 
-                const updateHiddenInput = () => { hiddenAdminInput.value = adminEmailList.join(', '); };
+                // 1. Render Function
+                const renderStaffList = (filter = '') => {
+                    listContainer.innerHTML = '';
+                    const lowerFilter = filter.toLowerCase();
+                    const filtered = staffList.filter(s =>
+                        s.name.toLowerCase().includes(lowerFilter) ||
+                        s.email.toLowerCase().includes(lowerFilter)
+                    );
 
-                const renderAdminPills = () => {
-                    pillsContainer.innerHTML = '';
-                    adminEmailList.forEach((email, index) => {
-                        const pill = document.createElement('div');
-                        pill.className = 'admin-pill-item';
-                        pill.innerHTML = `<i class="fa-solid fa-user" style="font-size:0.8em;"></i> ${escapeHtml(email)} <i class="fa-solid fa-times remove-pill" data-index="${index}"></i>`;
-                        pillsContainer.appendChild(pill);
-                    });
-                    pillsContainer.querySelectorAll('.remove-pill').forEach(btn => {
-                        btn.onclick = (e) => {
-                            const idx = parseInt(e.target.dataset.index);
-                            adminEmailList.splice(idx, 1);
-                            renderAdminPills();
-                            updateHiddenInput();
-                        };
-                    });
-                };
-
-                const addAdmin = () => {
-                    const email = newAdminInput.value.trim();
-                    if (email && isValidEmail(email)) {
-                        if (!adminEmailList.includes(email)) {
-                            adminEmailList.push(email);
-                            renderAdminPills();
-                            updateHiddenInput();
-                            newAdminInput.value = '';
-                        } else {
-                            showNotification('warning', 'Duplicate', 'Email already added.');
-                        }
-                    } else if (email) {
-                        showNotification('error', 'Invalid Email', 'Please enter a valid email.');
+                    if (filtered.length === 0) {
+                        listContainer.innerHTML = `<div style="padding:20px; text-align:center; opacity:0.6;">No staff found</div>`;
+                        return;
                     }
+
+                    filtered.forEach(staff => {
+                        const emailLower = staff.email.toLowerCase();
+                        const isSelected = currentAdmins.has(emailLower);
+
+                        const div = document.createElement('div');
+                        div.className = `student-item ${isSelected ? 'selected' : ''}`;
+                        const initials = staff.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+
+                        div.innerHTML = `
+                            <div class="student-avatar-placeholder" style="${isSelected ? 'background:var(--primary-color); color:white;' : ''}">${initials}</div>
+                            <div class="student-info" style="flex-grow:1;">
+                                <div class="student-name">${escapeHtml(staff.name)}</div>
+                                <div class="student-uid" style="font-size:0.8em;">${escapeHtml(staff.role === 'Global' ? 'Admin' : (staff.role || 'Staff'))} &bull; ${escapeHtml(staff.email)}</div>
+                            </div>
+                            ${isSelected ? '<i class="fa-solid fa-check" style="color:var(--primary-color);"></i>' : ''}
+                        `;
+
+                        div.onclick = () => {
+                            if (isSelected) currentAdmins.delete(emailLower);
+                            else currentAdmins.add(emailLower);
+                            renderStaffList(searchInput.value);
+                            countHint.textContent = `${currentAdmins.size} selected`;
+                        };
+                        listContainer.appendChild(div);
+                    });
                 };
-                addAdminBtn.onclick = addAdmin;
-                newAdminInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addAdmin(); });
-                renderAdminPills();
-                updateHiddenInput();
+
+                // 2. Fetch Data
+                callWebApp('getGlobalSettingsData', {}, 'POST')
+                    .then(data => {
+                        if (loader) loader.style.display = 'none';
+                        if (data && data.staff) {
+                            staffList = data.staff;
+                            staffList.sort((a, b) => a.name.localeCompare(b.name));
+                            renderStaffList();
+                        }
+                    })
+                    .catch(e => {
+                        if (loader) loader.style.display = 'none';
+                        listContainer.innerHTML = `<div class="error-message">Failed to load staff list.</div>`;
+                    });
+
+                // 3. Search Listener
+                searchInput.addEventListener('input', (e) => renderStaffList(e.target.value));
             }
 
             const close = () => document.body.removeChild(dialogBackdrop);
@@ -8003,19 +8037,36 @@
             // --- Save Logic ---
             dialog.querySelector('#save-edit-c').onclick = async (e) => {
                 const btn = e.target;
+                const nameInput = document.getElementById('edit-c-name');
+                const rawName = nameInput.value.trim();
+                const systemName = rawName.replace(/\s+/g, '_');
+
+                // --- VALIDATION: Max Length ---
+                if (systemName.length > 50) {
+                    showInputError(nameInput, 'Name is too long (max 50 chars).');
+                    return;
+                }
+
+                // --- VALIDATION: Forbidden Characters ---
+                if (/[:\\\/?*\[\]]/.test(systemName)) {
+                    showInputError(nameInput, 'Name contains invalid characters (: \\ / ? * [ ]).');
+                    return;
+                }
+
                 btn.disabled = true;
                 btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
 
                 if (currentSections.length === 0) {
-                    showNotification('error', 'Missing Data', 'Please add at least one section (e.g. Theory A).');
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save';
+                    showNotification('error', 'Missing Data', 'Please add at least one section.');
+                    btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save';
                     return;
                 }
 
+                const finalAdminString = Array.from(currentAdmins).join(', ');
+
                 const payload = {
                     originalName: courseName,
-                    courseName: document.getElementById('edit-c-name').value,
+                    courseName: systemName, // SEND UNDERSCORES
                     defaultHours: document.getElementById('edit-c-hours').value,
                     startDate: document.getElementById('edit-c-start').value,
                     endDate: document.getElementById('edit-c-end').value,
@@ -8023,24 +8074,18 @@
                     holidayWeeks: document.getElementById('edit-c-holidays').value,
                     eisId: document.getElementById('edit-c-eis').value,
                     availableSections: currentSections.join(', '),
-                    adminEmails: isGlobalAdmin ? hiddenAdminInput.value : (data.adminEmails || '')
+                    adminEmails: isGlobalAdmin ? finalAdminString : (data.adminEmails || '')
                 };
 
                 try {
                     const res = await callWebApp('saveCourseSettings_Admin', payload, 'POST');
                     if (res.result === 'success') {
                         showNotification('success', 'Saved', 'Course updated.');
-
                         close();
                         document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
                         document.body.style.overflow = '';
-
-                        if (isGlobalAdmin) {
-                            showGlobalSettingsDialog();
-                        } else {
-                            showAdminProfileDialog();
-                        }
-
+                        if (isGlobalAdmin) showGlobalSettingsDialog();
+                        else showAdminProfileDialog();
                     } else { throw new Error(res.message); }
                 } catch (err) {
                     showNotification('error', 'Save Failed', err.message);
@@ -8050,14 +8095,35 @@
             };
 
             if (!isNew && isGlobalAdmin) {
-                dialog.querySelector('#delete-course-btn').onclick = () => {
+                dialog.querySelector('#delete-course-btn').onclick = async (e) => {
                     if (confirm('Delete this course from settings?')) {
-                        callWebApp('saveCourseSettings_Admin', { originalName: courseName, isDelete: true }, 'POST')
-                            .then(() => { close(); showGlobalSettingsDialog(); });
+                        const btn = e.currentTarget;
+                        const originalText = btn.innerHTML;
+
+                        try {
+                            btn.disabled = true;
+                            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Deleting...';
+
+                            await callWebApp('saveCourseSettings_Admin', { originalName: courseName, isDelete: true }, 'POST');
+
+                            showNotification('success', 'Deleted', 'Course removed.');
+
+                            close();
+                            document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
+                            document.body.style.overflow = '';
+
+                            showGlobalSettingsDialog();
+
+                        } catch (err) {
+                            showNotification('error', 'Delete Failed', err.message);
+                            btn.disabled = false;
+                            btn.innerHTML = originalText;
+                        }
                     }
                 };
             }
         }
+
 
         // --- 3. Non-Global Admin Profile & Settings ---
         function showAdminProfileDialog() {
@@ -8304,7 +8370,7 @@ ${uidContent}
                 // Re-enable scrolling
                 document.body.classList.remove('is-loading');
 
-                // --- FIX: Ensure auth UI state (hiding modules) is applied correctly ---
+                // --- Ensure auth UI state (hiding modules) is applied correctly ---
                 updateAuthUI();
                 updateUI();
 
@@ -11497,7 +11563,7 @@ ${uidContent}
                 const data = await response.json();
 
                 if (data && data.result === 'error') {
-                    // --- NEW: HANDLE SESSION EXPIRY ---
+                    // --- HANDLE SESSION EXPIRY ---
                     if (data.message === 'KIOSK_SESSION_EXPIRED') {
                         console.warn("Kiosk session expired. Reloading.");
                         localStorage.removeItem('gapi_token');
@@ -13019,7 +13085,7 @@ ${uidContent}
             <div class="form-group">
                 <label class="dialog-label-fixed"><i class="fa-solid fa-wifi"></i> UID*</label>
                 <div class="admin-input-wrapper">
-                    <input type="text" id="add-uid" class="form-control" placeholder="Type or scan...">
+                    <input type="text" id="add-uid" class="form-control" placeholder="AB:CD:12:34">
                     ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
                 </div>
             </div>
@@ -13210,7 +13276,7 @@ ${uidContent}
                 uidGroup.style.marginBottom = '15px'; // Increased margin
                 uidGroup.innerHTML = `
     <label class="dialog-label-fixed"><i class="fa-solid fa-wifi"></i> UID</label>
-    <input type="text" class="form-control uid-input" value="${escapeHtml(uidValue)}" placeholder="Type or scan...">
+    <input type="text" class="form-control uid-input" value="${escapeHtml(uidValue)}" placeholder="AB:CD:12:34">
     <div class="uid-button-group"> ${nfcSupported ? '<button class="btn-blue btn-icon btn-sm scan-uid-btn" title="Scan UID"><i class="fa-solid fa-wifi"></i></button>' : ''}
         <button class="btn-red btn-icon btn-sm remove-uid-btn" title="Remove UID"><i class="fa-solid fa-minus"></i></button>
     </div> `;
@@ -13784,7 +13850,7 @@ ${uidContent}
             const commonDateObj = new Date(firstLog.timestamp);
             const formattedDate = commonDateObj.toISOString().split('T')[0];
 
-            // --- FIX 1: Determine correct UID display value ---
+            // --- Determine correct UID display value ---
             // If we have the display array (actual card IDs), use that. Otherwise fallback to uid.
             const uidDisplayValue = (group.uidsForDisplay && group.uidsForDisplay.length > 0)
                 ? group.uidsForDisplay.join(', ')
@@ -13796,7 +13862,7 @@ ${uidContent}
                 const formattedTime = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
                 const manualClass = (log.manual === true || log.manual === 'true') ? 'manual-timestamp-input' : '';
 
-                // --- FIX 2: Session Dropdown ---
+                // --- Session Dropdown ---
                 const sessionLabel = log.session ? log.session : 'Default';
                 const optionsHtml = generateSessionOptions(sessionLabel);
 
@@ -13915,7 +13981,7 @@ ${uidContent}
                 });
             });
 
-            // --- FIX 3: Delete All Logic ---
+            // --- Delete All Logic ---
             document.getElementById('delete-all-logs-btn').addEventListener('click', () => {
                 showConfirmationDialog({
                     title: 'Delete Entire Entry?',
