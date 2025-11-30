@@ -5743,7 +5743,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbz6F0R2YqPyAFJiZ1dlKD47-EmiihhZ6RbiFrqcpBOqTPFkcXb55Eth0N-rtyUlC_P_vw/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbywzbb3_sn0EinbH-N2r1tdNkL9Zo4QRhqQp1z4jMjudMJraPVqq4tEjtLJxunDslI55A/exec';
 
         // App state
         let courseData = {};
@@ -6643,6 +6643,12 @@
                         else if (req.status === 'Rejected') statusBadge = `<span style="color:var(--danger-color); font-weight:bold; font-size:0.85em; background:#ffebee; padding:2px 8px; border-radius:10px;">Rejected</span>`;
                         else statusBadge = `<span style="color:var(--warning-color); font-weight:bold; font-size:0.85em; background:#fff3e0; padding:2px 8px; border-radius:10px;">Pending</span>`;
 
+                        // --- NEW: Session Badge ---
+                        let sessionBadge = '';
+                        if (req.session && req.session !== 'Default') {
+                            sessionBadge = `<span style="background:#e3f2fd; color:var(--primary-color); font-weight:700; font-size:0.75em; padding:1px 6px; border-radius:4px; text-transform:uppercase; margin-left:6px;">${escapeHtml(req.session)}</span>`;
+                        }
+
                         return `
         <div class="request-list-item clickable-hist-row" style="border:1px solid #eee; padding:10px; margin-bottom:8px; border-radius:8px; cursor:pointer;">
             <div style="flex-grow:1;">
@@ -6650,8 +6656,10 @@
                     <strong>${escapeHtml(req.studentName)}</strong>
                     ${statusBadge}
                 </div>
-                <div style="font-size:0.9em; color:#666;">
-                    ${escapeHtml(req.course.replace(/_/g, ' '))} &bull; ${escapeHtml(req.absenceDate)}
+                <div style="font-size:0.9em; color:#666; display:flex; align-items:center;">
+                    ${escapeHtml(req.course.replace(/_/g, ' '))} ${sessionBadge} 
+                    <span style="margin:0 6px;">&bull;</span> 
+                    ${escapeHtml(req.absenceDate)}
                 </div>
                 <div style="font-size:0.85em; opacity:0.7; margin-top:2px;">
                     ${escapeHtml(req.reasonType)}
@@ -6663,18 +6671,19 @@
                     // Attach Click Listeners
                     container.querySelectorAll('.clickable-hist-row').forEach((row, index) => {
                         row.onclick = () => {
-                            const req = history[index]; // Or simpler mapping if using filtered list index
+                            const req = filtered[index]; // Use filtered array index
                             showPermissionDetailsDialog({
                                 requestId: req.requestID,
                                 studentName: req.studentName,
                                 studentEmail: req.studentEmail,
                                 course: req.course,
+                                session: req.session, // <--- Pass session
                                 absenceDate: req.absenceDate,
                                 hours: req.hours,
                                 reasonType: req.reasonType,
                                 description: req.description,
                                 attachmentUrl: req.attachmentUrl
-                            }, true);
+                            }, true); // true = readOnly
                         };
                     });
                 };
@@ -7737,8 +7746,20 @@
 
             const formatDate = (d) => {
                 if (!d) return '';
-                if (typeof d === 'string' && d.match(/^\d{4}-\d{2}-\d{2}$/)) return d;
-                try { return new Date(d).toISOString().split('T')[0]; } catch (e) { return ''; }
+                // If it's already YYYY-MM-DD, trust it
+                if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+
+                try {
+                    const date = new Date(d);
+                    if (isNaN(date.getTime())) return '';
+
+                    // Use LOCAL getters to preserve the exact date selected by the user
+                    // This ignores UTC conversion entirely.
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                } catch (e) { return ''; }
             };
 
             const canEditSensitive = isGlobalAdmin;
@@ -9136,7 +9157,6 @@ ${uidContent}
         function showRequestPermissionDialog() {
             if (!isSignedIn || isAdmin || !currentUser) return;
 
-            // --- Date Restrictions ---
             const getLocalDateString = (date) => {
                 const year = date.getFullYear();
                 const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -9145,13 +9165,10 @@ ${uidContent}
             };
 
             const today = new Date();
-            const daysInPast = 10;
-            const daysInFuture = 10;
-            const minDateStr = getLocalDateString(addBusinessDays(today, -daysInPast));
-            const maxDateStr = getLocalDateString(addBusinessDays(today, daysInFuture));
+            const minDateStr = getLocalDateString(addBusinessDays(today, -10));
+            const maxDateStr = getLocalDateString(addBusinessDays(today, 10));
             const todayStr = getLocalDateString(today);
 
-            // --- HTML Structure ---
             document.body.style.overflow = 'hidden';
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
@@ -9159,12 +9176,10 @@ ${uidContent}
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            // Course Options
             const courseOptions = Object.keys(courseInfoMap).sort().map(courseName =>
                 `<option value="${escapeHtml(courseName)}">${courseName.replace(/_/g, ' ')}</option>`
             ).join('');
 
-            // Hour Buttons
             const hoursList = ['8:40', '9:40', '10:40', '11:40', '12:40', '13:40', '14:40', '15:40', '16:00', '17:00', '18:00', '19:00'];
             const hourButtons = hoursList.map(h => `<button type="button" class="toggle-button" data-value="${h}">${h}</button>`).join('');
 
@@ -9184,6 +9199,15 @@ ${uidContent}
                     <option value="" disabled selected>Select Course...</option>
                     ${courseOptions}
                 </select>
+            </div>
+
+            <div id="request-session-container" style="display:none; margin-bottom:15px;">
+                <div class="form-group required" style="align-items:flex-start;">
+                    <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-users"></i> Group</label>
+                    <div style="flex-grow:1;">
+                        <div id="req-session-wrapper"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="form-group required" style="align-items:flex-start;">
@@ -9222,7 +9246,6 @@ ${uidContent}
                     <i class="fa-solid fa-bus"></i>
                     <span>Bus Issue</span>
                 </div>
-                
                 <div class="reason-card" data-value="Club">
                     <i class="fa-solid fa-people-robbery"></i>
                     <span>Student Event</span>
@@ -9258,6 +9281,9 @@ ${uidContent}
             document.body.appendChild(dialogBackdrop);
 
             // --- Variables ---
+            const courseSelect = document.getElementById('request-course');
+            const sessionContainer = document.getElementById('request-session-container');
+            const sessionWrapper = document.getElementById('req-session-wrapper');
             const reasonGrid = document.getElementById('reason-grid');
             const helpText = document.getElementById('reason-help-text');
             const fileGroup = document.getElementById('request-file-group');
@@ -9267,9 +9293,102 @@ ${uidContent}
             const explInput = document.getElementById('request-explanation');
             const submitBtn = document.getElementById('submit-request-btn');
             const hoursGroup = document.getElementById('request-hours-group');
-            const courseSelect = document.getElementById('request-course');
 
             let selectedReason = null;
+
+            // --- SESSION SELECTOR LOGIC ---
+            courseSelect.addEventListener('change', () => {
+                const courseName = courseSelect.value;
+                if (!courseName) return;
+
+                const rawSections = courseInfoMap[courseName]?.availableSections || '';
+                const sectionsMap = parseAvailableSections(rawSections);
+                const categories = Object.keys(sectionsMap);
+
+                if (categories.length > 0) {
+                    sessionContainer.style.display = 'block';
+
+                    let html = `<div id="req-session-controls" style="margin-top:5px;">`;
+                    html += `<input type="hidden" id="req-selected-session" value="">`;
+
+                    // 1. Categories (ALWAYS Visible)
+                    const icons = { 'theory': 'fa-book', 'lab': 'fa-desktop', 'practice': 'fa-pen-to-square' };
+                    let catHtml = '';
+                    categories.forEach((cat, idx) => {
+                        const icon = icons[cat.toLowerCase()] || 'fa-tag';
+                        catHtml += `<div class="course-button ${idx === 0 ? 'active' : ''}" data-type="cat" data-val="${cat}" style="flex:1; padding:8px 5px; font-size:0.9em; min-width:0;"><i class="fa-solid ${icon}"></i>&nbsp;${cat}</div>`;
+                    });
+                    html += `<div class="course-buttons-container" id="req-cat-row" style="display:flex; margin-bottom:8px; gap:5px; flex-wrap:nowrap;">${catHtml}</div>`;
+
+                    // 2. Groups (Smart Hide)
+                    categories.forEach((cat, idx) => {
+                        const groups = sectionsMap[cat] || [];
+                        if (groups.length > 0) {
+                            let grpHtml = '';
+                            groups.forEach((grp, gIdx) => {
+                                grpHtml += `<div class="course-button ${gIdx === 0 ? 'active' : ''}" data-type="grp" data-val="${grp}" style="min-width:35px; padding:8px 0; justify-content:center;"><b>${grp}</b></div>`;
+                            });
+
+                            const isInitialActive = (idx === 0);
+                            const hasMultipleGroups = (groups.length > 1);
+                            const grpDisplay = (isInitialActive && hasMultipleGroups) ? 'flex' : 'none';
+
+                            html += `<div class="course-buttons-container req-grp-row" id="req-grp-${cat}" data-has-multiple="${hasMultipleGroups}" style="display:${grpDisplay}; gap:5px; margin-bottom:0;">${grpHtml}</div>`;
+                        }
+                    });
+                    html += `</div>`;
+                    sessionWrapper.innerHTML = html;
+
+                    updateRequestSessionValue();
+
+                    // Listeners
+                    const catRow = document.getElementById('req-cat-row');
+                    catRow.addEventListener('click', (e) => {
+                        const btn = e.target.closest('.course-button');
+                        if (!btn) return;
+                        catRow.querySelectorAll('.course-button').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        const cat = btn.dataset.val;
+
+                        sessionWrapper.querySelectorAll('.req-grp-row').forEach(row => row.style.display = 'none');
+                        const targetRow = document.getElementById(`req-grp-${cat}`);
+
+                        if (targetRow && targetRow.dataset.hasMultiple === 'true') {
+                            targetRow.style.display = 'flex';
+                        }
+                        updateRequestSessionValue();
+                    });
+
+                    sessionWrapper.querySelectorAll('.req-grp-row').forEach(row => {
+                        row.addEventListener('click', (e) => {
+                            const btn = e.target.closest('.course-button');
+                            if (!btn) return;
+                            row.querySelectorAll('.course-button').forEach(b => b.classList.remove('active'));
+                            btn.classList.add('active');
+                            updateRequestSessionValue();
+                        });
+                    });
+
+                } else {
+                    sessionContainer.style.display = 'none';
+                    sessionWrapper.innerHTML = '';
+                }
+            });
+
+            function updateRequestSessionValue() {
+                const catBtn = document.querySelector('#req-cat-row .active');
+                if (!catBtn) return;
+                const cat = catBtn.dataset.val;
+
+                const grpRow = document.getElementById(`req-grp-${cat}`);
+                let session = cat;
+
+                if (grpRow) {
+                    const grpBtn = grpRow.querySelector('.active');
+                    if (grpBtn) session += ' ' + grpBtn.dataset.val;
+                }
+                document.getElementById('req-selected-session').value = session;
+            }
 
             // --- Hours Logic ---
             courseSelect.addEventListener('change', () => {
@@ -9291,20 +9410,29 @@ ${uidContent}
                 const card = e.target.closest('.reason-card');
                 if (!card) return;
 
-                // Visual Update
                 document.querySelectorAll('.reason-card').forEach(c => c.classList.remove('active'));
                 card.classList.add('active');
                 selectedReason = card.dataset.value;
 
-                // Reset Fields
+                const helpText = document.getElementById('reason-help-text');
+                const fileGroup = document.getElementById('request-file-group');
+                const fileLabel = document.getElementById('request-file-label');
+                const explGroup = document.getElementById('request-expl-group');
+                const explLabel = document.getElementById('request-expl-label'); // Ensure this var is defined above
+
+                // 1. RESET EVERYTHING
                 helpText.style.display = 'none';
                 fileGroup.style.display = 'none';
                 explGroup.style.display = 'none';
                 submitBtn.disabled = false;
                 explInput.value = '';
-                explInput.removeAttribute('minlength'); // Reset limits
+                explInput.removeAttribute('minlength');
 
-                // Switch Logic
+                // Reset Labels
+                fileLabel.innerHTML = 'Document';
+                explLabel.innerHTML = 'Details'; // Reset explanation label
+
+                // 2. APPLY LOGIC
                 switch (selectedReason) {
                     case 'Medical':
                         fileGroup.style.display = 'flex';
@@ -9329,10 +9457,9 @@ ${uidContent}
 
                     case 'Bus':
                         explGroup.style.display = 'flex';
-                        explLabel.innerHTML = 'Explanation <span style="color:red">*</span>';
-                        explInput.placeholder = "Which line? What time? What happened?";
-                        // --- CHARACTER LIMIT APPLIED HERE ---
                         explInput.setAttribute('minlength', '20');
+
+                        explLabel.innerHTML = 'Explanation <span style="color:red">*</span>';
 
                         fileGroup.style.display = 'flex';
                         fileLabel.innerHTML = 'Photo (Optional)';
@@ -9340,10 +9467,9 @@ ${uidContent}
                         helpText.style.display = 'block';
                         break;
 
-                    // --- BLOCKED REASONS ---
                     case 'Club':
                         submitBtn.disabled = true;
-                        helpText.style.background = '#fff3e0'; // Orange/Yellow
+                        helpText.style.background = '#fff3e0';
                         helpText.style.color = '#ef6c00';
                         helpText.style.borderLeftColor = '#ff9800';
                         helpText.innerHTML = `<i class="fa-solid fa-ban"></i> We do not process these manually. The Dean of Students Office must send the confirmation email directly to the lecturer.`;
@@ -9352,7 +9478,7 @@ ${uidContent}
 
                     case 'Confidential':
                         submitBtn.disabled = true;
-                        helpText.style.background = '#fff3e0'; // Orange/Yellow
+                        helpText.style.background = '#fff3e0';
                         helpText.style.color = '#ef6c00';
                         helpText.style.borderLeftColor = '#ff9800';
                         helpText.innerHTML = `<i class="fa-solid fa-lock"></i> For sensitive personal or family matters, please do not submit a digital request. You may <strong>visit my office</strong> to discuss this in person.`;
@@ -9361,40 +9487,42 @@ ${uidContent}
                 }
             });
 
-            // --- Submit Logic ---
-            submitBtn.addEventListener('click', async () => {
+            // --- SUBMIT LOGIC ---
+            submitBtn.addEventListener('click', () => {
                 const hours = Array.from(hoursGroup.querySelectorAll('.active')).map(b => b.dataset.value);
                 const date = document.getElementById('request-date').value;
                 const course = courseSelect.value;
                 const file = document.getElementById('request-file-upload').files[0];
                 const explanation = explInput.value.trim();
 
-                // Validation
+                const sessionInput = document.getElementById('req-selected-session');
+                const session = sessionInput ? sessionInput.value : 'Default';
+
+                // 1. General Validation
                 let errors = [];
                 if (!course) errors.push("Select a course.");
                 if (hours.length === 0) errors.push("Select at least one hour.");
                 if (!selectedReason) errors.push("Select a reason.");
 
-                // Reason Specific Validation
+                // 2. Reason Specific Validation
                 if (selectedReason === 'Medical' && !file) errors.push("Medical report is required.");
                 if (selectedReason === 'Official' && !file) errors.push("Official document is required.");
                 if (selectedReason === 'Conference' && !file) errors.push("Event document is required.");
 
-                // --- CHARACTER LIMIT CHECK ---
+                // 3. Bus Validation
                 if (selectedReason === 'Bus') {
-                    if (explanation.length < 20) {
-                        errors.push("Please explain the bus issue in detail (at least 20 characters).");
-                    }
+                    if (!explanation) errors.push("Explanation is required for bus issues.");
+                    else if (explanation.length < 20) errors.push("Please explain the bus issue in detail (at least 20 characters).");
                 }
 
                 if (errors.length > 0) {
-                    showNotification('error', 'Incomplete Form', errors.join('<br>'));
+                    showNotification('warning', 'Missing Info', errors.join('<br>'));
                     return;
                 }
 
-                // Prepare Data
+                // Submit
                 submitBtn.disabled = true;
-                submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Sending...';
+                submitBtn.innerHTML = '<i class="fa-solid fa-spin fa-circle-notch"></i> Sending...';
 
                 const payload = {
                     name: currentUser.name,
@@ -9403,13 +9531,14 @@ ${uidContent}
                     absenceDate: date,
                     hours: hours.join(', '),
                     reasonType: selectedReason,
-                    description: explanation
+                    description: explanation,
+                    session: session // <--- Send Session
                 };
 
                 if (file) {
                     const reader = new FileReader();
                     reader.readAsDataURL(file);
-                    reader.onload = async () => {
+                    reader.onload = () => {
                         payload.fileData = reader.result;
                         payload.fileName = file.name;
                         payload.fileType = file.type;
@@ -9424,22 +9553,17 @@ ${uidContent}
                 try {
                     const res = await callWebApp('submitAbsenceRequest', payload, 'POST');
                     if (res.result === 'success') {
-                        showNotification('success', 'Sent', 'Permission request submitted.');
-                        document.body.removeChild(dialogBackdrop);
-                        document.body.style.overflow = '';
-                    } else {
-                        throw new Error(res.message);
-                    }
+                        showNotification('success', 'Sent', 'Request submitted.');
+                        document.body.removeChild(dialogBackdrop); document.body.style.overflow = '';
+                    } else throw new Error(res.message);
                 } catch (e) {
                     showNotification('error', 'Error', e.message);
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit';
+                    submitBtn.disabled = false; submitBtn.innerHTML = 'Submit';
                 }
             }
 
-            dialog.querySelector('#cancel-request-btn').onclick = () => {
-                document.body.removeChild(dialogBackdrop);
-                document.body.style.overflow = '';
+            document.getElementById('cancel-request-btn').onclick = () => {
+                document.body.removeChild(dialogBackdrop); document.body.style.overflow = '';
             };
         }
 
@@ -11056,23 +11180,34 @@ ${uidContent}
             requests.forEach(req => {
                 const row = document.createElement('tr');
                 row.className = 'clickable-request-row';
-                // ... (Store dataset attributes exactly as before) ...
+
+                // Add Session to dataset
                 row.dataset.requestId = req.requestID;
                 row.dataset.studentName = req.name;
                 row.dataset.studentEmail = req.email;
                 row.dataset.course = req.course;
+                row.dataset.session = req.session || ''; // <--- NEW
                 row.dataset.absenceDate = req.absenceDate;
                 row.dataset.hours = req.hours;
                 row.dataset.reasonType = req.reasonType;
                 row.dataset.description = req.description;
                 row.dataset.attachmentUrl = req.attachmentURL || req.attachmentUrl || '';
 
+                // Create Session Badge (Cat Label style)
+                let sessionBadge = '';
+                if (req.session && req.session !== 'Default') {
+                    sessionBadge = `<span style="background:#e3f2fd; color:var(--primary-color); font-weight:700; font-size:0.75em; padding:2px 6px; border-radius:4px; text-transform:uppercase; margin-left:5px;">${escapeHtml(req.session)}</span>`;
+                }
+
                 row.innerHTML = `
             <td>
                 <div>${escapeHtml(req.name)}</div>
                 <small style="opacity:0.7">${escapeHtml(req.email)}</small>
             </td>
-            <td>${escapeHtml(req.course.replace(/_/g, ' '))}</td>
+            <td>
+                ${escapeHtml(req.course.replace(/_/g, ' '))}
+                ${sessionBadge}
+            </td>
             <td>${escapeHtml(req.absenceDate)}</td>
             <td class="times-cell">${formatHoursAsPills(req.hours)}</td>
             <td>${escapeHtml(req.reasonType)}</td>
@@ -11150,7 +11285,10 @@ ${uidContent}
                 `<span style="background:#e3f2fd; color:var(--primary-color); padding:6px 12px; border-radius:8px; font-weight:600; font-size:0.9em;">${h.trim()}</span>`
             ).join(' ');
 
-            // Single Column Layout HTML
+            // Session Value
+            const sessionVal = (data.session && data.session !== 'Default') ? data.session : 'Default';
+
+            // HTML
             dialog.innerHTML = `
     <h3 class="dialog-title">Review Request</h3>
     <div class="dialog-content">
@@ -11163,6 +11301,11 @@ ${uidContent}
         <div class="form-group">
             <label class="dialog-label-fixed">Course:</label>
             <input class="form-control" value="${escapeHtml(data.course.replace(/_/g, ' '))}" disabled>
+        </div>
+
+        <div class="form-group">
+            <label class="dialog-label-fixed">Group:</label>
+            <input class="form-control" value="${escapeHtml(sessionVal)}" disabled style="font-weight:600; color:var(--primary-color);">
         </div>
 
         <div class="form-group">
