@@ -175,7 +175,7 @@
         .settings-controls-bar {
             display: flex;
             gap: 10px;
-            margin-bottom: 20px;
+            margin-bottom: 5px;
             position: sticky;
             top: 0;
             background: var(--card-background);
@@ -310,7 +310,7 @@
             align-items: center;
             gap: 10px;
             width: 100%;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
         }
 
         .admin-input-wrapper .input-with-icon {
@@ -2280,7 +2280,7 @@
             position: fixed;
             bottom: 20px;
             right: 20px;
-            z-index: 10000;
+            z-index: 20000;
             width: 350px;
             max-width: 70%;
             pointer-events: none;
@@ -2688,6 +2688,56 @@
             background-color: #4a2c0f;
             /* Dark mode orange */
             color: #ffcc80;
+        }
+
+        .times-cell-stacked {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 4px;
+            /* Space between "Theory" row and "Lab" row */
+            height: 100%;
+        }
+
+        .time-row {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            /* Remove gap here, we handle it in the wrapper */
+            width: 100%;
+        }
+
+        .cat-label {
+            font-size: 0.7em;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: var(--primary-color);
+            width: 60px;
+            /* Fixed width */
+            text-align: left;
+            flex-shrink: 0;
+            margin-right: 6px;
+            /* Tighter distance to pills */
+        }
+
+        /* Wrapper for the pills to isolate them from the label */
+        .pills-wrapper {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 2px;
+            /* Tighter gap between time pills */
+        }
+
+        /* Fix rounding: Now targets the first TAG inside the WRAPPER */
+        .pills-wrapper .time-tag:first-child {
+            border-top-left-radius: 12px;
+            border-bottom-left-radius: 12px;
+        }
+
+        .pills-wrapper .time-tag:last-child {
+            border-top-right-radius: 12px;
+            border-bottom-right-radius: 12px;
         }
 
         .times-cell {
@@ -4341,6 +4391,22 @@
             z-index: 1;
         }
 
+        /* Add this to your CSS */
+        .dialog-label-fixed,
+        .form-group label,
+        .dialog-title,
+        .course-button,
+        .toggle-button {
+            -webkit-user-select: none;
+            /* Safari */
+            -moz-user-select: none;
+            /* Firefox */
+            -ms-user-select: none;
+            /* IE10+/Edge */
+            user-select: none;
+            /* Standard */
+        }
+
         @keyframes nfc-pulse {
             0% {
                 width: 1px;
@@ -5291,13 +5357,19 @@
 
         </div>
 
+        <div id="course-buttons-container" class="course-buttons-container"></div>
+
+        <div id="session-controls" style="display: none; flex-direction: column; gap: 8px; margin-bottom: 20px;">
+            <div id="session-category-group" class="course-buttons-container"
+                style="margin-bottom:0; justify-content:center;"></div>
+            <div id="session-group-container" class="course-buttons-container"
+                style="margin-bottom:0; justify-content:center;"></div>
+        </div>
+
         <div class="scan-buttons">
             <button id="scan-button" class="big-scan-button scan-button">
                 <i class="fa-solid fa-wifi"></i><b>&nbsp;&nbsp; START SCANNING</b>
             </button>
-        </div>
-
-        <div id="course-buttons-container" class="course-buttons-container">
         </div>
 
         <!-- Scanner & History Tab -->
@@ -5508,7 +5580,7 @@
         const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
         const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
         const LOGS_STORAGE_KEY = 'attendance_logs';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwrhc5J-7ySYyddF0mFakPtPqGrutQsNbwIFCqGWmCp6NACJsfLY4RcMGunybAQDKxvow/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwa9OVb4LBkZ2itZBKdQEG19yRlamNX-Y-P9izfF91ZJdgcZsAgwWyg46f8O2OKY5JorA/exec';
 
         // App state
         let courseData = {};
@@ -5572,6 +5644,9 @@
         let isBulkMode = false;
         let selectedLogIds = new Set(); // Stores IDs of selected rows
         let lastCheckedLogId = null; // For Shift+Click logic
+        let activeSessionCategory = null;
+        let activeSessionGroup = null;
+        let currentCourseSections = {}; // Parsed structure
 
         // DOM Elements
         let tabs, tabContents, importExcelBtn, excelInput, filterInput, sortSelect,
@@ -5669,6 +5744,158 @@
                     }
                 }, 1000);
             }
+        }
+
+        /**
+ * Parses "Theory A, Theory B, Lab" into { Theory: ['A', 'B'], Lab: [] }
+ */
+        function parseAvailableSections(sectionString) {
+            if (!sectionString) return {};
+            const map = {};
+            const items = sectionString.split(',').map(s => s.trim()).filter(Boolean);
+
+            items.forEach(item => {
+                // Split "Theory A" -> ["Theory", "A"]
+                // Split "Lab" -> ["Lab"]
+                const parts = item.split(' ');
+                const cat = parts[0];
+                const grp = parts[1] || ''; // Empty string if no group
+
+                if (!map[cat]) map[cat] = [];
+                if (grp && !map[cat].includes(grp)) map[cat].push(grp);
+            });
+            return map;
+        }
+
+        // --- SMART VERTICAL SESSION CONTROLS ---
+
+        function renderSessionControls(courseName) {
+            const controls = document.getElementById('session-controls');
+            const catGroup = document.getElementById('session-category-group');
+
+            // Safety check
+            if (!courseInfoMap || !courseInfoMap[courseName]) {
+                controls.style.display = 'none';
+                return;
+            }
+
+            const rawSections = courseInfoMap[courseName].availableSections || '';
+            currentCourseSections = parseAvailableSections(rawSections);
+            const categories = Object.keys(currentCourseSections);
+
+            if (categories.length === 0) {
+                controls.style.display = 'none';
+                activeSessionCategory = null;
+                activeSessionGroup = null;
+                return;
+            }
+
+            // 1. Auto-select Category Logic
+            // If no category selected, or current one invalid, pick first
+            if (!activeSessionCategory || !categories.includes(activeSessionCategory)) {
+                activeSessionCategory = categories[0];
+                activeSessionGroup = null; // Reset group
+            }
+
+            // 2. Render Categories
+            catGroup.innerHTML = '';
+            const icons = { 'theory': 'fa-book', 'lab': 'fa-desktop', 'practice': 'fa-pen-to-square' };
+
+            categories.forEach(cat => {
+                const lowerCat = cat.toLowerCase();
+                const iconClass = icons[lowerCat] || 'fa-tag';
+
+                const btn = document.createElement('div');
+                btn.className = 'course-button';
+                btn.innerHTML = `<i class="fa-solid ${iconClass}"></i>&nbsp; ${cat}`;
+
+                btn.onclick = () => selectSessionCategory(cat);
+
+                if (activeSessionCategory === cat) btn.classList.add('active');
+                catGroup.appendChild(btn);
+            });
+
+            // 3. Render Groups for the active category
+            renderGroupsForCategory(activeSessionCategory);
+
+            // 4. SMART VISIBILITY CHECK
+            // Hide Category Row if only 1 category exists
+            const showCategories = categories.length > 1;
+            catGroup.style.display = showCategories ? 'flex' : 'none';
+
+            // Group visibility is determined inside renderGroupsForCategory
+            const grpContainer = document.getElementById('session-group-container');
+            const showGroups = grpContainer.style.display !== 'none';
+
+            // Only show main container if at least one row is visible
+            controls.style.display = (showCategories || showGroups) ? 'flex' : 'none';
+        }
+
+        function selectSessionCategory(category) {
+            activeSessionCategory = category;
+            activeSessionGroup = null; // Reset group
+
+            // Visual Update
+            const catGroup = document.getElementById('session-category-group');
+            Array.from(catGroup.children).forEach(btn => {
+                if (btn.innerText.trim() === category) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+
+            renderGroupsForCategory(category);
+
+            // Re-check parent visibility (Group row might have appeared/disappeared)
+            const grpContainer = document.getElementById('session-group-container');
+            const categories = Object.keys(currentCourseSections);
+            const showCategories = categories.length > 1;
+            const showGroups = grpContainer.style.display !== 'none';
+
+            document.getElementById('session-controls').style.display = (showCategories || showGroups) ? 'flex' : 'none';
+        }
+
+        function renderGroupsForCategory(category) {
+            const groups = currentCourseSections[category] || [];
+            const grpContainer = document.getElementById('session-group-container');
+
+            // 1. Auto-select Group Logic
+            if (groups.length > 0) {
+                if (!activeSessionGroup || !groups.includes(activeSessionGroup)) {
+                    activeSessionGroup = groups[0];
+                }
+            } else {
+                activeSessionGroup = null;
+            }
+
+            // 2. Render Buttons
+            grpContainer.innerHTML = '';
+
+            groups.forEach(grp => {
+                const btn = document.createElement('div');
+                btn.className = 'course-button';
+                btn.innerHTML = `<b>${grp}</b>`;
+
+                btn.onclick = () => selectSessionGroup(grp);
+
+                if (activeSessionGroup === grp) btn.classList.add('active');
+                grpContainer.appendChild(btn);
+            });
+
+            // 3. SMART VISIBILITY CHECK (Groups)
+            // Hide Group Row if <= 1 group exists
+            if (groups.length <= 1) {
+                grpContainer.style.display = 'none';
+            } else {
+                grpContainer.style.display = 'flex';
+            }
+        }
+
+        function selectSessionGroup(group) {
+            activeSessionGroup = group;
+            const grpContainer = document.getElementById('session-group-container');
+            Array.from(grpContainer.children).forEach(btn => {
+                if (btn.innerText.trim() === group) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
         }
 
         // --- Absence History Logic ---
@@ -6166,11 +6393,18 @@
 
                     // Hide or show the course buttons based on the selected tab
                     if (courseButtons) {
+                        const sessionControls = document.getElementById('session-controls');
+
                         if (tabId === 'database-tab') {
                             courseButtons.style.display = 'none';
-                            // The refreshAdminViews() call was REMOVED from here
+                            if (sessionControls) sessionControls.style.display = 'none'; // <--- HIDE
                         } else {
                             courseButtons.style.display = isSignedIn ? 'flex' : 'none';
+                            // Only show session controls if a course is selected and has sections
+                            if (sessionControls && currentCourse && courseInfoMap[currentCourse]?.availableSections) {
+                                // Re-trigger render logic to decide if it should be visible
+                                renderSessionControls(currentCourse);
+                            }
                         }
                     }
 
@@ -6647,7 +6881,10 @@
             document.getElementById('add-staff-btn').onclick = () => showStaffEditorDialog(null);
             document.getElementById('add-new-course-btn').onclick = () => showCourseEditorDialog(null);
 
-            const close = () => document.body.removeChild(dialogBackdrop);
+            const close = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
             document.getElementById('close-settings-btn').onclick = close;
         }
 
@@ -6904,6 +7141,12 @@
             const disabledAttr = canEditSensitive ? '' : 'disabled';
             const readOnlyStyle = canEditSensitive ? '' : 'style="background-color:#f5f5f5; color:#666; cursor:not-allowed;"';
 
+            // Parse existing sections
+            let currentSections = [];
+            if (data.availableSections) {
+                currentSections = data.availableSections.split(',').map(s => s.trim()).filter(Boolean);
+            }
+
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             dialogBackdrop.style.zIndex = "10002";
@@ -6911,49 +7154,101 @@
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
 
-            const currentCategory = val(data.defaultCategory).toLowerCase() || 'theory';
-            const currentSectionFull = val(data.defaultSection) || 'ALL';
-            let [secType, secChar] = currentSectionFull.split(' ');
-            if (currentSectionFull === 'ALL') secType = 'ALL';
-
-            let adminEmailList = [];
-            if (isGlobalAdmin) {
-                const rawAdmins = val(data.adminEmails);
-                adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
-            }
-
+            // --- ADMIN ACCESS HTML (Global Only) ---
             let adminSectionHtml = '';
             if (isGlobalAdmin) {
                 adminSectionHtml = `
-        <hr style="border:0; border-top:1px solid #eee; margin:15px 0;">
-        <div class="form-group" style="flex-direction:column; gap:5px; align-items:stretch;">
-            <label style="text-align:left; font-weight:700; margin-bottom:5px;"><i class="fa-solid fa-user-shield"></i> Admin Access</label>
-            <div class="admin-input-wrapper">
-                <div class="input-with-icon" style="flex-grow:1;">
-                    <i class="fa-solid fa-user-plus"></i>
-                    <input type="email" id="new-admin-email" class="form-control" placeholder="Enter email...">
+        <div class="form-group" style="align-items:flex-start; margin-top: 15px;">
+            <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-user-shield"></i> Admins</label>
+            
+            <div style="flex-grow:1; min-width:0;">
+                <div id="admin-pills-list" class="admin-pills-list" style="width:100%; box-sizing:border-box; min-height:40px; margin-bottom:10px; border:1px solid #eee; background:#fafafa; border-radius:8px; padding:5px; font-size:0.85em;"></div>
+
+                <div style="background:rgba(0,0,0,0.03); padding:6px; border-radius:10px; width:100%; box-sizing:border-box; border:1px solid rgba(0,0,0,0.05); display:flex; gap:10px; align-items:center;">
+                    
+                    <div class="input-with-icon" style="flex-grow:1;">
+                        <i class="fa-solid fa-user-plus"></i>
+                        <input type="email" id="new-admin-email" class="form-control" placeholder="Enter email..." style="background:white; font-size:0.85em;">
+                    </div>
+                    
+                    <button id="add-admin-btn" class="btn-green btn-sm" style="padding:8px 15px; flex-shrink:0; font-size:0.85em;">
+                        <i class="fa-solid fa-plus"></i> Add
+                    </button>
                 </div>
-                <button id="add-admin-btn" class="btn-blue btn-icon"><i class="fa-solid fa-plus"></i></button>
+
+                <textarea id="edit-c-admins" style="display:none;"></textarea>
             </div>
-            <div id="admin-pills-list" class="admin-pills-list"></div>
-            <textarea id="edit-c-admins" style="display:none;"></textarea>
-        </div>`;
+        </div>
+        <hr style="border:0; border-top:1px solid #eee; margin:15px 0;">`;
             }
 
             let eisWarning = !isGlobalAdmin ? `<small style="color:var(--warning-color); display:block; margin-top:4px;"><i class="fa-solid fa-lock"></i> Global Admin only.</small>` : '';
+
+            // Generate Buttons A-D (Loop 0 to 4)
+            let groupButtonsHtml = '';
+            for (let i = 0; i < 4; i++) {
+                const char = String.fromCharCode(65 + i); // 65 is 'A'
+                groupButtonsHtml += `<div class="course-button" data-val="${char}" style="min-width:35px; padding:6px 0; font-size:0.9em;"><b>${char}</b></div>`;
+            }
 
             dialog.innerHTML = `
     <h3 class="dialog-title"><i class="fa-solid fa-book-open"></i> ${title}</h3>
     <div class="dialog-content">
         
         <div class="form-group">
-            <label class="dialog-label-fixed"><i class="fa-solid fa-heading"></i> Name</label>
+            <label class="dialog-label-fixed"><i class="fa-solid fa-quote-left"></i> Name</label>
             <div class="input-with-icon" style="flex-grow:1;">
-                <i class="fa-solid fa-font"></i>
-                <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_202">
+                <input id="edit-c-name" class="form-control" value="${escapeHtml(courseName || '')}" ${isNew ? '' : 'disabled'} placeholder="e.g. CE_101">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="dialog-label-fixed"><i class="fa-solid fa-id-badge"></i> EIS ID</label>
+            <div style="flex-grow:1;">
+                <div class="input-with-icon">
+                    <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345" ${disabledAttr} ${readOnlyStyle}>
+                </div>
+                ${eisWarning}
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="dialog-label-fixed"><i class="fa-regular fa-clock"></i> Hours</label>
+            <div class="input-with-icon" style="flex-grow:1;">
+                <input type="number" id="edit-c-hours" class="form-control" value="${escapeHtml(val(data.defaultHours))}">
             </div>
         </div>
         
+   <div class="form-group" style="align-items:flex-start; margin-top: 15px;">
+            <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-layer-group"></i> Sections</label>
+            
+            <div style="flex-grow:1; min-width:0; display:flex; flex-direction:column; gap:10px;">
+                
+                <div id="section-builder-list" class="admin-pills-list" style="width:100%; box-sizing:border-box; min-height:40px; border:1px solid #eee; background:#fafafa; border-radius:8px; padding:5px; font-size:0.85em;"></div>
+
+                <div style="background:rgba(0,0,0,0.03); padding:10px; border-radius:10px; width:100%; box-sizing:border-box; border:1px solid rgba(0,0,0,0.05); display:flex; flex-direction:column; gap:8px; font-size:0.85em;">
+                    
+                    <div id="new-sec-cat" class="course-buttons-container" style="margin:0; width:100%; display:flex; gap:6px;">
+                        <div class="course-button active" data-val="Theory" style="flex:1; text-align:center; padding:6px; font-size:0.85em; min-width:0;"><i class="fa-solid fa-book"></i>&nbsp;Theory</div>
+                        <div class="course-button" data-val="Lab" style="flex:1; text-align:center; padding:6px; font-size:0.85em; min-width:0;"><i class="fa-solid fa-desktop"></i>&nbsp;Lab</div>
+                        <div class="course-button" data-val="Practice" style="flex:1; text-align:center; padding:6px; font-size:0.85em; min-width:0;"><i class="fa-solid fa-pen-to-square"></i>&nbsp;Prac</div>
+                    </div>
+                    
+                    <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                        <div id="new-sec-grp" class="course-buttons-container" style="margin:0; flex-wrap:nowrap; gap:6px;">
+                            ${groupButtonsHtml}
+                        </div>
+                        <button id="btn-add-section" class="btn-green btn-sm" style="padding:8px 15px; flex-shrink:0; margin-left:10px; font-size:0.85em;">
+                            <i class="fa-solid fa-plus"></i> Add
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        ${adminSectionHtml}
+
         <div class="form-group">
             <label class="dialog-label-fixed"><i class="fa-regular fa-calendar"></i> Start Date</label>
             <input type="date" id="edit-c-start" class="form-control" value="${formatDate(data.startDate)}" ${disabledAttr} ${readOnlyStyle}>
@@ -6977,54 +7272,6 @@
             </div>
         </div>
 
-        <div class="form-group">
-            <label class="dialog-label-fixed"><i class="fa-regular fa-clock"></i> Hours</label>
-            <div class="input-with-icon" style="flex-grow:1;">
-                <i class="fa-solid fa-hourglass-half"></i>
-                <input type="number" id="edit-c-hours" class="form-control" value="${escapeHtml(val(data.defaultHours))}">
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label class="dialog-label-fixed"><i class="fa-solid fa-fingerprint"></i> EIS ID</label>
-            <div style="flex-grow:1;">
-                <div class="input-with-icon">
-                    <i class="fa-solid fa-id-badge"></i>
-                    <input id="edit-c-eis" class="form-control" value="${escapeHtml(val(data.eisId))}" placeholder="12345" ${disabledAttr} ${readOnlyStyle}>
-                </div>
-                ${eisWarning}
-            </div>
-        </div>
-
-        <div class="form-group" style="align-items:flex-start;">
-            <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-tag"></i> Category</label>
-            <div id="edit-c-cat-group" class="toggle-button-group">
-                <button class="toggle-button ${currentCategory === 'theory' ? 'active' : ''}" data-value="theory"><i class="fa-solid fa-book"></i> Theory</button>
-                <button class="toggle-button ${currentCategory === 'lab' ? 'active' : ''}" data-value="lab"><i class="fa-solid fa-desktop"></i> Lab</button>
-                <button class="toggle-button ${currentCategory === 'practice' ? 'active' : ''}" data-value="practice"><i class="fa-solid fa-pen-to-square"></i> Practice</button>
-            </div>
-        </div>
-
-        <div class="form-group" style="align-items:flex-start;">
-            <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-users"></i> Section</label>
-            <div style="flex-grow:1;">
-                <div id="edit-c-sect-type" class="toggle-button-group" style="margin-bottom:8px;">
-                    <button class="toggle-button ${secType === 'ALL' ? 'active' : ''}" data-value="ALL">All</button>
-                    <button class="toggle-button ${secType === 'Theory' ? 'active' : ''}" data-value="Theory">Theory</button>
-                    <button class="toggle-button ${secType === 'Lab' ? 'active' : ''}" data-value="Lab">Lab</button>
-                    <button class="toggle-button ${secType === 'Practice' ? 'active' : ''}" data-value="Practice">Practice</button>
-                </div>
-                <div id="edit-c-sect-char" class="toggle-button-group" style="display:${secType === 'ALL' ? 'none' : 'flex'}">
-                    <button class="toggle-button btn-char ${secChar === 'A' ? 'active' : ''}" data-value="A">A</button>
-                    <button class="toggle-button btn-char ${secChar === 'B' ? 'active' : ''}" data-value="B">B</button>
-                    <button class="toggle-button btn-char ${secChar === 'C' ? 'active' : ''}" data-value="C">C</button>
-                    <button class="toggle-button btn-char ${secChar === 'D' ? 'active' : ''}" data-value="D">D</button>
-                </div>
-            </div>
-        </div>
-
-        ${adminSectionHtml}
-
     </div>
     <div class="dialog-actions">
         ${(!isNew && isGlobalAdmin) ? '<button id="delete-course-btn" class="btn-red" style="margin-right:auto;"><i class="fa-solid fa-trash"></i> Delete</button>' : ''}
@@ -7035,13 +7282,83 @@
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // --- Render Admin Pills (Only for Global) ---
+            // --- Section Builder Logic ---
+            const sectionListContainer = document.getElementById('section-builder-list');
+            const catContainer = document.getElementById('new-sec-cat');
+            const grpContainer = document.getElementById('new-sec-grp');
+            const addSectionBtn = document.getElementById('btn-add-section');
+
+            let newSectionCat = 'Theory';
+            let newSectionGrp = 'A'; // Default to A
+
+            // 1. Render Current Sections
+            const renderSections = () => {
+                sectionListContainer.innerHTML = '';
+                currentSections.forEach((sec, index) => {
+                    const pill = document.createElement('div');
+                    pill.className = 'admin-pill-item';
+                    pill.innerHTML = `<b>${sec}</b> <i class="fa-solid fa-times remove-pill" style="margin-left:8px; cursor:pointer; color:var(--danger-color);" data-index="${index}"></i>`;
+                    sectionListContainer.appendChild(pill);
+                });
+
+                // Bind Remove Events
+                sectionListContainer.querySelectorAll('.remove-pill').forEach(btn => {
+                    btn.onclick = (e) => {
+                        const idx = parseInt(e.target.dataset.index);
+                        currentSections.splice(idx, 1);
+                        renderSections();
+                    };
+                });
+            };
+            renderSections();
+
+            // 2. UI Toggles Logic
+            const bindToggleGroup = (container, onClick) => {
+                container.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.course-button');
+                    if (btn) {
+                        Array.from(container.children).forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        onClick(btn.dataset.val);
+                    }
+                });
+            };
+
+            bindToggleGroup(catContainer, (val) => newSectionCat = val);
+            bindToggleGroup(grpContainer, (val) => newSectionGrp = val);
+
+            // Set initial active state for Group A
+            grpContainer.querySelector('[data-val="A"]').classList.add('active');
+
+            // 3. Add Button Logic
+            addSectionBtn.onclick = () => {
+                const fullSection = `${newSectionCat} ${newSectionGrp}`;
+                if (!currentSections.includes(fullSection)) {
+                    currentSections.push(fullSection);
+                    // Sort nicely: Theory first, then Lab, then Practice. Inside that, A-Z.
+                    const catOrder = { 'Theory': 1, 'Lab': 2, 'Practice': 3 };
+                    currentSections.sort((a, b) => {
+                        const [catA, grpA] = a.split(' ');
+                        const [catB, grpB] = b.split(' ');
+                        if (catOrder[catA] !== catOrder[catB]) return catOrder[catA] - catOrder[catB];
+                        return grpA.localeCompare(grpB);
+                    });
+                    renderSections();
+                } else {
+                    showNotification('warning', 'Duplicate', 'Section already exists.');
+                }
+            };
+
+            // --- Admin Emails Logic (Global Only) ---
+            let adminEmailList = [];
             let hiddenAdminInput = null;
             if (isGlobalAdmin) {
                 const pillsContainer = document.getElementById('admin-pills-list');
                 const newAdminInput = document.getElementById('new-admin-email');
                 const addAdminBtn = document.getElementById('add-admin-btn');
                 hiddenAdminInput = document.getElementById('edit-c-admins');
+                const rawAdmins = val(data.adminEmails);
+                adminEmailList = rawAdmins ? rawAdmins.split(',').map(e => e.trim()).filter(Boolean) : [];
 
                 const updateHiddenInput = () => { hiddenAdminInput.value = adminEmailList.join(', '); };
 
@@ -7084,51 +7401,21 @@
                 updateHiddenInput();
             }
 
-            const catGroup = dialog.querySelector('#edit-c-cat-group');
-            const sectTypeGroup = dialog.querySelector('#edit-c-sect-type');
-            const sectCharGroup = dialog.querySelector('#edit-c-sect-char');
-            const charContainer = document.getElementById('edit-c-sect-char');
-
-            const updateSectionLogic = () => {
-                const activeTypeBtn = sectTypeGroup.querySelector('.active');
-                const activeType = activeTypeBtn ? activeTypeBtn.dataset.value : 'ALL';
-                charContainer.style.display = activeType === 'ALL' ? 'none' : 'flex';
-
-                const btnD = sectCharGroup.querySelector('[data-value="D"]');
-                if (btnD) btnD.disabled = (activeType === 'Theory');
-
-                if (activeType === 'Theory' && sectCharGroup.querySelector('.active')?.dataset.value === 'D') {
-                    sectCharGroup.querySelector('.active').classList.remove('active');
-                    sectCharGroup.querySelector('[data-value="A"]').classList.add('active');
-                }
-            };
-            updateSectionLogic();
-
-            catGroup.addEventListener('click', (e) => {
-                const btn = e.target.closest('.toggle-button');
-                if (btn) { catGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
-            });
-            sectTypeGroup.addEventListener('click', (e) => {
-                const btn = e.target.closest('.toggle-button');
-                if (btn) { sectTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active')); btn.classList.add('active'); updateSectionLogic(); }
-            });
-            sectCharGroup.addEventListener('click', (e) => {
-                const btn = e.target.closest('.toggle-button');
-                if (btn && !btn.disabled) { sectCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
-            });
-
             const close = () => document.body.removeChild(dialogBackdrop);
             dialog.querySelector('#cancel-edit-c').onclick = close;
 
+            // --- Save Logic ---
             dialog.querySelector('#save-edit-c').onclick = async (e) => {
                 const btn = e.target;
                 btn.disabled = true;
                 btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
 
-                const cat = catGroup.querySelector('.active')?.dataset.value || 'theory';
-                const sType = sectTypeGroup.querySelector('.active')?.dataset.value || 'ALL';
-                const sChar = sectCharGroup.querySelector('.active')?.dataset.value || '';
-                const finalSection = (sType === 'ALL') ? 'ALL' : `${sType} ${sChar}`.trim();
+                if (currentSections.length === 0) {
+                    showNotification('error', 'Missing Data', 'Please add at least one section (e.g. Theory A).');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save';
+                    return;
+                }
 
                 const payload = {
                     originalName: courseName,
@@ -7139,8 +7426,8 @@
                     holidayStartDate: document.getElementById('edit-c-holiday-start').value,
                     holidayWeeks: document.getElementById('edit-c-holidays').value,
                     eisId: document.getElementById('edit-c-eis').value,
-                    defaultCategory: cat,
-                    defaultSection: finalSection,
+                    // SEND THE NEW FIELD:
+                    availableSections: currentSections.join(', '),
                     adminEmails: isGlobalAdmin ? hiddenAdminInput.value : (data.adminEmails || '')
                 };
 
@@ -7149,15 +7436,11 @@
                     if (res.result === 'success') {
                         showNotification('success', 'Saved', 'Course updated.');
 
-                        // 1. Close the Editor Dialog
+                        // --- NUCLEAR CLOSE FIX ---
                         close();
-
-                        // 2. FORCE CLOSE any remaining backdrops (the old Global Settings dialog)
-                        // This prevents duplicate IDs in the DOM
                         document.querySelectorAll('.dialog-backdrop').forEach(el => el.remove());
-                        document.body.style.overflow = ''; // Reset overflow just in case
+                        document.body.style.overflow = '';
 
-                        // 3. Re-open the fresh Global Settings
                         if (isGlobalAdmin) {
                             showGlobalSettingsDialog();
                         } else {
@@ -7241,7 +7524,10 @@
                 }
             });
 
-            const close = () => document.body.removeChild(dialogBackdrop);
+            const close = () => {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+            };
             dialog.querySelector('#close-profile-btn').onclick = close;
 
             // --- Async Data Fetch ---
@@ -7890,110 +8176,80 @@ ${uidContent}
                 return;
             }
 
-            // 1. Force fetch first to ensure we have the latest IDs
-            await fetchCourseInfo();
-
-            // 2. Lookup ID using trimmed key for safety
-            // We try the trimmed version first, then the raw version
-            const eisId = courseIDMap[currentCourse.trim()] || courseIDMap[currentCourse];
-
-            if (!eisId) {
-                showNotification('error', 'EIS ID Missing', `ID for "${currentCourse}" is not set in the Course Info sheet.`);
-                return;
-            }
-
+            // 1. Render Dialog IMMEDIATELY
             document.body.style.overflow = 'hidden';
-
             const dialogBackdrop = document.createElement('div');
             dialogBackdrop.className = 'dialog-backdrop';
             const dialog = document.createElement('div');
             dialog.className = 'dialog';
             dialog.setAttribute('role', 'dialog');
-            dialog.setAttribute('aria-modal', 'true');
 
             const formattedCourseName = currentCourse.replace(/_/g, ' ');
 
             dialog.innerHTML = `
         <h3 class="dialog-title"><i class="fa-solid fa-list-check"></i> Add to EIS</h3>
         <div class="dialog-content">
-            <div class="dialog-loader" style="display: flex; justify-content: center; align-items: center; min-height: 300px;">
+            <div class="dialog-loader" style="display:flex; justify-content:center; align-items:center; padding: 50px 0;">
                 <div class="loading-spinner"></div>
             </div>
-            <div class="dialog-main-content" style="height: 0; overflow: hidden;">
+            
+            <div class="dialog-main-content" style="display:none; opacity:0; transition: opacity 0.3s ease;">
                 
                 <div class="form-group">
                     <label class="dialog-label-fixed"><i class="fa-solid fa-book"></i> Course</label>
-                    <input class="form-control" value="${escapeHtml(formattedCourseName)} (ID: ${escapeHtml(eisId)})" disabled>
+                    <input id="export-course-display" class="form-control" value="${escapeHtml(formattedCourseName)}" disabled>
                 </div>
 
                 <div class="form-group">
-                    <label class="dialog-label-fixed" for="export-week"><i class="fa-solid fa-calendar-week"></i> Week</label>
+                    <label class="dialog-label-fixed"><i class="fa-solid fa-calendar-week"></i> Week</label>
                     <select id="export-week" class="form-control"></select>
                 </div>
 
                 <div class="form-group">
-                    <label class="dialog-label-fixed" for="export-date"><i class="fa-regular fa-calendar-days"></i> Date</label>
+                    <label class="dialog-label-fixed"><i class="fa-regular fa-calendar-days"></i> Date</label>
                     <input type="date" id="export-date" class="form-control">
                 </div>
 
-                <div class="form-group" style="align-items:flex-start;">
-                    <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-tag"></i> Category</label>
-                    <div id="category-btn-group" class="toggle-button-group"></div>
+                <div class="form-group">
+                    <label class="dialog-label-fixed"><i class="fa-solid fa-quote-left"></i> Topic</label>
+                    <input type="text" id="export-topic" class="form-control" value="Lecture">
                 </div>
 
-                <div class="form-group" id="hours-form-group">
+                <div class="form-group" style="align-items:flex-start;">
+                    <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-users"></i> Group</label>
+                    <div style="flex-grow:1; display:flex; flex-direction:column; gap:8px;">
+                        <div id="export-cat-group" class="course-buttons-container" style="margin-bottom:0; justify-content:flex-start;"></div>
+                        <div id="export-subgroup-group" class="course-buttons-container" style="margin-bottom:0; justify-content:flex-start; display:none;"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
                     <label class="dialog-label-fixed"><i class="fa-regular fa-clock"></i> Hours</label>
                     <div class="number-input-container" style="flex-grow:1;">
-                        <input type="number" id="hours-custom-input" class="form-control number-input-field" value="1" min="1" max="25">
+                        <input type="number" id="hours-custom-input" class="form-control number-input-field" value="2" min="1" max="5">
                         <button class="number-input-btn" id="hours-decrement">-</button>
                         <button class="number-input-btn" id="hours-increment">+</button>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label class="dialog-label-fixed" for="export-topic"><i class="fa-solid fa-quote-left"></i> Topic</label>
-                    <input type="text" id="export-topic" class="form-control" value="Lecture" list="topic-suggestions">
-                    <datalist id="topic-suggestions">
-                        <option value="Lecture">
-                        <option value="Review">
-                        <option value="Midterm Exam">
-                        <option value="Final Exam">
-                        <option value="Project Presentation">
-                        <option value="Lab Exercise">
-                        <option value="Problem Session">
-                    </datalist>
+                <div class="form-group" style="align-items:flex-start;">
+                    <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-tag"></i> Section</label>
+                    <div id="export-section-group" class="course-buttons-container" style="margin-bottom:0; width:100%; display:flex; gap:8px;">
+                        <div class="course-button active" data-value="theory" style="flex:1; text-align:center; padding: 8px 5px; font-size: 0.9em; min-width: 0;"><i class="fa-solid fa-book"></i>&nbsp; Theory</div>
+                        <div class="course-button" data-value="lab" style="flex:1; text-align:center; padding: 8px 5px; font-size: 0.9em; min-width: 0;"><i class="fa-solid fa-desktop"></i>&nbsp; Lab</div>
+                        <div class="course-button" data-value="practice" style="flex:1; text-align:center; padding: 8px 5px; font-size: 0.9em; min-width: 0;"><i class="fa-solid fa-pen-to-square"></i>&nbsp; Practice</div>
+                    </div>
                 </div>
 
-                <div class="form-group" style="align-items:flex-start;">
-                    <label class="dialog-label-fixed" style="margin-top:10px;"><i class="fa-solid fa-users"></i> Group</label>
-                    <div id="section-type-group" class="toggle-button-group">
-                        <button class="toggle-button" data-value="ALL">All</button>
-                        <button class="toggle-button" data-value="Theory"> Theory</button>
-                        <button class="toggle-button" data-value="Lab"> Lab</button>
-                        <button class="toggle-button" data-value="Practice"> Practice</button>
-                    </div>
+                <div class="collapsible-trigger" style="width: fit-content; margin-left: auto; display:flex; align-items:center; margin-top:15px; margin-bottom:0; cursor:pointer; user-select:none; color:var(--primary-color); font-weight:500; -webkit-tap-highlight-color: transparent;">
+                    <span style="margin-right:5px;">More Options</span> <i class="fa-solid fa-chevron-down" style="font-size:0.8em;"></i>
                 </div>
                 
-                <div id="section-char-container" class="form-group section-char-group is-hidden" style="align-items:flex-start;">
-                    <label class="dialog-label-fixed"></label> <div id="section-char-group" class="toggle-button-group">
-                        <button class="toggle-button btn-char" data-value="A">A</button>
-                        <button class="toggle-button btn-char" data-value="B">B</button>
-                        <button class="toggle-button btn-char" data-value="C">C</button>
-                        <button class="toggle-button btn-char" data-value="D">D</button>
-                    </div>
-                </div>
-                <div id="section-validation-msg" style="color: var(--danger-color); font-size: 0.8em; text-align: right; height: 1em; margin-top: -10px; margin-bottom: 10px;"></div>
-
-                <div class="collapsible-trigger"><i class="fa-solid fa-gears"></i> More Options <i class="fa-solid fa-chevron-down"></i></div>
-                <div class="collapsible-content">
+                <div class="collapsible-content" style="margin-top:0; transition: max-height 0.4s ease-out, padding 0.4s ease-out, margin-top 0.3s ease;">
                     <button id="save-export-btn" class="btn-blue btn-sm"><i class="fa-solid fa-file-export"></i> Export to File</button><hr>
-                    <div style="font-weight: bold; margin-bottom: 10px;">Preferences</div>
                     <label><input type="checkbox" id="mark-exempted-option"> Always mark exempted students as absent</label>
                     <label><input type="checkbox" id="new-tab-option"> Open EIS in new tab</label>
-                    <label><input type="checkbox" id="mark-missing-option"> Mark students without UID as absent</label><hr>
-                    <div style="font-weight: bold; margin-bottom: 10px;">Instructions</div>
-                    <p style="font-size: 0.9em;">1. Install <a href="https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo" target="_blank">Tampermonkey</a>.</p>
-                    <p style="font-size: 0.9em;">2. Install the <a href="https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js" target="_blank">Userscript</a>.</p>
+                    <label><input type="checkbox" id="mark-missing-option"> Mark students without UID as absent</label>
                 </div>
             </div>
         </div> 
@@ -8002,248 +8258,252 @@ ${uidContent}
             <button id="confirm-eis-export-btn" class="btn-green"><i class="fa-solid fa-wand-magic-sparkles"></i> Add to EIS</button>
         </div>`;
 
-            // Add temporary styles for animation
-            const style = document.createElement('style');
-            style.id = 'temp-dialog-styles';
-            style.textContent = `.section-char-group { transition: all 0.4s ease-out; max-height: 100px; opacity: 1; overflow: hidden; margin-bottom: 15px; } .section-char-group.is-hidden { max-height: 0; opacity: 0; margin: 0; }`;
-            document.head.appendChild(style);
             dialogBackdrop.appendChild(dialog);
             document.body.appendChild(dialogBackdrop);
 
-            // Wait for course info to be sure (redundant but safe)
-            fetchCourseInfo().then(() => {
-                const courseMetadata = getCourseMetadata(currentCourse);
-                const weekSelect = dialog.querySelector('#export-week');
-                const dateInput = dialog.querySelector('#export-date');
-                const categoryGroup = dialog.querySelector('#category-btn-group');
-                const sectionTypeGroup = dialog.querySelector('#section-type-group');
-                const sectionCharGroup = dialog.querySelector('#section-char-group');
-                const sectionCharContainer = dialog.querySelector('#section-char-container');
-                const confirmBtn = dialog.querySelector('#confirm-eis-export-btn');
-                const validationMsg = dialog.querySelector('#section-validation-msg');
-                const customHoursInput = dialog.querySelector('#hours-custom-input');
+            // 2. Fetch Data
+            try {
+                await fetchCourseInfo();
+            } catch (e) {
+                console.error("Error fetching course info", e);
+            }
 
-                // Load Preferences
-                const preferences = ['mark-exempted-option', 'new-tab-option', 'mark-missing-option'];
-                preferences.forEach(id => {
-                    const checkbox = dialog.querySelector(`#${id}`);
-                    const savedState = localStorage.getItem(`eis_pref_${id}`);
-                    if (savedState === null) {
-                        if (id !== 'mark-exempted-option') checkbox.checked = true;
-                    } else {
-                        checkbox.checked = JSON.parse(savedState);
-                    }
-                    checkbox.addEventListener('change', () => localStorage.setItem(`eis_pref_${id}`, checkbox.checked));
-                });
+            const eisId = courseIDMap[currentCourse.trim()] || courseIDMap[currentCourse];
+            if (!eisId) {
+                document.body.removeChild(dialogBackdrop);
+                document.body.style.overflow = '';
+                showNotification('error', 'EIS ID Missing', `ID for "${currentCourse}" is not set.`);
+                return;
+            }
+            document.getElementById('export-course-display').value = `${formattedCourseName} (ID: ${eisId})`;
 
-                // Populate Week Select
-                for (let i = 1; i <= 14; i++) {
-                    weekSelect.innerHTML += `<option value="${i}">Week ${i}</option>`;
+            // -- Logic --
+            const closeDialog = () => { document.body.removeChild(dialogBackdrop); document.body.style.overflow = ''; };
+            const courseMetadata = getCourseMetadata(currentCourse);
+            const rawSections = courseMetadata?.availableSections || '';
+            const sectionsMap = parseAvailableSections(rawSections);
+            const categories = Object.keys(sectionsMap);
+
+            // --- NEW DEFAULT SELECTION LOGIC ---
+            // 1. Default to 'Theory' if list is empty
+            let defaultCategory = 'Theory';
+            let defaultSubgroup = null;
+
+            // 2. If we have sections defined, pick the VERY FIRST one from the sheet
+            if (categories.length > 0) {
+                defaultCategory = categories[0]; // First Key
+                const groups = sectionsMap[defaultCategory];
+                if (groups && groups.length > 0) {
+                    defaultSubgroup = groups[0]; // First Item in First Key
                 }
+            }
 
-                // Handle Date Logic
-                if (prefilledDateStr) {
-                    const [day, month, year] = prefilledDateStr.split('-');
-                    const prefilledDate = new Date(`${year}-${month}-${day}`);
-                    dateInput.value = `${year}-${month}-${day}`;
-                    if (courseMetadata) {
-                        const week = calculateWeekForDate(courseMetadata, prefilledDate);
-                        weekSelect.value = Math.min(week, 14);
-                    }
-                } else {
-                    dateInput.value = courseMetadata ? getSuggestedDate(courseMetadata) : new Date().toISOString().split('T')[0];
-                    const currentWeek = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
-                    weekSelect.value = currentWeek;
-                }
+            // 3. Initialize State
+            let selectedCategory = defaultCategory;
+            let selectedSubgroup = defaultSubgroup;
+            let selectedSection = selectedCategory.toLowerCase();
 
-                // Populate Category Buttons (WITH ICONS)
-                const defaultCategory = courseMetadata?.defaultCategory || 'theory';
-                categoryGroup.innerHTML = `
-            <button class="toggle-button ${defaultCategory === 'theory' ? 'active' : ''}" data-value="theory">
-                <i class="fa-solid fa-book"></i> Theory
-            </button>
-            <button class="toggle-button ${defaultCategory === 'lab' ? 'active' : ''}" data-value="lab">
-                <i class="fa-solid fa-desktop"></i> Lab
-            </button>
-            <button class="toggle-button ${defaultCategory === 'practice' ? 'active' : ''}" data-value="practice">
-                <i class="fa-solid fa-pen-to-square"></i> Practice
-            </button>
-        `;
-                customHoursInput.value = parseInt(courseMetadata?.defaultHours || 2);
+            // -- Render Logic --
+            const catContainer = document.getElementById('export-cat-group');
+            const subContainer = document.getElementById('export-subgroup-group');
+            const sectionContainer = document.getElementById('export-section-group');
 
-                // Helper Functions for Section Logic
-                const validateSectionSelection = () => {
-                    const selectedType = sectionTypeGroup.querySelector('.active')?.dataset.value;
-                    const selectedChar = sectionCharGroup.querySelector('.active')?.dataset.value;
-                    let isValid = (selectedType === 'ALL' && !selectedChar) || (selectedType && selectedType !== 'ALL' && selectedChar);
-                    validationMsg.textContent = (!isValid && selectedType && selectedType !== 'ALL' && !selectedChar) ? 'Please select a group letter.' : '';
-                    confirmBtn.disabled = !isValid;
-                };
-
-                const updateSectionButtons = () => {
-                    const selectedType = sectionTypeGroup.querySelector('.active')?.dataset.value;
-                    const selectedChar = sectionCharGroup.querySelector('.active')?.dataset.value;
-                    sectionCharGroup.querySelectorAll('.toggle-button').forEach(btn => btn.disabled = (selectedType === 'ALL') || (selectedType === 'Theory' && btn.dataset.value === 'D'));
-                    sectionTypeGroup.querySelectorAll('.toggle-button').forEach(btn => btn.disabled = (selectedChar === 'D' && btn.dataset.value === 'Theory'));
-                };
-
-                const closeDialog = () => {
-                    document.body.removeChild(dialogBackdrop);
-                    document.head.removeChild(document.getElementById('temp-dialog-styles'));
-                    document.body.style.overflow = '';
-                };
-
-                // Event Listeners
-                categoryGroup.addEventListener('click', e => {
-                    const btn = e.target.closest('.toggle-button');
-                    if (btn) {
-                        categoryGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
-                    }
+            const updateSectionToggle = () => {
+                const btns = sectionContainer.querySelectorAll('.course-button');
+                btns.forEach(btn => {
+                    if (btn.dataset.value === selectedSection.toLowerCase()) btn.classList.add('active');
+                    else btn.classList.remove('active');
                 });
+            };
 
-                sectionTypeGroup.addEventListener('click', e => {
-                    const btn = e.target.closest('.toggle-button');
-                    if (btn && !btn.disabled) {
-                        sectionTypeGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
-                        if (btn.dataset.value === 'ALL') {
-                            sectionCharContainer.classList.add('is-hidden');
-                            sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                        } else {
-                            sectionCharContainer.classList.remove('is-hidden');
-                        }
-                        updateSectionButtons();
-                        validateSectionSelection();
-                    }
-                });
+            const renderSubgroups = () => {
+                const groups = sectionsMap[selectedCategory] || [];
+                subContainer.innerHTML = '';
 
-                sectionCharGroup.addEventListener('click', e => {
-                    const btn = e.target.closest('.toggle-button');
-                    if (btn && !btn.disabled) {
-                        sectionCharGroup.querySelectorAll('.active').forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
-                        updateSectionButtons();
-                        validateSectionSelection();
-                    }
-                });
+                // Only auto-select first subgroup if we switched categories and `selectedSubgroup` became invalid/null
+                if (groups.length > 0 && !selectedSubgroup) selectedSubgroup = groups[0];
 
-                dialog.querySelector('#hours-decrement').addEventListener('click', () => customHoursInput.stepDown());
-                dialog.querySelector('#hours-increment').addEventListener('click', () => customHoursInput.stepUp());
-                dialog.querySelector('.collapsible-trigger').addEventListener('click', e => {
-                    e.currentTarget.nextElementSibling.classList.toggle('is-open');
-                    e.currentTarget.querySelector('i.fa-chevron-down').classList.toggle('fa-chevron-up');
-                });
-
-                // Data Preparation
-                const createExportData = () => {
-                    let section = sectionTypeGroup.querySelector('.active')?.dataset.value || 'ALL';
-                    const sectionChar = sectionCharGroup.querySelector('.active')?.dataset.value;
-                    if (section !== 'ALL' && sectionChar) {
-                        section = `${section} ${sectionChar}`;
-                    }
-
-                    const nameMapForExport = Object.entries(databaseMap).reduce((acc, [dbKey, data]) => {
-                        acc[dbKey] = data.name;
-                        return acc;
-                    }, {});
-
-                    const data = {
-                        parameters: {
-                            week: weekSelect.value,
-                            hours: customHoursInput.value,
-                            category: categoryGroup.querySelector('.active')?.dataset.value || defaultCategory,
-                            date: dateInput.value,
-                            topic: dialog.querySelector('#export-topic').value,
-                            course: currentCourse || 'Default',
-                            section: section
-                        },
-                        options: {
-                            markMissingAsAbsent: dialog.querySelector('#mark-missing-option').checked,
-                            markExemptedAsAbsent: dialog.querySelector('#mark-exempted-option').checked
-                        },
-                        attendance: {},
-                        nameMap: nameMapForExport
-                    };
-
-                    const logsForCurrentCourse = courseData[currentCourse]?.logs || [];
-                    if (logsForCurrentCourse.length > 0) {
-                        const uidCounts = {};
-                        const selectedDateStr = data.parameters.date;
-                        logsForCurrentCourse.forEach(log => {
-                            const logDateStr = new Date(log.timestamp).toISOString().split('T')[0];
-                            if (logDateStr === selectedDateStr) {
-                                const primaryStudentKey = uidToPrimaryUidMap[log.uid];
-                                if (primaryStudentKey) {
-                                    uidCounts[primaryStudentKey] = (uidCounts[primaryStudentKey] || 0) + 1;
-                                }
-                            }
-                        });
-                        data.attendance = uidCounts;
-                    }
-                    return data;
-                };
-
-                // "Add to EIS" (Copy)
-                confirmBtn.addEventListener('click', () => {
-                    const data = createExportData();
-                    copyToClipboard(JSON.stringify(data)).then(() => {
-                        const eisUrl = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
-                        showNotification('success', 'Data Copied', `Attendance data copied. Click "Paste Data" on the EIS page.`);
-                        if (dialog.querySelector('#new-tab-option').checked) window.open(eisUrl, '_blank');
-                        else window.location.href = eisUrl;
-                        closeDialog();
-                    }).catch(error => {
-                        console.error("Clipboard error:", error);
-                        showNotification('error', 'Clipboard Error', `Could not copy to clipboard. Use the Export to File option instead.`);
+                if (groups.length > 0) {
+                    subContainer.style.display = 'flex';
+                    groups.forEach(grp => {
+                        const btn = document.createElement('div');
+                        btn.className = `course-button ${selectedSubgroup === grp ? 'active' : ''}`;
+                        btn.innerHTML = `<b>${grp}</b>`;
+                        btn.style.padding = "8px 15px";
+                        btn.style.minWidth = "35px";
+                        btn.onclick = () => {
+                            selectedSubgroup = grp;
+                            renderSubgroups();
+                        };
+                        subContainer.appendChild(btn);
                     });
-                });
-
-                // "Export to File"
-                dialog.querySelector('#save-export-btn').addEventListener('click', () => {
-                    const data = createExportData();
-                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
-                    const downloadEl = document.createElement('a');
-                    downloadEl.setAttribute("href", dataStr);
-                    downloadEl.setAttribute("download", `eis_${currentCourse || 'default'}_${data.parameters.date}.json`);
-                    document.body.appendChild(downloadEl);
-                    downloadEl.click();
-                    document.body.removeChild(downloadEl);
-                    showNotification('success', 'Export Saved', `Attendance data saved as a file.`);
-                });
-
-                dialog.querySelector('#cancel-export-btn').addEventListener('click', closeDialog);
-
-                // Initialize Section Defaults
-                const defaultSectionFull = courseMetadata?.defaultSection || 'ALL';
-                let [defaultSectionType, defaultSectionChar] = defaultSectionFull.split(' ');
-                if (defaultSectionFull === 'ALL') defaultSectionType = 'ALL';
-
-                const defaultTypeBtn = sectionTypeGroup.querySelector(`[data-value="${defaultSectionType}"]`);
-                if (defaultTypeBtn) defaultTypeBtn.classList.add('active');
-
-                if (defaultSectionChar) {
-                    const defaultCharBtn = sectionCharGroup.querySelector(`[data-value="${defaultSectionChar}"]`);
-                    if (defaultCharBtn) defaultCharBtn.classList.add('active');
+                } else {
+                    subContainer.style.display = 'none';
+                    selectedSubgroup = null;
                 }
+            };
 
-                if (sectionTypeGroup.querySelector('.active')?.dataset.value !== 'ALL') {
-                    sectionCharContainer.classList.remove('is-hidden');
-                }
-                updateSectionButtons();
-                validateSectionSelection();
+            const renderCategories = () => {
+                catContainer.innerHTML = '';
+                const icons = { 'theory': 'fa-book', 'lab': 'fa-desktop', 'practice': 'fa-pen-to-square' };
 
-                // Reveal Content
-                const loader = dialog.querySelector('.dialog-loader');
-                const mainContent = dialog.querySelector('.dialog-main-content');
-                loader.classList.add('fade-out');
-                setTimeout(() => {
-                    loader.style.display = 'none';
-                    mainContent.style.height = 'auto';
-                    mainContent.style.overflow = 'visible';
-                    mainContent.classList.add('fade-in');
-                }, 250);
+                categories.forEach(cat => {
+                    const lowerCat = cat.toLowerCase();
+                    const iconClass = icons[lowerCat] || 'fa-tag';
+
+                    const btn = document.createElement('div');
+                    btn.className = `course-button ${selectedCategory === cat ? 'active' : ''}`;
+                    btn.innerHTML = `<i class="fa-solid ${iconClass}"></i>&nbsp; ${cat}`;
+                    btn.style.padding = "8px 12px";
+                    btn.style.fontSize = "0.9em";
+                    btn.style.minWidth = "auto";
+
+                    btn.onclick = () => {
+                        selectedCategory = cat;
+                        selectedSubgroup = null; // Reset sub to force auto-pick of first in new cat
+                        selectedSection = cat.toLowerCase();
+                        updateSectionToggle();
+                        renderCategories();
+                        renderSubgroups();
+                    };
+                    catContainer.appendChild(btn);
+                });
+            };
+
+            // Initialize UI
+            renderCategories();
+            renderSubgroups();
+            updateSectionToggle();
+
+            sectionContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.course-button');
+                if (!btn) return;
+                selectedSection = btn.dataset.value;
+                updateSectionToggle();
             });
+
+            // -- Fields --
+            const weekSelect = document.getElementById('export-week');
+            for (let i = 1; i <= 14; i++) weekSelect.innerHTML += `<option value="${i}">Week ${i}</option>`;
+
+            const dateInput = document.getElementById('export-date');
+            if (prefilledDateStr) {
+                const [day, month, year] = prefilledDateStr.split('-');
+                dateInput.value = `${year}-${month}-${day}`;
+                if (courseMetadata) weekSelect.value = calculateWeekForDate(courseMetadata, new Date(dateInput.value)) || 1;
+            } else {
+                dateInput.value = courseMetadata ? getSuggestedDate(courseMetadata) : new Date().toISOString().split('T')[0];
+                weekSelect.value = courseMetadata ? calculateCurrentWeek(courseMetadata) : 1;
+            }
+
+            const hoursInput = document.getElementById('hours-custom-input');
+            hoursInput.value = parseInt(courseMetadata?.defaultHours || 2);
+            document.getElementById('hours-decrement').onclick = () => hoursInput.stepDown();
+            document.getElementById('hours-increment').onclick = () => hoursInput.stepUp();
+
+            ['mark-exempted-option', 'new-tab-option', 'mark-missing-option'].forEach(id => {
+                const cb = document.getElementById(id);
+                const saved = localStorage.getItem(`eis_pref_${id}`);
+                if (saved !== null) cb.checked = JSON.parse(saved);
+                else if (id !== 'mark-exempted-option') cb.checked = true;
+                cb.addEventListener('change', () => localStorage.setItem(`eis_pref_${id}`, cb.checked));
+            });
+
+            dialog.querySelector('.collapsible-trigger').onclick = (e) => {
+                const content = e.currentTarget.nextElementSibling;
+                content.classList.toggle('is-open');
+                const icon = e.currentTarget.querySelector('i.fa-chevron-down, i.fa-chevron-up');
+
+                if (content.classList.contains('is-open')) {
+                    icon.className = 'fa-solid fa-chevron-up';
+                    content.style.marginTop = '10px';
+                } else {
+                    icon.className = 'fa-solid fa-chevron-down';
+                    content.style.marginTop = '0';
+                }
+            };
+
+            // -- Data Prep --
+            const prepareData = () => {
+                let targetSession = selectedCategory;
+                if (selectedSubgroup) targetSession += ' ' + selectedSubgroup;
+                const sectionParam = selectedSubgroup ? targetSession : 'ALL';
+
+                const logsForCourse = courseData[currentCourse]?.logs || [];
+                const uidCounts = {};
+                const selectedDateStr = dateInput.value;
+
+                logsForCourse.forEach(log => {
+                    const logDateStr = new Date(log.timestamp).toISOString().split('T')[0];
+                    if (logDateStr !== selectedDateStr) return;
+
+                    const logSession = log.session || 'Default';
+                    let isMatch = (logSession === targetSession);
+                    if (logSession === 'Default' && categories.length <= 1) isMatch = true;
+
+                    if (isMatch) {
+                        const primaryKey = uidToPrimaryUidMap[log.uid];
+                        if (primaryKey) uidCounts[primaryKey] = (uidCounts[primaryKey] || 0) + 1;
+                    }
+                });
+
+                const nameMap = {};
+                Object.entries(databaseMap).forEach(([k, v]) => nameMap[k] = v.name);
+
+                return {
+                    parameters: {
+                        week: weekSelect.value,
+                        hours: hoursInput.value,
+                        category: selectedSection,
+                        date: dateInput.value,
+                        topic: document.getElementById('export-topic').value,
+                        course: currentCourse,
+                        section: sectionParam
+                    },
+                    options: {
+                        markMissingAsAbsent: document.getElementById('mark-missing-option').checked,
+                        markExemptedAsAbsent: document.getElementById('mark-exempted-option').checked
+                    },
+                    attendance: uidCounts,
+                    nameMap: nameMap
+                };
+            };
+
+            // -- Buttons --
+            document.getElementById('confirm-eis-export-btn').onclick = () => {
+                const data = prepareData();
+                copyToClipboard(JSON.stringify(data)).then(() => {
+                    const url = `https://eis.epoka.edu.al/courseattendance/${eisId}/newcl`;
+                    showNotification('success', 'Copied', `Data for ${selectedCategory} ${selectedSubgroup || ''} copied.`);
+                    if (document.getElementById('new-tab-option').checked) window.open(url, '_blank');
+                    else window.location.href = url;
+                    closeDialog();
+                }).catch(() => showNotification('error', 'Error', 'Clipboard failed.'));
+            };
+
+            document.getElementById('save-export-btn').onclick = () => {
+                const data = prepareData();
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+                const a = document.createElement('a');
+                a.href = dataStr;
+                a.download = `eis_${currentCourse}_${data.parameters.date}.json`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                showNotification('success', 'Saved', 'File exported.');
+            };
+
+            document.getElementById('cancel-export-btn').onclick = closeDialog;
+
+            // 4. Reveal Content
+            const loader = dialog.querySelector('.dialog-loader');
+            const content = dialog.querySelector('.dialog-main-content');
+
+            setTimeout(() => {
+                loader.style.display = 'none';
+                content.style.display = 'block';
+                void content.offsetWidth;
+                content.style.opacity = '1';
+                content.style.visibility = 'visible';
+            }, 300);
         }
 
         /**
@@ -11927,13 +12187,16 @@ ${uidContent}
         }
 
         /**
-         * Get the EIS ID for the current course
-         * @returns {string|null} The EIS ID for the current course or null if not found
+         * Returns the current active session string (e.g., "Theory A", "Lab", or "Default")
          */
-        function getCurrentCourseEisId() {
-            if (!currentCourse) return null;
+        function getCurrentActiveSession() {
+            if (!activeSessionCategory) return 'Default';
 
-            return courseIDMap[currentCourse] || null;
+            let session = activeSessionCategory;
+            if (activeSessionGroup) {
+                session += ' ' + activeSessionGroup;
+            }
+            return session;
         }
 
 
@@ -12905,7 +13168,8 @@ ${uidContent}
                     uid: selectedUid,
                     timestamp: new Date(`${manualDate}T${manualTime}:00`).getTime(),
                     id: Date.now() + Math.random().toString(36).substring(2, 11),
-                    manual: true
+                    manual: true,
+                    session: getCurrentActiveSession()
                 };
 
                 newLog = touchLogForEdit(newLog, currentUser?.email);
@@ -12962,19 +13226,29 @@ ${uidContent}
                 const formattedTime = timeObj.getHours().toString().padStart(2, '0') + ':' + timeObj.getMinutes().toString().padStart(2, '0');
                 const manualClass = (log.manual === true || log.manual === 'true') ? 'manual-timestamp-input' : '';
 
+                // NEW: Get the specific session string (e.g. "Theory A")
+                const sessionLabel = log.session ? log.session : 'Default';
+
                 timestampFields += `
-        <div class="timestamp-edit-group" data-log-id="${log.id}">
-            <div class="form-group">
-                <label class="dialog-label-fixed">Hour ${index + 1}</label>
-                <div class="input-with-icon" style="flex-grow:1;">
+    <div class="timestamp-edit-group" data-log-id="${log.id}">
+        <div class="form-group" style="align-items:center;">
+            <label class="dialog-label-fixed">Time ${index + 1}</label>
+            
+            <div style="flex-grow:1; display:flex; flex-direction:column; gap:2px;">
+                <div class="input-with-icon">
                     <i class="fa-regular fa-clock"></i>
                     <input type="time" class="form-control timestamp-time ${manualClass}" value="${formattedTime}">
                 </div>
-                <button class="delete-time-btn btn-red btn-icon" data-index="${index}" title="Delete Timestamp" style="margin-left:10px;">
-                    <i class="fa-solid fa-trash"></i>
-                </button>
+                <small style="text-align:right; color:var(--primary-color); font-weight:600; font-size:0.8em; margin-right:5px;">
+                    ${escapeHtml(sessionLabel)}
+                </small>
             </div>
-        </div>`;
+
+            <button class="delete-time-btn btn-red btn-icon" data-index="${index}" title="Delete Timestamp" style="margin-left:10px;">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        </div>
+    </div>`;
             });
 
             dialog.innerHTML = `
@@ -13167,11 +13441,10 @@ ${uidContent}
                         uid: group.originalLogs[0]?.uid,
                         timestamp: newTimestampObj.getTime(),
                         id: Date.now() + Math.random().toString(36).substring(2, 11),
-                        manual: true // All newly added times are manual
+                        manual: true,
+                        session: getCurrentActiveSession()
                     };
                     newLog = touchLogForEdit(newLog, currentUser?.email);
-
-                    // Add the new log to the main data array
                     courseData[currentCourse].logs.unshift(newLog);
                 });
 
@@ -13957,7 +14230,15 @@ ${uidContent}
                         const timeStr = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
                         return timeStr.includes(filter);
                     });
-                    return name.toLowerCase().includes(filter) || uidMatch || date.includes(filter) || hasMatchingTime;
+                    const sessionMatch = group.originalLogs.some(log =>
+                        (log.session || '').toLowerCase().includes(filter)
+                    );
+
+                    return name.toLowerCase().includes(filter) ||
+                        uidMatch ||
+                        date.includes(filter) ||
+                        hasMatchingTime ||
+                        sessionMatch;
                 });
             }
 
@@ -14088,25 +14369,60 @@ ${uidContent}
                 row.appendChild(dateCell);
 
                 const timesCell = document.createElement('td');
-                timesCell.className = 'times-cell';
+                timesCell.className = 'times-cell times-cell-stacked';
+
+                // 1. Group logs by CATEGORY ONLY (Theory, Lab, Practice)
+                const categoryGroups = {};
+
                 group.originalLogs.sort((a, b) => a.timestamp - b.timestamp).forEach(log => {
-                    const timeTag = document.createElement('span');
-                    timeTag.className = 'time-tag';
-                    if (log.manual === true || log.manual === 'true') {
-                        timeTag.classList.add('manual', 'excused');
-                        timeTag.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            if (!isAdmin && currentUser && normalizeName(group.name) === normalizeName(currentUser.name)) {
-                                showNotification('warning', 'Excused Absence', 'You have been excused for this hour.');
-                            } else {
-                                showNotification('warning', 'Excused Absence', `${group.name} has been excused for this hour.`);
-                            }
-                        });
-                    }
-                    const timeObj = new Date(log.timestamp);
-                    timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
-                    timesCell.appendChild(timeTag);
+                    const rawSession = log.session || 'Default';
+
+                    // Split "Theory A" -> ["Theory", "A"] -> "Theory"
+                    // Split "Default" -> "Default"
+                    const category = rawSession.split(' ')[0];
+
+                    if (!categoryGroups[category]) categoryGroups[category] = [];
+                    categoryGroups[category].push(log);
                 });
+
+                // 2. Render rows
+                Object.entries(categoryGroups).forEach(([categoryName, logs]) => {
+                    const rowDiv = document.createElement('div');
+                    rowDiv.className = 'time-row';
+
+                    // 3. Add Label (General Category Only)
+                    // Show if not default OR if multiple categories exist
+                    if (categoryName !== 'Default' || Object.keys(categoryGroups).length > 1) {
+                        const label = document.createElement('span');
+                        label.className = 'cat-label';
+                        label.textContent = categoryName; // Displays "Theory", "Lab", etc.
+                        rowDiv.appendChild(label);
+                    }
+
+                    // 4. Container for Pills (Fixes CSS child issues)
+                    const pillContainer = document.createElement('div');
+                    pillContainer.className = 'pills-wrapper';
+
+                    logs.forEach(log => {
+                        const timeTag = document.createElement('span');
+                        timeTag.className = 'time-tag';
+                        if (log.manual === true || log.manual === 'true') {
+                            timeTag.classList.add('manual', 'excused');
+                            timeTag.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                showNotification('warning', 'Excused', 'Student was excused for this hour.');
+                            });
+                        }
+
+                        const timeObj = new Date(log.timestamp);
+                        timeTag.textContent = `${String(timeObj.getHours()).padStart(2, '0')}:${String(timeObj.getMinutes()).padStart(2, '0')}`;
+                        pillContainer.appendChild(timeTag);
+                    });
+
+                    rowDiv.appendChild(pillContainer);
+                    timesCell.appendChild(rowDiv);
+                });
+
                 row.appendChild(timesCell);
 
                 if (isAdminForCourse(currentCourse)) {
@@ -14518,6 +14834,10 @@ ${uidContent}
             updateScanButtons();
             populateCourseButtons();
 
+            if (currentCourse) {
+                renderSessionControls(currentCourse);
+            }
+
             const hasLogs = logsForCurrentCourse.length > 0;
             filterInput.disabled = !hasLogs;
             sortSelect.disabled = !hasLogs;
@@ -14681,11 +15001,21 @@ ${uidContent}
             }
 
             const timestamp = new Date();
+
+            let sessionStr = '';
+            if (activeSessionCategory) {
+                sessionStr = activeSessionCategory;
+                if (activeSessionGroup) {
+                    sessionStr += ' ' + activeSessionGroup;
+                }
+            }
+
             let newLog = {
                 uid: serialNumber,
                 timestamp: timestamp.getTime(),
                 id: Date.now() + Math.random().toString(36).substring(2, 11),
-                manual: false
+                manual: false,
+                session: getCurrentActiveSession()
             };
 
             // In LecturerMode, currentUser might be null, which is fine
@@ -14975,6 +15305,8 @@ ${uidContent}
                     btn.classList.add('active');
                 }
             });
+
+            renderSessionControls(course);
 
             // Do nothing more if the course is already selected
             if (currentCourse === course && window.location.hash === `#${course}`) {
