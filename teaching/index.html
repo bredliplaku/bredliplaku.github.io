@@ -2915,6 +2915,57 @@
                 filter: drop-shadow(4px 4px 0 var(--dark-border));
             }
         }
+
+        /* Admin UI Styles */
+        .admin-fab {
+            position: fixed;
+            bottom: 90px;
+            right: 20px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--light-color);
+            border: var(--border-width) solid var(--dark-color);
+            box-shadow: 4px 4px 0 var(--dark-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 999;
+            transition: all 0.2s cubic-bezier(.68, -.55, .265, 1.55);
+            font-size: 1.25em;
+            color: var(--dark-color);
+        }
+
+        .admin-fab:hover {
+            transform: translate(-2px, -2px) rotate(15deg);
+            box-shadow: 6px 6px 0 var(--accent-color);
+            background: var(--secondary-color);
+        }
+
+        .admin-fab.active {
+            background: var(--primary-color);
+            color: var(--light-color);
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0 var(--dark-color);
+        }
+
+        .admin-controls-panel {
+            display: none;
+            /* Hidden by default */
+        }
+
+        body.admin-mode .editable {
+            cursor: text;
+            border: 2px dashed var(--accent-color);
+            padding: 2px 5px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        body.is-admin .admin-controls-panel {
+            display: block;
+        }
     </style>
 </head>
 
@@ -3035,6 +3086,13 @@
             <div class="footer-tools">
                 <button id="theme-toggle" class="theme-toggle" aria-label="Theme: Auto" title="Theme: Auto">
                     <i id="theme-toggle-icon" class="fas fa-adjust" aria-hidden="true"></i>
+                </button>
+                <button id="sign-in-btn" class="theme-toggle" aria-label="Sign In" title="Admin Sign In">
+                    <i class="fas fa-sign-in-alt"></i>
+                </button>
+                <button id="sign-out-btn" class="theme-toggle" aria-label="Sign Out" title="Sign Out"
+                    style="display: none;">
+                    <i class="fas fa-sign-out-alt"></i>
                 </button>
             </div>
             <div class="social-links">
@@ -3196,6 +3254,79 @@
             fab.addEventListener('click', toggleMenu);
             overlay.addEventListener('click', toggleMenu);
         }
+
+
+        // --- ADMIN LOGIC ---
+        let isAdmin = false;
+        let isEditMode = false;
+        let userEmail = '';
+
+        async function checkAdminStatus(token) {
+            try {
+                const url = `${BRAIN_URL}?action=checkAdmin&token=${encodeURIComponent(token)}`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.isAdmin) {
+                    console.log("Admin verified:", data.email);
+                    isAdmin = true;
+                    userEmail = data.email;
+                    document.body.classList.add('is-admin');
+                    setupAdminUI();
+                    showImprovedNotification('success', 'Admin Access', 'Welcome back, Commander.');
+                } else {
+                    console.log("User is not admin");
+                    isAdmin = false;
+                    document.body.classList.remove('is-admin');
+                }
+            } catch (e) {
+                console.error("Admin check failed", e);
+            }
+        }
+
+        function setupAdminUI() {
+            if (document.getElementById('admin-edit-toggle')) return;
+
+            const fab = document.createElement('div');
+            fab.id = 'admin-edit-toggle';
+            fab.className = 'admin-fab';
+            fab.innerHTML = '<i class="fas fa-pen"></i>';
+            fab.title = "Toggle Edit Mode";
+
+            fab.onclick = toggleEditMode;
+
+            document.body.appendChild(fab);
+        }
+
+        function toggleEditMode() {
+            isEditMode = !isEditMode;
+            const fab = document.getElementById('admin-edit-toggle');
+
+            if (isEditMode) {
+                fab.classList.add('active');
+                fab.innerHTML = '<i class="fas fa-save"></i>';
+                document.body.classList.add('admin-mode');
+                enableInlineEditing();
+                showImprovedNotification('info', 'Edit Mode', 'You can now edit content.');
+            } else {
+                fab.classList.remove('active');
+                fab.innerHTML = '<i class="fas fa-pen"></i>';
+                document.body.classList.remove('admin-mode');
+                disableInlineEditing();
+                // TODO: Prompt to save if changes were made, or save automatically
+            }
+        }
+
+        function enableInlineEditing() {
+            console.log("Inline editing enabled");
+            setupSortAndRender(); // Re-render with edit controls
+        }
+
+        function disableInlineEditing() {
+            console.log("Inline editing disabled");
+            setupSortAndRender(); // Re-render without edit controls
+        }
+        // --- END ADMIN LOGIC ---
 
         function init() {
             setRandomSpinnerGif();
@@ -3772,15 +3903,16 @@
                 gapi.client.init({ apiKey: API_KEY, discoveryDocs: DISCOVERY_DOCS }).then(() => {
                     tryPublicAccess().then(success => {
                         if (success) {
-                            if (document.getElementById('sign-in-btn')) {
-                                document.getElementById('sign-in-btn').style.display = 'none';
-                            }
                             showMainContent();
+                            // Ensure button is visible for optional admin login
+                            updateAuthButtonDisplay(false);
                         } else {
                             const savedToken = localStorage.getItem('gapi_token');
                             if (savedToken) {
                                 try {
-                                    gapi.client.setToken(JSON.parse(savedToken));
+                                    const tokenData = JSON.parse(savedToken);
+                                    gapi.client.setToken(tokenData);
+                                    if (tokenData.access_token) checkAdminStatus(tokenData.access_token);
                                     isSignedIn = true;
                                     updateAuthButtonDisplay(true);
                                     fetchAvailableCourses().then(() => {
@@ -3847,7 +3979,88 @@
             }
         }
 
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwzUlz7R5MSs0Y6detlWJdvtmBUpp7MzAEIr7krRPbM71kUSSqE4oklizYuul6EluFKGw/exec';
+        /* --- Admin Write Operations --- */
+        async function brainWrite(action, payload) {
+            const token = gapi.client.getToken()?.access_token;
+            if (!token) {
+                showImprovedNotification('error', 'Auth Error', 'No access token found');
+                return null;
+            }
+
+            try {
+                showImprovedNotification('info', 'Saving...', 'Syncing changes to cloud...');
+                document.body.classList.add('is-loading');
+
+                const response = await fetch(BRAIN_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: action,
+                        token: token,
+                        data: payload
+                    })
+                });
+
+                const result = await response.json();
+                document.body.classList.remove('is-loading');
+
+                if (result.error) throw new Error(result.error);
+
+                showImprovedNotification('success', 'Saved', 'Changes saved successfully');
+                return result;
+
+            } catch (error) {
+                document.body.classList.remove('is-loading');
+                console.error('Brain Write Error:', error);
+                showImprovedNotification('error', 'Save Failed', error.message);
+                return null;
+            }
+        }
+
+        async function editModule(moduleId) {
+            const module = courseData.modules.find(m => m.id === moduleId);
+            if (!module) return;
+
+            const newTitle = prompt("Edit Module Title:", module.title);
+            if (newTitle && newTitle !== module.title) {
+                const result = await brainWrite('editModule', {
+                    sheet: currentCourse,
+                    id: moduleId,
+                    title: newTitle
+                });
+                if (result) {
+                    module.title = newTitle;
+                    setupSortAndRender();
+                }
+            }
+        }
+
+        async function addModule() {
+            const title = prompt("New Module Title:");
+            if (title) {
+                const result = await brainWrite('addModule', {
+                    sheet: currentCourse,
+                    title: title
+                });
+                if (result) selectCourse(currentCourse);
+            }
+        }
+
+        async function addMaterial(moduleId) {
+            const title = prompt("Material Title:");
+            if (!title) return;
+            const link = prompt("Material Link (URL):");
+
+            const result = await brainWrite('addMaterial', {
+                sheet: currentCourse,
+                moduleId: moduleId,
+                title: title,
+                link: link || ''
+            });
+
+            if (result) selectCourse(currentCourse);
+        }
+
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwzPApFf6VMrMMFArXu6qgnMEtD4GWvyu_BvtP8PjZSIEo3wdn1_vChW2OtcBDyTVRxTQ/exec';
 
         async function fetchPublicSheetData(sheetName, range) {
             try {
@@ -3882,6 +4095,9 @@
                 return;
             }
             try {
+                // Check Admin Status immediately
+                checkAdminStatus(resp.access_token);
+
                 localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
                 isSignedIn = true;
                 updateAuthButtonDisplay(true);
@@ -4323,6 +4539,7 @@
         <div class="module-header">
             ${module.dueDate ? `<span class="project-deadline-background">${module.dueDate}</span>` : ''}
             <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
+            ${isEditMode ? `<button class="admin-edit-btn" onclick="event.stopPropagation(); editModule('${module.id}')" title="Edit Module"><i class="fas fa-pen"></i></button>` : ''}
         </div>
         <div class="module-content">
             ${filesHtml}
@@ -4553,6 +4770,7 @@
                 <div class="module-header">
                     ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
                     <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
+                    ${isEditMode ? `<button class="admin-edit-btn" onclick="event.stopPropagation(); editModule('${module.id}')" title="Edit Module"><i class="fas fa-pen"></i></button>` : ''}
                 </div>
                 <div class="module-content">
                     <div class="${gridClass}">`;
@@ -4574,12 +4792,24 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
                     </div>`;
                     });
                     html += `</div>`;
+                    if (isEditMode) {
+                        html += `<div style="text-align:center; padding: 10px;">
+                                    <button class="btn-blue" onclick="event.stopPropagation(); addMaterial('${module.id}')"><i class="fas fa-plus"></i> Add Material</button>
+                                 </div>`;
+                    }
                     module.funFacts.forEach(funFact => {
                         html += `<div class="fun-fact">${funFact.text}</div>`;
                     });
                     html += `</div></div>`;
                 }
             });
+
+            if (isEditMode) {
+                html += `<div class="admin-add-module-container" style="text-align: center; margin-top: 30px; margin-bottom: 30px;">
+                            <button class="btn-primary" onclick="addModule()"><i class="fas fa-plus"></i> Add New Module</button>
+                         </div>`;
+            }
+
             return html;
         }
 
@@ -4628,15 +4858,40 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
             return keys.some(key => parseInt(metadata[key]) > 0);
         }
 
+        function signOut() {
+            const token = gapi.client.getToken();
+            if (token !== null) {
+                google.accounts.oauth2.revoke(token.access_token);
+                gapi.client.setToken('');
+            }
+            localStorage.removeItem('gapi_token');
+            isSignedIn = false;
+            isAdmin = false;
+            isEditMode = false;
+            document.body.classList.remove('admin-mode');
+
+            // Remove admin FAB if exists
+            const fab = document.getElementById('admin-edit-toggle');
+            if (fab) fab.remove();
+
+            updateAuthButtonDisplay(false);
+            showImprovedNotification('info', 'Signed Out', 'You have been signed out');
+
+            // Re-render to remove admin controls
+            setupSortAndRender();
+        }
+
         function updateAuthButtonDisplay(isSignedIn) {
             const signInBtn = document.getElementById('sign-in-btn');
             const signOutBtn = document.getElementById('sign-out-btn');
             if (signInBtn) {
                 signInBtn.style.display = isSignedIn ? 'none' : 'inline-block';
-                // Add this line to make the button work with the modern library
                 signInBtn.onclick = () => tokenClient.requestAccessToken({ prompt: '' });
             }
-            if (signOutBtn) signOutBtn.style.display = isSignedIn ? 'inline-block' : 'none';
+            if (signOutBtn) {
+                signOutBtn.style.display = isSignedIn ? 'inline-block' : 'none';
+                signOutBtn.onclick = signOut;
+            }
         }
 
         function generateGradeDistribution(metadata) {
