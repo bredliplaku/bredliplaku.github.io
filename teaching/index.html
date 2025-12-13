@@ -3257,8 +3257,14 @@
             const bubble = document.getElementById('cat-speech-bubble');
             if (!cat || !bubble) return;
 
+            // Accessibility: Make it interactive for keyboard users
+            cat.setAttribute('role', 'button');
+            cat.setAttribute('tabindex', '0');
+            cat.setAttribute('aria-label', 'Cat Companion: Click for a message');
+
             let bubbleTimeout;
             let animationTimeout;
+            let lastIndex = -1; // Track the last message to avoid repeats
 
             const messages = [
                 // --- Study "Encouragement" ---
@@ -3317,35 +3323,67 @@
                 "Po vjen koha e kafes. ☕"
             ];
 
-            cat.addEventListener('click', (event) => {
-                event.stopPropagation();
-
+            const triggerCatInteraction = () => {
                 // --- Easter Egg Logic ---
                 const chance = 10000;
-                const randomNumber = Math.floor(Math.random() * chance); // Random number between 0 and 9999
-                if (randomNumber === 0) { // If it's the 1 in 10,000 chance
+                const randomNumber = Math.floor(Math.random() * chance);
+
+                if (randomNumber === 0) {
                     window.open('https://youtu.be/dQw4w9WgXcQ', '_blank');
-                    return; // Stop the function so the speech bubble doesn't appear
+                    return;
                 }
-                // --- End of Easter Egg ---
 
-                clearTimeout(bubbleTimeout);
-                clearTimeout(animationTimeout);
-                bubble.classList.remove('visible');
+                // Logic: Get a unique random index
+                let randomIndex;
+                do {
+                    randomIndex = Math.floor(Math.random() * messages.length);
+                } while (randomIndex === lastIndex && messages.length > 1);
+                lastIndex = randomIndex;
 
-                animationTimeout = setTimeout(() => {
-                    const randomIndex = Math.floor(Math.random() * messages.length);
+                // Logic: specific handling if bubble is ALREADY visible
+                if (bubble.classList.contains('visible')) {
+                    // If already visible, just swap text immediately and reset the "hide" timer
                     bubble.textContent = messages[randomIndex];
-                    bubble.classList.add('visible');
-                }, 100);
+                    clearTimeout(bubbleTimeout);
 
-                bubbleTimeout = setTimeout(() => {
-                    bubble.classList.remove('visible');
-                }, 6000);
+                    // Reset the auto-hide timer
+                    bubbleTimeout = setTimeout(() => {
+                        bubble.classList.remove('visible');
+                    }, 6000);
+                } else {
+                    // If hidden, perform the standard pop-in animation
+                    clearTimeout(animationTimeout); // Clear any pending open animations
+
+                    animationTimeout = setTimeout(() => {
+                        bubble.textContent = messages[randomIndex];
+                        bubble.classList.add('visible');
+                    }, 50); // Reduced latency from 100ms for snappier feel
+
+                    bubbleTimeout = setTimeout(() => {
+                        bubble.classList.remove('visible');
+                    }, 6000);
+                }
+            };
+
+            // Mouse Click Handler
+            cat.addEventListener('click', (event) => {
+                event.stopPropagation();
+                triggerCatInteraction();
             });
 
-            document.addEventListener('click', () => {
-                if (bubble.classList.contains('visible')) {
+            // Keyboard Handler (Enter or Space)
+            cat.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault(); // Prevent page scroll on Space
+                    event.stopPropagation();
+                    triggerCatInteraction();
+                }
+            });
+
+            // Global click listener to close bubble when clicking outside
+            document.addEventListener('click', (event) => {
+                // Only close if the click was NOT on the cat itself (already handled by stopPropagation, but safe to check)
+                if (bubble.classList.contains('visible') && !cat.contains(event.target)) {
                     bubble.classList.remove('visible');
                 }
             });
