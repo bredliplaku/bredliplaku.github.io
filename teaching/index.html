@@ -3464,7 +3464,7 @@
 
         function getFileTypeClass(iconClass) {
             if (!iconClass) return '';
-            const icon = iconClass.toLowerCase();
+            const icon = String(iconClass).toLowerCase();
             if (icon.includes('pdf')) return 'ft-pdf';
             if (icon.includes('word')) return 'ft-word';
             if (icon.includes('excel')) return 'ft-excel';
@@ -3818,9 +3818,15 @@
 
         async function tryPublicAccess() {
             try {
-                const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${COURSE_MATERIALS_SPREADSHEET_ID}?key=${API_KEY}`);
+                // Use the GAS Web App proxy for listing sheets (action=getSheets)
+                // Note: user must have updated GAS script to support this action
+                const url = `${BRAIN_URL}?action=getSheets`;
+
+                const response = await fetch(url);
                 if (response.ok) {
                     const data = await response.json();
+
+                    // The new GAS script structure returns { sheets: [ { properties: { title: "Name" } } ] }
                     if (data.sheets && data.sheets.length > 0) {
                         availableCourses = data.sheets.map(sheet => sheet.properties.title);
                         populateCourseButtons();
@@ -3841,15 +3847,27 @@
             }
         }
 
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwzUlz7R5MSs0Y6detlWJdvtmBUpp7MzAEIr7krRPbM71kUSSqE4oklizYuul6EluFKGw/exec';
+
         async function fetchPublicSheetData(sheetName, range) {
             try {
-                const url = `https://sheets.googleapis.com/v4/spreadsheets/${COURSE_MATERIALS_SPREADSHEET_ID}/values/${sheetName}!${range}?key=${API_KEY}`;
+                // Use the GAS Web App proxy
+                const url = `${BRAIN_URL}?sheet=${encodeURIComponent(sheetName)}&range=${encodeURIComponent(range)}`;
+
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+
+                // The GAS script returns plain text JSON
                 const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Return just the values array, ensuring compatibility with previous return type
                 return data.values || [];
             } catch (error) {
-                console.error('Error fetching public sheet data:', error);
+                console.error('Error fetching data via BRAIN:', error);
                 throw error;
             }
         }
@@ -4149,10 +4167,10 @@
 
             rows.forEach(row => {
                 if (!row || row.length === 0) return;
-                const type = row[0]?.toLowerCase();
+                const type = String(row[0] || '').toLowerCase();
 
                 if (type === 'metadata') {
-                    const key = row[1]?.toLowerCase().replace(/\s+/g, '_');
+                    const key = String(row[1] || '').toLowerCase().replace(/\s+/g, '_');
                     if (key) data.metadata[key] = row[2] || '';
                 } else if (type === 'button') {
                     data.actionButtons.push({
@@ -4166,7 +4184,7 @@
                         type: 'standard', id: row[1] || Date.now().toString(), title: row[2] || 'Untitled Module',
                         icon: row[3] || 'fas fa-folder', moduleNumber: row[4] || '',
                         // Check column F (index 5) for the default collapsed state
-                        isInitiallyCollapsed: row[5]?.toLowerCase() === 'false',
+                        isInitiallyCollapsed: String(row[5] || '').toLowerCase() === 'false',
                         materials: [], funFacts: []
                     };
                     data.modules.push(currentModule);
@@ -4174,7 +4192,7 @@
                     currentModule = {
                         type: 'project', id: row[1] || Date.now().toString(), title: row[2] || 'Untitled Project',
                         icon: row[3] || 'fas fa-flask', dueDate: row[4] || '',
-                        isInitiallyCollapsed: row[5]?.toLowerCase() === 'false',
+                        isInitiallyCollapsed: String(row[5] || '').toLowerCase() === 'false',
                         materials: [], groups: [], funFacts: []
                     };
                     data.modules.push(currentModule);
