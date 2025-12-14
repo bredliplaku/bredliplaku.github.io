@@ -1096,6 +1096,7 @@
             color: var(--dark-color);
             border: var(--border-width) solid var(--dark-color);
             padding: 10px 16px;
+            font-family: inherit;
             font-size: .95em;
             font-weight: 700;
             text-transform: uppercase;
@@ -3275,12 +3276,15 @@
                     setupAdminUI();
                     showImprovedNotification('success', 'Admin Access', 'Welcome back, Commander.');
                 } else {
-                    console.log("User is not admin");
+                    console.log("User is not admin:", data.email);
                     isAdmin = false;
                     document.body.classList.remove('is-admin');
+                    // Explain why they aren't admin (helpful for debugging)
+                    showImprovedNotification('warning', 'Access Denied', `User ${data.email || 'Unknown'} is not in the Admins list.`);
                 }
             } catch (e) {
                 console.error("Admin check failed", e);
+                showImprovedNotification('error', 'Check Failed', 'Could not verify admin status. Check console/network.');
             }
         }
 
@@ -3960,7 +3964,9 @@
 
                     // The new GAS script structure returns { sheets: [ { properties: { title: "Name" } } ] }
                     if (data.sheets && data.sheets.length > 0) {
-                        availableCourses = data.sheets.map(sheet => sheet.properties.title);
+                        availableCourses = data.sheets
+                            .map(s => s.properties.title)
+                            .filter(title => title !== 'Metadata' && title !== 'Admins'); // Hide Metadata & Admins
                         populateCourseButtons();
                         if (availableCourses.length > 0) {
                             const urlCourse = localStorage.getItem('urlSelectedCourse');
@@ -4137,27 +4143,45 @@
             setupCourseSwipe();
             const container = document.getElementById('course-buttons-container');
             if (!container) return;
-            container.innerHTML = '';
+            container.innerHTML = ''; // Clear existing buttons
 
             const updateFaderForButtons = () => {
                 const btnContainer = document.getElementById('course-buttons-container');
                 if (btnContainer) updateScrollFaders(btnContainer);
             };
 
+            // Filter out 'Metadata' and 'Admins' sheets from the button list
+            const coursesToShow = availableCourses.filter(course =>
+                course !== 'Metadata' && course !== 'Admins'
+            );
+
             fetchCourseCodes().then(() => {
-                availableCourses.forEach(sheetName => {
+                coursesToShow.forEach(sheetName => {
                     const courseCode = courseMap[sheetName] || sheetName;
-                    const button = document.createElement('div');
+                    const button = document.createElement('button'); // Changed to button for ripple
                     button.className = 'course-button' + (currentCourse === sheetName ? ' active' : '');
                     button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${formatCourseCode(courseCode)}`;
                     button.dataset.sheet = sheetName;
                     button.onclick = () => selectCourse(sheetName);
+
+                    // Add ripple effect
+                    button.addEventListener('mousedown', function (e) {
+                        const x = e.clientX - e.target.offsetLeft;
+                        const y = e.clientY - e.target.offsetTop;
+                        const ripple = document.createElement('span');
+                        ripple.style.left = x + 'px';
+                        ripple.style.top = y + 'px';
+                        this.appendChild(ripple);
+                        setTimeout(() => ripple.remove(), 600);
+                    });
+
                     container.appendChild(button);
                 });
-                updateFaderForButtons(); // 
+                updateFaderForButtons();
             }).catch(err => {
-                availableCourses.forEach(sheetName => {
-                    const button = document.createElement('div');
+                // Fallback if fetchCourseCodes fails, still filter
+                coursesToShow.forEach(sheetName => {
+                    const button = document.createElement('button'); // Changed to button for ripple
                     button.className = 'course-button' + (currentCourse === sheetName ? ' active' : '');
                     button.innerHTML = `<i class="fas fa-th-list"></i>&nbsp; ${formatCourseCode(sheetName)}`;
                     button.dataset.sheet = sheetName;
