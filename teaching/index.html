@@ -2517,13 +2517,14 @@
         }
 
         #spinner-image {
-            width: 250px;
+            width: 200px;
             height: 2%;
             opacity: 0;
             transition: opacity 0.3s ease-in;
             filter:
-                /* The Black Stroke (created by 4 non-blurred shadows) */
-                drop-shadow(3px 3px 0 var(--dark-color)) drop-shadow(-3px -3px 0 var(--dark-color)) drop-shadow(3px -3px 0 var(--dark-color)) drop-shadow(-3px 3px 0 var(--dark-color))
+                /* The Black Stroke (created by 4 non-blurred shadows) 
+                drop-shadow(3px 3px 0 var(--dark-color)) drop-shadow(-3px -3px 0 var(--dark-color)) drop-shadow(3px -3px 0 var(--dark-color)) drop-shadow(-3px 3px 0 var(--dark-color)) */
+
                 /* The Original Accent Shadow (offset further to be visible) */
                 drop-shadow(8px 8px 0 var(--accent-color));
         }
@@ -3160,7 +3161,7 @@
 
         // API client configuration
         const DISCOVERY_DOCS = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
-        const SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
+        const SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
         // Global variables
         let tokenClient = null;
@@ -3310,7 +3311,7 @@
                     console.log("User is not admin:", data.email);
                     isAdmin = false;
                     document.body.classList.remove('is-admin');
-                    showImprovedNotification('warning', 'Access Denied', `User ${data.email || 'Unknown'} is not in the Admins list.`);
+                    showImprovedNotification('warning', 'Access Denied', `User ${data.email || data.debugError || 'Unknown'} is not in the Admins list.`);
                 }
             } catch (e) {
                 console.error("Admin check failed", e);
@@ -3985,14 +3986,12 @@
         async function tryPublicAccess() {
             try {
                 // Use the GAS Web App proxy for listing sheets (action=getSheets)
-                // Note: user must have updated GAS script to support this action
                 const url = `${BRAIN_URL}?action=getSheets`;
 
                 const response = await fetch(url);
                 if (response.ok) {
                     const data = await response.json();
 
-                    // The new GAS script structure returns { sheets: [ { properties: { title: "Name" } } ] }
                     if (data.sheets && data.sheets.length > 0) {
                         availableCourses = data.sheets
                             .map(s => s.properties.title)
@@ -4005,12 +4004,13 @@
                                 (lastCourse && availableCourses.includes(lastCourse) ? lastCourse : availableCourses[0]));
                             localStorage.removeItem('urlSelectedCourse');
                         }
+                        updateAuthButtonDisplay(false); // Ensure button is visible for optional admin login
                         return true;
                     }
                 }
                 return false;
             } catch (error) {
-                console.error('Error during public access attempt:', error);
+                console.error("Public access check failed:", error);
                 return false;
             }
         }
@@ -4096,7 +4096,7 @@
             if (result) selectCourse(currentCourse);
         }
 
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwzPApFf6VMrMMFArXu6qgnMEtD4GWvyu_BvtP8PjZSIEo3wdn1_vChW2OtcBDyTVRxTQ/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxdoJHE85Mjppg9TCjld8MlPPCNBE9hCamPUHgTohwghK3CIoHvvVw27P9HU5BWlYkoAg/exec';
 
         async function fetchPublicSheetData(sheetName, range) {
             try {
@@ -4154,8 +4154,11 @@
 
         async function fetchAvailableCourses() {
             try {
-                let response = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID });
-                const sheets = response.result.sheets || [];
+                // Use Proxy for this too
+                const url = `${BRAIN_URL}?action=getSheets`;
+                const response = await fetch(url);
+                const data = await response.json();
+                const sheets = data.sheets || [];
                 availableCourses = sheets.map(sheet => sheet.properties.title);
                 populateCourseButtons();
                 return availableCourses;
@@ -4226,7 +4229,7 @@
             try {
                 const promises = availableCourses.map(async (sheetName) => {
                     try {
-                        let rows = isSignedIn ? (await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID, range: `${sheetName}!A2:C10` })).result.values || [] : await fetchPublicSheetData(sheetName, 'A2:C10');
+                        let rows = await fetchPublicSheetData(sheetName, 'A2:C10');
                         for (const row of rows) {
                             if (row[0]?.toLowerCase() === 'metadata' && row[1]?.toLowerCase() === 'code') {
                                 courseMap[sheetName] = row[2] || sheetName;
@@ -4417,7 +4420,8 @@
 
         async function fetchCourseData(sheetName) {
             try {
-                let rows = isSignedIn ? (await gapi.client.sheets.spreadsheets.values.get({ spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID, range: `${sheetName}!A2:J` })).result.values || [] : await fetchPublicSheetData(sheetName, 'A2:J');
+                // ALWAYS use the public proxy method. This avoids needing 'spreadsheets' scope in the client.
+                let rows = await fetchPublicSheetData(sheetName, 'A2:J');
                 return rows.length === 0 ? null : processCourseData(rows);
             } catch (error) {
                 showImprovedNotification('error', 'Data Error', 'Failed to fetch course data');
