@@ -3079,6 +3079,7 @@
         let isInitializing = true;
         let criticalErrorsOnly = true;
         const courseData = { metadata: {}, modules: [] };
+        const courseDataCache = {}; // Cache for fetched course data
         let isProgrammaticScroll = false;
         const swipeArea = document.body;
         let touchstartX = 0, touchendX = 0, touchstartY = 0, touchendY = 0;
@@ -3780,7 +3781,7 @@
             }
         }
 
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbw53e9ExvdRJKWIZB_naba4VmfR3pTvT0cB784ZH1S-LhL9MMwihy2lJcRGWXANKYWcbw/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwtBWoDdz3hwlnwlaM1LKaQMDnX8Swx5RFhixkOo624EVV2ILFNxk_htWr-nDp1Svoh/exec';
 
         async function fetchPublicSheetData(sheetName, range) {
             try {
@@ -3886,25 +3887,54 @@
         }
 
         async function fetchCourseCodes() {
+            const CACHE_KEY = 'courseCodesCache';
+            const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
+
+            // Check localStorage cache first
             try {
-                const promises = availableCourses.map(async (sheetName) => {
-                    try {
-                        let rows = await fetchPublicSheetData(sheetName, 'A2:C10');
-                        for (const row of rows) {
-                            if (row[0]?.toLowerCase() === 'metadata' && row[1]?.toLowerCase() === 'code') {
-                                courseMap[sheetName] = row[2] || sheetName;
-                                break;
-                            }
-                        }
-                    } catch (error) {
-                        courseMap[sheetName] = sheetName;
+                const cached = localStorage.getItem(CACHE_KEY);
+                if (cached) {
+                    const { data, timestamp } = JSON.parse(cached);
+                    if (Date.now() - timestamp < CACHE_EXPIRY) {
+                        Object.assign(courseMap, data);
+                        return courseMap;
                     }
-                });
-                await Promise.all(promises);
-                return courseMap;
-            } catch (error) {
-                throw error;
+                }
+            } catch (e) {
+                // Cache read failed, proceed with fetch
             }
+
+            // Fetch all course codes in one request
+            try {
+                const url = `${BRAIN_URL}?action=getAllCourseCodes`;
+                const response = await fetch(url);
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.courseCodes) {
+                        Object.assign(courseMap, result.courseCodes);
+                        // Cache the result
+                        try {
+                            localStorage.setItem(CACHE_KEY, JSON.stringify({
+                                data: result.courseCodes,
+                                timestamp: Date.now()
+                            }));
+                        } catch (e) {
+                            // Cache write failed, continue anyway
+                        }
+                        return courseMap;
+                    }
+                }
+            } catch (error) {
+                console.error('Bulk fetch failed, falling back:', error);
+            }
+
+            // Fallback: use sheet names as codes
+            availableCourses.forEach(sheetName => {
+                if (!courseMap[sheetName]) {
+                    courseMap[sheetName] = sheetName;
+                }
+            });
+            return courseMap;
         }
 
         function setupSearchFilter() {
@@ -4078,10 +4108,19 @@
             };
         }
 
-        async function fetchCourseData(sheetName) {
+        async function fetchCourseData(sheetName, forceRefresh = false) {
+            // Return cached data if available and not forcing refresh
+            if (!forceRefresh && courseDataCache[sheetName]) {
+                return courseDataCache[sheetName];
+            }
             try {
                 let rows = await fetchPublicSheetData(sheetName, 'A2:J');
-                return rows.length === 0 ? null : processCourseData(rows);
+                const data = rows.length === 0 ? null : processCourseData(rows);
+                // Cache the fetched data
+                if (data) {
+                    courseDataCache[sheetName] = data;
+                }
+                return data;
             } catch (error) {
                 showImprovedNotification('error', 'Data Error', 'Failed to fetch course data');
                 throw error;
