@@ -1021,7 +1021,8 @@
         }
 
         .iframe-container.visible {
-            height: 500px;
+            height: 800px;
+            /*height: 500px;*/
             opacity: 1;
             visibility: visible;
             /* ADDED transition property to override the delay when showing */
@@ -1759,7 +1760,8 @@
         /* Responsive: 1000 ↓ */
         @media (max-width: 1000px) {
             .iframe-container.visible {
-                height: 310px;
+                /*height: 310px;*/
+                height: 650px;
             }
 
             iframe {
@@ -3517,13 +3519,44 @@
         }
 
         // Save and load module states
+        // Structure: { moduleId: { userInteracted: boolean, state: boolean, sheetDefault: string } }
+        function saveModuleState(moduleId, isExpanded, wasUserInteraction = false) {
+            const cacheKey = `moduleStates_${currentCourse}`;
+            let states = {};
+            try {
+                const saved = localStorage.getItem(cacheKey);
+                if (saved) states = JSON.parse(saved);
+            } catch (e) { /* ignore parse errors */ }
+
+            const module = document.getElementById(moduleId);
+            const sheetDefault = module ? module.dataset.initiallyCollapsed : 'false';
+
+            states[moduleId] = {
+                state: isExpanded,
+                userInteracted: wasUserInteraction || (states[moduleId]?.userInteracted || false),
+                sheetDefault: sheetDefault
+            };
+
+            localStorage.setItem(cacheKey, JSON.stringify(states));
+        }
+
         function saveModuleStates() {
-            const modules = document.querySelectorAll('.module');
-            const states = {};
-            modules.forEach(module => {
-                states[module.id] = module.classList.contains('active');
+            // Called on course switch - save current visual state of all modules
+            document.querySelectorAll('.module').forEach(module => {
+                const moduleId = module.id;
+                const isExpanded = module.classList.contains('active');
+                // Only save if user has previously interacted with this module
+                const cacheKey = `moduleStates_${currentCourse}`;
+                let states = {};
+                try {
+                    const saved = localStorage.getItem(cacheKey);
+                    if (saved) states = JSON.parse(saved);
+                } catch (e) { /* ignore parse errors */ }
+
+                if (states[moduleId]?.userInteracted) {
+                    saveModuleState(moduleId, isExpanded, true);
+                }
             });
-            localStorage.setItem(`moduleStates_${currentCourse}`, JSON.stringify(states));
         }
 
         function loadModuleStates() {
@@ -3531,22 +3564,45 @@
         }
 
         function applyModuleStates() {
-            const savedStatesJSON = localStorage.getItem(`moduleStates_${currentCourse}`);
-            const savedStates = savedStatesJSON ? JSON.parse(savedStatesJSON) : null;
+            const cacheKey = `moduleStates_${currentCourse}`;
+            let savedStates = null;
+            try {
+                const saved = localStorage.getItem(cacheKey);
+                if (saved) savedStates = JSON.parse(saved);
+            } catch (e) { /* ignore parse errors */ }
 
             document.querySelectorAll('.module').forEach(module => {
                 const moduleId = module.id;
+                const currentSheetDefault = module.dataset.initiallyCollapsed || 'false';
 
-                // 1. Check for a user's saved state in the cache first
-                if (savedStates && savedStates[moduleId] !== undefined) {
-                    if (savedStates[moduleId]) {
-                        module.classList.add('active');
-                    } else {
-                        module.classList.remove('active');
+                // Check if we have cached state for this module
+                const cached = savedStates ? savedStates[moduleId] : null;
+
+                // Smart logic:
+                // 1. If no cached state, use sheet default
+                // 2. If cached state exists but user never interacted, use sheet default
+                // 3. If user interacted AND sheet default hasn't changed, use cached state
+                // 4. If user interacted BUT sheet default changed, reset to new sheet default
+
+                let useSheetDefault = true;
+
+                if (cached && cached.userInteracted) {
+                    // User explicitly interacted with this module before
+                    if (cached.sheetDefault === currentSheetDefault) {
+                        // Sheet default hasn't changed - respect user's preference
+                        useSheetDefault = false;
+                        if (cached.state) {
+                            module.classList.add('active');
+                        } else {
+                            module.classList.remove('active');
+                        }
                     }
-                } else {
-                    // 2. If no saved state, use the default from the Google Sheet
-                    const isInitiallyCollapsed = module.dataset.initiallyCollapsed === 'true';
+                    // If sheet default changed, we fall through to use sheet default
+                }
+
+                if (useSheetDefault) {
+                    // Use the default from the Google Sheet
+                    const isInitiallyCollapsed = currentSheetDefault === 'true';
                     if (isInitiallyCollapsed) {
                         module.classList.remove('active');
                     } else {
@@ -3596,6 +3652,8 @@
                     content.style.maxHeight = '0px';
                     moduleEl.classList.remove('active');
                 });
+                // Save user's explicit preference (collapsing = not expanded)
+                saveModuleState(moduleEl.id, false, true);
             } else {
                 // --- Start Opening ---
                 moduleEl.classList.add('active');
@@ -3611,6 +3669,8 @@
                     content.removeEventListener('transitionend', handleTransitionEnd);
                 };
                 content.addEventListener('transitionend', handleTransitionEnd);
+                // Save user's explicit preference (expanding = expanded)
+                saveModuleState(moduleEl.id, true, true);
             }
         }
 
@@ -4152,19 +4212,38 @@
                         colorClass: row[4] || 'btn-primary'
                     });
                 } else if (type === 'module') {
+                    // Column F: SHOW = expanded, HIDE = collapsed, empty = skip module entirely
+                    const colFValue = String(row[5] || '').toLowerCase().trim();
+
+                    // Skip module entirely if column F is empty
+                    if (!colFValue) {
+                        currentModule = null; // Reset so materials don't attach to previous module
+                        return; // Skip this row
+                    }
+
                     currentModule = {
                         type: 'standard', id: row[1] || Date.now().toString(), title: row[2] || 'Untitled Module',
                         icon: row[3] || 'fas fa-folder', moduleNumber: row[4] || '',
-                        // Check column F (index 5) for the default collapsed state
-                        isInitiallyCollapsed: String(row[5] || '').toLowerCase() === 'false',
+                        // isInitiallyCollapsed = true means module starts collapsed
+                        // SHOW = expanded (not collapsed), HIDE = collapsed
+                        isInitiallyCollapsed: colFValue === 'hide',
                         materials: [], funFacts: []
                     };
                     data.modules.push(currentModule);
                 } else if (type === 'project') {
+                    // Column F: SHOW = expanded, HIDE = collapsed, empty = skip module entirely
+                    const colFValueProject = String(row[5] || '').toLowerCase().trim();
+
+                    // Skip project module entirely if column F is empty
+                    if (!colFValueProject) {
+                        currentModule = null; // Reset so materials don't attach to previous module
+                        return; // Skip this row
+                    }
+
                     currentModule = {
                         type: 'project', id: row[1] || Date.now().toString(), title: row[2] || 'Untitled Project',
                         icon: row[3] || 'fas fa-flask', moduleNumber: row[4] || '',
-                        isInitiallyCollapsed: String(row[5] || '').toLowerCase() === 'false',
+                        isInitiallyCollapsed: colFValueProject === 'hide',
                         materials: [], groups: [], funFacts: []
                     };
                     data.modules.push(currentModule);
@@ -4291,7 +4370,7 @@
             });
 
             return `
-    <div class="module module-project" id="${moduleId}" data-initially-collapsed="${module.isInitiallyCollapsed || 'false'}">
+    <div class="module module-project" id="${moduleId}" data-initially-collapsed="${module.isInitiallyCollapsed === true}">
         <div class="module-header">
             ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
             <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
@@ -4522,7 +4601,7 @@
                     else if (materialCount === 2) gridClass += ' materials-2';
 
                     html += `
-            <div class="module" id="module-${module.id}" data-initially-collapsed="${module.isInitiallyCollapsed || 'false'}">
+            <div class="module" id="module-${module.id}" data-initially-collapsed="${module.isInitiallyCollapsed === true}">
                 <div class="module-header">
                     ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
                     <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
