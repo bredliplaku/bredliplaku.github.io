@@ -34,7 +34,7 @@
         var $btnGroup = $('<div style="display:inline-block; margin-right: 5px;"></div>');
 
         // Create Buttons
-        var $pasteBtn = $('<button type="button" class="btn btn-info" style="margin-right: 5px;" title="Try to paste from clipboard automatically"><i class="fa fa-clipboard"></i> Paste Grades</button>');
+        var $pasteBtn = $('<button type="button" class="btn btn-info" title="Try to paste from clipboard automatically"><i class="fa fa-clipboard"></i> Paste Grades</button>');
         var $importBtn = $('<button type="button" class="btn btn-success"><i class="fa fa-file-excel-o"></i> Import from Excel</button>');
         var $fileInput = $('<input type="file" accept=".xlsx, .xls" style="display:none;" />');
 
