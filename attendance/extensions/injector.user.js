@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         EIS Attendance Auto-Import
-// @namespace    https://bredliplaku.com/
-// @version      1.9
+// @namespace    https://swimmingbrain.dev/
+// @version      2.0
 // @description  Automatically import attendance data from clipboard on EIS page load.
-// @author       Bredli Plaku
+// @author       swimmingbrain
 // @match        https://eis.epoka.edu.al/courseattendance/*/newcl
-// @updateURL    https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js
-// @downloadURL  https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/injector.user.js
+// @updateURL    https://github.com/bredliplaku/STANDO/raw/refs/heads/main/extensions/injector.user.js
+// @downloadURL  https://github.com/bredliplaku/STANDO/raw/refs/heads/main/extensions/injector.user.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -33,8 +33,8 @@
     // --- UPDATED MAPPINGS BASED ON YOUR HTML ---
     const CATEGORY_MAP = {
         "theory": "Theory",
-        "lab": "Lab",          // Fixed: HTML says "Lab", not "Laboratory"
-        "practice": "Practice" // Fixed: HTML says "Practice", not "Problem Session"
+        "lab": "Lab",          // HTML says "Lab", not "Laboratory"
+        "practice": "Practice" // HTML says "Practice", not "Problem Session"
     };
 
     console.log("EIS Script: Initializing...");
@@ -291,7 +291,6 @@
         const importButton = document.createElement('button');
         importButton.id = 'eis-import-btn';
         importButton.className = 'btn btn-info';
-        importButton.style.marginRight = '10px';
         importButton.innerHTML = '<i class="fas fa-file-import"></i> Import';
         importButton.onclick = importAttendance;
 
@@ -333,7 +332,6 @@
     function applyGlobalStyles() {
         const style = document.createElement('style');
         style.textContent = `
-            .eis-paste-btn, #eis-import-btn { border-radius: 20px !important; }
             .eis-highlighted-row { animation: highlight-flash 1.5s ease-in-out; }
             @keyframes highlight-flash { 0% { background-color: transparent; } 50% { background-color: rgba(57, 73, 171, 0.2); } 100% { background-color: transparent; } }
             .eis-no-uid-row { background-color: #ffebee !important; }

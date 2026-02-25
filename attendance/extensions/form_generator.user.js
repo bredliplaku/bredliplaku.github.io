@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         EIS Attendance Sheet Generator
-// @namespace    https://bredliplaku.com/
-// @version      1.3
+// @namespace    https://swimmingbrain.dev/
+// @version      1.5
 // @description  Generates attendance sheet that perfectly matches the original template with customizable fields
-// @author       Bredli Plaku
+// @author       swimmingbrain
 // @match        https://eis.epoka.edu.al/courseattendance/*/editcl
 // @match        https://eis.epoka.edu.al/courseattendance/*/newcl
-// @updateURL    https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/form_generator.user.js
-// @downloadURL  https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/attendance/form_generator.user.js
+// @updateURL    https://github.com/bredliplaku/STANDO/raw/refs/heads/main/extensions/form_generator.user.js
+// @downloadURL  https://github.com/bredliplaku/STANDO/raw/refs/heads/main/extensions/form_generator.user.js
 // @grant        GM_addStyle
 // ==/UserScript==
 
@@ -28,12 +28,7 @@
         #attendance-btn {
             background-color: #3949ab;
             color: white;
-            padding: 6px 12px;
-            border-radius: 4px;
-            border: none;
-            margin-right: 10px;
             cursor: pointer;
-            font-weight: bold;
         }
 
         #attendance-btn:hover {
@@ -133,21 +128,6 @@
             padding: 5px 10px;
             cursor: pointer;
             margin-top: 5px;
-        }
-
-        .attendance-btn {
-            background-color: #3949ab;
-            color: white;
-            padding: 8px 15px;
-            border-radius: 4px;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-            margin-right: 10px;
-        }
-
-        .attendance-btn:hover {
-            background-color: #1a237e;
         }
 
         #close-sheet-btn {
@@ -527,6 +507,7 @@
 
         const button = document.createElement('button');
         button.id = 'attendance-btn';
+        button.className = 'btn btn-info';
         button.innerHTML = '<i class="fa fa-table"></i> Generate Attendance Sheet';
         button.onclick = generateAttendanceSheet;
 

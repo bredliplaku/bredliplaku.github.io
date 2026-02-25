@@ -3,54 +3,436 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redirecting...</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Smart Attendance</title>
+    <link rel="icon" href="../favicon.png">
+    <meta name="theme-color" content="#f4f4f4" />
+    <!-- Preconnect to external domains for faster loading -->
+    <link rel="dns-prefetch" href="https://apis.google.com">
+    <link rel="dns-prefetch" href="https://accounts.google.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <!-- External Resources -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,slnt,wdth,wght,GRAD,ROND@6..144,-10..0,25..151,1..1000,0..100,0..100&display=swap"
+        rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Code:ital,wght@0,300..800;1,300..800&display=swap"
+        rel="stylesheet">
+    <!-- Load XLSX library with defer since it's not needed immediately -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+    <!-- Google API client library -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link rel="stylesheet" href="css/styles.css">
 
-    <!-- Meta Refresh Fallback -->
-    <meta http-equiv="refresh" content="0; url=https://attendance.bredliplaku.com">
-
-    <style>
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            background-color: #f3f4f6;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin: 0;
-            color: #374151;
-        }
-
-        .container {
-            text-align: center;
-            background: white;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-
-        a {
-            color: #2563eb;
-            text-decoration: none;
-        }
-
-        a:hover {
-            text-decoration: underline;
-        }
-    </style>
 </head>
 
 <body>
-    <div class="container">
-        <p>Redirecting you to attendance...</p>
-        <p><small>If you are not redirected automatically, <a href="https://attendance.bredliplaku.com">click
-                    here</a>.</small></p>
+    <div id="app-loading" class="skeleton-loader-overlay">
+        <div class="skeleton-loader-container">
+            <div class="skeleton-header">
+                <div class="skeleton-line title"></div>
+                <div class="skeleton-line subtitle"></div>
+                <div class="skeleton-info-bar">
+                    <div class="skeleton-info-item"></div>
+                    <div class="skeleton-info-item"></div>
+                    <div class="skeleton-info-item"></div>
+                </div>
+            </div>
+            <div class="skeleton-courses">
+                <div class="skeleton-course-btn"></div>
+                <div class="skeleton-course-btn"></div>
+                <div class="skeleton-course-btn"></div>
+                <div class="skeleton-course-btn"></div>
+            </div>
+            <div class="skeleton-module">
+                <div class="skeleton-module-header"></div>
+                <div class="skeleton-module-content">
+                    <div class="skeleton-line"></div>
+                    <div class="skeleton-line"></div>
+                    <div class="skeleton-line"></div>
+                    <div class="skeleton-line"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="container content-hidden" id="main-container">
+        <!-- Audio elements for scan sounds -->
+        <audio id="success-sound" preload="auto">
+            <source src="../miscellaneous/payment_success.mp3" type="audio/mpeg">
+        </audio>
+        <audio id="error-sound" preload="auto">
+            <source src="../miscellaneous/payment_failure.mp3" type="audio/mpeg">
+        </audio>
+
+        <div class="sync-auth-container">
+            <div class="sync-container">
+                <button id="sync-btn" class="btn-blue btn-icon admin-only" style="display: none;">
+                    <i class="fa-solid fa-rotate"></i>
+                </button>
+                <div id="sync-status" class="sync-status offline" aria-live="polite">
+                    <i class="fa-solid fa-circle"></i> <span id="sync-text">Offline</span>
+                </div>
+            </div>
+            <div class="auth-container">
+                <div id="login-container">
+                    <button id="login-btn" class="btn-blue">
+                        <i class="fa-brands fa-google"></i> Sign in
+                    </button>
+                </div>
+                <div id="user-container" style="display: none">
+                    <div class="user-info">
+                        <button id="request-permission-btn" class="btn-sm btn-orange" title="Request for Permission"
+                            style="display: none;">
+                            <i class="fa-solid fa-hand-point-up"></i>
+                            <span class="btn-text"> Request for Permission</span>
+                        </button>
+                        <button id="register-uid-btn" class="btn-sm" title="Register your Student ID Card">
+                            <i class="fa-solid fa-address-card"></i>
+                            <span class="btn-text"> Register Student ID</span>
+                        </button>
+                        <img id="user-avatar" class="user-avatar" src="" alt="User Avatar">
+                        <span id="user-name"></span>
+                        <button id="logout-btn" class="btn-red btn-icon" title="Sign Out">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="app-header">
+            <h1>Smart Attendance</h1>
+            <h2>Track your attendance in real time.</h2>
+            <div class="app-info">
+                <span class="info-item"><i class="fa-solid fa-rotate"></i> <span id="total-scans">0</span> scans
+                </span>
+                <span class="info-item"><i class="fa-solid fa-folder-tree"></i> <span id="database-status">Not
+                        loaded</span></span>
+                <span class="info-item"><i class="fa-solid fa-clock"></i> Last scan: <span
+                        id="last-scan">Never</span></span>
+            </div>
+            <div class="tabs" style="display: none;">
+                <div class="tab active" data-tab="scanner-tab">
+                    <i class="fa-solid fa-list-check"></i>&nbsp; Courses
+                </div>
+                <div class="tab" data-tab="database-tab">
+                    <i class="fa-solid fa-list-ol"></i>&nbsp; Student List
+                </div>
+            </div>
+        </div>
+
+        <div id="admin-dashboard-bar" class="admin-action-bar admin-only" style="display:none;">
+            <div class="action-chip loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Checking requests...</div>
+        </div>
+
+        <div id="admin-views-container" class="admin-only">
+
+            <div id="pending-absences-view" class="collapsible-module">
+                <div class="module-content">
+                    <div
+                        style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:2px solid #f0f0f0; padding-bottom:8px;">
+                        <div style="font-weight:700; color:var(--warning-color);"><i
+                                class="fa-solid fa-hand-point-up"></i> Absences</div>
+                        <button id="absence-history-btn" class="btn-sm btn-blue" title="View All History">
+                            <i class="fa-solid fa-clock-rotate-left"></i> History
+                        </button>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="database-table">
+                            <thead>
+                                <tr>
+                                    <th>Student</th>
+                                    <th>Course</th>
+                                    <th>Date</th>
+                                    <th>Hours</th>
+                                    <th>Reason</th>
+                                    <th class="actions-header">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="absences-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="pending-registrations-view" class="collapsible-module">
+                <div class="module-content">
+                    <div
+                        style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:2px solid #f0f0f0; padding-bottom:8px;">
+                        <div style="font-weight:700; color:var(--warning-color);"><i
+                                class="fa-solid fa-address-card"></i>
+                            New Registrations</div>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="database-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th class="uid-column">UID</th>
+                                    <th>Email</th>
+                                    <th>Timestamp</th>
+                                    <th>Sent By</th>
+                                    <th class="actions-header">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="registrations-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div id="course-buttons-container" class="course-buttons-container"></div>
+
+        <div id="session-controls" style="display: none; flex-direction: column; gap: 8px; margin-bottom: 20px;">
+            <div id="session-category-group" class="course-buttons-container"
+                style="margin-bottom:0; justify-content:center;"></div>
+            <div id="session-group-container" class="course-buttons-container"
+                style="margin-bottom:0; justify-content:center;"></div>
+        </div>
+
+        <div class="scan-buttons">
+            <button id="scan-button" class="big-scan-button scan-button">
+                <i class="fa-solid fa-wifi"></i><b>&nbsp;&nbsp; START SCANNING</b>
+            </button>
+        </div>
+
+        <!-- Scanner & History Tab -->
+        <div id="scanner-tab" class="tab-content active">
+            <div class="module" id="scan-history-module">
+                <div class="module-header">
+                    <span class="module-title"><i class="fa-solid fa-clock-rotate-left"></i> Scan History</span>
+
+                    <div class="module-header-actions">
+                        <button id="scanner-refresh-btn" class="btn-icon refresh-btn" title="Refresh Logs">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="module-content">
+                    <div class="filter-container">
+                        <input type="text" id="filter-input" class="filter-input" placeholder="Search...">
+                        <select id="sort-select" class="sort-dropdown">
+                            <option value="date-desc"> Date (Newest)</option>
+                            <option value="date-asc"> Date (Oldest)</option>
+                            <option value="name-asc"> Name (A-Z)</option>
+                            <option value="name-desc"> Name (Z-A)</option>
+                            <option value="uid-asc"> UID (A-Z)</option>
+                            <option value="uid-desc"> UID (Z-A)</option>
+                        </select>
+                    </div>
+
+                    <div class="logs-header">
+                        <div class="logs-count" aria-live="polite"><span id="filtered-count">0</span> logs found
+                        </div>
+                        <div class="logs-actions">
+                            <button onclick="toggleBulkMode()" class="btn-icon admin-only" style="display: none;"
+                                title="Select Multiple"><i class="fa-solid fa-list-check"></i></button>
+                            <button id="import-btn" class="btn-blue btn-icon admin-only" style="display: none;"
+                                title="Import Logs"><i class="fa-solid fa-file-import"></i></button>
+                            <button id="export-btn" class="btn-blue btn-icon admin-only" style="display: none;" disabled
+                                title="Export Logs"><i class="fa-solid fa-file-export"></i></button>
+                            <button id="add-log-btn" class="btn-green btn-icon admin-only" style="display: none;"
+                                title="Add Log"><i class="fa-solid fa-plus"></i></button>
+                            <button id="clear-btn" class="btn-red btn-icon admin-only" style="display: none;" disabled
+                                title="Clear Logs"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Hidden file inputs -->
+                    <input type="file" id="import-input" accept="application/json" style="display: none;">
+                    <input type="file" id="excel-input" accept=".xlsx,.xls" style="display: none;">
+
+                    <!-- Table container for horizontal scrolling -->
+                    <div class="table-container">
+                        <table class="logs-table">
+                            <thead>
+                                <tr>
+                                    <th class="sortable name-column" data-sort="name">
+                                        <i class="fa-solid fa-user"></i> Name <i class="sort-icon fa-solid fa-sort"></i>
+                                    </th>
+                                    <th class="sortable uid-column admin-only" data-sort="uid">
+                                        <i class="fa-solid fa-id-card"></i> UID <i
+                                            class="sort-icon fa-solid fa-sort"></i>
+                                    </th>
+                                    <th class="sortable date-column" data-sort="date">
+                                        <i class="fa-regular fa-calendar-days"></i> Date <i
+                                            class="sort-icon fa-solid fa-sort-down"></i>
+                                    </th>
+                                    <th>
+                                        <i class="fa-regular fa-clock"></i> Time
+                                    </th>
+                                    <th class="admin-only actions-header">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-tbody">
+                                <!-- Log entries will go here -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination Controls for Logs -->
+                    <div id="logs-pagination" class="pagination-controls" style="display: none;">
+                        <button id="logs-prev-page" class="btn-icon pagination-btn" title="Previous Page">
+                            <i class="fa-solid fa-chevron-left"></i>
+                        </button>
+                        <div id="logs-page-numbers" class="page-numbers"></div>
+                        <button id="logs-next-page" class="btn-icon pagination-btn" title="Next Page">
+                            <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+
+                    <div id="empty-logs" class="empty-logs">
+                        <i class="fa-solid fa-ghost" style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                        <p style="font-size: 1.1em; margin-bottom: 5px;">No attendance records found.</p>
+                        <p style="font-size: 0.9em; color: #999;">Start scanning or select a different course to see
+                            the
+                            history.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Database Tab -->
+        <div id="database-tab" class="tab-content">
+
+            <div class="module" style="margin-top:20px">
+                <div class="module-header">
+                    <span class="module-title"><i class="fa-solid fa-list-ol"></i> UID Database</span>
+                    <div class="module-header-actions">
+                        <button id="database-refresh-btn" class="btn-icon refresh-btn" title="Refresh Database">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="module-content">
+                    <div class="filter-container">
+                        <input type="text" id="db-filter-input" class="filter-input" placeholder="Search...">
+                        <select id="db-sort-select" class="sort-dropdown">
+                            <option value="name-asc"> Name (A-Z)</option>
+                            <option value="name-desc"> Name (Z-A)</option>
+                            <option value="uid-asc"> UID (A-Z)</option>
+                            <option value="uid-desc"> UID (Z-A)</option>
+                            <option value="email-asc"> Email (A-Z)</option>
+                            <option value="email-desc"> Email (Z-A)</option>
+                        </select>
+                    </div>
+
+                    <div class="database-controls">
+                        <div class="entry-count"><span id="db-entry-count">0</span> registered students</div>
+                        <div class="database-actions">
+                            <button id="import-excel-btn" class="btn-blue btn-icon admin-only" style="display: none;"
+                                title="Import from Excel"><i class="fa-solid fa-file-import"></i></button>
+                            <button id="export-excel-btn" class="btn-blue btn-icon admin-only" style="display: none;"
+                                title="Export to Excel"><i class="fa-solid fa-file-export"></i></button>
+                            <button id="add-entry-btn" class="btn-green btn-icon admin-only" style="display: none;"
+                                title="Add Entry"><i class="fa-solid fa-plus"></i></button>
+                            <button id="clear-db-btn" class="btn-red btn-icon admin-only" style="display: none;"
+                                title="Clear Database"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="database-table">
+                            <thead>
+                                <tr>
+                                    <th class="sortable" data-sort="name">
+                                        <i class="fa-solid fa-user"></i> Name <i
+                                            class="sort-icon fa-solid fa-sort-up"></i>
+                                    </th>
+                                    <th class="sortable uid-column" data-sort="uid">
+                                        <i class="fa-solid fa-id-card"></i> UID <i
+                                            class="sort-icon fa-solid fa-sort"></i>
+                                    </th>
+                                    <th class="sortable email-column" data-sort="email">
+                                        <i class="fa-solid fa-envelope"></i> Email <i
+                                            class="sort-icon fa-solid fa-sort"></i>
+                                    </th>
+                                    <th class="admin-only actions-header" style="display: none;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="database-tbody">
+                            </tbody>
+                        </table>
+                        <div id="empty-database" class="empty-logs" style="display: none;">
+                            <i class="fa-solid fa-database"
+                                style="font-size: 3em; color: #ccc; margin-bottom: 10px;"></i>
+                            <p style="font-size: 1.1em; margin-bottom: 5px;">The database is empty.</p>
+                            <p style="font-size: 0.9em; color: #999;">Import an Excel file or add a new entry to get
+                                started.</p>
+                        </div>
+                    </div>
+
+                    <!-- Pagination Controls for Database -->
+                    <div id="db-pagination" class="pagination-controls" style="display: none;">
+                        <button id="db-prev-page" class="btn-icon pagination-btn" title="Previous Page">
+                            <i class="fa-solid fa-chevron-left"></i>
+                        </button>
+                        <div id="db-page-numbers" class="page-numbers"></div>
+                        <button id="db-next-page" class="btn-icon pagination-btn" title="Next Page">
+                            <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <footer class="footer">
+            <img src="../miscellaneous/logo.png" alt="Logo" class="floating-logo" loading="lazy"
+                style="width: 50px; margin-top: 0; margin-bottom: 20px; display: block; margin-left: auto; margin-right: auto;">
+
+            <div class="social-links">
+                <a href="https://bredliplaku.com/" target="_blank" rel="noopener noreferrer"><i
+                        class="fa-solid fa-house-chimney-user"></i></a>
+                <a href="mailto:bplaku@epoka.edu.al" target="_blank" rel="noopener noreferrer"><i
+                        class="fa-solid fa-envelope"></i></a>
+                <button id="theme-toggle-btn" class="theme-toggle" title="Toggle Theme"><i
+                        class="fa-solid fa-circle-half-stroke"></i></button>
+            </div>
+            <p style="font-size:0.7em"><i class="fa-regular fa-copyright"></i> 2023-<span id="currentYear"></span>
+                Bredli Plaku. All Rights Reserved.</p>
+        </footer>
     </div>
 
-    <script>
-        // Immediate redirect using JavaScript
-        window.location.replace("https://attendance.bredliplaku.com");
-    </script>
+    <div id="bulk-actions-bar" class="bulk-actions-bar">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <button onclick="toggleBulkMode()" class="btn-icon" style="background:#f5f5f5; color:#333;"><i
+                    class="fa-solid fa-xmark"></i></button>
+            <span class="bulk-count-badge" id="bulk-count">0</span> selected
+        </div>
+        <div class="bulk-actions-group">
+            <button onclick="performBulkAction('add1h')" class="btn-green btn-icon" title="Add +1 Hour"><i
+                    class="fa-solid fa-plus"></i></button>
+            <button onclick="performBulkAction('sub1h')" class="btn-orange btn-icon" title="Remove -1 Hour"><i
+                    class="fa-solid fa-minus"></i></button>
+            <button onclick="performBulkAction('delete')" class="btn-red btn-icon" title="Delete Selected"><i
+                    class="fa-solid fa-trash"></i></button>
+        </div>
+    </div>
+
+    <!-- Notification area -->
+    <div id="in-page-notification-area" class="in-page-notifications" aria-live="polite"></div>
+
+    <div id="scan-announcement-overlay" style="display: none;" aria-live="assertive" aria-atomic="true">
+        <div class="scan-announcement-content">
+            <div class="scan-announcement-icon"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="scan-announcement-title">Welcome</div>
+            <div id="scan-announcement-name" class="scan-announcement-name"></div>
+            <div class="scan-announcement-subtitle">Attendance Recorded</div>
+        </div>
+    </div>
+
+    <div id="cat-companion" class="cat-companion">
+        <div id="cat-speech-bubble" class="cat-speech-bubble"></div>
+        <img src="https://leunghoicheng.com/assets/hero-section-animation.gif" alt="Cat Companion">
+    </div>
+
+    <script src="js/scripts.js"></script>
+
 </body>
 
 </html>
