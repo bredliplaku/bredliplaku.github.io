@@ -194,20 +194,38 @@
             flex-wrap: wrap;
             margin-top: 16px;
             margin-bottom: 8px;
-            gap: 8px;
+            gap: 2px;
             align-items: center;
         }
 
         .info-item {
             background-color: rgba(255, 255, 255, 0.15);
             padding: 8px 14px;
-            border-radius: 10px;
+            border-radius: 4px;
             font-size: 0.85em;
             align-items: center;
             display: inline-flex;
             color: white;
             min-height: 38px;
             line-height: 1;
+        }
+
+        .info-item.first-in-row {
+            border-top-left-radius: 10px !important;
+            border-bottom-left-radius: 10px !important;
+        }
+
+        .info-item.last-in-row {
+            border-top-right-radius: 10px !important;
+            border-bottom-right-radius: 10px !important;
+        }
+
+        .info-item.only-in-row {
+            border-radius: 10px !important;
+        }
+
+        .info-item.middle-in-row {
+            border-radius: 10px !important;
         }
 
         .info-item i {
@@ -238,6 +256,7 @@
             display: contents;
             align-items: center;
             cursor: default;
+            transition: all 0.2s ease-in-out;
         }
 
         .professor-link:hover {
@@ -1949,7 +1968,6 @@
                 flex-wrap: nowrap !important;
                 overflow-x: auto !important;
                 -webkit-overflow-scrolling: touch;
-                gap: 6px !important;
                 margin: 10px 0 !important;
                 scrollbar-width: none;
                 -ms-overflow-style: none;
@@ -4521,6 +4539,48 @@
             }
         }
 
+        // Dynamically tags info-item chips in .course-info by which visual row they sit on
+        function updateInfoItemRows() {
+            const courseInfoEl = document.getElementById('course-info');
+            if (!courseInfoEl) return;
+
+            // Collect ALL .info-item descendants (professors-container has display:contents
+            // so its children participate in the same flex row as the direct .info-item spans)
+            const items = Array.from(courseInfoEl.querySelectorAll('.info-item'))
+                .filter(el => el.offsetParent !== null); // skip hidden elements
+
+            // Wipe existing row classes
+            items.forEach(el => {
+                el.classList.remove('first-in-row', 'last-in-row', 'only-in-row', 'middle-in-row');
+            });
+
+            if (items.length === 0) return;
+
+            // Group by offsetTop (fuzzy ±5px for subpixel zoom)
+            const rows = {};
+            items.forEach(el => {
+                const top = el.offsetTop;
+                const existingKey = Object.keys(rows).find(k => Math.abs(parseInt(k) - top) < 5);
+                if (existingKey) {
+                    rows[existingKey].push(el);
+                } else {
+                    rows[top] = [el];
+                }
+            });
+
+            const rowArrays = Object.values(rows);
+            rowArrays.sort((a, b) => a[0].offsetTop - b[0].offsetTop);
+
+            rowArrays.forEach((rowItems, index) => {
+                if (rowItems.length === 1) {
+                    rowItems[0].classList.add(index === 0 ? 'only-in-row' : 'middle-in-row');
+                } else {
+                    rowItems[0].classList.add('first-in-row');
+                    rowItems[rowItems.length - 1].classList.add('last-in-row');
+                }
+            });
+        }
+
         // Dynamically tags buttons that fall onto new lines so CSS can round their outer edges
         function updateButtonRows(container) {
             const buttons = Array.from(container.children).filter(b => b.style.display !== 'none');
@@ -5156,6 +5216,17 @@
                 generateGradeDistribution(metadata);
             } else {
                 evaluationDisplay.style.display = 'none';
+            }
+
+            // Update info-item row classes after all items have been populated
+            // Defer slightly so the browser has laid out the row before we measure offsetTop
+            requestAnimationFrame(() => updateInfoItemRows());
+
+            // Reinstall a ResizeObserver on course-info so rows re-compute if the chip set reflows
+            const courseInfoEl = document.getElementById('course-info');
+            if (courseInfoEl && !courseInfoEl._infoRowObserver) {
+                courseInfoEl._infoRowObserver = new ResizeObserver(() => updateInfoItemRows());
+                courseInfoEl._infoRowObserver.observe(courseInfoEl);
             }
         }
 

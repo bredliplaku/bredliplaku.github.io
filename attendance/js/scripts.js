@@ -795,6 +795,12 @@ function renderSessionControls(courseName) {
 
     // Only show main container if at least one row is visible
     controls.style.display = (showCategories || showGroups) ? 'flex' : 'none';
+
+    // Apply row-aware rounding to session button containers
+    requestAnimationFrame(() => {
+        updateButtonRows(catGroup);
+        updateButtonRows(document.getElementById('session-group-container'));
+    });
 }
 
 function selectSessionCategory(category) {
@@ -853,6 +859,9 @@ function renderGroupsForCategory(category) {
     } else {
         grpContainer.style.display = 'flex';
     }
+
+    // Apply row-aware rounding after group buttons are rendered
+    requestAnimationFrame(() => updateButtonRows(grpContainer));
 }
 
 function selectSessionGroup(group) {
@@ -3654,6 +3663,16 @@ function init() {
 
     // Set up event listeners
     setupEventListeners();
+
+    // Apply row-aware rounding to the static info-item chips in .app-info
+    const appInfoEl = document.querySelector('.app-info');
+    if (appInfoEl) {
+        requestAnimationFrame(() => updateButtonRows(appInfoEl));
+        if (!appInfoEl._rowObserver) {
+            appInfoEl._rowObserver = new ResizeObserver(() => updateButtonRows(appInfoEl));
+            appInfoEl._rowObserver.observe(appInfoEl);
+        }
+    }
     setupRefreshButtons();
 
     // Restore and apply the last saved sort UI state
@@ -10768,6 +10787,40 @@ function generatePageNumbers(current, total) {
     return pages;
 }
 
+// Dynamically tags children of a flex container by their visual row so CSS can round outer edges
+function updateButtonRows(container) {
+    if (!container) return;
+    const items = Array.from(container.children).filter(el => el.style.display !== 'none' && el.offsetParent !== null);
+
+    // Wipe existing row classes
+    items.forEach(el => el.classList.remove('first-in-row', 'last-in-row', 'only-in-row', 'middle-in-row'));
+    if (items.length === 0) return;
+
+    // Group by offsetTop (±5px fuzzy for subpixel zoom)
+    const rows = {};
+    items.forEach(el => {
+        const top = el.offsetTop;
+        const existingKey = Object.keys(rows).find(k => Math.abs(parseInt(k) - top) < 5);
+        if (existingKey) {
+            rows[existingKey].push(el);
+        } else {
+            rows[top] = [el];
+        }
+    });
+
+    const rowArrays = Object.values(rows);
+    rowArrays.sort((a, b) => a[0].offsetTop - b[0].offsetTop);
+
+    rowArrays.forEach((rowItems, index) => {
+        if (rowItems.length === 1) {
+            rowItems[0].classList.add(index === 0 ? 'only-in-row' : 'middle-in-row');
+        } else {
+            rowItems[0].classList.add('first-in-row');
+            rowItems[rowItems.length - 1].classList.add('last-in-row');
+        }
+    });
+}
+
 function populateCourseButtons() {
     const courseButtonsContainer = document.getElementById('course-buttons-container');
     if (!courseButtonsContainer) return;
@@ -10805,6 +10858,15 @@ function populateCourseButtons() {
 
     if (!currentCourse && coursesToDisplay.length > 0) {
         selectCourseButton(coursesToDisplay[0]);
+    }
+
+    // Apply row-aware rounding after buttons are in the DOM
+    requestAnimationFrame(() => updateButtonRows(courseButtonsContainer));
+
+    // Attach a ResizeObserver so rows re-compute on resize
+    if (!courseButtonsContainer._rowObserver) {
+        courseButtonsContainer._rowObserver = new ResizeObserver(() => updateButtonRows(courseButtonsContainer));
+        courseButtonsContainer._rowObserver.observe(courseButtonsContainer);
     }
 }
 
