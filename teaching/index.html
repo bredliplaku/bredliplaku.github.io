@@ -996,9 +996,10 @@
             border-color: rgba(0, 0, 0, 0.2);
         }
 
-        #timetable-btn.active {
-            background: var(--accent-color);
+        .timetable-btn.active {
+            background: var(--accent-color) !important;
             transform: scale(0.95);
+            border-color: rgba(0, 0, 0, 0.2) !important;
         }
 
         /* Fun fact card */
@@ -2009,7 +2010,8 @@
                 min-height: 52px;
             }
 
-            .course-tabs-wrapper {
+            .course-tabs-wrapper,
+            .skeleton-tabs-wrapper {
                 display: flex;
                 flex-wrap: nowrap;
                 overflow-x: auto;
@@ -2025,7 +2027,8 @@
             }
 
             .course-tabs-wrapper::-webkit-scrollbar,
-            .course-buttons-container::-webkit-scrollbar {
+            .course-buttons-container::-webkit-scrollbar,
+            .skeleton-tabs-wrapper::-webkit-scrollbar {
                 display: none;
             }
 
@@ -2906,14 +2909,25 @@
 
         .skeleton-actions {
             display: flex;
+            overflow-x: auto;
+            flex-wrap: nowrap;
             gap: 2px;
-            margin-bottom: 20px;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .skeleton-actions::-webkit-scrollbar {
+            display: none;
         }
 
         .skeleton-button {
             height: 40px;
             width: 120px;
             border-radius: 8px;
+            flex: 0 0 auto;
         }
 
         .skeleton-button:first-child {
@@ -2970,6 +2984,7 @@
             height: 40px;
             width: 100px;
             border-radius: 8px;
+            flex: 0 0 100px;
         }
 
         .skeleton-course-button:first-child {
@@ -3012,9 +3027,9 @@
                 height: 35px;
             }
 
-            .course-buttons-container,
             .skeleton-info-grid,
-            .skeleton-actions {
+            .skeleton-actions,
+            .skeleton-tabs-wrapper {
                 display: flex;
                 flex-wrap: nowrap;
                 overflow-x: auto;
@@ -3023,9 +3038,9 @@
                 scrollbar-width: none;
             }
 
-            .course-buttons-container::-webkit-scrollbar,
             .skeleton-info-grid::-webkit-scrollbar,
-            .skeleton-actions::-webkit-scrollbar {
+            .skeleton-actions::-webkit-scrollbar,
+            .skeleton-tabs-wrapper::-webkit-scrollbar {
                 display: none;
             }
 
@@ -3218,10 +3233,12 @@
             </div>
             <div class="container">
                 <div class="course-buttons-container">
-                    <div class="skeleton skeleton-course-button"></div>
-                    <div class="skeleton skeleton-course-button"></div>
-                    <div class="skeleton skeleton-course-button"></div>
-                    <div class="skeleton skeleton-course-button"></div>
+                    <div class="skeleton-tabs-wrapper" style="display: flex; gap: 2px;">
+                        <div class="skeleton skeleton-course-button"></div>
+                        <div class="skeleton skeleton-course-button"></div>
+                        <div class="skeleton skeleton-course-button"></div>
+                        <div class="skeleton skeleton-course-button"></div>
+                    </div>
                 </div>
                 <div class="skeleton-header">
                     <div class="skeleton skeleton-h2"></div>
@@ -4056,7 +4073,7 @@
         }
 
         function initializeScrollFaders() {
-            const scrollContainers = document.querySelectorAll('.course-buttons-container, .course-tabs-wrapper, .course-info, .course-actions, .materials-grid, .project-groups-grid');
+            const scrollContainers = document.querySelectorAll('.course-buttons-container, .course-tabs-wrapper, .course-info, .course-actions, .materials-grid, .project-groups-grid, .skeleton-actions, .skeleton-tabs-wrapper');
             scrollContainers.forEach(el => {
                 // Check state on load
                 updateScrollFaders(el);
@@ -4234,48 +4251,70 @@
             }
         }
 
-        function toggleTimetable() {
+        function toggleTimetable(index, btnName) {
             const timetableContainer = document.getElementById("timetable-container");
             const iframeContainer = document.getElementById("iframe-container");
-            const button = document.getElementById("timetable-btn");
             const iframe = document.getElementById('timetable-iframe');
 
+            const clickedButton = document.getElementById(`timetable-btn-${index}`);
+            const targetTimetableId = clickedButton.dataset.timetableId;
+            const targetClassId = clickedButton.dataset.classId;
+
             const isVisible = iframeContainer.classList.contains('visible');
+            const isCurrentlyActive = clickedButton.classList.contains('active');
 
-            if (!isVisible) {
-                // --- SHOWING ---
-                iframeContainer.classList.remove('is-loaded'); // Reset loaded state to show spinner
-                timetableContainer.style.display = ''; // Make parent element visible
+            const allTimetableBtns = document.querySelectorAll('.timetable-btn');
 
-                // Only submit the form if the iframe hasn't been loaded before
-                if (!iframe.src || iframe.src === 'about:blank') {
-                    iframe.onload = () => {
-                        iframeContainer.classList.add('is-loaded'); // Hide spinner, fade in iframe
-                    };
-                    document.getElementById('timetable-form').submit();
-                } else {
-                    // If already loaded, just show the content immediately
-                    iframeContainer.classList.add('is-loaded');
-                }
+            if (isCurrentlyActive) {
+                // --- HIDING THE CURRENTLY OPEN TIMETABLE ---
+                iframeContainer.classList.remove('visible');
+                clickedButton.innerHTML = `<i class="fas fa-calendar-alt"></i> ${btnName}`;
+                clickedButton.classList.remove('active');
 
-                // A tiny delay allows the 'display' change to render before we start the animation
-                setTimeout(() => {
-                    iframeContainer.classList.add('visible');
-                }, 10);
-
-                button.innerHTML = '<i class="fa fa-eye-slash"></i> Timetable';
-                button.classList.add('active');
-
-            } else {
-                // --- HIDING ---
-                iframeContainer.classList.remove('visible'); // Start closing animation
-                button.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
-                button.classList.remove('active');
-
-                // Hide the parent container AFTER the animation is complete
                 setTimeout(() => {
                     timetableContainer.style.display = 'none';
                 }, 700); // This must match your CSS transition duration
+            } else {
+                // --- SHOWING OR SWITCHING ---
+                allTimetableBtns.forEach(btn => {
+                    btn.classList.remove('active');
+                    btn.innerHTML = `<i class="fas fa-calendar-alt"></i> ${btn.dataset.btnName || 'Timetable'}`;
+                });
+
+                document.getElementById('timetable-id-input').value = targetTimetableId || '';
+                document.getElementById('class-select').value = targetClassId || '';
+
+                if (isVisible) {
+                    // Switch to a new timetable while one is already open
+                    iframeContainer.classList.remove('visible');
+                    iframeContainer.classList.remove('is-loaded');
+                    clickedButton.innerHTML = `<i class="fa fa-eye-slash"></i> ${btnName}`;
+                    clickedButton.classList.add('active');
+
+                    setTimeout(() => {
+                        iframe.onload = () => {
+                            iframeContainer.classList.add('is-loaded');
+                            iframeContainer.classList.add('visible');
+                        };
+                        document.getElementById('timetable-form').submit();
+                    }, 500);
+                } else {
+                    // Open from hidden state
+                    iframeContainer.classList.remove('is-loaded');
+                    timetableContainer.style.display = '';
+
+                    iframe.onload = () => {
+                        iframeContainer.classList.add('is-loaded');
+                    };
+                    document.getElementById('timetable-form').submit();
+
+                    setTimeout(() => {
+                        iframeContainer.classList.add('visible');
+                    }, 10);
+
+                    clickedButton.innerHTML = `<i class="fa fa-eye-slash"></i> ${btnName}`;
+                    clickedButton.classList.add('active');
+                }
             }
         }
 
@@ -5005,12 +5044,27 @@
             const timetableContainer = document.getElementById('timetable-container');
 
             if (isTimetableEnabled) {
-                const timetableBtn = document.createElement('button');
-                timetableBtn.id = 'timetable-btn';
-                timetableBtn.innerHTML = `<i class="fas fa-calendar-alt"></i> Timetable`;
-                timetableBtn.onclick = toggleTimetable;
-                container.appendChild(timetableBtn);
-                // The lines that changed the container's display property are now removed.
+                let addedAny = false;
+                for (let i = 1; i <= 10; i++) {
+                    const tId = metadata[`timetable${i}_id`] !== undefined ? metadata[`timetable${i}_id`] : (i === 1 ? metadata['timetable_id'] : undefined);
+                    const cId = metadata[`class${i}_id`] !== undefined ? metadata[`class${i}_id`] : (i === 1 ? metadata['class_id'] : undefined);
+
+                    if (tId !== undefined && tId !== '') {
+                        const btnName = metadata[`timetable${i}_name`] || 'Timetable';
+                        const btnColor = metadata[`timetable${i}_colour`] || 'btn-primary';
+
+                        const timetableBtn = document.createElement('button');
+                        timetableBtn.id = `timetable-btn-${i}`;
+                        timetableBtn.className = `timetable-btn ${btnColor}`;
+                        timetableBtn.innerHTML = `<i class="fas fa-calendar-alt"></i> ${btnName}`;
+                        timetableBtn.dataset.timetableId = tId;
+                        timetableBtn.dataset.classId = cId !== undefined ? cId : '';
+                        timetableBtn.dataset.btnName = btnName;
+                        timetableBtn.onclick = () => toggleTimetable(i, btnName);
+                        container.appendChild(timetableBtn);
+                        addedAny = true;
+                    }
+                }
             }
 
             // Track wrapped rows for proper CSS edge rounding
@@ -5115,12 +5169,12 @@
         }
 
         function resetUIElements() {
-            const timetableBtn = document.getElementById('timetable-btn');
-            if (timetableBtn) {
-                // Reset the button's text and remove the active class
-                timetableBtn.innerHTML = '<i class="fas fa-calendar-alt"></i> Timetable';
-                timetableBtn.classList.remove('active'); // <-- Add this line
-            }
+            const timetableBtns = document.querySelectorAll('.timetable-btn');
+            timetableBtns.forEach(btn => {
+                const btnName = btn.dataset.btnName || 'Timetable';
+                btn.innerHTML = `<i class="fas fa-calendar-alt"></i> ${btnName}`;
+                btn.classList.remove('active');
+            });
 
             const iframeContainer = document.getElementById('iframe-container');
             if (iframeContainer) {
