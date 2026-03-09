@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      4.1
+// @version      4.5
 // @description  Automatically enhance EIS, log in with Google.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer(alt).user.js
@@ -23,6 +23,26 @@
         fontLink.rel = "stylesheet";
         fontLink.href = jetbrainsMonoURL;
         document.head.appendChild(fontLink);
+    }
+
+    // ************************************************************************
+    // Font Awesome 7.2.0 Injection
+    // ************************************************************************
+    const fontAwesomeURL = "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.2.0/css/all.min.css";
+    const faShimsURL = "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.2.0/css/v4-shims.min.css";
+
+    if (!document.querySelector('link[href="' + fontAwesomeURL + '"]')) {
+        const faLink = document.createElement("link");
+        faLink.rel = "stylesheet";
+        faLink.href = fontAwesomeURL;
+        document.head.appendChild(faLink);
+    }
+
+    if (!document.querySelector('link[href="' + faShimsURL + '"]')) {
+        const shimsLink = document.createElement("link");
+        shimsLink.rel = "stylesheet";
+        shimsLink.href = faShimsURL;
+        document.head.appendChild(shimsLink);
     }
 
     // ************************************************************************
@@ -77,10 +97,6 @@
             font-family: 'Google Sans', sans-serif !important;
         }
         
-        /* Ensure font overrides don't break icon encodings */
-        .fa {
-            font-family: 'FontAwesome' !important;
-        }
 
         /* --------------------------------------------------------------------
            Small Rounded Corners & Shadows
@@ -312,21 +328,37 @@
     document.head.appendChild(style);
 
     // ************************************************************************
-    // Force Font Awesome 4 Icons to be Solid (Excluding Buttons & Header)
+    // Force Font Awesome 7 Icons to be Solid (Excluding Buttons & Header)
     // ************************************************************************
     function solidifyIcons() {
-        document.querySelectorAll('i.fa:not(.btn i.fa):not(.header .navbar-nav i.fa)').forEach(icon => {
+        // Target icons, excluding buttons and header navigation
+        document.querySelectorAll('i[class*="fa"]:not(.btn i):not(.header .navbar-nav i)').forEach(icon => {
+
+            // 1. Convert modern Regular classes to Solid
+            if (icon.classList.contains('far')) {
+                icon.classList.remove('far');
+                icon.classList.add('fas');
+            }
+            if (icon.classList.contains('fa-regular')) {
+                icon.classList.remove('fa-regular');
+                icon.classList.add('fa-solid');
+            }
+
+            // 2. Strip legacy v4 outline suffixes and force modern solid class
             Array.from(icon.classList).forEach(cls => {
                 if (cls.endsWith('-o')) {
                     icon.classList.remove(cls);
-                    icon.classList.add(cls.slice(0, -2));
+                    icon.classList.add(cls.slice(0, -2)); // e.g., fa-user-o becomes fa-user
+                    icon.classList.add('fas'); // Guarantee it renders as solid
                 }
             });
         });
 
-        document.querySelectorAll('.header .navbar-nav i.fa-bell').forEach(icon => {
-            icon.classList.remove('fa-bell');
-            icon.classList.add('fa-bell-o');
+        // 3. The Bell Icon Exception: Force this specific icon to be outlined (Regular)
+        document.querySelectorAll('.header .navbar-nav i.fa-bell, .header .navbar-nav i.fa-solid.fa-bell').forEach(icon => {
+            icon.classList.remove('fas', 'fa-solid', 'fa-bell');
+            // Apply modern outline styling, while keeping legacy class just in case the site's JS needs it
+            icon.classList.add('fa-regular', 'fa-bell', 'fa-bell-o');
         });
     }
 
@@ -408,31 +440,15 @@
     // ************************************************************************
 
     if (window.location.pathname === '/login') {
-        // First, click the expand link to reveal the hidden login form.
-        const expandInterval = setInterval(() => {
-            // The expand link is inside ".tools a.expand"
-            const expandLink = document.querySelector('.tools a.expand');
-            if (expandLink) {
-                expandLink.click();
-                clearInterval(expandInterval);
-            }
-        }, 100);
-
-        // Then wait for the green login button to be visible and click it.
         const loginInterval = setInterval(() => {
-            const greenButton = document.querySelector('button.btn.green.pull-right');
-            if (greenButton && greenButton.offsetParent !== null) { // ensures element is visible
-                greenButton.click();
-                // Optionally, click one more time after a slight delay to ensure submission.
-                setTimeout(() => {
-                    greenButton.click();
-                }, 1200);
+            const loginLink = document.querySelector('a.btn.blue.btn-block[href="/connect/google"]');
+            if (loginLink) {
+                loginLink.click();
                 clearInterval(loginInterval);
             }
         }, 100);
     }
 
-    // Auto-click login button on /switchrole page
     if (window.location.pathname === '/switchrole') {
         const roleInterval = setInterval(() => {
             const loginButton = document.querySelector('button.btn.green.pull-right');
