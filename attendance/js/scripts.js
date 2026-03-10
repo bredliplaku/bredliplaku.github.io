@@ -238,11 +238,11 @@ function showStaffEditorDialog(staffData = null) {
     const btnText = isEdit ? 'Save Changes' : 'Add Staff';
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     dialogBackdrop.style.zIndex = "10010";
 
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
 
     let activeNfcSession = { controller: null, button: null };
@@ -454,7 +454,7 @@ function renderSessionControls(courseName) {
         const iconClass = icons[lowerCat] || 'fa-tag';
 
         const btn = document.createElement('div');
-        btn.className = 'course-button';
+        btn.setAttribute('class', 'course-button');
         btn.innerHTML = `<i class="fa-solid ${iconClass}"></i>&nbsp; ${cat}`;
 
         btn.onclick = () => selectSessionCategory(cat);
@@ -772,7 +772,7 @@ function renderSessionControls(courseName) {
         const iconClass = icons[lowerCat] || 'fa-tag';
 
         const btn = document.createElement('div');
-        btn.className = 'course-button';
+        btn.setAttribute('class', 'course-button');
         btn.innerHTML = `<i class="fa-solid ${iconClass}"></i>&nbsp; ${cat}`;
 
         btn.onclick = () => selectSessionCategory(cat);
@@ -843,7 +843,7 @@ function renderGroupsForCategory(category) {
 
     groups.forEach(grp => {
         const btn = document.createElement('div');
-        btn.className = 'course-button';
+        btn.setAttribute('class', 'course-button');
         btn.innerHTML = `<b>${grp}</b>`;
 
         btn.onclick = () => selectSessionGroup(grp);
@@ -888,9 +888,9 @@ async function showAbsenceHistoryDialog() {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.style.maxWidth = '900px';
     dialog.style.maxHeight = '85vh';
     dialog.setAttribute('role', 'dialog');
@@ -1620,9 +1620,9 @@ function setupEventListeners() {
 function showGlobalSettingsDialog() {
     openDialogMode();
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.style.maxWidth = '1000px';
     dialog.style.height = '85vh';
     dialog.setAttribute('role', 'dialog');
@@ -1895,11 +1895,11 @@ function showGlobalSettingsDialog() {
     // 4. Action Buttons
     document.getElementById('register-this-device-btn').onclick = () => {
         const dialogBackdrop = document.createElement('div');
-        dialogBackdrop.className = 'dialog-backdrop';
+        dialogBackdrop.setAttribute('class', 'dialog-backdrop');
         dialogBackdrop.style.zIndex = "10010";
 
         const dialog = document.createElement('div');
-        dialog.className = 'dialog';
+        dialog.setAttribute('class', 'dialog');
         dialog.setAttribute('role', 'dialog');
 
         dialog.innerHTML = `
@@ -2108,10 +2108,10 @@ function showCourseEditorDialog(courseName, courseData = null) {
     }
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     dialogBackdrop.style.zIndex = "10002";
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
 
     // --- ADMIN ACCESS HTML ---
@@ -2267,7 +2267,7 @@ function showCourseEditorDialog(courseName, courseData = null) {
         sectionListContainer.innerHTML = '';
         currentSections.forEach((sec, index) => {
             const pill = document.createElement('div');
-            pill.className = 'admin-pill-item';
+            pill.setAttribute('class', 'admin-pill-item');
             pill.innerHTML = `<b>${sec}</b> <i class="fa-solid fa-times remove-pill" style="margin-left:8px; cursor:pointer; color:var(--danger-color);" data-index="${index}"></i>`;
             sectionListContainer.appendChild(pill);
         });
@@ -2340,7 +2340,7 @@ function showCourseEditorDialog(courseName, courseData = null) {
                 const isSelected = currentAdmins.has(emailLower);
 
                 const div = document.createElement('div');
-                div.className = `student-item ${isSelected ? 'selected' : ''}`;
+                div.setAttribute('class', `student-item ${isSelected ? 'selected' : ''}`);
                 const initials = staff.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
 
                 div.innerHTML = `
@@ -2480,9 +2480,9 @@ function showAdminProfileDialog() {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.style.maxWidth = '900px';
     dialog.style.height = '85vh';
     dialog.setAttribute('role', 'dialog');
@@ -2818,7 +2818,9 @@ function handleRouting() {
 function updateDbSortIcons() {
     // Reset all sort icons in the database table
     document.querySelectorAll('.database-table .sort-icon').forEach(icon => {
-        icon.className = 'sort-icon fa-solid fa-sort';
+        const i = document.createElement('i');
+        i.className = 'sort-icon fa-solid fa-sort';
+        icon.replaceWith(i);
     });
 
     // Set the active sort icon
@@ -2826,7 +2828,11 @@ function updateDbSortIcons() {
     const header = document.querySelector(`.database-table .sortable[data-sort="${field}"]`);
     if (header) {
         const icon = header.querySelector('.sort-icon');
-        icon.className = `sort-icon fa-solid fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
+        if (icon) {
+            const i = document.createElement('i');
+            i.className = `sort-icon fa-solid fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
+            icon.replaceWith(i);
+        }
     }
 }
 
@@ -2919,17 +2925,22 @@ function applyTheme(theme) {
         themeColorMeta.setAttribute('content', isDarkMode ? '#000000' : '#f4f4f4');
     }
 
-    const toggleIcon = document.querySelector('#theme-toggle-btn i');
-    if (toggleIcon) {
-        if (theme === 'light') {
-            toggleIcon.className = 'fa-solid fa-sun';
-            toggleIcon.parentElement.title = 'Switch to Dark Mode';
-        } else if (theme === 'dark') {
-            toggleIcon.className = 'fa-solid fa-moon';
-            toggleIcon.parentElement.title = 'Switch to Auto Mode';
-        } else {
-            toggleIcon.className = 'fa-solid fa-circle-half-stroke';
-            toggleIcon.parentElement.title = 'Switch to Light Mode';
+    const toggleBtn = document.querySelector('#theme-toggle-btn');
+    if (toggleBtn) {
+        const oldIcon = toggleBtn.querySelector('i, svg');
+        if (oldIcon) {
+            const i = document.createElement('i');
+            if (theme === 'light') {
+                i.className = 'fa-solid fa-sun';
+                toggleBtn.title = 'Switch to Dark Mode';
+            } else if (theme === 'dark') {
+                i.className = 'fa-solid fa-moon';
+                toggleBtn.title = 'Switch to Auto Mode';
+            } else {
+                i.className = 'fa-solid fa-circle-half-stroke';
+                toggleBtn.title = 'Switch to Light Mode';
+            }
+            oldIcon.replaceWith(i);
         }
     }
 }
@@ -3212,9 +3223,9 @@ async function showDirectEisExportDialog(prefilledDateStr = null) {
 
     openDialogMode();
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
 
     const formattedCourseName = currentCourse.replace(/_/g, ' ');
@@ -3335,7 +3346,7 @@ async function showDirectEisExportDialog(prefilledDateStr = null) {
 
         groups.forEach(grp => {
             const btn = document.createElement('div');
-            btn.className = `course-button ${selectedSubgroup === grp ? 'active' : ''}`;
+            btn.setAttribute('class', `course-button ${selectedSubgroup === grp ? 'active' : ''}`);
             btn.innerHTML = `<b>${grp}</b>`;
             btn.style.padding = "8px 15px"; btn.style.minWidth = "35px";
             btn.onclick = () => { selectedSubgroup = grp; renderSubgroups(); };
@@ -3350,7 +3361,7 @@ async function showDirectEisExportDialog(prefilledDateStr = null) {
             const lowerCat = cat.toLowerCase();
             const iconClass = icons[lowerCat] || 'fa-tag';
             const btn = document.createElement('div');
-            btn.className = `course-button ${selectedCategory === cat ? 'active' : ''}`;
+            btn.setAttribute('class', `course-button ${selectedCategory === cat ? 'active' : ''}`);
             btn.innerHTML = `<i class="fa-solid ${iconClass}"></i>&nbsp; ${cat}`;
             btn.style.padding = "8px 12px"; btn.style.fontSize = "0.9em"; btn.style.minWidth = "auto";
             btn.onclick = () => {
@@ -3404,7 +3415,13 @@ async function showDirectEisExportDialog(prefilledDateStr = null) {
     dialog.querySelector('.collapsible-trigger').onclick = (e) => {
         const content = e.currentTarget.nextElementSibling;
         content.classList.toggle('is-open');
-        e.currentTarget.querySelector('i, svg').className = content.classList.contains('is-open') ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down';
+        const chevronEl = e.currentTarget.querySelector('i, svg');
+        if (chevronEl) {
+            const i = document.createElement('i');
+            i.className = content.classList.contains('is-open') ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down';
+            i.style.fontSize = '0.8em';
+            chevronEl.replaceWith(i);
+        }
         content.style.marginTop = content.classList.contains('is-open') ? '10px' : '0';
     };
 
@@ -4236,9 +4253,9 @@ function showRegisterUIDDialog() {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -4353,9 +4370,9 @@ function showRegisterUIDDialogWithPrefill(prefillUid) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -4519,9 +4536,9 @@ function showDuplicateWarningForNewEntry(newData, duplicates, onCompleteCallback
     openDialogMode();
     const existing = duplicates[0];
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -4696,9 +4713,9 @@ function showRegistrationDetailsDialog(data) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -4861,9 +4878,9 @@ function showApproveDialog(registration) {
 function showFinalApprovalDialog(registration) {
     openDialogMode();
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -4931,9 +4948,9 @@ function showDuplicateWarningDialog(newData, duplicates) {
     openDialogMode();
     const existing = duplicates[0];
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -5200,7 +5217,7 @@ function renderRegistrationsTable(registrations) {
 
     registrations.forEach(reg => {
         const row = document.createElement('tr');
-        // REMOVED: row.className = 'clickable-request-row'; 
+        // REMOVED: row.setAttribute('class', 'clickable-request-row'); 
         // This prevents the pointer cursor and the hover effect
 
         let formattedTimestamp = reg.timestamp ? new Date(reg.timestamp).toLocaleString() : 'N/A';
@@ -5246,7 +5263,7 @@ function renderAbsencesTable(requests) {
 
     requests.forEach(req => {
         const row = document.createElement('tr');
-        row.className = 'clickable-request-row';
+        row.setAttribute('class', 'clickable-request-row');
 
         // Add Session to dataset
         row.dataset.requestId = req.requestID;
@@ -5331,9 +5348,9 @@ function showPermissionDetailsDialog(data, isReadOnly = false) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -5365,7 +5382,7 @@ function showPermissionDetailsDialog(data, isReadOnly = false) {
         <div class="dialog-content">
             <div class="form-group" style="align-items: flex-start;">
                 <label class="dialog-label-fixed"><i class="fa-solid fa-user"></i> Student</label>
-                <div class="form-control" style="background:#f9f9f9; border:none;">
+                <div class="form-control" style="border:none;">
                     <strong>${escapeHtml(data.studentName)}</strong><br>
                     <small style="opacity:0.7">${escapeHtml(data.studentEmail)}</small>
                 </div>
@@ -5373,7 +5390,7 @@ function showPermissionDetailsDialog(data, isReadOnly = false) {
 
             <div class="form-group">
                 <label class="dialog-label-fixed"><i class="fa-solid fa-book"></i> Course</label>
-                <div class="form-control" style="background:#f9f9f9; border:none; display:flex; align-items:center;">
+                <div class="form-control" style="border:none; display:flex; align-items:center;">
                     ${escapeHtml(data.course ? data.course.replace(/_/g, ' ') : 'N/A')}
                     ${sessionHtml}
                 </div>
@@ -5449,9 +5466,9 @@ function showRequestPermissionDialog() {
 
     openDialogMode();
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
 
     const courseOptions = Object.keys(courseInfoMap).sort().map(courseName =>
@@ -6028,9 +6045,9 @@ function showApproveAbsenceDialog(data) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -6165,10 +6182,10 @@ function showRejectAbsenceDialog(data) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
 
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -6263,9 +6280,9 @@ function showDeleteAbsenceDialog(data) {
 function showRejectDialog(registration) {
     openDialogMode();
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -6495,10 +6512,12 @@ async function handleManualRefresh(buttonId) {
     if (!refreshBtn) return;
 
     const icon = refreshBtn.querySelector('i, svg');
-    const originalIconClass = icon.className;
+    const originalIconClass = icon.getAttribute('class') || icon.className;
 
     // Start spinner
-    icon.className = 'fa-solid fa-arrows-rotate fa-spin';
+    const spinnerI = document.createElement('i');
+    spinnerI.className = 'fa-solid fa-arrows-rotate fa-spin';
+    icon.replaceWith(spinnerI);
     refreshBtn.disabled = true;
 
     try {
@@ -6572,7 +6591,12 @@ async function handleManualRefresh(buttonId) {
         updateSyncStatus("Error", "error"); // Show error status
     } finally {
         // Stop spinner
-        icon.className = originalIconClass;
+        const currentIcon = refreshBtn.querySelector('i, svg');
+        if (currentIcon) {
+            const restoreI = document.createElement('i');
+            restoreI.className = originalIconClass;
+            currentIcon.replaceWith(restoreI);
+        }
         refreshBtn.disabled = false;
         // Ensure sync status reverts if it wasn't an error
         if (!syncStatus.classList.contains('error')) {
@@ -6646,7 +6670,7 @@ function showInputError(inputElement, message) {
         }
 
         const errorElement = document.createElement('div');
-        errorElement.className = 'error-message';
+        errorElement.setAttribute('class', 'error-message');
         errorElement.textContent = message;
 
         // This is the key: insert the error message AFTER the form group.
@@ -6715,13 +6739,13 @@ function updateSyncStatus(message, status) {
     // If the browser is offline, ALWAYS show the offline status, regardless of the requested change.
     if (!isOnline) {
         if (syncText) syncText.textContent = 'Offline';
-        if (syncStatus) syncStatus.className = 'sync-status offline';
+        if (syncStatus) syncStatus.setAttribute('class', 'sync-status offline');
         return; // Exit the function early
     }
 
     if (syncText) syncText.textContent = message;
     if (syncStatus) {
-        syncStatus.className = 'sync-status ' + (status || 'offline');
+        syncStatus.setAttribute('class', 'sync-status ' + (status || 'offline'));
     }
 }
 
@@ -6796,7 +6820,7 @@ function updateAuthUI() {
         if (!chip) {
             chip = document.createElement('div');
             chip.id = 'student-profile-chip';
-            chip.className = 'student-profile-chip';
+            chip.setAttribute('class', 'student-profile-chip');
             if (userInfo && logoutBtn) userInfo.insertBefore(chip, logoutBtn);
             else if (userInfo) userInfo.appendChild(chip);
             chip.appendChild(userAvatar);
@@ -6868,7 +6892,7 @@ function updateAuthUI() {
         if (!notSignedInMsg) {
             notSignedInMsg = document.createElement('div');
             notSignedInMsg.id = 'not-signed-in-message';
-            notSignedInMsg.className = 'not-signed-in-message';
+            notSignedInMsg.setAttribute('class', 'not-signed-in-message');
             const mainContainer = document.getElementById('main-container');
             const appHeaderElement = mainContainer.querySelector('.app-header');
             if (mainContainer && appHeaderElement) mainContainer.insertBefore(notSignedInMsg, appHeaderElement);
@@ -7118,7 +7142,7 @@ function populateCourseDropdown() {
     if (!isSignedIn) {
         courseButtonsContainer.innerHTML = ''; // Clear any old buttons
         const button = document.createElement('div');
-        button.className = 'course-button active'; // Make the default button active
+        button.setAttribute('class', 'course-button active'); // Make the default button active
         button.innerHTML = `<i class="fa-solid fa-table-list"></i>&nbsp; Default`;
         courseButtonsContainer.appendChild(button);
         courseButtonsContainer.style.display = 'flex';
@@ -7173,7 +7197,7 @@ function populateCourseDropdown() {
 
     coursesToDisplay.forEach(course => {
         const button = document.createElement('div');
-        button.className = 'course-button' + (currentCourse === course ? ' active' : '');
+        button.setAttribute('class', 'course-button' + (currentCourse === course ? ' active' : ''));
         button.innerHTML = `<i class="fa-solid fa-table-list"></i>&nbsp; ${escapeHtml(course.replace(/_/g, ' '))}`;
         button.addEventListener('click', () => selectCourseButton(course));
         courseButtonsContainer.appendChild(button);
@@ -7273,11 +7297,11 @@ function updateOnlineStatus() {
 
     if (isOnline) {
         syncText.textContent = 'Online';
-        syncStatus.className = 'sync-status online';
+        syncStatus.setAttribute('class', 'sync-status online');
         syncBtn.disabled = !isSignedIn || isSyncing;
     } else {
         syncText.textContent = 'Offline';
-        syncStatus.className = 'sync-status offline';
+        syncStatus.setAttribute('class', 'sync-status offline');
         syncBtn.disabled = true;
     }
 
@@ -7285,7 +7309,7 @@ function updateOnlineStatus() {
     // This ensures that when the status is updated again, it reverts to the correct online/offline state.
     if (pendingChanges && isOnline) {
         syncText.textContent = autoSyncEnabled ? 'Pending auto-sync' : 'Pending sync';
-        syncStatus.className = 'sync-status waiting';
+        syncStatus.setAttribute('class', 'sync-status waiting');
     }
 }
 
@@ -7739,7 +7763,9 @@ async function syncDatabaseToSheet() {
 function updateSortIcons() {
     // Reset all sort icons
     document.querySelectorAll('.sort-icon').forEach(icon => {
-        icon.className = 'sort-icon fa-solid fa-sort';
+        const i = document.createElement('i');
+        i.className = 'sort-icon fa-solid fa-sort';
+        icon.replaceWith(i);
     });
 
     // Set sort icon for current sort field
@@ -7748,7 +7774,11 @@ function updateSortIcons() {
 
     if (header) {
         const icon = header.querySelector('.sort-icon');
-        icon.className = `sort-icon fa-solid fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
+        if (icon) {
+            const i = document.createElement('i');
+            i.className = `sort-icon fa-solid fa-sort-${direction === 'asc' ? 'up' : 'down'}`;
+            icon.replaceWith(i);
+        }
     }
 }
 
@@ -7798,9 +7828,9 @@ function showAddEntryDialog() {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -7969,9 +7999,9 @@ function editDatabaseEntry(dbKey) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     const entry = databaseMap[dbKey];
@@ -8012,7 +8042,7 @@ function editDatabaseEntry(dbKey) {
 
     const createUidRow = (uidValue = '') => {
         const uidGroup = document.createElement('div');
-        uidGroup.className = 'form-group uid-edit-row';
+        uidGroup.setAttribute('class', 'form-group uid-edit-row');
         uidGroup.style.marginBottom = '15px'; // Increased margin
         uidGroup.innerHTML = `
     <label class="dialog-label-fixed"><i class="fa-solid fa-wifi"></i> UID</label>
@@ -8198,10 +8228,10 @@ function showAlertDialog(title, message) {
     if (existingDialog) existingDialog.remove();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
 
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.innerHTML = `
@@ -8243,10 +8273,10 @@ function showPromptDialog({ title, message, initialValue = '', confirmText = 'Co
     if (existingDialog) existingDialog.remove();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
 
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.innerHTML = `
@@ -8309,10 +8339,10 @@ function showConfirmationDialog({ title, message, confirmText = 'Confirm', cance
     const cancelBtnClass = 'btn-blue';
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
 
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.innerHTML = `
@@ -8388,9 +8418,9 @@ function showAddLogEntryDialog() {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -8498,7 +8528,7 @@ function showAddLogEntryDialog() {
         const itemsToShow = filtered.slice(0, 50);
         itemsToShow.forEach(student => {
             const div = document.createElement('div');
-            div.className = `student-item ${selectedUid === student.uid ? 'selected' : ''}`;
+            div.setAttribute('class', `student-item ${selectedUid === student.uid ? 'selected' : ''}`);
             div.innerHTML = `
                 <div class="student-avatar-placeholder">${student.initials}</div>
                 <div class="student-info">
@@ -8579,9 +8609,9 @@ function showEditLogDialog(group) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -8681,7 +8711,7 @@ function showEditLogDialog(group) {
         const defaultSessionOptions = generateSessionOptions(getCurrentActiveSession());
 
         const newTimestampGroup = document.createElement('div');
-        newTimestampGroup.className = 'timestamp-edit-group new-item-flash';
+        newTimestampGroup.setAttribute('class', 'timestamp-edit-group new-item-flash');
         newTimestampGroup.dataset.isNew = "true";
         newTimestampGroup.innerHTML = `
         <div class="form-group">
@@ -9137,7 +9167,7 @@ function toggleBulkMode() {
         const theadRow = table.querySelector('thead tr');
         if (!theadRow.querySelector('.select-column-header')) {
             const th = document.createElement('th');
-            th.className = 'select-column select-column-header';
+            th.setAttribute('class', 'select-column select-column-header');
             // Note: We do NOT use 'bulk-checkbox' class here to avoid selecting it in loops
             th.innerHTML = `<input type="checkbox" onclick="toggleSelectAll(this.checked)" style="cursor:pointer; width:18px; height:18px;">`;
             theadRow.insertBefore(th, theadRow.firstChild);
@@ -9305,9 +9335,9 @@ function handleExcelFile(event) {
  */
 function showDatabaseImportDialog(excelMappings) {
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -9430,11 +9460,11 @@ function handleImportFile(event) {
 function showImportDialog(importedLogs) {
     // Create dialog backdrop
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
 
     // Create dialog box
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -9681,19 +9711,19 @@ function updateLogsList() {
             if (thisDay !== currentDay) {
                 currentDay = thisDay;
                 const separatorRow = document.createElement('tr');
-                separatorRow.className = 'day-separator';
+                separatorRow.setAttribute('class', 'day-separator');
                 const separatorCell = document.createElement('td');
                 separatorCell.colSpan = 100; // Span across all columns (100 is effectively "all")
 
 
                 const flexWrapper = document.createElement('div');
-                flexWrapper.className = 'day-separator-content';
+                flexWrapper.setAttribute('class', 'day-separator-content');
 
                 // --- 1. DATE GROUP CHECKBOX ---
                 if (isBulkMode) {
                     const dateCheckbox = document.createElement('input');
                     dateCheckbox.type = 'checkbox';
-                    dateCheckbox.className = 'day-separator-checkbox'; // Different class than row checkboxes
+                    dateCheckbox.setAttribute('class', 'day-separator-checkbox'); // Different class than row checkboxes
                     dateCheckbox.title = `Select all logs for ${thisDay}`;
                     // Pass the specific date string to the toggle function
                     dateCheckbox.onclick = (e) => toggleDateGroup(thisDay, e.target.checked);
@@ -9701,21 +9731,21 @@ function updateLogsList() {
                 }
 
                 const dateText = document.createElement('span');
-                dateText.className = 'day-separator-date';
+                dateText.setAttribute('class', 'day-separator-date');
                 dateText.innerHTML = `<i class="fa-solid fa-calendar-day"></i> ${escapeHtml(group.date)}`;
                 flexWrapper.appendChild(dateText);
                 const buttonContainer = document.createElement('div');
-                buttonContainer.className = 'day-separator-actions';
+                buttonContainer.setAttribute('class', 'day-separator-actions');
                 const dateForButton = thisDay;
                 const eisBtn = document.createElement('button');
-                eisBtn.className = 'btn-sm eis-day-btn';
+                eisBtn.setAttribute('class', 'btn-sm eis-day-btn');
                 eisBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Add to EIS';
                 eisBtn.title = 'Add to EIS for this day';
                 eisBtn.setAttribute('aria-label', `Add attendance for ${group.date} to EIS`);
                 eisBtn.onclick = (e) => { e.stopPropagation(); showDirectEisExportDialog(dateForButton); };
                 buttonContainer.appendChild(eisBtn);
                 /* const bulkAddBtn = document.createElement('button');
-                 bulkAddBtn.className = 'btn-green btn-sm';
+                 bulkAddBtn.setAttribute('class', 'btn-green btn-sm');
                  bulkAddBtn.innerHTML = '<i class="fa-solid fa-clone"></i>';
                  bulkAddBtn.title = 'Add +1 Hour to All Students on This Day';
                  bulkAddBtn.setAttribute('aria-label', `Add a plus one hour log to all students on ${group.date}`);
@@ -9736,7 +9766,7 @@ function updateLogsList() {
         // --- Bulk Checkbox Cell ---
         if (isBulkMode) {
             const selectCell = document.createElement('td');
-            selectCell.className = 'select-column';
+            selectCell.setAttribute('class', 'select-column');
             const logIdsInGroup = group.originalLogs.map(l => l.id).join(','); // Join IDs
 
             // We use the first ID as the primary key for logic
@@ -9753,24 +9783,24 @@ function updateLogsList() {
         }
 
         const nameCell = document.createElement('td');
-        nameCell.className = 'name-cell name-column';
+        nameCell.setAttribute('class', 'name-cell name-column');
         nameCell.textContent = group.name;
         row.appendChild(nameCell);
 
         if (isAdminForCourse(currentCourse)) {
             const uidCell = document.createElement('td');
-            uidCell.className = 'uid-cell uid-column admin-only';
+            uidCell.setAttribute('class', 'uid-cell uid-column admin-only');
             uidCell.innerHTML = `<span class="uid-badge">${escapeHtml(group.uid)}</span>`;
             row.appendChild(uidCell);
         }
 
         const dateCell = document.createElement('td');
-        dateCell.className = 'date-cell date-column';
+        dateCell.setAttribute('class', 'date-cell date-column');
         dateCell.textContent = group.date;
         row.appendChild(dateCell);
 
         const timesCell = document.createElement('td');
-        timesCell.className = 'times-cell times-cell-stacked';
+        timesCell.setAttribute('class', 'times-cell times-cell-stacked');
 
         // 1. Group logs by CATEGORY ONLY (Theory, Lab, Practice)
         const categoryGroups = {};
@@ -9789,21 +9819,21 @@ function updateLogsList() {
         // 2. Render rows
         Object.entries(categoryGroups).forEach(([categoryName, logs]) => {
             const rowDiv = document.createElement('div');
-            rowDiv.className = 'time-row';
+            rowDiv.setAttribute('class', 'time-row');
 
             if (categoryName && categoryName !== 'Default') {
                 const label = document.createElement('span');
-                label.className = 'cat-label';
+                label.setAttribute('class', 'cat-label');
                 label.textContent = categoryName;
                 rowDiv.appendChild(label);
             }
 
             const pillContainer = document.createElement('div');
-            pillContainer.className = 'pills-wrapper';
+            pillContainer.setAttribute('class', 'pills-wrapper');
 
             logs.forEach(log => {
                 const timeTag = document.createElement('span');
-                timeTag.className = 'time-tag';
+                timeTag.setAttribute('class', 'time-tag');
                 if (log.manual === true || log.manual === 'true') {
                     timeTag.classList.add('manual', 'excused');
 
@@ -9832,13 +9862,13 @@ function updateLogsList() {
 
         if (isAdminForCourse(currentCourse)) {
             const actionsCell = document.createElement('td');
-            actionsCell.className = 'actions-cell admin-only';
+            actionsCell.setAttribute('class', 'actions-cell admin-only');
             const actionsWrapper = document.createElement('div');
-            actionsWrapper.className = 'actions-cell-content';
+            actionsWrapper.setAttribute('class', 'actions-cell-content');
 
             if (group.name === 'Unknown') {
                 const addUserBtn = document.createElement('button');
-                addUserBtn.className = 'btn-green btn-icon add-user-btn';
+                addUserBtn.setAttribute('class', 'btn-green btn-icon add-user-btn');
                 addUserBtn.title = 'Register Student';
                 addUserBtn.setAttribute('aria-label', `Register student with UID ${group.uid}`);
                 addUserBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
@@ -9909,9 +9939,9 @@ function showAddEntryFromLog(uid) {
     openDialogMode();
 
     const dialogBackdrop = document.createElement('div');
-    dialogBackdrop.className = 'dialog-backdrop';
+    dialogBackdrop.setAttribute('class', 'dialog-backdrop');
     const dialog = document.createElement('div');
-    dialog.className = 'dialog';
+    dialog.setAttribute('class', 'dialog');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
 
@@ -10153,7 +10183,7 @@ function renderCoursesInSettings(courseInfo, filterText = '') {
 
         // Build HTML
         const card = document.createElement('div');
-        card.className = 'modern-course-card';
+        card.setAttribute('class', 'modern-course-card');
         card.innerHTML = `
             <div class="card-color-strip ${stripClass}"></div>
             <div class="card-body">
@@ -10633,7 +10663,7 @@ function showNotification(type, title, message, duration = 5000) {
 
     // Create the new notification
     const notification = document.createElement('div');
-    notification.className = `in-page-notification in-page-notification-${type}`;
+    notification.setAttribute('class', `in-page-notification in-page-notification-${type}`);
     notification.dataset.notificationType = type;
 
     let icon;
@@ -10698,7 +10728,7 @@ function renderLogsPagination(currentPage, totalPages) {
     const pages = generatePageNumbers(currentPage, totalPages);
     pages.forEach(page => {
         const btn = document.createElement('button');
-        btn.className = 'page-btn' + (page === currentPage ? ' active' : '') + (page === '...' ? ' ellipsis' : '');
+        btn.setAttribute('class', 'page-btn' + (page === currentPage ? ' active' : '') + (page === '...' ? ' ellipsis' : ''));
         btn.textContent = page;
         if (page !== '...') {
             btn.onclick = () => {
@@ -10737,7 +10767,7 @@ function renderDbPagination(currentPage, totalPages) {
     const pages = generatePageNumbers(currentPage, totalPages);
     pages.forEach(page => {
         const btn = document.createElement('button');
-        btn.className = 'page-btn' + (page === currentPage ? ' active' : '') + (page === '...' ? ' ellipsis' : '');
+        btn.setAttribute('class', 'page-btn' + (page === currentPage ? ' active' : '') + (page === '...' ? ' ellipsis' : ''));
         btn.textContent = page;
         if (page !== '...') {
             btn.onclick = () => {
@@ -10843,7 +10873,7 @@ function populateCourseButtons() {
 
     coursesToDisplay.forEach(course => {
         const button = document.createElement('div');
-        button.className = 'course-button' + (currentCourse === course ? ' active' : '');
+        button.setAttribute('class', 'course-button' + (currentCourse === course ? ' active' : ''));
 
         // Mark guest courses visually
         if (course === guestCourse) {

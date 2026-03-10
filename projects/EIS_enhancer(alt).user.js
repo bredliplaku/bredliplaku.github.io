@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      4.1
+// @version      5.0
 // @description  Automatically enhance EIS, log in with Google.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer(alt).user.js
@@ -23,6 +23,26 @@
         fontLink.rel = "stylesheet";
         fontLink.href = jetbrainsMonoURL;
         document.head.appendChild(fontLink);
+    }
+
+    // ************************************************************************
+    // Font Awesome 7.2.0 Injection
+    // ************************************************************************
+    const fontAwesomeURL = "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7/css/all.min.css";
+    const faShimsURL = "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7/css/v4-shims.min.css";
+
+    if (!document.querySelector('link[href="' + fontAwesomeURL + '"]')) {
+        const faLink = document.createElement("link");
+        faLink.rel = "stylesheet";
+        faLink.href = fontAwesomeURL;
+        document.head.appendChild(faLink);
+    }
+
+    if (!document.querySelector('link[href="' + faShimsURL + '"]')) {
+        const shimsLink = document.createElement("link");
+        shimsLink.rel = "stylesheet";
+        shimsLink.href = faShimsURL;
+        document.head.appendChild(shimsLink);
     }
 
     // ************************************************************************
@@ -65,8 +85,8 @@
             --card-background: #ffffff;
             --text-color: #333333;
             --box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-            --small-radius: 6px; 
-            --grid-radius: 12px; 
+            --small-radius: 6px;
+            --grid-radius: 12px;
         }
 
         /* Apply the new fonts */
@@ -76,11 +96,7 @@
         h1, h2, h3, h4, h5, h6, .page-title, .portlet-title .caption {
             font-family: 'Google Sans', sans-serif !important;
         }
-        
-        /* Ensure font overrides don't break icon encodings */
-        .fa {
-            font-family: 'FontAwesome' !important;
-        }
+
 
         /* --------------------------------------------------------------------
            Small Rounded Corners & Shadows
@@ -89,16 +105,16 @@
             border-radius: var(--small-radius) !important;
             box-shadow: var(--box-shadow) !important;
         }
-        
+
         .portlet.box {
             border-radius: var(--small-radius) !important;
             box-shadow: var(--box-shadow) !important;
         }
-        
+
         .portlet.box > .portlet-title {
             border-radius: var(--small-radius) var(--small-radius) 0 0 !important;
         }
-        
+
         .portlet.box > .portlet-body {
             border-radius: 0 0 var(--small-radius) var(--small-radius) !important;
         }
@@ -121,10 +137,10 @@
         .header .navbar-nav {
             display: flex !important;
             align-items: center !important;
-            height: 46px !important; 
+            height: 46px !important;
             margin: 0 !important;
         }
-        
+
         .header .navbar-nav > li {
             display: flex !important;
             align-items: center !important;
@@ -142,23 +158,23 @@
         .header .navbar-nav > li.dropdown.user > .dropdown-toggle {
             background: transparent !important;
         }
-        
+
         .header .navbar-nav > li.dropdown.user > .dropdown-toggle .username {
             order: 1;
-            margin: 0 10px 0 0 !important; 
+            margin: 0 10px 0 0 !important;
             font-size: 14px !important;
         }
-        
+
         .header .navbar-nav > li.dropdown.user > .dropdown-toggle img {
             order: 2;
-            border-radius: 50% !important; 
-            height: 30px !important; 
+            border-radius: 50% !important;
+            height: 30px !important;
             width: 30px !important;
             object-fit: cover !important;
-            float: none !important; 
+            float: none !important;
             margin: 0 !important;
         }
-        
+
         .header .navbar-nav > li.dropdown.user > .dropdown-toggle i {
             order: 3;
             margin-left: 8px !important;
@@ -168,9 +184,9 @@
         .header .navbar-nav > li.notifications > a {
             position: relative !important;
         }
-        
+
         .notification-badge {
-            top: 6px !important; 
+            top: 6px !important;
             right: 2px !important;
         }
 
@@ -178,32 +194,32 @@
            Sidebar Fixes: Touch Friendly Padding & Larger Icons
            -------------------------------------------------------------------- */
         .page-sidebar .page-sidebar-menu > li > a {
-            padding: 15px 15px !important; 
+            padding: 15px 15px !important;
             display: flex !important;
             align-items: center !important;
         }
-        
+
         .page-sidebar .page-sidebar-menu > li > a > i {
-            font-size: 20px !important; 
+            font-size: 20px !important;
             margin-right: 12px !important;
         }
 
         .page-sidebar .page-sidebar-menu > li > a > .title {
-            flex-grow: 1; 
+            flex-grow: 1;
         }
-        
+
         .page-sidebar .page-sidebar-menu > li > a > .arrow {
-            margin-top: 0 !important; 
+            margin-top: 0 !important;
         }
 
         .page-sidebar .page-sidebar-menu > li > ul.sub-menu > li > a {
-            padding: 12px 15px 12px 30px !important; 
+            padding: 12px 15px 12px 30px !important;
             display: flex !important;
             align-items: center !important;
         }
-        
+
         .page-sidebar .page-sidebar-menu > li > ul.sub-menu > li > a > i {
-            font-size: 16px !important; 
+            font-size: 16px !important;
             margin-right: 10px !important;
         }
 
@@ -217,7 +233,7 @@
         }
 
         .btn.green-stripe {
-            border-left: 4px solid #35aa47 !important; 
+            border-left: 4px solid #35aa47 !important;
             box-shadow: var(--box-shadow) !important;
         }
 
@@ -225,14 +241,14 @@
             border-top-left-radius: 0 !important;
             border-bottom-left-radius: 0 !important;
         }
-        
+
         .btn-group > .btn:has(+ .btn) {
             border-top-right-radius: 0 !important;
             border-bottom-right-radius: 0 !important;
         }
 
         .btn:hover, .toggler:hover, .sidebar-toggler:hover, .more:hover {
-            transform: translateY(-1px); 
+            transform: translateY(-1px);
         }
 
         .btn-primary:hover, .btn.blue:hover { box-shadow: 0 4px 8px rgba(0, 69, 140, 0.25) !important; }
@@ -241,8 +257,8 @@
         .btn.default:hover { box-shadow: 0 4px 8px rgba(150, 150, 150, 0.2) !important; }
 
         .btn.dropdown-toggle:hover {
-            transform: none !important; 
-            box-shadow: var(--box-shadow) !important; 
+            transform: none !important;
+            box-shadow: var(--box-shadow) !important;
         }
 
         /* --------------------------------------------------------------------
@@ -253,10 +269,10 @@
             align-items: center !important;
             height: 100% !important;
         }
-        
+
         .portlet-title .caption i {
-            margin-top: 0 !important; 
-            margin-right: 8px !important; 
+            margin-top: 0 !important;
+            margin-right: 8px !important;
         }
 
         /* --------------------------------------------------------------------
@@ -264,20 +280,20 @@
            -------------------------------------------------------------------- */
         .dashboard-stat {
             position: relative;
-            overflow: hidden !important; 
-            min-height: 125px !important; 
-            padding-bottom: 28px !important; 
-            border-radius: var(--grid-radius) !important; 
+            overflow: hidden !important;
+            min-height: 125px !important;
+            padding-bottom: 28px !important;
+            border-radius: var(--grid-radius) !important;
             box-shadow: var(--box-shadow) !important;
         }
-        
+
         .dashboard-stat .details {
             position: relative;
-            z-index: 2; 
+            z-index: 2;
         }
 
         .dashboard-stat .details .number {
-            font-size: 28px !important; 
+            font-size: 28px !important;
             line-height: 32px !important;
         }
 
@@ -288,45 +304,61 @@
             left: 0 !important;
             width: 100% !important;
             box-sizing: border-box !important;
-            border-radius: 0 0 var(--grid-radius) var(--grid-radius) !important; 
+            border-radius: 0 0 var(--grid-radius) var(--grid-radius) !important;
             padding: 6px 20px !important; /* Pushes text and arrow inwards from the edges */
         }
-        
+
         /* Giant watermark icon tucked securely on the left with added margin */
         .dashboard-stat .visual {
-            opacity: 0.15 !important; 
+            opacity: 0.15 !important;
             position: absolute !important;
             left: 20px !important; /* Pushed inward to match text padding */
-            right: auto !important; 
+            right: auto !important;
             top: 50% !important;
             transform: translateY(-50%) !important;
-            z-index: 1; 
+            z-index: 1;
             padding: 0 !important;
         }
-        
+
         .dashboard-stat .visual i {
-            font-size: 85px !important; 
+            font-size: 85px !important;
             margin: 0 !important;
         }
     `;
     document.head.appendChild(style);
 
     // ************************************************************************
-    // Force Font Awesome 4 Icons to be Solid (Excluding Buttons & Header)
+    // Force Font Awesome 7 Icons to be Solid (Excluding Buttons & Header)
     // ************************************************************************
     function solidifyIcons() {
-        document.querySelectorAll('i.fa:not(.btn i.fa):not(.header .navbar-nav i.fa)').forEach(icon => {
+        // Target icons, excluding buttons and header navigation
+        document.querySelectorAll('i[class*="fa"]:not(.btn i):not(.header .navbar-nav i)').forEach(icon => {
+
+            // 1. Convert modern Regular classes to Solid
+            if (icon.classList.contains('far')) {
+                icon.classList.remove('far');
+                icon.classList.add('fas');
+            }
+            if (icon.classList.contains('fa-regular')) {
+                icon.classList.remove('fa-regular');
+                icon.classList.add('fa-solid');
+            }
+
+            // 2. Strip legacy v4 outline suffixes and force modern solid class
             Array.from(icon.classList).forEach(cls => {
                 if (cls.endsWith('-o')) {
                     icon.classList.remove(cls);
-                    icon.classList.add(cls.slice(0, -2));
+                    icon.classList.add(cls.slice(0, -2)); // e.g., fa-user-o becomes fa-user
+                    icon.classList.add('fas'); // Guarantee it renders as solid
                 }
             });
         });
 
-        document.querySelectorAll('.header .navbar-nav i.fa-bell').forEach(icon => {
-            icon.classList.remove('fa-bell');
-            icon.classList.add('fa-bell-o');
+        // 3. The Bell Icon Exception: Force this specific icon to be outlined (Regular)
+        document.querySelectorAll('.header .navbar-nav i.fa-bell, .header .navbar-nav i.fa-solid.fa-bell').forEach(icon => {
+            icon.classList.remove('fas', 'fa-solid', 'fa-bell');
+            // Apply modern outline styling, while keeping legacy class just in case the site's JS needs it
+            icon.classList.add('fa-regular', 'fa-bell', 'fa-bell-o');
         });
     }
 
