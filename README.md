@@ -49,7 +49,7 @@ Browser enhancement scripts designed to optimize the university's EIS portal.
 
 ## 🛠️ Tech Stack & Features
 
-- **Core**: Vanilla HTML5, CSS3, JavaScript (No heavy frontend frameworks).
+- **Core**: HTML5, CSS3, JavaScript (No heavy frontend frameworks).
 - **Fun Features**: An interactive cat companion built into the website with randomized dialogue and idle animations.
 
 ## 📬 Connect
