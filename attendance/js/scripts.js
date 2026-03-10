@@ -3404,7 +3404,7 @@ async function showDirectEisExportDialog(prefilledDateStr = null) {
     dialog.querySelector('.collapsible-trigger').onclick = (e) => {
         const content = e.currentTarget.nextElementSibling;
         content.classList.toggle('is-open');
-        e.currentTarget.querySelector('i').className = content.classList.contains('is-open') ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down';
+        e.currentTarget.querySelector('i, svg').className = content.classList.contains('is-open') ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down';
         content.style.marginTop = content.classList.contains('is-open') ? '10px' : '0';
     };
 
@@ -6494,7 +6494,7 @@ async function handleManualRefresh(buttonId) {
     const refreshBtn = document.getElementById(buttonId);
     if (!refreshBtn) return;
 
-    const icon = refreshBtn.querySelector('i');
+    const icon = refreshBtn.querySelector('i, svg');
     const originalIconClass = icon.className;
 
     // Start spinner
@@ -7269,7 +7269,7 @@ async function loadAllCourseLogsForStudent() {
  */
 function updateOnlineStatus() {
     isOnline = navigator.onLine;
-    const statusIcon = syncStatus.querySelector("i");
+    const statusIcon = syncStatus.querySelector('i, svg');
 
     if (isOnline) {
         syncText.textContent = 'Online';
@@ -7298,7 +7298,7 @@ async function syncData() {
 
     isSyncing = true;
     const syncBtn = document.getElementById('sync-btn');
-    const syncIcon = syncBtn.querySelector('i');
+    const syncIcon = syncBtn.querySelector('i, svg');
     if (syncIcon) syncIcon.classList.add('spin-animation');
     syncBtn.disabled = true;
 
