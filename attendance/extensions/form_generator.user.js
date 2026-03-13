@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Attendance Sheet Generator
 // @namespace    https://bredliplaku.com/
-// @version      1.5
+// @version      2.0
 // @description  Generates attendance sheet that perfectly matches the original template with customizable fields
 // @author       Bredli Plaku
 // @match        https://eis.epoka.edu.al/courseattendance/*/editcl
@@ -1528,7 +1528,6 @@
             const signatureItems = document.querySelectorAll('.signature-item');
             const signatureArea = document.getElementById('signature-area');
 
-            let signaturesHtml = '';
             let savedSigs = [];
             signatureItems.forEach(item => {
                 const parts = item.id.split('-');
@@ -1538,15 +1537,36 @@
                     const nameEl = document.getElementById(`signature-name-${id}`);
 
                     if (titleEl && nameEl) {
-                        signaturesHtml += `
-                            <div style="margin-bottom: 30px;">
-                                <p style="font-weight: bold; font-size: 14px; margin-bottom: 2px;">${titleEl.value} ${nameEl.value}</p>
-                                <p style="font-size: 11px; font-style: italic; margin-top: 0;">(Signature)</p>
-                            </div>
-                        `;
                         savedSigs.push({ title: titleEl.value, name: nameEl.value });
                     }
                 }
+            });
+
+            // Sort signatures for display
+            const titleOrder = {
+                'Lecturer Prof. Dr.': 1,
+                'Lecturer Assoc. Prof. Dr.': 2,
+                'Lecturer Dr.': 3,
+                'Assistant Lecturer': 4
+            };
+
+            const displaySigs = [...savedSigs].sort((a, b) => {
+                const orderA = titleOrder[a.title] || 99;
+                const orderB = titleOrder[b.title] || 99;
+                if (orderA !== orderB) {
+                    return orderA - orderB;
+                }
+                return a.name.localeCompare(b.name);
+            });
+
+            let signaturesHtml = '';
+            displaySigs.forEach(sig => {
+                signaturesHtml += `
+                    <div style="margin-bottom: 40px;">
+                        <p style="font-weight: bold; font-size: 14px; margin-bottom: 2px;">${sig.title} ${sig.name}</p>
+                        <p style="font-size: 11px; font-style: italic; margin-top: 0;">(Signature)</p>
+                    </div>
+                `;
             });
 
             if (signatureArea) {
