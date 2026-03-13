@@ -25,23 +25,15 @@
         /* Import signature fonts - expanded with more formal/official document signing fonts */
         @import url('https://fonts.googleapis.com/css2?family=Homemade+Apple&family=Dancing+Script&family=Caveat&family=Pacifico&family=Satisfy&family=Indie+Flower&family=Kalam&family=Shadows+Into+Light&family=Marck+Script&family=Just+Me+Again+Down+Here&family=Great+Vibes&family=Tangerine:wght@400;700&family=Cedarville+Cursive&family=Sacramento&family=Mr+De+Haviland&family=Reenie+Beanie&family=La+Belle+Aurore&family=Yellowtail&family=Alex+Brush&family=Allura&family=Pinyon+Script&family=Petit+Formal+Script&family=Bilbo&family=Lovers+Quarrel&family=Herr+Von+Muellerhoff&family=Mrs+Saint+Delafield&family=Meie+Script&family=Monsieur+La+Doulaise&family=Miss+Fajardose&family=Italianno&family=Meddon&family=Aguafina+Script&family=Niconne&family=Felipa&family=Jim+Nightshade&family=Yesteryear&family=Berkshire+Swash&family=Rouge+Script&family=Ruthie&family=Sail&family=Sofia&family=Qwigley&family=Dynalight&family=Diplomata+SC&family=Carattere&family=Birthstone&family=Sarina&family=Inspiration&family=Moon+Dance&family=Courgette&family=Oleo+Script&family=Playball&display=swap');
 
-        #attendance-btn {
-            background-color: #3949ab;
-            color: white;
-            cursor: pointer;
-        }
-
-        #attendance-btn:hover {
-            background-color: #1a237e;
-        }
-
         #attendance-sheet-container {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.8);
+            background-color: rgba(15, 23, 42, 0.6); /* Modern dark overlay with blur backdrop if supported */
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
             z-index: 9999;
             display: flex;
             flex-direction: column;
@@ -51,140 +43,227 @@
             box-sizing: border-box;
         }
 
+        #attendance-sheet-container * {
+            font-family: Verdana, Geneva, sans-serif !important;
+        }
+
+        /* Protect FontAwesome Icons from the aggressive Arial override */
+        #attendance-sheet-container .fa, 
+        #attendance-sheet-container .fas,
+        #attendance-sheet-container .fab,
+        #attendance-sheet-container .far {
+            font-family: "Font Awesome 5 Free", "Font Awesome 5 Brands", "FontAwesome" !important;
+            font-weight: 900;
+        }
+
         #attendance-sheet-content {
-            background-color: white;
-            padding: 20px;
-            border-radius: 30px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            background-color: #ffffff;
+            padding: 24px;
+            border-radius: 24px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
             max-width: 95%;
             max-height: 90vh;
             overflow: auto;
             position: relative;
             width: 800px;
-            font-family: Arial, sans-serif;
-            font-size: 12px;
+            font-family: Verdana, Geneva, sans-serif !important; /* Force explicit vector sans-serif over EIS defaults */
+            font-size: 13px;
         }
 
         #sheet-controls {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
+        }
+
+        .attendance-btn {
+            border: none;
+            border-radius: 12px; /* Rounded buttons */
+            padding: 8px 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        #print-sheet-btn, #save-sheet-btn {
+            background-color: #428bca; /* Modern Blue */
+        }
+        
+        #print-sheet-btn:hover, #save-sheet-btn:hover {
+            background-color: #00458c;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0, 69, 140, 0.2);
         }
 
         #config-panel {
-            background-color: #f5f5f5;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 15px;
+            background-color: #f8fafc; /* Lighter, modern slate gray background */
+            padding: 12px;
+            border-radius: 12px; /* Rounded panel */
+            border: 1px solid #e2e8f0;
+            margin-bottom: 12px;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.02);
         }
 
         .config-row {
             display: flex;
             gap: 10px;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             align-items: center;
         }
 
         .config-row label {
-            width: 150px;
-            font-weight: bold;
+            width: 140px;
+            font-weight: 700;
+            color: #334155; /* Slate 700 text */
+            font-size: 13px;
         }
 
         .config-row input, .config-row select {
             flex: 1;
-            padding: 5px;
-            border-radius: 4px;
-            border: 1px solid #ccc;
+            padding: 4px 8px;
+            border-radius: 6px; /* Slightly rounded inputs */
+            border: 1px solid #cbd5e1; /* Slate 300 border */
+            background-color: #ffffff;
+            color: #0f172a;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .config-row input:focus, .config-row select:focus {
+            outline: none;
+            border-color: #428bca;
+            box-shadow: 0 0 0 3px rgba(66, 139, 202, 0.1);
         }
 
         .signature-item {
             display: flex;
             gap: 10px;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             align-items: center;
         }
 
         .signature-item input, .signature-item select {
-            padding: 5px;
-            border-radius: 4px;
-            border: 1px solid #ccc;
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            background-color: #ffffff;
+            color: #0f172a;
+            transition: all 0.15s;
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .signature-item input:focus, .signature-item select:focus {
+             outline: none;
+             border-color: #428bca;
+             box-shadow: 0 0 0 3px rgba(66, 139, 202, 0.1);
         }
 
         .signature-item button {
-            background-color: #f44336;
+            background-color: #ef4444; /* Modern red */
             color: white;
             border: none;
-            border-radius: 4px;
-            padding: 5px 10px;
+            border-radius: 6px;
+            padding: 4px 10px;
             cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(239, 68, 68, 0.2);
+        }
+        
+        .signature-item button:hover {
+            background-color: #dc2626;
+            transform: translateY(-1px);
         }
 
         #add-signature-btn {
-            background-color: #4caf50;
+            background-color: #10b981; /* Modern Emerald */
             color: white;
             border: none;
-            border-radius: 4px;
-            padding: 5px 10px;
+            border-radius: 8px;
+            padding: 8px 16px;
             cursor: pointer;
-            margin-top: 5px;
+            font-weight: 500;
+            margin-top: 8px;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(16, 185, 129, 0.2);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        #add-signature-btn:hover {
+             background-color: #059669;
+             transform: translateY(-1px);
         }
 
         #close-sheet-btn {
-            background-color: #f44336;
+            background-color: #f1f5f9; /* Slate 100 base */
+            color: #475569; /* Slate 600 text */
+            border: 1px solid #e2e8f0;
+            box-shadow: none;
         }
 
         #close-sheet-btn:hover {
-            background-color: #d32f2f;
+            background-color: #e2e8f0;
+            color: #0f172a;
+            transform: translateY(0);
         }
 
         /* Styling to match the screenshots exactly with BOLD text */
         .sheet-header {
-            margin-bottom: 10px;  /* Reduced from 20px */
+            margin-bottom: 8px;  /* Closer to the table */
         }
 
         .sheet-header h1 {
-            font-size: 16px;  /* Reduced from 14px */
+            font-size: 16px;
             margin: 0;
-            font-weight: 900 !important;
+            font-weight: 700 !important;
             color: #000;
             text-align: left;
-            -webkit-text-stroke: 0.3px black; /* Add stroke for extra boldness */
         }
 
         .sheet-header h2 {
-            font-size: 16px;  /* Reduced from 13px */
+            font-size: 16px;
             margin: 5px 0;
-            font-weight: 800 !important;
+            font-weight: 700 !important;
             color: #000;
             text-align: left;
-            -webkit-text-stroke: 0.2px black; /* Add stroke for extra boldness */
         }
 
         .sheet-header h3 {
-            font-size: 18px;  /* Reduced from 16px */
-            margin: 15px 0 10px 0;
-            font-weight: 900 !important;
+            font-size: 18px;
+            margin: 25px 0 15px 0;
+            font-weight: 700 !important;
             color: #000;
             text-align: center;
             text-transform: uppercase;
-            -webkit-text-stroke: 0.5px black; /* Add stroke for extra boldness */
+        }
+
+        #printed-date-display {
+            font-size: 11px !important;
         }
 
         .sheet-header h4 {
-            font-size: 12px;  /* Reduced from 13px */
+            font-size: 12px;
             margin: 5px 0;
-            font-weight: 900 !important;  /* Increased from 800 to 900 */
+            font-weight: 700 !important;
             color: #000;
             text-align: left;
-            -webkit-text-stroke: 0.3px black; /* Add stroke for extra boldness */
         }
 
         .header-flex {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 5px;
+            margin-bottom: 0px; /* Reduced from 5px to be closer to table */
         }
 
         .sheet-header p {
@@ -197,7 +276,7 @@
         .attendance-table {
             border-collapse: collapse;
             width: 100%;
-            margin-top: 8px;  /* Reduced from 15px */
+            margin-top: 4px;  /* Reduced from 8px to be closer to "Printed on" */
             table-layout: fixed;
         }
 
@@ -212,12 +291,17 @@
         }
 
         .attendance-table th {
-            font-weight: 800;  /* Increased from 800 */
+            font-weight: bold; /* Revert to standard bold instead of 800 */
             background-color: #fff;
         }
 
         .attendance-table th:nth-child(1) {
             width: 30px; /* Nr. column */
+        }
+
+        .attendance-table td:nth-child(1) {
+            text-align: right;
+            padding-right: 5px;
         }
 
         .attendance-table th:nth-child(2) {
@@ -280,32 +364,35 @@
         }
 
         /* Define all font classes - with formal document signing fonts added */
-        .font-homemade-apple { font-family: 'Homemade Apple', cursive; }
-        .font-dancing-script { font-family: 'Dancing Script', cursive; }
-        .font-caveat { font-family: 'Caveat', cursive; }
-        .font-pacifico { font-family: 'Pacifico', cursive; }
-        .font-satisfy { font-family: 'Satisfy', cursive; }
-        .font-indie-flower { font-family: 'Indie Flower', cursive; }
-        .font-kalam { font-family: 'Kalam', cursive; }
-        .font-shadows-into-light { font-family: 'Shadows Into Light', cursive; }
-        .font-marck-script { font-family: 'Marck Script', cursive; }
-        .font-just-me { font-family: 'Just Me Again Down Here', cursive; }
-        .font-great-vibes { font-family: 'Great Vibes', cursive; }
-        .font-tangerine { font-family: 'Tangerine', cursive; }
-        .font-cedarville { font-family: 'Cedarville Cursive', cursive; }
-        .font-sacramento { font-family: 'Sacramento', cursive; }
-        .font-mr-dehaviland { font-family: 'Mr De Haviland', cursive; }
-        .font-reenie-beanie { font-family: 'Reenie Beanie', cursive; }
-        .font-belle-aurore { font-family: 'La Belle Aurore', cursive; }
-        .font-yellowtail { font-family: 'Yellowtail', cursive; }
-        .font-alex-brush { font-family: 'Alex Brush', cursive; }
-        .font-allura { font-family: 'Allura', cursive; }
-        .font-pinyon-script { font-family: 'Pinyon Script', cursive; }
-        .font-petit-formal { font-family: 'Petit Formal Script', cursive; }
-        .font-bilbo { font-family: 'Bilbo', cursive; }
-        .font-lovers-quarrel { font-family: 'Lovers Quarrel', cursive; }
-        .font-herr-von-muellerhoff { font-family: 'Herr Von Muellerhoff', cursive; }
-        .font-mrs-saint-delafield { font-family: 'Mrs Saint Delafield', cursive; }
+        .font-homemade-apple { font-family: 'Homemade Apple', cursive !important; }
+        .font-dancing-script { font-family: 'Dancing Script', cursive !important; }
+        .font-caveat { font-family: 'Caveat', cursive !important; }
+        .font-pacifico { font-family: 'Pacifico', cursive !important; }
+        .font-satisfy { font-family: 'Satisfy', cursive !important; }
+        .font-indie-flower { font-family: 'Indie Flower', cursive !important; }
+        .font-kalam { font-family: 'Kalam', cursive !important; }
+        .font-shadows-into-light { font-family: 'Shadows Into Light', cursive !important; }
+        .font-marck-script { font-family: 'Marck Script', cursive !important; }
+        .font-just-me { font-family: 'Just Me Again Down Here', cursive !important; }
+        .font-great-vibes { font-family: 'Great Vibes', cursive !important; }
+        .font-tangerine { font-family: 'Tangerine', cursive !important; }
+        .font-cedarville { font-family: 'Cedarville Cursive', cursive !important; }
+        .font-sacramento { font-family: 'Sacramento', cursive !important; }
+        /* Ensure FontAwesome icons are displayed correctly within the container */
+        #attendance-sheet-container .fa, #attendance-sheet-container .fas {
+            font-family: "Font Awesome 5 Free", "Font Awesome 5 Brands", "FontAwesome" !important;
+        }
+        /* Protect FontAwesome inside the table if any exist */
+        #attendance-sheet-content .fa,
+        #attendance-sheet-content .fas {
+            font-family: "Font Awesome 5 Free", "Font Awesome 5 Brands", "FontAwesome" !important;
+            font-weight: 900;
+        }
+        .font-petit-formal { font-family: 'Petit Formal Script', cursive !important; }
+        .font-bilbo { font-family: 'Bilbo', cursive !important; }
+        .font-lovers-quarrel { font-family: 'Lovers Quarrel', cursive !important; }
+        .font-herr-von-muellerhoff { font-family: 'Herr Von Muellerhoff', cursive !important; }
+        .font-mrs-saint-delafield { font-family: 'Mrs Saint Delafield', cursive !important; }
         .font-meie-script { font-family: 'Meie Script', cursive; }
         .font-monsieur-la-doulaise { font-family: 'Monsieur La Doulaise', cursive; }
         .font-miss-fajardose { font-family: 'Miss Fajardose', cursive; }
@@ -383,94 +470,91 @@
         @media print {
             @page {
                 size: A4 portrait;
-                margin: 0.8cm;  /* Reduced from 1cm */
+                margin: 12mm 8mm 8mm 8mm; /* top right bottom left */
+            }
+
+            *, *::before, *::after {
+                box-sizing: border-box !important;
             }
 
             html, body {
-                width: 100%;
-                height: 100%;
-                margin: 0;
-                padding: 0;
+                width: 794px !important; /* Exact A4 width at standard DPI */
+                min-width: 794px !important;
+                max-width: 794px !important;
+                height: auto !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background-color: white !important;
             }
 
-            body * {
-                visibility: hidden;
+            /* Hide everything in the body by default */
+            body > * {
+                display: none !important;
             }
 
-            #attendance-sheet-container {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                margin: 0;
-                padding: 0;
-                overflow: visible;
-                background-color: white;
+            /* Only show the attendance container */
+            body > #attendance-sheet-container {
+                display: block !important;
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 794px !important;
+                min-width: 794px !important;
+                max-width: 794px !important;
+                height: auto !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background-color: transparent !important;
             }
 
             #attendance-sheet-content {
-                position: absolute;
-                left: 50%;
-                top: 0;
-                transform: translateX(-50%); /* Center the content */
-                width: calc(100% - 1.6cm); /* Account for margins */
-                max-width: 190mm; /* Increased from 180mm */
-                background-color: white;
-                box-shadow: none;
-                padding: 0;
-                margin: 0 auto;
-                border-radius: 0;
-                overflow: visible;
-                visibility: visible;
+                display: block !important;
+                position: relative !important;
+                left: 0 !important;
+                top: 0 !important;
+                transform: none !important;
+                width: 750px !important; /* Widen table to squeeze default side margins safely */
+                min-width: 750px !important;
+                max-width: 750px !important;
+                height: auto !important;
+                max-height: none !important; /* Critical to unlock the 90vh limit */
+                background-color: white !important;
+                box-shadow: none !important;
+                padding: 15px 0 !important; /* Squeeze vertical padding slightly */
+                margin: 0 auto !important; /* Forces centering inside the 794px canvas */
+                border: none !important;
+                border-radius: 0 !important;
+                overflow: visible !important;
             }
 
-            #attendance-sheet-content * {
-                visibility: visible;
-            }
-
+            /* Hide controls */
             #sheet-controls, #config-panel {
                 display: none !important;
             }
 
+            /* Ensure table fits horizontally and paginates vertically */
             .attendance-table {
-                width: 100%;
-                page-break-inside: auto;
-                table-layout: fixed;
-            }
-
-            /* Ensure date columns don't overlap in print */
-            .attendance-table th:nth-child(5),
-            .attendance-table th:nth-child(6),
-            .attendance-table th:nth-child(7),
-            .attendance-table th:nth-child(8),
-            .attendance-table th:nth-child(9) {
-                width: 70px; /* Fixed width for date columns */
-                overflow: hidden;
-                white-space: nowrap;
+                width: 100% !important;
+                max-width: 100% !important;
+                table-layout: fixed !important;
+                border-collapse: collapse !important;
+                margin: 0 !important;
             }
 
             .attendance-table tr {
-                page-break-inside: avoid;
-                page-break-after: auto;
+                page-break-inside: avoid !important;
             }
 
             .attendance-table thead {
-                display: table-header-group;
+                display: table-header-group !important;
             }
 
-            .footer-note, .signature-line {
-                page-break-inside: avoid;
+            .attendance-table tbody {
+                display: table-row-group !important;
             }
 
-            /* Set explicit min-height to prevent extra page breaks */
-            #attendance-sheet-content {
-                min-height: auto;
-                page-break-after: avoid;
-            }
-
-            .page-number {
-                display: none; /* Remove page number */
+            .sheet-header, .footer-note, .signature-line {
+                width: 100% !important;
             }
         }
     `);
@@ -530,11 +614,66 @@
         // Get username from page
         const usernameElement = document.querySelector('.username');
         if (usernameElement) {
-            data.username = usernameElement.textContent.trim();
+            data.username = usernameElement.textContent.trim().replace('Assistant Lecturer M.Sc.', 'Assistant Lecturer');
         }
 
-        // Get course details
-        data.courseTitle = document.querySelector('.course h4')?.textContent?.trim() || 'Attendance Sheet';
+        // Get course details for code, name, and category
+        const courseHeadingElem = document.querySelector('.course h4');
+        let courseName = courseHeadingElem ? courseHeadingElem.textContent.trim() : 'Attendance Sheet';
+
+        const captionElem = document.querySelector('.course .caption');
+        let courseCode = '';
+        if (captionElem) {
+            courseCode = captionElem.textContent.replace(/\s+/g, ' ').trim();
+
+            // Clean up redundant course codes at the start of the course name
+            // E.g. If code is "SWE / MTH 102" and name is "MTH 102 CALCULUS II", we want just "CALCULUS II"
+            if (courseCode && courseName !== 'Attendance Sheet') {
+                const codeParts = courseCode.split('/').map(p => p.trim()).sort((a, b) => b.length - a.length);
+                for (const part of codeParts) {
+                    if (part && courseName.startsWith(part)) {
+                        courseName = courseName.substring(part.length).trim();
+                        // Additional safety clean up if there's a dangling dash
+                        if (courseName.startsWith('-')) {
+                            courseName = courseName.substring(1).trim();
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Get category and group from list items
+        const ulItems = document.querySelectorAll('.attendance-details ul.list-unstyled li');
+        let category = '';
+        let group = '';
+
+        ulItems.forEach(li => {
+            const label = li.querySelector('.label-cont')?.textContent?.trim();
+            const text = li.querySelector('.text-cont')?.textContent?.trim();
+            if (label === 'Category' && text && text.toUpperCase() !== 'ALL') {
+                category = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+            }
+            if (label === 'Group' && text && text.toUpperCase() !== 'ALL') {
+                group = text.trim();
+            }
+        });
+
+        let formattedCategory = '';
+        if (category) {
+            formattedCategory = ' - ' + category;
+            if (group) {
+                formattedCategory += ' ' + group;
+            }
+        }
+
+        if (courseCode) {
+            data.courseTitle = courseCode + ' - ' + courseName + formattedCategory;
+            data.storageKey = (courseCode + '_' + courseName).replace(/[^a-z0-9]/gi, '_');
+        } else {
+            data.courseTitle = courseName + formattedCategory;
+            data.storageKey = courseName.replace(/[^a-z0-9]/gi, '_');
+        }
 
         // Get date from the form - specifically from the requested HTML element
         const dateElements = document.querySelectorAll('.attendance-details li');
@@ -716,8 +855,8 @@
                 // Initialize student hours attendance
                 data.attendance[studentId] = Array(data.totalHours).fill(false);
 
-                // Get attendance checks - using the original working implementation
-                const checkElements = row.querySelectorAll('.checkboxes_row_td input[type="checkbox"], .checkboxes.pull-left, input.checkboxes');
+                // Get attendance checks - using the original working implementation, plus handle locked icons
+                const checkElements = row.querySelectorAll('.checkboxes_row_td input[type="checkbox"], .checkboxes.pull-left, input.checkboxes, .checkboxes_row_td i.fa-check-square, .checkboxes_row_td i.fa-square, .checkboxes_row_td i.fa-check-square-o, .checkboxes_row_td i.fa-square-o');
 
                 // If no checkboxes found, try to find hidden inputs that might contain check state
                 if (checkElements.length === 0 || checkElements.length < data.totalHours) {
@@ -762,7 +901,9 @@
                         const checkIndex = startIndex + i;
                         if (checkElements[checkIndex] &&
                             (checkElements[checkIndex].checked ||
-                                checkElements[checkIndex].classList.contains('fa-check-square-o'))) {
+                                checkElements[checkIndex].classList.contains('fa-check-square-o') ||
+                                checkElements[checkIndex].classList.contains('fa-check-square') ||
+                                checkElements[checkIndex].classList.contains('fa-check'))) {
                             // Mark this hour as attended
                             data.attendance[studentId][i] = true;
                         }
@@ -779,13 +920,17 @@
         // Update all date column headers
         const dateColumns = document.querySelectorAll('.date-column');
         dateColumns.forEach(column => {
-            if (dateString) {
-                const parts = dateString.split('-');
-                if (parts.length === 3) {
-                    column.textContent = `${parts[2]}/${parts[1]}/${parts[0]}`;
+            if (column.hasAttribute('data-index')) {
+                if (dateString) {
+                    const parts = dateString.split('-');
+                    if (parts.length === 3) {
+                        column.textContent = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                    }
+                } else {
+                    column.textContent = '__/__/2025';
                 }
             } else {
-                column.textContent = '__/__/2025';
+                column.textContent = '';
             }
         });
     }
@@ -816,14 +961,11 @@
         controls.innerHTML = `
             <div>
                 <button id="print-sheet-btn" class="attendance-btn">
-                    <i class="fa fa-print"></i> Print
-                </button>
-                <button id="save-sheet-btn" class="attendance-btn">
-                    <i class="fa fa-download"></i> Save as PDF
+                    <i class="fas fa-print"></i> Print PDF
                 </button>
             </div>
             <button id="close-sheet-btn" class="attendance-btn">
-                <i class="fa fa-times"></i> Close
+                <i class="fas fa-times"></i> Close
             </button>
         `;
 
@@ -907,6 +1049,46 @@
         }
 
         // Generate config panel HTML with signature font dropdown and use checkmarks option
+        let cachedSigs = null;
+        if (data.storageKey) {
+            try {
+                const stored = localStorage.getItem(`EIS_attendance_sigs_${data.storageKey}`);
+                if (stored) { cachedSigs = JSON.parse(stored); }
+            } catch (e) { }
+        }
+
+        let signaturesConfigHtml = '';
+        if (cachedSigs && cachedSigs.length > 0) {
+            cachedSigs.forEach((sig, index) => {
+                const i = index + 1;
+                signaturesConfigHtml += `
+                    <div class="signature-item" id="signature-item-${i}">
+                        <select id="signature-title-${i}">
+                            <option value="Lecturer Prof. Dr." ${sig.title === 'Lecturer Prof. Dr.' ? 'selected' : ''}>Lecturer Prof. Dr.</option>
+                            <option value="Lecturer Assoc. Prof. Dr." ${sig.title === 'Lecturer Assoc. Prof. Dr.' ? 'selected' : ''}>Lecturer Assoc. Prof. Dr.</option>
+                            <option value="Lecturer Dr." ${sig.title === 'Lecturer Dr.' ? 'selected' : ''}>Lecturer Dr.</option>
+                            <option value="Assistant Lecturer" ${sig.title === 'Assistant Lecturer' ? 'selected' : ''}>Assistant Lecturer</option>
+                        </select>
+                        <input type="text" id="signature-name-${i}" value="${sig.name}" style="flex: 1;">
+                        <button class="remove-signature-btn" data-id="${i}" ${i === 1 ? 'style="visibility: hidden;"' : ''}>Remove</button>
+                    </div>
+                `;
+            });
+        } else {
+            signaturesConfigHtml = `
+                <div class="signature-item" id="signature-item-1">
+                    <select id="signature-title-1">
+                        <option value="Lecturer Prof. Dr.">Lecturer Prof. Dr.</option>
+                        <option value="Lecturer Assoc. Prof. Dr.">Lecturer Assoc. Prof. Dr.</option>
+                        <option value="Lecturer Dr.">Lecturer Dr.</option>
+                        <option value="Assistant Lecturer" selected>Assistant Lecturer</option>
+                    </select>
+                    <input type="text" id="signature-name-1" value="${data.username}" style="flex: 1;">
+                    <button class="remove-signature-btn" data-id="1" style="visibility: hidden;">Remove</button>
+                </div>
+            `;
+        }
+
         configPanel.innerHTML = `
             <h3 style="margin-top: 0;">Configuration</h3>
             <div class="config-row">
@@ -929,16 +1111,7 @@
             ${dateInputsHtml}
             <div id="signatures-container">
                 <h4 style="margin-top: 10px;">Signatures</h4>
-                <div class="signature-item" id="signature-item-1">
-                    <select id="signature-title-1">
-                        <option value="Lecturer Prof. Dr.">Lecturer Prof. Dr.</option>
-                        <option value="Lecturer Assoc. Prof. Dr.">Lecturer Assoc. Prof. Dr.</option>
-                        <option value="Lecturer Dr.">Lecturer Dr.</option>
-                        <option value="Assistant Lecturer M.Sc." selected>Assistant Lecturer M.Sc.</option>
-                    </select>
-                    <input type="text" id="signature-name-1" value="${data.username}" style="flex: 1;">
-                    <button class="remove-signature-btn" data-id="1" style="visibility: hidden;">Remove</button>
-                </div>
+                ${signaturesConfigHtml}
             </div>
             <button id="add-signature-btn">Add Another Signature</button>
         `;
@@ -949,12 +1122,12 @@
 
         // Institution details
         header.innerHTML = `
-            <h1>Epoka University</h1>
+            <h2>Epoka University</h2>
             <h2>Faculty of Architecture and Engineering</h2>
             <h3>ATTENDANCE LIST</h3>
             <div class="header-flex">
                 <h4>${data.courseTitle}</h4>
-                <p id="printed-date-display">Printed on: ${formatDate(new Date())}</p>
+                <p id="printed-date-display"><i>Printed on:</i> ${formatDate(new Date())}</p>
             </div>
         `;
 
@@ -968,7 +1141,7 @@
 
         // Add header cells - EXACTLY matching the template
         let headerCells = `
-            <th>Nr.</th>
+            <th>No.</th>
             <th>R</th>
             <th>Student ID</th>
             <th>Name Surname</th>
@@ -979,7 +1152,7 @@
             if (i < data.totalHours) {
                 headerCells += `<th class="date-column" data-index="${i}">__/__/2025</th>`;
             } else {
-                headerCells += `<th class="date-column">__/__/2025</th>`;
+                headerCells += `<th class="date-column"></th>`;
             }
         }
 
@@ -1074,11 +1247,11 @@
         const note = document.createElement('div');
         note.className = 'footer-note';
         note.innerHTML = `
-            <p><strong>NOTE:</strong></p>
-            <p>Students that are not listed in the attendance list will not be considered as enrolled in the course!</p>
+            <p style="margin-bottom: 10px;"><strong>NOTE:</strong></p>
+            <p style="margin-bottom: 10px;">Students that are not listed in the attendance list will not be considered as enrolled in the course!</p>
             <p>All attendance sheets should be delivered to department coordinators by the end of the week after recording</p>
-            <p>the entries electronically through EIS system.</p>
-            <p><strong>R</strong> - Repeated Course, <strong>Ex</strong> - Exempted from attendances.</p>
+            <p style="margin-bottom: 10px;">the entries electronically through EIS system.</p>
+            <p style="margin-bottom: 10px;"><strong>R</strong> - Repeated Course, <strong>Ex</strong> - Exempted from attendances.</p>
         `;
 
         const signature = document.createElement('div');
@@ -1220,10 +1393,6 @@
             window.print();
         });
 
-        document.getElementById('save-sheet-btn').addEventListener('click', () => {
-            window.print();
-        });
-
         document.getElementById('close-sheet-btn').addEventListener('click', () => {
             document.body.removeChild(container);
         });
@@ -1242,7 +1411,7 @@
         });
 
         // Add event listener for adding signatures
-        let signatureCounter = 1;
+        let signatureCounter = cachedSigs && cachedSigs.length > 0 ? cachedSigs.length : 1;
         document.getElementById('add-signature-btn').addEventListener('click', () => {
             signatureCounter++;
 
@@ -1257,7 +1426,7 @@
                     <option value="Lecturer Prof. Dr.">Lecturer Prof. Dr.</option>
                     <option value="Lecturer Assoc. Prof. Dr.">Lecturer Assoc. Prof. Dr.</option>
                     <option value="Lecturer Dr." selected>Lecturer Dr.</option>
-                    <option value="Assistant Lecturer M.Sc.">Assistant Lecturer M.Sc.</option>
+                    <option value="Assistant Lecturer">Assistant Lecturer</option>
                 </select>
                 <input type="text" id="signature-name-${signatureCounter}" value="" style="flex: 1;">
                 <button class="remove-signature-btn" data-id="${signatureCounter}">Remove</button>
@@ -1336,6 +1505,16 @@
             input.addEventListener('input', updateSignatures); // Also listen for real-time input changes
         });
 
+        // Add listeners for cached remove buttons
+        document.querySelectorAll('.remove-signature-btn').forEach(btn => {
+            if (btn.getAttribute('data-id') !== '1') {
+                btn.addEventListener('click', function () {
+                    this.closest('.signature-item').remove();
+                    updateSignatures();
+                });
+            }
+        });
+
         // Set initial dates
         if (data.isoDate) {
             updateAllDates(data.isoDate);
@@ -1350,15 +1529,34 @@
             const signatureArea = document.getElementById('signature-area');
 
             let signaturesHtml = '';
+            let savedSigs = [];
             signatureItems.forEach(item => {
-                const id = item.id.split('-')[2];
-                const title = document.getElementById(`signature-title-${id}`).value;
-                const name = document.getElementById(`signature-name-${id}`).value;
+                const parts = item.id.split('-');
+                if (parts.length >= 3) {
+                    const id = parts[2];
+                    const titleEl = document.getElementById(`signature-title-${id}`);
+                    const nameEl = document.getElementById(`signature-name-${id}`);
 
-                signaturesHtml += `<p>${title} ${name}</p><p>(Signature)</p>`;
+                    if (titleEl && nameEl) {
+                        signaturesHtml += `
+                            <div style="margin-bottom: 30px;">
+                                <p style="font-weight: bold; font-size: 14px; margin-bottom: 2px;">${titleEl.value} ${nameEl.value}</p>
+                                <p style="font-size: 11px; font-style: italic; margin-top: 0;">(Signature)</p>
+                            </div>
+                        `;
+                        savedSigs.push({ title: titleEl.value, name: nameEl.value });
+                    }
+                }
             });
 
-            signatureArea.innerHTML = signaturesHtml;
+            if (signatureArea) {
+                signatureArea.innerHTML = signaturesHtml;
+            }
+
+            // Save to localStorage whenever signatures are updated
+            if (data.storageKey) {
+                localStorage.setItem(`EIS_attendance_sigs_${data.storageKey}`, JSON.stringify(savedSigs));
+            }
         }
     }
 
