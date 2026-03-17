@@ -2642,7 +2642,7 @@ ${uidContent}
 
 <div class="form-section-title" style="margin-top:20px;">Permission History</div>
 <div id="student-requests-loader" style="text-align:center; padding:20px; opacity:0.6;">
-    <i class="fas fa-circle-notch fa-spin"></i> Loading requests...
+    <i class="fa-solid fa-circle-notch fa-spin"></i> Loading requests...
 </div>
 <div id="student-requests-list"></div>
 `;
@@ -2669,7 +2669,7 @@ ${uidContent}
                 // Admin note logic
                 let noteHtml = '';
                 if (req.adminNotes) {
-                    noteHtml = `<div class="req-note"><i class="fas fa-reply" style="margin-right:5px; opacity:0.6;"></i> <strong>Reply:</strong> ${escapeHtml(req.adminNotes)}</div>`;
+                    noteHtml = `<div class="req-note"><i class="fa-solid fa-reply" style="margin-right:5px; opacity:0.6;"></i> <strong>Reply:</strong> ${escapeHtml(req.adminNotes)}</div>`;
                 } else if (req.reason) {
                     noteHtml = `<div class="req-note" style="font-style:italic; opacity:0.8;">"${escapeHtml(req.reason)}"</div>`;
                 }
@@ -2681,8 +2681,8 @@ ${uidContent}
                 <div class="req-status-pill">${escapeHtml(req.status)}</div>
             </div>
             <div class="req-details">
-                <span><i class="far fa-calendar"></i> ${escapeHtml(req.absenceDate)}</span>
-                <span><i class="far fa-clock"></i> ${escapeHtml(req.hours)}</span>
+                <span><i class="fa-regular fa-calendar"></i> ${escapeHtml(req.absenceDate)}</span>
+                <span><i class="fa-regular fa-clock"></i> ${escapeHtml(req.hours)}</span>
             </div>
             ${noteHtml}
         </div>`;
@@ -2694,7 +2694,7 @@ ${uidContent}
     } catch (err) {
         const loader = document.getElementById('student-requests-loader');
         if (loader) {
-            loader.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> Failed to load requests.</span>`;
+            loader.innerHTML = `<span style="color:var(--danger-color)"><i class="fa-solid fa-exclamation-circle"></i> Failed to load requests.</span>`;
         }
     }
 }
@@ -8445,11 +8445,11 @@ function showAddLogEntryDialog() {
     studentList.sort((a, b) => a.name.localeCompare(b.name));
 
     dialog.innerHTML = `
-    <h3 class="dialog-title"><i class="fas fa-clock"></i> Add Manual Log</h3>
+    <h3 class="dialog-title"><i class="fa-solid fa-clock"></i> Add Manual Log</h3>
     <div class="dialog-content">
         
         <div class="form-group" style="margin-bottom:0;">
-            <label class="dialog-label-fixed"><i class="fas fa-search"></i> Search</label>
+            <label class="dialog-label-fixed"><i class="fa-solid fa-search"></i> Search</label>
             <input type="text" id="manual-name-search" class="form-control" placeholder="Type name or UID..." autocomplete="off">
         </div>
 
