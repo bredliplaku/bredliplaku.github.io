@@ -14,10 +14,34 @@ const firebaseApp = firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Optional: Handle background messages
+// Handle background messages (FCM shows the notification automatically — don't call showNotification here)
 messaging.onBackgroundMessage(function (payload) {
-  console.log('[firebase-messaging-sw.js] Received background message natively by FCM ', payload);
-  // FCM automatically displays a native notification when the app is in the background 
-  // because the payload contains a 'notification' object.
-  // We do not need to call self.registration.showNotification here, or it will duplicate!
+  console.log('[firebase-messaging-sw.js] Received background message ', payload);
+});
+
+// Handle notification action button clicks
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close(); // Always close the notification first
+
+  const action = event.action;
+  const url = (event.notification.data && event.notification.data.url)
+    ? event.notification.data.url
+    : '/';
+
+  // Dismiss / close actions: close only, no navigation
+  if (action === 'close' || action === 'dismiss') return;
+
+  // View action or clicking the notification body: open the URL
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
+      // If the URL is already open, focus it
+      for (var i = 0; i < clientList.length; i++) {
+        if (clientList[i].url === url && 'focus' in clientList[i]) {
+          return clientList[i].focus();
+        }
+      }
+      // Otherwise open a new tab
+      if (clients.openWindow) return clients.openWindow(url);
+    })
+  );
 });

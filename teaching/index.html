@@ -4928,7 +4928,7 @@
             }
         }
 
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbyUtIKzpfzMLO193uMpl9EJy6-BOQMChoFngNFmbh4YFD71kUhcZSzzGkL_2arTliT1Iw/exec';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzxTguH8Xz19mshH_WNJMOc82wotNUPc__vegFRCNMsnsII6FfivEZrFGxIFbMTCD-SPw/exec';
 
         async function fetchPublicSheetData(sheetName, range) {
             try {
@@ -6105,28 +6105,50 @@
             swipeables.forEach(card => {
                 let startX = 0;
                 let currentX = 0;
+                let startY = 0;
                 let isDragging = false;
                 let hasMoved = false;
+                let intentLocked = false;   // true once we decide horizontal or vertical
+                let isHorizontal = false;   // true = horizontal swipe intent, false = vertical scroll
                 const row = card.closest('.announcement-row');
                 const annId = row.id.replace('ann-row-', '');
 
-                const handleStart = (clientX) => {
+                const handleStart = (clientX, clientY) => {
                     startX = clientX;
+                    startY = clientY;
                     isDragging = true;
                     hasMoved = false;
-                    card.style.transition = 'none'; // Disable transition during drag for 1:1 finger tracking
+                    intentLocked = false;
+                    isHorizontal = false;
+                    card.style.transition = 'none';
                 };
 
-                const handleMove = (clientX, e) => {
+                const handleMove = (clientX, clientY, e) => {
                     if (!isDragging) return;
                     currentX = clientX;
                     const diffX = currentX - startX;
+                    const diffY = clientY - startY;
 
-                    // Require at least 5px of movement before considering it a drag vs a click
+                    // On first significant move, determine gesture intent
+                    if (!intentLocked && (Math.abs(diffX) > 4 || Math.abs(diffY) > 4)) {
+                        intentLocked = true;
+                        isHorizontal = Math.abs(diffX) >= Math.abs(diffY);
+                    }
+
+                    // If intent is vertical (scroll), release control immediately
+                    if (intentLocked && !isHorizontal) {
+                        isDragging = false;
+                        card.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                        card.style.transform = '';
+                        card.style.opacity = '';
+                        return;
+                    }
+
+                    // Require at least 5px of horizontal movement before considering it a drag vs a click
                     if (Math.abs(diffX) > 5) {
                         hasMoved = true;
                         card.classList.add('is-dragging');
-                        if (e && e.cancelable) e.preventDefault(); // Prevent text selection/scrolling while dragging
+                        if (e && e.cancelable) e.preventDefault(); // Prevent scroll while dragging horizontally
                     }
 
                     if (!hasMoved) return;
@@ -6138,7 +6160,6 @@
                         card.style.transform = `translateX(${diffX}px)`;
                         card.style.opacity = Math.max(0, 1 - (Math.abs(diffX) / triggerThreshold));
                     } else if (diffX > 0) {
-                        // Elastic comeback resistance moving right: asymptotes towards max 100px stretch
                         const elasticStretch = (1 - Math.exp(-diffX / 150)) * 100;
                         card.style.transform = `translateX(${elasticStretch}px)`;
                     }
@@ -6172,13 +6193,13 @@
                 };
 
                 // Touch Events
-                card.addEventListener('touchstart', (e) => handleStart(e.touches[0].clientX), { passive: true });
-                card.addEventListener('touchmove', (e) => handleMove(e.touches[0].clientX, e), { passive: false });
+                card.addEventListener('touchstart', (e) => handleStart(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+                card.addEventListener('touchmove', (e) => handleMove(e.touches[0].clientX, e.touches[0].clientY, e), { passive: false });
                 card.addEventListener('touchend', handleEnd);
                 card.addEventListener('touchcancel', handleEnd);
 
                 // Mouse Events
-                const onMouseMove = (e) => handleMove(e.clientX, e);
+                const onMouseMove = (e) => handleMove(e.clientX, e.clientY, e);
                 const onMouseUp = () => {
                     handleEnd();
                     window.removeEventListener('mousemove', onMouseMove);
@@ -6186,8 +6207,8 @@
                 };
 
                 card.addEventListener('mousedown', (e) => {
-                    if (e.target.closest('button') || e.target.closest('a')) return; // Ignore grabs on buttons/links
-                    handleStart(e.clientX);
+                    if (e.target.closest('button') || e.target.closest('a')) return;
+                    handleStart(e.clientX, e.clientY);
                     window.addEventListener('mousemove', onMouseMove);
                     window.addEventListener('mouseup', onMouseUp);
                 });
