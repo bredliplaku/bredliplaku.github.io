@@ -21,27 +21,51 @@ messaging.onBackgroundMessage(function (payload) {
 
 // Handle notification action button clicks
 self.addEventListener('notificationclick', function (event) {
-  event.notification.close(); // Always close the notification first
+  event.notification.close();
 
   const action = event.action;
-  const url = (event.notification.data && event.notification.data.url)
-    ? event.notification.data.url
-    : '/';
 
-  // Dismiss / close actions: close only, no navigation
-  if (action === 'close' || action === 'dismiss') return;
+  // FCM is wildly inconsistent with where it puts data depending on the OS and browser.
+  // We agressive-search for the default URL in all known locations.
+  let fcmData = {};
+  if (event.notification.data) {
+    if (event.notification.data.FCM_MSG && event.notification.data.FCM_MSG.data) {
+      fcmData = event.notification.data.FCM_MSG.data;
+    } else {
+      fcmData = event.notification.data;
+    }
+  }
 
-  // View action or clicking the notification body: open the URL
+  // 1. Try FCM_MSG's explicit fcmOptions.link (most reliable for body clicks)
+  let defaultUrl = '/';
+  if (event.notification.data && event.notification.data.FCM_MSG && event.notification.data.FCM_MSG.notification && event.notification.data.FCM_MSG.notification.fcmOptions) {
+    defaultUrl = event.notification.data.FCM_MSG.notification.fcmOptions.link || defaultUrl;
+  }
+  // 2. Try click_action fallback
+  if (defaultUrl === '/' && event.notification.click_action) defaultUrl = event.notification.click_action;
+  // 3. Try our custom injected data fields
+  if (defaultUrl === '/') defaultUrl = fcmData.url || fcmData.customUrl || fcmData.click_action || '/';
+
+  // Parse stored action URL map
+  let actionUrls = {};
+
+  if (fcmData.actionUrls) {
+    try { actionUrls = JSON.parse(fcmData.actionUrls); }
+    catch (e) { console.error('Error parsing action URLs', e); }
+  }
+
+  // Resolve destination
+  let target = actionUrls[action];
+
+  if (target === 'close' || target === 'dismiss') return;
+  if (!target || !target.startsWith('http')) target = defaultUrl;
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
-      // If the URL is already open, focus it
-      for (var i = 0; i < clientList.length; i++) {
-        if (clientList[i].url === url && 'focus' in clientList[i]) {
-          return clientList[i].focus();
-        }
+      for (let i = 0; i < clientList.length; i++) {
+        if (clientList[i].url === target && 'focus' in clientList[i]) return clientList[i].focus();
       }
-      // Otherwise open a new tab
-      if (clients.openWindow) return clients.openWindow(url);
+      if (clients.openWindow) return clients.openWindow(target);
     })
   );
 });
