@@ -341,16 +341,37 @@
             width: 100%;
         }
 
-        .announcements-collapsed {
+        .announcement-row-group {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 2px;
             overflow-x: visible;
-            overflow-y: clip;
-            /* clips height for animation but allows horizontal swiping */
             padding: 4px;
             margin: -4px -4px 0 -4px;
+        }
+
+        .announcements-collapsed {
+            overflow-y: clip;
+            /* clips height for animation but allows horizontal swiping */
             transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+        }
+
+        .announcement-row-group .announcement-row.first-in-col .announcement-card {
+            border-bottom-left-radius: 4px;
+            border-bottom-right-radius: 4px;
+        }
+
+        .announcement-row-group .announcement-row.last-in-col .announcement-card {
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        }
+
+        .announcement-row-group .announcement-row.middle-in-col .announcement-card {
+            border-radius: 4px;
+        }
+
+        .announcement-row-group .announcement-row.only-in-col .announcement-card {
+            border-radius: 12px;
         }
 
         .show-more-announcements {
@@ -397,7 +418,7 @@
             display: flex;
             flex-direction: row;
             min-width: 0;
-            transition: box-shadow 0.2s ease, transform 0.2s ease;
+            transition: box-shadow 0.2s ease, transform 0.2s ease, border-radius 0.3s ease;
             overflow: hidden;
             cursor: default;
             user-select: none;
@@ -6102,6 +6123,26 @@
             }
         }
 
+        function updateAnnouncementCorners() {
+            document.querySelectorAll('.announcement-row-group').forEach(group => {
+                const rows = Array.from(group.querySelectorAll('.announcement-row:not(.swipe-dismissing)'));
+
+                group.querySelectorAll('.announcement-row').forEach(row => {
+                    row.classList.remove('first-in-col', 'last-in-col', 'middle-in-col', 'only-in-col');
+                });
+
+                if (rows.length === 1) {
+                    rows[0].classList.add('only-in-col');
+                } else if (rows.length > 1) {
+                    rows.forEach((row, index) => {
+                        if (index === 0) row.classList.add('first-in-col');
+                        else if (index === rows.length - 1) row.classList.add('last-in-col');
+                        else row.classList.add('middle-in-col');
+                    });
+                }
+            });
+        }
+
         function dismissAnnouncement(id, cardElement) {
             const dismissed = getDismissedAnnouncements();
             if (!dismissed.includes(id)) {
@@ -6110,7 +6151,13 @@
             }
 
             if (cardElement) {
-                cardElement.classList.add('swipe-dismissing');
+                // If they passed the inner card instead of the row, find it
+                const targetRow = cardElement.classList.contains('announcement-row') ? cardElement : cardElement.closest('.announcement-row');
+                if (targetRow) targetRow.classList.add('swipe-dismissing');
+                else cardElement.classList.add('swipe-dismissing');
+
+                updateAnnouncementCorners();
+
                 setTimeout(() => {
                     // Force a re-render of announcements from the cached data source
                     if (window.currentCourseData && window.currentCourseData.announcements) {
@@ -6146,7 +6193,7 @@
                     collapsedDiv.style.maxHeight = '0px';
                     collapsedDiv.style.opacity = '0';
                     collapsedDiv.dataset.expanded = 'false';
-                    toggleBtn.innerHTML = '<i class="fa-solid fa-chevron-down"></i> Show more';
+                    toggleBtn.innerHTML = '<i class="fa-solid fa-chevron-down"></i> Show older';
 
                     // Wait for the CSS transition to finish before hiding it structurally
                     setTimeout(() => {
@@ -6164,7 +6211,7 @@
                     collapsedDiv.style.maxHeight = collapsedDiv.scrollHeight + 'px';
                     collapsedDiv.style.opacity = '1';
                     collapsedDiv.dataset.expanded = 'true';
-                    toggleBtn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Show less';
+                    toggleBtn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Hide older';
                 }
             }
         }
@@ -6282,27 +6329,42 @@
 
             // Render highlighted announcements (SHOW) normally
             const initialAnnouncements = visibleAnnouncements.filter(ann => ann.visibility === 'SHOW');
+            const collapsedAnnouncements = visibleAnnouncements.filter(ann => ann.visibility !== 'SHOW');
 
-            if (initialAnnouncements.length === 0) {
-                // If there are no highlighted announcements, hide everything
+            if (initialAnnouncements.length === 0 && collapsedAnnouncements.length === 0) {
+                // If there are no announcements at all, hide everything
                 banner.style.display = 'none';
                 banner.innerHTML = '';
                 return;
             }
 
-            initialAnnouncements.forEach(ann => {
-                html += renderCardHtml(ann);
-            });
+            if (initialAnnouncements.length === 0 && collapsedAnnouncements.length > 0) {
+                html += `
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 15px; color: #757575; font-size: 0.9em; flex-wrap: wrap;">
+                    <span style="user-select: none; -webkit-user-select: none;"><i class="fa-solid fa-bullhorn"></i> There are no new announcements...</span>
+                    <button id="announcements-toggle-btn" class="show-more-announcements" onclick="toggleAnnouncements()" style="margin: 0 !important; font-size: 1em;">
+                        <i class="fa-solid fa-chevron-down"></i> Show older
+                    </button>
+                </div>`;
+            } else {
+                html += `<div id="announcements-active-view" class="announcement-row-group">`;
+                initialAnnouncements.forEach(ann => {
+                    html += renderCardHtml(ann);
+                });
+                html += `</div>`;
+            }
 
             // Render the rest in a collapsible container if they exist
-            const collapsedAnnouncements = visibleAnnouncements.filter(ann => ann.visibility !== 'SHOW');
             if (collapsedAnnouncements.length > 0) {
-                html += `<div id="announcements-collapsed-view" class="announcements-collapsed" style="max-height: 0px; opacity: 0; display: none;">`;
+                html += `<div id="announcements-collapsed-view" class="announcements-collapsed announcement-row-group" style="max-height: 0px; opacity: 0; display: none;">`;
                 collapsedAnnouncements.forEach(ann => {
                     html += renderCardHtml(ann);
                 });
                 html += `</div>`;
-                html += `<button id="announcements-toggle-btn" class="show-more-announcements" onclick="toggleAnnouncements()"><i class="fa-solid fa-chevron-down"></i> Show more</button>`;
+
+                if (initialAnnouncements.length > 0) {
+                    html += `<button id="announcements-toggle-btn" class="show-more-announcements" onclick="toggleAnnouncements()"><i class="fa-solid fa-chevron-down"></i> Show older</button>`;
+                }
             }
 
             // Preserve expanded state before re-rendering
@@ -6311,6 +6373,8 @@
 
             banner.innerHTML = html;
             banner.style.display = 'flex';
+
+            updateAnnouncementCorners();
 
             // Restore expanded state instantly if it was open before dismissal
             if (wasExpanded) {
@@ -6321,7 +6385,7 @@
                     newCollapsedDiv.style.maxHeight = 'none'; // skip animation limitation for instant render
                     newCollapsedDiv.style.opacity = '1';
                     newCollapsedDiv.dataset.expanded = 'true';
-                    newToggleBtn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Show less';
+                    newToggleBtn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Hide older';
 
                     // Small delay then calculate absolute height bounds so future toggles work correctly
                     setTimeout(() => {
@@ -6345,6 +6409,19 @@
                 const row = card.closest('.announcement-row');
                 const annId = row.id.replace('ann-row-', '');
 
+                const getSiblings = () => {
+                    const group = row.closest('.announcement-row-group');
+                    if (!group) return [];
+                    const siblings = [];
+                    if (row.previousElementSibling && row.previousElementSibling.classList.contains('announcement-row')) {
+                        siblings.push(row.previousElementSibling.querySelector('.announcement-card'));
+                    }
+                    if (row.nextElementSibling && row.nextElementSibling.classList.contains('announcement-row')) {
+                        siblings.push(row.nextElementSibling.querySelector('.announcement-card'));
+                    }
+                    return siblings.filter(s => s); // remove nulls attached to elements without cards
+                };
+
                 const handleStart = (clientX, clientY) => {
                     startX = clientX;
                     startY = clientY;
@@ -6353,6 +6430,10 @@
                     intentLocked = false;
                     isHorizontal = false;
                     card.style.transition = 'none';
+
+                    getSiblings().forEach(sibling => {
+                        sibling.style.transition = 'none';
+                    });
                 };
 
                 const handleMove = (clientX, clientY, e) => {
@@ -6370,9 +6451,14 @@
                     // If intent is vertical (scroll), release control immediately
                     if (intentLocked && !isHorizontal) {
                         isDragging = false;
-                        card.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                        card.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, border-radius 0.3s ease';
                         card.style.transform = '';
                         card.style.opacity = '';
+
+                        getSiblings().forEach(sibling => {
+                            sibling.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, border-radius 0.3s ease';
+                            sibling.style.transform = '';
+                        });
                         return;
                     }
 
@@ -6387,14 +6473,20 @@
 
                     // Swipe left to dismiss (negative diffX)
                     // Swipe right bounces back (positive diffX)
+                    let targetX = diffX;
                     if (diffX < 0) {
                         const triggerThreshold = Math.min(250, window.innerWidth * 0.4);
                         card.style.transform = `translateX(${diffX}px)`;
                         card.style.opacity = Math.max(0, 1 - (Math.abs(diffX) / triggerThreshold));
                     } else if (diffX > 0) {
                         const elasticStretch = (1 - Math.exp(-diffX / 150)) * 100;
+                        targetX = elasticStretch;
                         card.style.transform = `translateX(${elasticStretch}px)`;
                     }
+
+                    getSiblings().forEach(sibling => {
+                        sibling.style.transform = `translateX(${targetX * 0.04}px)`;
+                    });
                 };
 
                 const handleEnd = () => {
@@ -6404,14 +6496,21 @@
 
                     if (!hasMoved) {
                         // It was just a click, Re-enable smooth transitions and return
-                        card.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                        card.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, border-radius 0.3s ease';
+                        getSiblings().forEach(sibling => {
+                            sibling.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, border-radius 0.3s ease';
+                        });
                         return;
                     }
 
                     const diffX = currentX - startX;
 
                     // Re-enable smooth transitions
-                    card.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                    card.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, border-radius 0.3s ease';
+                    getSiblings().forEach(sibling => {
+                        sibling.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, border-radius 0.3s ease';
+                        sibling.style.transform = ''; // swap sibling back immediately
+                    });
 
                     const triggerThreshold = Math.min(250, window.innerWidth * 0.4);
 
