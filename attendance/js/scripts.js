@@ -195,24 +195,6 @@ function handleOneTapResponse(response) {
             prompt: 'none',
             login_hint: responsePayload.email
         });
-        
-        // Fallback: If verification hangs (e.g., third-party cookies blocked silently)
-        setTimeout(() => {
-            if (loginBtn && loginBtn.innerHTML.includes('Verifying')) {
-                console.warn("One Tap verification timed out. Falling back to manual consent.");
-                loginBtn.disabled = false;
-                loginBtn.innerHTML = loginBtn.dataset.originalText || '<i class="fa-brands fa-google"></i> Sign in';
-                loginBtn.style.backgroundColor = "";
-                loginBtn.style.cursor = "pointer";
-                
-                const newBtn = loginBtn.cloneNode(true);
-                loginBtn.parentNode.replaceChild(newBtn, loginBtn);
-                newBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    tokenClient.requestAccessToken({ prompt: 'consent' });
-                });
-            }
-        }, 4000);
     } else {
         console.error("Token Client not initialized.");
         // Reset UI if GAPI failed
@@ -3892,11 +3874,6 @@ async function initGoogleApi() {
             client_id: CLIENT_ID,
             scope: SCOPES,
             callback: handleTokenResponse, // This now handles the silent fail gracefully
-            error_callback: (err) => {
-                console.error("Token Client Error (Popup Blocked, etc.):", err);
-                // Pass an artificial error to handleTokenResponse to clear the Verifying state and show Grant Permissions
-                handleTokenResponse({ error: err.type || 'popup_blocked' });
-            }
         });
 
         // Try to restore session from LocalStorage first
@@ -4176,8 +4153,8 @@ function handleTokenResponse(resp) {
             // Important: We change the button to indicate action is needed
             loginBtn.disabled = false; // Re-enable button
             loginBtn.style.cursor = "pointer";
-            loginBtn.innerHTML = loginBtn.dataset.originalText || '<i class="fa-brands fa-google"></i> Sign in';
-            loginBtn.style.backgroundColor = "";
+            loginBtn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Grant Permissions';
+            loginBtn.style.backgroundColor = "#fb8c00"; // Orange color
 
             // Ensure the click handler uses the STANDARD prompt (popup)
             // We clone to strip old listeners and add a fresh one
