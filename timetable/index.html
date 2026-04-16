@@ -3097,34 +3097,49 @@
         }
 
         async function loadAllData() {
+            let cachedSettingsObj = null;
+            let cachedCategoriesObj = null;
             let hasCache = false;
 
             try {
-                const cachedSettings = localStorage.getItem('timetable_settings');
-                const cachedCategories = localStorage.getItem('timetable_categories');
+                const cachedSettingsStr = localStorage.getItem('timetable_settings');
+                const cachedCategoriesStr = localStorage.getItem('timetable_categories');
 
-                if (cachedSettings && cachedCategories) {
+                if (cachedSettingsStr && cachedCategoriesStr) {
                     hasCache = true;
                     // Render from cache immediately
-                    const settings = JSON.parse(cachedSettings);
-                    renderSemesterInfo(settings);
-                    renderCourseInfo(settings.info_items);
-                    renderActionButtons(settings.action_buttons);
+                    cachedSettingsObj = JSON.parse(cachedSettingsStr);
+                    cachedCategoriesObj = JSON.parse(cachedCategoriesStr);
 
-                    const categoriesData = JSON.parse(cachedCategories);
-                    await renderDynamicCategories(settings.category_map, categoriesData, false);
+                    renderSemesterInfo(cachedSettingsObj);
+                    renderCourseInfo(cachedSettingsObj.info_items);
+                    renderActionButtons(cachedSettingsObj.action_buttons);
+
+                    await renderDynamicCategories(cachedSettingsObj.category_map, cachedCategoriesObj, true);
 
                     document.body.classList.remove('is-loading');
-                    clearInterval(textInterval);
+                    if (textInterval) clearInterval(textInterval);
                 }
             } catch (error) {
                 console.error('Cache read error:', error);
             }
 
-            // Always fetch fresh data in background
+            // Fetch fresh data in background
             try {
-                // 1. Fetch all settings data first
-                const settings = await parseSettings();
+                let settingsPromise = parseSettings();
+                let categoriesPromise = null;
+
+                // Try to fetch categories early if we have cached map ranges
+                if (cachedSettingsObj && cachedSettingsObj.category_map) {
+                    const sheetNames = Object.keys(cachedSettingsObj.category_map);
+                    const ranges = sheetNames.map(name => name === 'Lecturers' ? `${name}!A2:B50` : `${name}!A2:C50`);
+                    if (ranges.length > 0) {
+                        categoriesPromise = fetchBatchTimetableData(ranges);
+                    }
+                }
+
+                // 1. Await fresh settings 
+                const settings = await settingsPromise;
                 localStorage.setItem('timetable_settings', JSON.stringify(settings));
 
                 // 2. Use settings to render the UI
@@ -3132,25 +3147,34 @@
                 renderCourseInfo(settings.info_items);
                 renderActionButtons(settings.action_buttons);
 
-                // 3. Use the category map from settings to build the timetable section
+                // 3. Setup category map ranges if we haven't already fetching them
                 const sheetNames = Object.keys(settings.category_map);
                 const ranges = sheetNames.map(name => name === 'Lecturers' ? `${name}!A2:B50` : `${name}!A2:C50`);
 
-                if (ranges.length > 0) {
-                    const categoriesData = await fetchBatchTimetableData(ranges);
-                    localStorage.setItem('timetable_categories', JSON.stringify(categoriesData));
-                    await renderDynamicCategories(settings.category_map, categoriesData, hasCache);
+                if (ranges.length > 0 && !categoriesPromise) {
+                    categoriesPromise = fetchBatchTimetableData(ranges);
                 }
 
                 if (!hasCache) {
+                    // Render the empty category containers (with spinners inside) instantly!
+                    await renderDynamicCategories(settings.category_map, null, false);
+                    
+                    // The core UI is now built! Hide the full-page skeleton loader NOW so the user sees the spinners.
                     document.body.classList.remove('is-loading');
-                    clearInterval(textInterval);
+                    if (textInterval) clearInterval(textInterval);
                 }
+
+                if (categoriesPromise) {
+                    const categoriesData = await categoriesPromise;
+                    localStorage.setItem('timetable_categories', JSON.stringify(categoriesData));
+                    await renderDynamicCategories(settings.category_map, categoriesData, false);
+                }
+
             } catch (error) {
                 console.error('Error loading fresh data:', error);
                 if (!hasCache) {
                     document.body.classList.remove('is-loading');
-                    clearInterval(textInterval);
+                    if (textInterval) clearInterval(textInterval);
                 }
             }
         }
@@ -3169,27 +3193,7 @@
             }
         }
 
-        async function loadAllData() {
-            try {
-                // 1. Fetch all settings data first
-                const settings = await parseSettings();
 
-                // 2. Use settings to render the UI
-                renderSemesterInfo(settings);
-                renderCourseInfo(settings.info_items);
-                renderActionButtons(settings.action_buttons);
-
-                // 3. Use the category map from settings to build the timetable section
-                await renderDynamicCategories(settings.category_map);
-
-                document.body.classList.remove('is-loading');
-                clearInterval(textInterval);
-            } catch (error) {
-                console.error('Error loading data:', error);
-                document.body.classList.remove('is-loading');
-                clearInterval(textInterval);
-            }
-        }
 
         // Renders dynamic info items
         function renderCourseInfo(infoItems) {
@@ -3223,15 +3227,16 @@
         }
 
         // Builds category buttons and fetches timetable data based on the map
-        async function renderDynamicCategories(categoryMap) {
+        async function renderDynamicCategories(categoryMap, categoriesData, isCache) {
             const mainContainer = document.getElementById('main-container');
             const sheetNames = Object.keys(categoryMap);
             if (!sheetNames.length || !mainContainer) return;
 
             let buttonsContainer = document.getElementById('dynamic-course-buttons');
             let contentsWrapper = document.getElementById('dynamic-contents-wrapper');
+            let isInitialBuild = !buttonsContainer;
 
-            if (!buttonsContainer) {
+            if (isInitialBuild) {
                 buttonsContainer = document.createElement('div');
                 buttonsContainer.id = 'dynamic-course-buttons';
                 buttonsContainer.setAttribute('class', 'course-buttons-container');
@@ -3244,7 +3249,7 @@
                 let isFirst = true;
 
                 sheetNames.forEach(sheetName => {
-                    const categoryId = `${sheetName.toLowerCase().replace(/\s+/g, '-')}-content`;
+                    const categoryId = `${sheetName.toLowerCase().replace(/\\s+/g, '-')}-content`;
                     const icon = categoryMap[sheetName];
 
                     const button = document.createElement('button');
@@ -3266,7 +3271,11 @@
                     contentDiv.id = categoryId;
                     contentDiv.setAttribute('class', 'category-content');
                     if (isActive) contentDiv.classList.add('active');
-                    contentDiv.innerHTML = `<div class="course-buttons-container" id="${sheetName}-buttons" style="margin-bottom: 20px;"></div>`;
+                    contentDiv.innerHTML = `<div class="course-buttons-container" id="${sheetName}-buttons" style="margin-bottom: 20px;">
+                        <div style="width: 100%; display: flex; justify-content: center; align-items: center; min-height: 100px;">
+                            <i class="fa-solid fa-circle-notch fa-spin fa-2x" style="color: var(--primary-color); opacity: 0.5;"></i>
+                        </div>
+                    </div>`;
                     contentsWrapper.appendChild(contentDiv);
 
                     isFirst = false;
@@ -3277,50 +3286,64 @@
                     mainContainer.insertBefore(buttonsContainer, form);
                     mainContainer.insertBefore(contentsWrapper, form);
                 }
+                
+                setupCategoryButtons();
             }
 
-            // Fetch data for all visible categories
-            const ranges = sheetNames.map(name => name === 'Lecturers' ? `${name}!A2:B50` : `${name}!A2:C50`);
+            if (categoriesData) {
+                try {
+                    const data = categoriesData;
+                    const valueRanges = data.valueRanges || [];
 
-            try {
-                const data = await fetchBatchTimetableData(ranges);
-                const valueRanges = data.valueRanges || [];
+                    valueRanges.forEach((rangeResult, index) => {
+                        const sheetName = sheetNames[index];
+                        const rows = rangeResult.values || [];
+                        const type = sheetName === 'Lecturers' ? 'lecturer' : 'timetable';
+                        populateTimetableButtons(`${sheetName}-buttons`, rows, type);
+                    });
 
-                valueRanges.forEach((rangeResult, index) => {
-                    const sheetName = sheetNames[index];
-                    const rows = rangeResult.values || [];
-                    const type = sheetName === 'Lecturers' ? 'lecturer' : 'timetable';
-                    populateTimetableButtons(`${sheetName}-buttons`, rows, type);
-                });
+                    if (isInitialBuild) {
+                        initializeScrollFaders();
 
-                // Initialize UI elements now that they exist in the DOM
-                setupCategoryButtons();
-                initializeScrollFaders();
-
-                // Restore active button state
-                const savedButtonState = localStorage.getItem('timetable_active_button');
-                if (savedButtonState) {
-                    try {
-                        const parsed = JSON.parse(savedButtonState);
-                        let targetBtn = null;
-                        if (parsed.type === 'lecturer' && parsed.id) {
-                            targetBtn = document.querySelector(`.course-button.secondary-action[data-lecturer-id="${parsed.id}"]`);
-                        } else if (parsed.type === 'timetable' && parsed.tId && parsed.cId) {
-                            targetBtn = document.querySelector(`.course-button.secondary-action[data-t-id="${parsed.tId}"][data-c-id="${parsed.cId}"]`);
+                        // Restore active button state
+                        const savedButtonState = localStorage.getItem('timetable_active_button');
+                        if (savedButtonState) {
+                            try {
+                                const parsed = JSON.parse(savedButtonState);
+                                let targetBtn = null;
+                                if (parsed.type === 'lecturer' && parsed.id) {
+                                    targetBtn = document.querySelector(`.course-button.secondary-action[data-lecturer-id="${parsed.id}"]`);
+                                } else if (parsed.type === 'timetable' && parsed.tId && parsed.cId) {
+                                    targetBtn = document.querySelector(`.course-button.secondary-action[data-t-id="${parsed.tId}"][data-c-id="${parsed.cId}"]`);
+                                }
+                                // Only automatically click if we don't already have an active item running
+                                if (targetBtn && !currentTimetableId && !currentLecturerKey) {
+                                    targetBtn.click();
+                                    setTimeout(() => {
+                                        targetBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                                    }, 50);
+                                } else if (targetBtn) {
+                                    highlightActiveButton(targetBtn);
+                                }
+                            } catch (e) {
+                                console.error('Failed to restore active button from cache');
+                            }
                         }
-                        if (targetBtn) {
-                            targetBtn.click();
-                            setTimeout(() => {
-                                targetBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-                            }, 50);
+                    } else {
+                        initializeScrollFaders();
+                        
+                        if (currentLecturerKey) {
+                            const targetBtn = document.querySelector(`.course-button.secondary-action[data-lecturer-id="${currentLecturerKey}"]`);
+                            if (targetBtn) highlightActiveButton(targetBtn);
+                        } else if (currentTimetableId && currentClassId) {
+                            const targetBtn = document.querySelector(`.course-button.secondary-action[data-t-id="${currentTimetableId}"][data-c-id="${currentClassId}"]`);
+                            if (targetBtn) highlightActiveButton(targetBtn);
                         }
-                    } catch (e) {
-                        console.error('Failed to restore active button from cache');
                     }
-                }
 
-            } catch (error) {
-                console.error("Error fetching timetable data:", error);
+                } catch (error) {
+                    console.error("Error populating timetable data:", error);
+                }
             }
         }
 
@@ -3379,6 +3402,12 @@
         function populateTimetableButtons(containerId, data, type) {
             const container = document.getElementById(containerId);
             if (!container) return;
+
+            // Only clear and re-render if data has changed to prevent DOM flickering
+            const currentHash = JSON.stringify(data || []);
+            if (container.dataset.hash === currentHash) return;
+            container.dataset.hash = currentHash;
+
             container.innerHTML = '';
 
             (data || []).filter(row => row && row[0]).forEach(item => {
