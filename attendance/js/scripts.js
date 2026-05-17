@@ -5,7 +5,7 @@ let adminCourses = [];
 const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
 const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
 const LOGS_STORAGE_KEY = 'attendance_logs';
-const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxF3uBPUdZ5j5ByZa2qAvdBQWS8x8xnlsq3TXaYxESp97HufjdqWm9UoW84uQ-9gyMLOw/exec';
+const BRAIN_URL = 'https://script.google.com/macros/s/AKfycby-hX_e4gGfoz43eaN0MiexalGktxf3hlEh19MVMXnRByr2fSRtGp8Ic4qA9b99gScdPA/exec';
 
 // App state
 let courseData = {};
@@ -43,6 +43,7 @@ let initialPullDone = false;
 let guestCourse = null; // Track the course global admin is "visiting" but not officially admin of
 let scanClockInterval = null;
 let globalNotificationCount = 0;
+let myNotificationCount = 0;
 
 // Auto syncing
 let autoSyncInterval = null;
@@ -68,6 +69,8 @@ let lastNotificationKey = '';
 let lastNotificationTime = 0;
 let isBulkMode = false;
 let selectedLogIds = new Set(); // Stores IDs of selected rows
+let hideOtherCourseAbsences = true;
+let cachedAbsences = [];
 let lastCheckedLogId = null; // For Shift+Click logic
 let activeSessionCategory = null;
 let activeSessionGroup = null;
@@ -883,6 +886,36 @@ function setupAbsenceHistory() {
     }
 }
 
+function toggleAbsenceFilter() {
+    hideOtherCourseAbsences = !hideOtherCourseAbsences;
+    syncAbsenceFilterBtn();
+    const tbody = document.getElementById('absences-tbody');
+    if (tbody) {
+        tbody.style.transition = 'opacity 0.18s ease';
+        tbody.style.opacity = '0';
+        setTimeout(() => {
+            renderAbsencesTable(cachedAbsences);
+            tbody.style.opacity = '1';
+        }, 180);
+    } else {
+        renderAbsencesTable(cachedAbsences);
+    }
+}
+
+function syncAbsenceFilterBtn() {
+    const btn = document.getElementById('absence-filter-btn');
+    if (!btn) return;
+    if (hideOtherCourseAbsences) {
+        btn.innerHTML = '<i class="fa-solid fa-filter"></i> My courses';
+        btn.className = 'btn-sm btn-blue';
+        btn.title = 'Showing my courses only';
+    } else {
+        btn.innerHTML = '<i class="fa-solid fa-filter-circle-xmark"></i> All courses';
+        btn.className = 'btn-sm';
+        btn.title = 'Showing all courses';
+    }
+}
+
 
 async function showAbsenceHistoryDialog() {
     openDialogMode();
@@ -1145,7 +1178,7 @@ function updateScanClock() {
         </div>`;
 }
 
-function updateAdminDashboardBar(absencesCount, registrationsCount, isLoading = false) {
+function updateAdminDashboardBar(absencesCount, registrationsCount, isLoading = false, myAbsencesCount = absencesCount) {
     const bar = document.getElementById('admin-dashboard-bar');
 
     // 1. Force Clean State if not global admin
@@ -1166,17 +1199,35 @@ function updateAdminDashboardBar(absencesCount, registrationsCount, isLoading = 
         return;
     }
 
+    // Auto-drive filter state based on counts
+    if (isGlobalAdmin && adminCourses.length > 0) {
+        hideOtherCourseAbsences = myAbsencesCount > 0;
+        const filterBtn = document.getElementById('absence-filter-btn');
+        if (filterBtn) {
+            filterBtn.style.display = myAbsencesCount > 0 ? '' : 'none';
+            syncAbsenceFilterBtn();
+        }
+    }
+
     let html = '';
 
     // 2. Generate Chips
     if (absencesCount > 0) {
         const isAbsExpanded = document.getElementById('pending-absences-view')?.classList.contains('expanded') ? 'active' : '';
-        html += `
-        <div class="action-chip has-items ${isAbsExpanded}" id="chip-absences" onclick="toggleAdminView('pending-absences-view', this)">
-            <i class="fa-solid fa-hand-point-up"></i> 
-            <span>Requests for Permission</span>
-            <span class="badge">${absencesCount}</span>
-        </div>`;
+        if (myAbsencesCount > 0) {
+            html += `
+            <div class="action-chip has-items ${isAbsExpanded}" id="chip-absences" onclick="toggleAdminView('pending-absences-view', this)">
+                <i class="fa-solid fa-hand-point-up"></i>
+                <span>Requests for Permission</span>
+                <span class="badge">${myAbsencesCount}</span>
+            </div>`;
+        } else {
+            html += `
+            <div class="action-chip ${isAbsExpanded}" id="chip-absences" onclick="toggleAdminView('pending-absences-view', this)">
+                <i class="fa-solid fa-hand-point-up"></i>
+                <span>Requests for Permission</span>
+            </div>`;
+        }
     }
 
     if (registrationsCount > 0 && isGlobalAdmin) {
@@ -5123,12 +5174,16 @@ async function refreshAdminViews() {
         // Only count registrations if the user is a Global Admin
         const regCount = isGlobalAdmin ? registrations.length : 0;
         const absCount = absences.length;
+        const myAbsCount = (isGlobalAdmin && adminCourses.length > 0)
+            ? absences.filter(r => adminCourses.includes(r.course)).length
+            : absCount;
 
         globalNotificationCount = regCount + absCount;
+        myNotificationCount = regCount + myAbsCount;
         updatePageTitle();
 
         // 3. Update the Bar
-        updateAdminDashboardBar(absCount, registrations.length, false);
+        updateAdminDashboardBar(absCount, registrations.length, false, myAbsCount);
 
         // 4. Automatically collapse views if they are empty
         if (regCount === 0) {
@@ -5166,13 +5221,17 @@ async function silentRefreshAdminViews() {
 
         const regCount = isGlobalAdmin ? registrations.length : 0;
         const absCount = absences.length;
+        const myAbsCount = (isGlobalAdmin && adminCourses.length > 0)
+            ? absences.filter(r => adminCourses.includes(r.course)).length
+            : absCount;
         const newTotal = regCount + absCount;
 
         // Only update UI if counts changed
         if (newTotal !== globalNotificationCount) {
             globalNotificationCount = newTotal;
+            myNotificationCount = regCount + myAbsCount;
             updatePageTitle();
-            updateAdminDashboardBar(absCount, registrations.length, false);
+            updateAdminDashboardBar(absCount, registrations.length, false, myAbsCount);
             renderRegistrationsTable(registrations);
             renderAbsencesTable(absences);
 
@@ -5255,15 +5314,23 @@ function renderRegistrationsTable(registrations) {
 }
 
 function renderAbsencesTable(requests) {
+    cachedAbsences = requests || [];
     const tbody = document.getElementById('absences-tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
 
-    if (!requests || requests.length === 0) return;
+    const isFiltering = isGlobalAdmin && adminCourses.length > 0 && hideOtherCourseAbsences;
+    const displayRequests = isFiltering
+        ? cachedAbsences.filter(r => adminCourses.includes(r.course))
+        : cachedAbsences;
 
-    requests.forEach(req => {
+    if (!displayRequests || displayRequests.length === 0) return;
+
+    displayRequests.forEach(req => {
         const row = document.createElement('tr');
-        row.setAttribute('class', 'clickable-request-row');
+
+        const isOtherCourse = isGlobalAdmin && adminCourses.length > 0 && !adminCourses.includes(req.course);
+        row.setAttribute('class', 'clickable-request-row' + (isOtherCourse ? ' other-admin-course' : ''));
 
         // Add Session to dataset
         row.dataset.requestId = req.requestID;
@@ -5321,7 +5388,8 @@ function attachPermissionRowListeners() {
 
             e.stopPropagation();
             const data = { ...this.dataset };
-            showPermissionDetailsDialog(data);
+            const isOtherCourse = isGlobalAdmin && adminCourses.length > 0 && !adminCourses.includes(data.course);
+            showPermissionDetailsDialog(data, isOtherCourse);
         });
     });
 }
@@ -10224,8 +10292,9 @@ function updatePageTitle() {
     let titlePrefix = '';
 
     // Only show count for admins if there are pending items
-    if (isAdmin && globalNotificationCount > 0) {
-        titlePrefix = `(${globalNotificationCount}) `;
+    const titleCount = (isGlobalAdmin && adminCourses.length > 0) ? myNotificationCount : globalNotificationCount;
+    if (isAdmin && titleCount > 0) {
+        titlePrefix = `(${titleCount}) `;
     }
 
     if (currentCourse && currentCourse !== 'Default') {
