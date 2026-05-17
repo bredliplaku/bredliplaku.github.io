@@ -5,7 +5,7 @@ let adminCourses = [];
 const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
 const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
 const LOGS_STORAGE_KEY = 'attendance_logs';
-const BRAIN_URL = 'https://script.google.com/macros/s/AKfycby-hX_e4gGfoz43eaN0MiexalGktxf3hlEh19MVMXnRByr2fSRtGp8Ic4qA9b99gScdPA/exec';
+const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzhvY1-V912MugWYhdqntFqp_3Kh3VT4CfuL5cG8Wrk3g0Rp4NmzUlKNWhL4ZrD_EeUwQ/exec';
 
 // App state
 let courseData = {};
@@ -1204,7 +1204,7 @@ function updateAdminDashboardBar(absencesCount, registrationsCount, isLoading = 
         hideOtherCourseAbsences = myAbsencesCount > 0;
         const filterBtn = document.getElementById('absence-filter-btn');
         if (filterBtn) {
-            filterBtn.style.display = myAbsencesCount > 0 ? '' : 'none';
+            filterBtn.style.display = absencesCount > myAbsencesCount ? '' : 'none';
             syncAbsenceFilterBtn();
         }
     }
@@ -7633,15 +7633,20 @@ async function loadAndMergeCourseData(courseName) {
                     serverLogs = response;
                 }
             } else {
+                // Students have no local pending writes — use server data as source of truth
+                // to avoid stale admin-fetched logs in localStorage leaking into the student view.
                 serverLogs = await callWebApp('getStudentLogs', { courseName: courseName }, 'POST');
+                courseData[courseName].logs = Array.isArray(serverLogs) ? serverLogs : [];
+                saveCourseToLocalStorage(courseName);
+                return;
             }
 
-            // Merge using the Map
+            // Merge using the Map (admin-only path)
             const mergedLogs = mergeLogs(serverLogs, localData.logs, localData.tombstones, serverTombstoneMap);
 
             courseData[courseName].logs = mergedLogs;
 
-            // Clean up local tombstones. 
+            // Clean up local tombstones.
             // If the server confirms deletion (via tombstoneMap), we can stop tracking it locally.
             serverTombstoneMap.forEach((_, id) => courseData[courseName].tombstones.delete(id));
 
