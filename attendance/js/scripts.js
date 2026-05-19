@@ -5,7 +5,7 @@ let adminCourses = [];
 const CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
 const LOGS_SPREADSHEET_ID = '1AvVrBRt4_3GJTVMmFph6UsUsplV9h8jXU93n1ezbMME';
 const LOGS_STORAGE_KEY = 'attendance_logs';
-const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbzhvY1-V912MugWYhdqntFqp_3Kh3VT4CfuL5cG8Wrk3g0Rp4NmzUlKNWhL4ZrD_EeUwQ/exec';
+const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbydXFkdY7P1QJlfBYMTsFYIpnsNEEjZzZC7BZ9KD03LXCRPqz6QC1SEISi3SCL1zInJEA/exec';
 
 // App state
 let courseData = {};
