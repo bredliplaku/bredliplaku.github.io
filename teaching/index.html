@@ -3833,7 +3833,7 @@
             border-radius: 20px !important;
         }
     </style>
-    <script src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
+    <script defer src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
 </head>
 
 <body class="is-loading">
@@ -5002,80 +5002,69 @@
 
         async function tryPublicAccess() {
             try {
-                // Use the GAS Web App proxy for listing sheets (action=getSheets)
-                // Append the current spreadsheet ID to the URL if not empty.
-                const url = `${BRAIN_URL}?action=getSheets&id=${currentSpreadsheetId}`;
+                const response = await sbFetch(
+                    `course_rows?type=eq.metadata&is_archive=eq.${isArchiveMode}&select=sheet_name,b,c&order=sheet_name`
+                );
+                if (!response.ok) return false;
+                const rows = await response.json();
+                if (!rows.length) return false;
 
-                const response = await fetch(url);
-                if (response.ok) {
-                    const data = await response.json();
+                const seen = new Set();
+                availableCourses = [];
+                const codes = {};
+                rows.forEach(r => {
+                    if (!seen.has(r.sheet_name)) { seen.add(r.sheet_name); availableCourses.push(r.sheet_name); }
+                    if (r.b === 'code') codes[r.sheet_name] = r.c;
+                });
 
-                    // The new GAS script structure returns { sheets: [ { properties: { title: "Name" } } ] }
-                    if (data.sheets && data.sheets.length > 0) {
-                        availableCourses = data.sheets
-                            .filter(sheet => !sheet.properties.title.startsWith('.'))
-                            .map(sheet => sheet.properties.title);
-                        await populateCourseButtons();
+                if (availableCourses.length === 0) return false;
 
-                        // Fallback logic for Hash Navigation
-                        const hash = window.location.hash.substring(1);
+                Object.assign(courseMap, codes);
+                try {
+                    localStorage.setItem(getCachePrefix() + 'courseCodesCache', JSON.stringify({ data: codes, timestamp: Date.now() }));
+                } catch (e) { }
 
-                        // If there's a hash, it's not a module, but it's not in the current availableCourses list
-                        if (hash && hash !== 'module-' && !availableCourses.includes(hash)) {
-                            const isArchiveQuery = new URLSearchParams(window.location.search).has('archive');
+                await populateCourseButtons();
 
-                            if (!isArchiveMode && !isArchiveQuery) {
-                                // We are in Active mode, and there is NO ?archive parameter.
-                                // Wait to see if this course exists in the Archive, rather than blindly switching
-                                console.log('Course not found in active list, switching to archive mode...');
-                                isArchiveMode = true;
-                                currentSpreadsheetId = ARCHIVE_SPREADSHEET_ID;
-
-                                // Add the parameter so the URL stays correct
-                                const url = new URL(window.location);
-                                url.searchParams.set('archive', '');
-                                let newUrlString = url.toString().replace(/archive=(&|$)/, 'archive$1');
-                                window.history.replaceState({ archive: true }, '', newUrlString || url);
-
-                                resetForNewSpreadsheet();
-                                return true; // Successfully intercepted, restarting flow
-                            }
-                        }
-
-                        selectInitialCourse();
+                const hash = window.location.hash.substring(1);
+                if (hash && hash !== 'module-' && !availableCourses.includes(hash)) {
+                    if (!isArchiveMode && !new URLSearchParams(window.location.search).has('archive')) {
+                        isArchiveMode = true;
+                        currentSpreadsheetId = ARCHIVE_SPREADSHEET_ID;
+                        const url = new URL(window.location);
+                        url.searchParams.set('archive', '');
+                        let newUrlString = url.toString().replace(/archive=(&|$)/, 'archive$1');
+                        window.history.replaceState({ archive: true }, '', newUrlString || url);
+                        resetForNewSpreadsheet();
                         return true;
                     }
                 }
-                return false;
+
+                selectInitialCourse();
+                return true;
             } catch (error) {
-                console.error('Error during public access attempt:', error);
+                console.error('Error during Supabase access:', error);
                 return false;
             }
         }
 
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbwOBjbflUtKxhdwWHaSAkAUlu-VBVqhaNlvX81e4gY6vncQd7JiOuRhibmpns4lPOK8rQ/exec';
+        const SUPABASE_URL = 'https://sreqxyznaymvksygradu.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyZXF4eXpuYXltdmtzeWdyYWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMDQ5NzksImV4cCI6MjA5NTc4MDk3OX0.-B-vzU8ZRkUnEp697N0nclLvomdP2k-dt9fPcJNV-gY';
+        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxf7BAQIWUwmKqkzxSdfKOSJEWOpogKgA3SznEYikeTaCTgGB4YhBSQFz2_MSLs4BX0Wg/exec';
 
-        async function fetchPublicSheetData(sheetName, range) {
-            try {
-                // Use the GAS Web App proxy, pass the explicit ID
-                const url = `${BRAIN_URL}?action=getSheetValues&sheet=${encodeURIComponent(sheetName)}&range=${encodeURIComponent(range)}&id=${currentSpreadsheetId}`;
+        function sbFetch(endpoint) {
+            return fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
+                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+            });
+        }
 
-                const response = await fetch(url);
-                if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-
-                // The GAS script returns plain text JSON
-                const data = await response.json();
-
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-
-                // Return just the values array, ensuring compatibility with previous return type
-                return data.values || [];
-            } catch (error) {
-                console.error('Error fetching data via BRAIN:', error);
-                throw error;
-            }
+        async function fetchPublicSheetData(sheetName) {
+            const response = await sbFetch(
+                `course_rows?sheet_name=eq.${encodeURIComponent(sheetName)}&is_archive=eq.${isArchiveMode}&order=row_index&select=type,b,c,d,e,f,g,h,i,j`
+            );
+            if (!response.ok) throw new Error(`Supabase error ${response.status}`);
+            const rows = await response.json();
+            return rows.map(r => [r.type, r.b, r.c, r.d, r.e, r.f, r.g, r.h, r.i, r.j]);
         }
 
         function handleTokenResponse(resp) {
@@ -5312,52 +5301,33 @@
         async function fetchCourseCodes() {
             const prefix = getCachePrefix();
             const CACHE_KEY = prefix + 'courseCodesCache';
-            const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
+            const CACHE_EXPIRY = 5 * 60 * 1000;
 
-            // Check localStorage cache first
             try {
                 const cached = localStorage.getItem(CACHE_KEY);
                 if (cached) {
                     const { data, timestamp } = JSON.parse(cached);
-                    if (Date.now() - timestamp < CACHE_EXPIRY) {
-                        Object.assign(courseMap, data);
-                        return courseMap;
-                    }
+                    if (Date.now() - timestamp < CACHE_EXPIRY) { Object.assign(courseMap, data); return courseMap; }
                 }
-            } catch (e) {
-                // Cache read failed, proceed with fetch
-            }
+            } catch (e) { }
 
-            // Fetch all course codes in one request
             try {
-                const url = `${BRAIN_URL}?action=getAllCourseCodes&id=${currentSpreadsheetId}`;
-                const response = await fetch(url);
+                const response = await sbFetch(
+                    `course_rows?type=eq.metadata&b=eq.code&is_archive=eq.${isArchiveMode}&select=sheet_name,c`
+                );
                 if (response.ok) {
-                    const result = await response.json();
-                    if (result.courseCodes) {
-                        Object.assign(courseMap, result.courseCodes);
-                        // Cache the result
-                        try {
-                            localStorage.setItem(CACHE_KEY, JSON.stringify({
-                                data: result.courseCodes,
-                                timestamp: Date.now()
-                            }));
-                        } catch (e) {
-                            // Cache write failed, continue anyway
-                        }
-                        return courseMap;
-                    }
+                    const rows = await response.json();
+                    const codes = {};
+                    rows.forEach(r => { codes[r.sheet_name] = r.c; });
+                    Object.assign(courseMap, codes);
+                    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: codes, timestamp: Date.now() })); } catch (e) { }
+                    return courseMap;
                 }
             } catch (error) {
-                console.error('Bulk fetch failed, falling back:', error);
+                console.error('Course codes fetch failed:', error);
             }
 
-            // Fallback: use sheet names as codes
-            availableCourses.forEach(sheetName => {
-                if (!courseMap[sheetName]) {
-                    courseMap[sheetName] = sheetName;
-                }
-            });
+            availableCourses.forEach(sheetName => { if (!courseMap[sheetName]) courseMap[sheetName] = sheetName; });
             return courseMap;
         }
 
@@ -5853,12 +5823,15 @@
                         unsubBtn.style.pointerEvents = 'none';
 
                         try {
-                            // Tell the Google Sheet backend to remove it
-                            if (BRAIN_URL && currentToken) {
-                                await fetch(BRAIN_URL, {
-                                    method: 'POST',
-                                    body: new URLSearchParams({ 'action': 'unsubscribe', 'token': currentToken, 'course': activeCourse })
-                                }).catch(e => console.error("Error unsubscribing backend:", e));
+                            // Remove from Supabase push_subscribers
+                            if (currentToken) {
+                                await fetch(
+                                    `${SUPABASE_URL}/rest/v1/push_subscribers?token=eq.${encodeURIComponent(currentToken)}&course=eq.${encodeURIComponent(activeCourse)}`,
+                                    {
+                                        method: 'DELETE',
+                                        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+                                    }
+                                ).catch(e => console.error("Error unsubscribing:", e));
                             }
 
                             // 3. Clear local cache
@@ -5906,13 +5879,17 @@
                                     serviceWorkerRegistration: swReg
                                 });
                                 if (token) {
-                                    if (BRAIN_URL) {
-                                        // Await the fetch so the UI reflects the actual network time
-                                        await fetch(BRAIN_URL, {
-                                            method: 'POST',
-                                            body: new URLSearchParams({ 'action': 'subscribe', 'token': token, 'course': activeCourse })
-                                        });
-                                    }
+                                    // Save to Supabase push_subscribers
+                                    await fetch(`${SUPABASE_URL}/rest/v1/push_subscribers`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'apikey': SUPABASE_ANON_KEY,
+                                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                                            'Content-Type': 'application/json',
+                                            'Prefer': 'return=minimal',
+                                        },
+                                        body: JSON.stringify({ token, course: activeCourse }),
+                                    }).catch(e => console.error("Error saving subscription:", e));
                                     let currentSubs = JSON.parse(localStorage.getItem('push_subscriptions') || '{}');
                                     currentSubs[activeCourse] = true;
                                     localStorage.setItem('push_subscriptions', JSON.stringify(currentSubs));
@@ -7020,7 +6997,7 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
             }
         }
 
-        window.addEventListener('load', init);
+        document.addEventListener('DOMContentLoaded', init);
     </script>
 
     <script type="module">
