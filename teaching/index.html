@@ -1481,8 +1481,8 @@
 
         .course-tabs-wrapper {
             display: flex;
-            flex-wrap: nowrap;
-            overflow-x: auto;
+            flex-wrap: wrap;
+            overflow-x: visible;
             gap: 5px 2px;
             flex: 1;
             align-items: center;
@@ -3898,7 +3898,7 @@
                             id="course-level">Loading...</span></span>
                     <span id="course-type-container" class="info-item"><i class="fa-solid fa-exclamation-circle"></i>
                         <span id="course-type">Loading...</span></span>
-                    <span class="info-item"><i class="fa-solid fa-trophy"></i> <span
+                    <span id="course-credits-container" class="info-item"><i class="fa-solid fa-trophy"></i> <span
                             id="course-credits">Loading...</span></span>
                     <span class="info-item"><i class="fa-regular fa-clock fa-spin"></i>
                         <span class="week-counter" id="week-counter"></span>
@@ -3950,13 +3950,13 @@
 
         <footer class="footer">
             <div class="social-links">
-                <a href="https://bredliplaku.com/" rel="noopener noreferrer"><i class="fa-regular fa-house"
-                        title="Home"></i></a>
+                <a href="../" rel="noopener noreferrer"><i class="fa-solid fa-house" title="Home"></i></a>
                 <a href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank" rel="noopener noreferrer"><i
-                        class="fa-regular fa-id-card" title="Curriculum Vitae"></i></a>
+                        class="fa-solid fa-id-card" title="Curriculum Vitae"></i></a>
                 <a href="mailto:bplaku@epoka.edu.al" target="_blank" rel="noopener noreferrer"><i
-                        class="fa-regular fa-envelope" title="Contact Email"></i></a>
-
+                        class="fa-solid fa-envelope" title="Contact Email"></i></a>
+                <a href="/teaching/admin/" rel="noopener noreferrer"><i class="fa-solid fa-arrow-right-to-bracket"
+                        title="Sign In"></i></a>
                 <button id="theme-toggle" class="theme-toggle" aria-label="Theme: Auto" title="Theme: Auto">
                     <i id="theme-toggle-icon" class="fa-solid fa-adjust" aria-hidden="true"></i>
                 </button>
@@ -6617,7 +6617,13 @@
             document.getElementById('course-title').textContent = metadata.title || 'Course Title';
             document.getElementById('course-semester').textContent = metadata.semester || 'Unknown Semester';
             document.getElementById('course-level').textContent = metadata.level || 'Undergraduate';
-            document.getElementById('course-credits').textContent = metadata.credits || '5 ECTS';
+            const creditsContainer = document.getElementById('course-credits-container');
+            if (metadata.credits) {
+                document.getElementById('course-credits').textContent = metadata.credits + ' ECTS';
+                if (creditsContainer) creditsContainer.style.display = '';
+            } else if (creditsContainer) {
+                creditsContainer.style.display = 'none';
+            }
 
             const courseType = metadata.type || 'Compulsory';
             document.getElementById('course-type').textContent = courseType;
@@ -6856,9 +6862,41 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
             document.getElementById('progress-bar').style.width = progressPercentage + '%';
         }
 
+        // Grading categories, in display order. Mirrors GRADING_CATEGORIES in teaching/admin/index.html.
+        // `legacyKey` keeps reading older single, un-numbered keys (e.g. courses saved before this
+        // category supported multiple entries) so older saved data still renders correctly here even
+        // if the admin panel hasn't been re-saved since.
+        const GRADING_CATEGORIES = [
+            { id: 'hw', singular: 'Homework', plural: 'Homeworks' },
+            { id: 'project', singular: 'Project', plural: 'Projects', legacyKey: 'term_project_percentage' },
+            { id: 'casestudy', singular: 'Case Study', plural: 'Case Studies' },
+            { id: 'lab', singular: 'Laboratory', plural: 'Laboratories' },
+            { id: 'quiz', singular: 'Quiz', plural: 'Quizzes' },
+            { id: 'midterm', singular: 'Midterm', plural: 'Midterms', legacyKey: 'midterm_percentage' },
+            { id: 'final', singular: 'Final', plural: 'Final', fixed: true, key: 'final_percentage' },
+            { id: 'attendance', singular: 'Attendance', plural: 'Attendance', fixed: true, key: 'attendance_percentage' },
+            { id: 'other', singular: 'Other', plural: 'Other' },
+        ];
+
+        // Existing numbered + legacy entries for a category, e.g. quiz1_percentage, quiz2_percentage.
+        function gradingItemsFor(cat, metadata) {
+            if (cat.fixed) return [{ key: cat.key }];
+            const re = new RegExp(`^${cat.id}(\\d+)_percentage$`);
+            const nums = [];
+            for (const k of Object.keys(metadata)) {
+                const m = k.match(re);
+                if (m) nums.push(parseInt(m[1], 10));
+            }
+            nums.sort((a, b) => a - b);
+            const items = nums.map(n => ({ key: `${cat.id}${n}_percentage` }));
+            if (cat.legacyKey && metadata[cat.legacyKey]) items.push({ key: cat.legacyKey });
+            return items;
+        }
+
         function hasEvaluationData(metadata) {
-            const keys = ['midterm_percentage', 'final_percentage', 'hw1_percentage', 'hw2_percentage', 'hw3_percentage', 'hw4_percentage', 'quiz1_percentage', 'quiz2_percentage', 'quiz3_percentage', 'quiz4_percentage', 'term_project_percentage', 'project1_percentage', 'project2_percentage', 'attendance_percentage'];
-            return keys.some(key => parseFloat(metadata[key]) > 0);
+            return GRADING_CATEGORIES.some(cat =>
+                gradingItemsFor(cat, metadata).some(item => parseFloat(metadata[item.key]) > 0)
+            );
         }
 
         function updateAuthButtonDisplay(isSignedIn) {
@@ -6877,20 +6915,30 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
             const legend = document.getElementById('distribution-legend');
             bar.innerHTML = '';
             legend.innerHTML = '';
-            let cumulativeWidth = 0;
-            const assessments = [
-                { name: 'Homework', colors: ['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.19)', 'rgba(255,255,255,0.16)', 'rgba(255,255,255,0.13)'], items: [{ key: 'hw1_percentage' }, { key: 'hw2_percentage' }, { key: 'hw3_percentage' }, { key: 'hw4_percentage' }] },
-                { name: 'Quizzes', colors: ['rgba(255,255,255,0.30)', 'rgba(255,255,255,0.27)', 'rgba(255,255,255,0.24)', 'rgba(255,255,255,0.21)'], items: [{ key: 'quiz1_percentage' }, { key: 'quiz2_percentage' }, { key: 'quiz3_percentage' }, { key: 'quiz4_percentage' }] },
-                { name: 'Project', colors: ['rgba(255,255,255,0.38)'], items: [{ key: 'term_project_percentage' }] },
-                { name: 'Projects', colors: ['rgba(255,255,255,0.34)', 'rgba(255,255,255,0.31)'], items: [{ key: 'project1_percentage' }, { key: 'project2_percentage' }] },
-                { name: 'Midterm', colors: ['rgba(255,255,255,0.42)'], items: [{ key: 'midterm_percentage' }] },
-                { name: 'Final', colors: ['rgba(255,255,255,0.48)'], items: [{ key: 'final_percentage' }] },
-                { name: 'Attendance', colors: ['rgba(255,255,255,0.15)'], items: [{ key: 'attendance_percentage' }] }];
 
-            assessments.forEach(assessment => {
+            const colorSets = {
+                hw: ['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.19)', 'rgba(255,255,255,0.16)', 'rgba(255,255,255,0.13)'],
+                project: ['rgba(255,255,255,0.38)', 'rgba(255,255,255,0.35)', 'rgba(255,255,255,0.32)'],
+                casestudy: ['rgba(255,255,255,0.44)', 'rgba(255,255,255,0.41)'],
+                lab: ['rgba(255,255,255,0.50)', 'rgba(255,255,255,0.47)'],
+                quiz: ['rgba(255,255,255,0.30)', 'rgba(255,255,255,0.27)', 'rgba(255,255,255,0.24)', 'rgba(255,255,255,0.21)'],
+                midterm: ['rgba(255,255,255,0.42)', 'rgba(255,255,255,0.39)'],
+                final: ['rgba(255,255,255,0.48)'],
+                attendance: ['rgba(255,255,255,0.15)'],
+                other: ['rgba(255,255,255,0.20)', 'rgba(255,255,255,0.17)'],
+            };
+            const legendColors = {
+                hw: 'rgba(255,255,255,0.6)', project: 'rgba(255,255,255,0.7)', casestudy: 'rgba(255,255,255,0.66)',
+                lab: 'rgba(255,255,255,0.72)', quiz: 'rgba(255,255,255,0.65)', midterm: 'rgba(255,255,255,0.75)',
+                final: 'rgba(255,255,255,0.8)', attendance: 'rgba(255,255,255,0.55)', other: 'rgba(255,255,255,0.58)',
+            };
+
+            GRADING_CATEGORIES.forEach(cat => {
+                const colors = colorSets[cat.id] || ['rgba(255,255,255,0.3)'];
                 let totalPercentage = 0;
+                let nonZeroCount = 0;
                 let colorIndex = 0;
-                assessment.items.forEach(item => {
+                gradingItemsFor(cat, metadata).forEach(item => {
                     const percentage = parseFloat(metadata[item.key]) || 0;
                     if (percentage > 0) {
                         const segment = document.createElement('div');
@@ -6899,39 +6947,24 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
 
                         const statusKey = item.key + '_status';
                         const isDone = (metadata[statusKey] || '').trim().toUpperCase() === 'DONE';
-
-                        if (isDone) {
-                            segment.style.backgroundColor = 'var(--success-color)';
-                        } else {
-                            const color = assessment.colors[colorIndex % assessment.colors.length];
-                            segment.style.backgroundColor = color;
-                        }
+                        segment.style.backgroundColor = isDone ? 'var(--success-color)' : colors[colorIndex % colors.length];
 
                         const display = percentage % 1 === 0 ? percentage.toFixed(0) : percentage + '';
                         segment.innerHTML = `<div class="segment-percentage">${display}%</div>`;
                         bar.appendChild(segment);
                         totalPercentage += percentage;
+                        nonZeroCount++;
                         colorIndex++;
                     }
                 });
 
                 if (totalPercentage > 0) {
-                    const legendColors = {
-                        'Homework': 'rgba(255,255,255,0.6)',
-                        'Quizzes': 'rgba(255,255,255,0.65)',
-                        'Project': 'rgba(255,255,255,0.7)',
-                        'Projects': 'rgba(255,255,255,0.68)',
-                        'Midterm': 'rgba(255,255,255,0.75)',
-                        'Final': 'rgba(255,255,255,0.8)',
-                        'Attendance': 'rgba(255,255,255,0.55)',
-                    };
                     const legendItem = document.createElement('div');
                     legendItem.setAttribute('class', 'legend-item');
                     legendItem.style.width = `${totalPercentage}%`;
-                    legendItem.textContent = assessment.name;
-                    legendItem.style.color = legendColors[assessment.name] || assessment.colors[0];
+                    legendItem.textContent = nonZeroCount > 1 ? cat.plural : cat.singular;
+                    legendItem.style.color = legendColors[cat.id] || colors[0];
                     legend.appendChild(legendItem);
-                    cumulativeWidth += totalPercentage;
                 }
             });
         }
