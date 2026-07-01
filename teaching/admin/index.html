@@ -573,6 +573,13 @@
       flex-wrap: wrap;
     }
 
+    /* Archived courses get a desaturated grey header instead of the active brand gradient, as a
+       "deactivated" visual cue. Grey is dark enough on its own for white text/icon contrast, so
+       this doesn't need a separate dark-theme variant (the header never adapted to page theme). */
+    .course-header.is-archive {
+      background: linear-gradient(135deg, #6b747c, #3d444a);
+    }
+
     .course-header h2 {
       margin: 0;
       font-size: 1.35em;
@@ -707,8 +714,49 @@
       display: flex;
       flex-wrap: wrap;
       gap: 2px;
+      justify-content: flex-start;
+    }
+
+    /* Holds the tab's Add button(s) plus its single green Save button, side by side on top. */
+    .section-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
       margin-bottom: 14px;
-      justify-content: flex-end;
+    }
+
+    .section-topbar .add-bar {
+      flex: 1;
+    }
+
+    .btn-save-section {
+      background-color: var(--success-color) !important;
+      color: white !important;
+      flex-shrink: 0;
+    }
+
+    .btn-save-section:hover {
+      filter: brightness(1.06);
+    }
+
+    /* Inline edit panel — replaces the old modal dialogue; expands directly below whatever
+       is being edited, using the same field markup the modal used to render inside itself. */
+    .inline-edit-panel {
+      background: #f7f8fc;
+      border: 1px solid #e0e0e0;
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      padding: 14px 16px 4px;
+      margin: -1px 0 10px;
+    }
+
+    .module > .inline-edit-panel,
+    .project-group-block .inline-edit-panel {
+      margin-left: 0;
+      margin-right: 0;
+      border-radius: 0;
     }
 
     .add-bar button {
@@ -932,6 +980,20 @@
 
     .module-content {
       padding: 10px 12px;
+    }
+
+    /* Materials and Fun Facts are kept in two physically separate lists so drag-and-drop
+       can never interleave them — each only reorders within its own kind, materials always on top. */
+    .module-materials,
+    .module-funfacts {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .module-funfacts:not(:empty) {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px dashed #e0e0e0;
     }
 
     /* ── Project group block ── */
@@ -1688,6 +1750,15 @@
       background: var(--dark-surface);
     }
 
+    html[data-theme="dark"] .module-funfacts:not(:empty) {
+      border-top-color: var(--dark-border);
+    }
+
+    html[data-theme="dark"] .inline-edit-panel {
+      background: var(--dark-surface-light);
+      border-color: var(--dark-border);
+    }
+
     html[data-theme="dark"] .project-group-block {
       background: var(--dark-surface);
       border-color: var(--dark-border);
@@ -1957,6 +2028,15 @@
         background: var(--dark-surface);
       }
 
+      html:not([data-theme="light"]) .module-funfacts:not(:empty) {
+        border-top-color: var(--dark-border);
+      }
+
+      html:not([data-theme="light"]) .inline-edit-panel {
+        background: var(--dark-surface-light);
+        border-color: var(--dark-border);
+      }
+
       html:not([data-theme="light"]) .project-group-block {
         background: var(--dark-surface);
         border-color: var(--dark-border);
@@ -2161,7 +2241,7 @@
         <div class="sidebar-label"><i class="fa-solid fa-circle" style="color:#43a047;font-size:0.65em"></i>Active
         </div>
         <div id="sb-active"></div>
-        <div class="sidebar-label"><i class="fa-solid fa-box-archive" style="font-size:0.8em"></i>Archive</div>
+        <div class="sidebar-label"><i class="fa-solid fa-box-archive" style="font-size:0.8em"></i>Archived</div>
         <div id="sb-archive"></div>
       </div>
     </aside>
@@ -2178,8 +2258,8 @@
 
   <footer class="footer">
     <div class="social-links">
-      <a href="./" rel="noopener noreferrer"><i class="fa-solid fa-arrow-left" title="Back"></i></a>
-      <a href="../" rel="noopener noreferrer"><i class="fa-solid fa-house" title="Home"></i></a>
+      <a href="../" rel="noopener noreferrer"><i class="fa-solid fa-arrow-left" title="Back"></i></a>
+      <a href="../../" rel="noopener noreferrer"><i class="fa-solid fa-house" title="Home"></i></a>
       <a href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank" rel="noopener noreferrer"><i
           class="fa-solid fa-id-card" title="Curriculum Vitae"></i></a>
       <a href="mailto:bplaku@epoka.edu.al" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-envelope"
@@ -2305,7 +2385,7 @@
       module: 'Module', material: 'Material', project: 'Project',
       project_file: 'Project File', project_description: 'Project Description',
       project_group: 'Project Group', group_file: 'Group File',
-      funfact: 'Fun Fact', send_notification: 'Notification',
+      funfact: 'Fun Fact',
     };
 
     const FIELDS = {
@@ -2385,7 +2465,7 @@
       project_description: [
         { col: 'b', label: 'Description (HTML)', ta: true, fi: 'fa-solid fa-code' },
       ],
-      project_group: 'dynamic', // handled by buildProjectGroupModal
+      project_group: 'dynamic', // handled inline via buildInlineGroupFieldsHtml/commitInlineGroupFields
       group_file: [
         { col: 'c', label: 'Title', fi: 'fa-solid fa-heading' },
         { col: 'b', label: 'Icon', icon: true, fi: 'fa-solid fa-icons' },
@@ -2394,31 +2474,35 @@
         { col: 'f', label: 'Download Link', link: true, fi: 'fa-solid fa-download' },
         { col: 'g', label: 'Open Link', link: true, fi: 'fa-solid fa-arrow-up-right-from-square' },
       ],
-      send_notification: [
-        { col: 'b', label: 'Title', fi: 'fa-solid fa-heading' },
-        { col: 'c', label: 'Body Text', ta: true, fi: 'fa-solid fa-align-left' },
-        { col: 'd', label: 'Icon URL', fi: 'fa-regular fa-image' },
-        { col: 'e', label: 'Image URL', fi: 'fa-solid fa-image' },
-        { col: 'f', label: 'Badge URL', fi: 'fa-regular fa-image' },
-        { col: 'g', label: 'Tag', fi: 'fa-solid fa-tag' },
-        { col: 'h', label: 'Require Interaction', fi: 'fa-regular fa-hand-pointer', sel: [{ val: 'FALSE', lbl: 'No' }, { val: 'TRUE', lbl: 'Yes' }] },
-        { col: 'i', label: 'Actions (JSON)', ta: true, fi: 'fa-solid fa-code' },
-        { col: 'j', label: 'Send Status', fi: 'fa-solid fa-paper-plane' },
-      ],
     };
 
     const SECTIONS = [
-      { id: 'info', label: 'Info', icon: 'fa-solid fa-circle-info', types: ['metadata'] },
-      { id: 'links', label: 'Links', icon: 'fa-solid fa-link', types: ['button'] },
-      { id: 'announce', label: 'Announcements', icon: 'fa-solid fa-bullhorn', types: ['announcement'] },
       { id: 'modules', label: 'Modules', icon: 'fa-solid fa-layer-group', types: ['module', 'material', 'funfact'], hier: true },
       { id: 'projects', label: 'Projects', icon: 'fa-solid fa-diagram-project', types: ['project', 'project_file', 'project_description', 'project_group', 'group_file'], proj: true },
-      { id: 'notifs', label: 'Notifications', icon: 'fa-regular fa-bell', types: ['send_notification'] },
+      { id: 'announce', label: 'Announcements', icon: 'fa-solid fa-bullhorn', types: ['announcement'] },
+      { id: 'links', label: 'Links', icon: 'fa-solid fa-link', types: ['button'] },
+      { id: 'info', label: 'Info', icon: 'fa-solid fa-circle-info', types: ['metadata'] },
     ];
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Auth
     // ─────────────────────────────────────────────────────────────────────────────
+
+    // Whether a session blob with both tokens is sitting in localStorage right now.
+    // Used below to tell "definitely logged out" apart from "getSession() came back
+    // empty because its internal token-refresh race hasn't resolved yet" — the latter
+    // must NOT flash the login screen, since onAuthStateChange corrects it a moment later.
+    function hasStoredSession() {
+      try {
+        for (const k of Object.keys(localStorage)) {
+          if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
+            const d = JSON.parse(localStorage.getItem(k));
+            if (d?.access_token && d?.refresh_token) return true;
+          }
+        }
+      } catch { }
+      return false;
+    }
 
     // Bootstrap: race getSession() against a timeout so a slow token-refresh network call
     // never leaves the user stuck on a blank screen. Crucially, a timeout only shows the
@@ -2434,12 +2518,23 @@
 
       try {
         const { data: { session } } = await sb.auth.getSession();
-        clearTimeout(timeoutId);
-        if (session && !_sessionHandled) { _sessionHandled = true; await handleSession(session); }
-        else if (!_sessionHandled && !didTimeout) showScreen('login');
+        if (session && !_sessionHandled) {
+          clearTimeout(timeoutId);
+          _sessionHandled = true;
+          await handleSession(session);
+        } else if (!session && !hasStoredSession() && !_sessionHandled && !didTimeout) {
+          // Nothing to restore at all — genuinely logged out, safe to show login right away.
+          clearTimeout(timeoutId);
+          showScreen('login');
+        }
+        // else: getSession() came back empty despite a stored session existing. Don't flash
+        // the login screen — keep the spinner up and let onAuthStateChange (SIGNED_IN /
+        // TOKEN_REFRESHED / SIGNED_OUT) decide, with the timeout above as the final fallback.
       } catch {
-        clearTimeout(timeoutId);
-        if (!_sessionHandled) showScreen('login');
+        if (!hasStoredSession() && !_sessionHandled) {
+          clearTimeout(timeoutId);
+          showScreen('login');
+        }
       }
     })();
 
@@ -2468,9 +2563,46 @@
       window.history.replaceState(null, '', window.location.pathname);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Idle sign-out — protects against staying logged in on a shared/public machine.
+    // Any interaction resets the clock; if none arrives for IDLE_TIMEOUT_MS, we sign out
+    // automatically. Watching starts/stops based on showScreen(), so the timer only ever
+    // runs while the admin dashboard is actually visible.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes of inactivity
+    let _idleTimer = null;
+    let _idleWatchStarted = false;
+
+    function resetIdleTimer() {
+      if (_idleTimer) clearTimeout(_idleTimer);
+      _idleTimer = setTimeout(async () => {
+        toast('Signed out due to inactivity', 'err');
+        await signOut();
+      }, IDLE_TIMEOUT_MS);
+    }
+
+    function startIdleWatch() {
+      resetIdleTimer();
+      if (_idleWatchStarted) return;
+      _idleWatchStarted = true;
+      ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'].forEach(evt =>
+        document.addEventListener(evt, resetIdleTimer, { passive: true }));
+    }
+
+    function stopIdleWatch() {
+      if (_idleTimer) clearTimeout(_idleTimer);
+      _idleTimer = null;
+    }
+
     async function handleSession(session) {
       let admin;
       try {
+        // Kick off the sidebar's course list query now, in parallel with the admin-identity
+        // lookup, instead of waiting for this to finish first — the two queries are independent
+        // (both only need the auth token), so overlapping them cuts perceived load time roughly
+        // in half instead of paying for both network round trips back to back.
+        prefetchSidebar();
         const result = await Promise.race([
           sb.from('admins').select('name,surname,email').single(),
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
@@ -2508,6 +2640,7 @@
       document.getElementById('error-screen').style.display = w === 'error' ? 'flex' : 'none';
       document.getElementById('admin-app').style.display = w === 'admin' ? 'flex' : 'none';
       if (w !== 'admin') hideLoading();
+      if (w === 'admin') startIdleWatch(); else stopIdleWatch();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -2523,10 +2656,23 @@
       document.getElementById('admin-app').classList.toggle('sidebar-open', open);
     }
 
-    async function loadSidebar() {
-      const { data, error } = await sb.from('course_rows')
+    let _sidebarPrefetch = null;
+    function prefetchSidebar() {
+      // Supabase's query builder is lazy — it only issues the actual HTTP request once
+      // awaited/then'd, not when the filter chain is built. Calling .then() here forces the
+      // request to start immediately (turning it into a real Promise), so it genuinely runs
+      // concurrently with the admin-identity lookup instead of only starting once loadSidebar()
+      // later awaits it.
+      _sidebarPrefetch = sb.from('course_rows')
         .select('sheet_name, is_archive, b, c')
-        .eq('type', 'metadata').order('sheet_name');
+        .eq('type', 'metadata').order('sheet_name')
+        .then(r => r);
+      return _sidebarPrefetch;
+    }
+
+    async function loadSidebar() {
+      const { data, error } = await (_sidebarPrefetch || prefetchSidebar());
+      _sidebarPrefetch = null;
       if (error) { toast('Sidebar error: ' + error.message, 'err'); return; }
       const map = {};
       for (const r of (data || [])) {
@@ -2574,8 +2720,19 @@
     // Course / Section
     // ─────────────────────────────────────────────────────────────────────────────
 
+    // Remembers which section tab was last open per course (keyed by sheet_name + archive
+    // flag, which together already uniquely identify a course/year offering), so reopening a
+    // course returns to where you left off instead of always resetting to the same tab.
+    function lastSectionKey(course, isArchive) { return `admin_last_section:${course}:${isArchive}`; }
+    function getLastSection(course, isArchive) {
+      try { return localStorage.getItem(lastSectionKey(course, isArchive)) || 'modules'; } catch { return 'modules'; }
+    }
+    function saveLastSection(course, isArchive, id) {
+      try { localStorage.setItem(lastSectionKey(course, isArchive), id); } catch { }
+    }
+
     function selectCourse(name, isArchive, el) {
-      S.course = name; S.isArchive = isArchive; S.section = 'info';
+      S.course = name; S.isArchive = isArchive; S.section = getLastSection(name, isArchive);
       document.querySelectorAll('.course-btn').forEach(b => b.classList.remove('active'));
       if (el) el.classList.add('active');
       if (window.innerWidth <= 768) {
@@ -2588,7 +2745,7 @@
 
     function renderCourseShell(name, isArchive) {
       document.getElementById('main-area').innerHTML = `
-    <div class="course-header">
+    <div class="course-header${isArchive ? ' is-archive' : ''}">
       <div class="ch-title-wrap" style="flex:1;min-width:0">
         <h2 id="ch-title">${x(name)}</h2>
         <div id="ch-meta" class="ch-meta"></div>
@@ -2606,14 +2763,14 @@
       ${SECTIONS.map((s, i, arr) => {
             const r = i === 0 ? 'border-radius:20px 8px 8px 20px'
               : i === arr.length - 1 ? 'border-radius:8px 20px 20px 8px' : '';
-            return `<button class="section-tab${s.id === 'info' ? ' active' : ''}" style="${r}"
+            return `<button class="section-tab${s.id === S.section ? ' active' : ''}" style="${r}"
                   onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon}" style="margin-right:5px;font-size:0.88em"></i>` : ''}${s.label}</button>`;
           }).join('')}
     </div>
     <div class="section-body" id="section-body"><div class="section-loading"><i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;opacity:0.55"></i>Loading…</div></div>
   `;
       fillCourseHeader(name, isArchive);
-      loadSection('info');
+      loadSection(S.section);
     }
 
     async function fillCourseHeader(name, isArchive) {
@@ -2632,6 +2789,7 @@
 
     function selectSection(id, el) {
       S.section = id;
+      saveLastSection(S.course, S.isArchive, id);
       document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
       if (el) el.classList.add('active');
       document.getElementById('section-body').innerHTML = '<div class="section-loading"><i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;opacity:0.55"></i>Loading…</div>';
@@ -2642,6 +2800,7 @@
       const sec = SECTIONS.find(s => s.id === id);
       if (!sec) return;
       if (id === 'info') { await loadMetadataSettings(); return; }
+      if (id === 'links') { await loadLinksSection(sec); return; }
       const { data, error } = await sb.from('course_rows').select('*')
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
         .in('type', sec.types).order('row_index');
@@ -2653,6 +2812,96 @@
       else body.innerHTML = renderCards(data || [], sec);
       body.classList.remove('loaded');
       requestAnimationFrame(() => { body.classList.add('loaded'); initDnD(sec); });
+    }
+
+    // Links tab shows the Timetables editor (moved out of Info, which was overcrowded) above
+    // the regular list of Link Button cards. Both save together via the one Save button at the
+    // top of the tab (saveSectionChanges('links') also calls saveTimetablesWork() internally).
+    async function loadLinksSection(sec) {
+      const body = document.getElementById('section-body');
+      const [metaRes, btnRes] = await Promise.all([
+        sb.from('course_rows').select('*').eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata').order('row_index'),
+        sb.from('course_rows').select('*').eq('sheet_name', S.course).eq('is_archive', S.isArchive).in('type', sec.types).order('row_index'),
+      ]);
+      if (metaRes.error) { body.innerHTML = `<div class="empty-content">Error: ${x(metaRes.error.message)}</div>`; return; }
+      if (btnRes.error) { body.innerHTML = `<div class="empty-content">Error: ${x(btnRes.error.message)}</div>`; return; }
+
+      const metaMap = {};
+      for (const r of (metaRes.data || [])) { ROW_STORE[r.row_uid] = r; if (isKnownMetaKey(r.b)) metaMap[r.b] = r; }
+
+      const ttNums = new Set();
+      for (const k of Object.keys(metaMap)) {
+        const m = k.match(/^timetable(\d+)_name$/);
+        if (m) ttNums.add(parseInt(m[1]));
+      }
+      const tts = Array.from(ttNums).sort((a, b) => a - b);
+
+      let h = `<div class="section-topbar" style="justify-content:flex-end">
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('links')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+  </div>`;
+
+      h += `<div class="settings-group" style="margin-bottom:14px">
+    <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-clock"></i>Timetables</span>
+      <button class="btn-sm btn-secondary" type="button" onclick="addTimetableCard()"><i class="fa-solid fa-plus"></i></button>
+    </div>
+    <div class="settings-body" id="timetables-list">`;
+      if (tts.length) {
+        for (const n of tts) h += timetableCardHtml(n, metaMap);
+      } else {
+        h += `<div id="no-tt-msg" class="form-hint" style="padding:4px 0">No timetables yet.</div>`;
+      }
+      h += `</div></div>`;
+
+      for (const r of (btnRes.data || [])) ROW_STORE[r.row_uid] = r;
+      // Wrapped in the same settings-group shell as Timetables above, so the two blocks read as
+      // one consistent "Links" page instead of two differently-styled widgets.
+      h += `<div class="settings-group">
+    <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-link"></i>Link Buttons</span>
+      <button class="btn-sm btn-secondary" type="button" onclick="addFlatRow('button')"><i class="fa-solid fa-plus"></i></button>
+    </div>
+    <div class="settings-body" id="links-cards-body">${renderCards(btnRes.data || [], sec, { bare: true })}</div>
+  </div>`;
+
+      body.innerHTML = h;
+      body.classList.remove('loaded');
+      requestAnimationFrame(() => { body.classList.add('loaded'); initDnD(sec); });
+    }
+
+    // Timetables (metadata rows): delete all old + insert fresh from current DOM order.
+    // Returns an error message string on failure, or null on success.
+    async function saveTimetablesWork() {
+      const { data: existing } = await sb.from('course_rows').select('row_uid,b,row_index')
+        .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata');
+      const existMap = {};
+      let maxIdx = 0;
+      for (const r of (existing || [])) { existMap[r.b] = r; if (r.row_index > maxIdx) maxIdx = r.row_index; }
+      const base = { sheet_name: S.course, is_archive: S.isArchive, type: 'metadata', d: '', e: '', f: '', g: '', h: '', i: '', j: '' };
+
+      const oldTtUids = Object.entries(existMap)
+        .filter(([k]) => /^timetable\d+_(name|id)$/.test(k) || /^class\d+_id$/.test(k))
+        .map(([, r]) => r.row_uid);
+      if (oldTtUids.length) {
+        const { error } = await sb.from('course_rows').delete().in('row_uid', oldTtUids);
+        if (error) return error.message;
+      }
+
+      const ttCards = document.getElementById('timetables-list') ? [...document.querySelectorAll('#timetables-list .dynamic-card')] : [];
+      const newTtRows = [];
+      ttCards.forEach((card, idx) => {
+        const i = idx + 1;
+        const name = card.querySelector('[name=tt_name]')?.value?.trim() || '';
+        const tid = card.querySelector('[name=tt_id]')?.value?.trim() || '';
+        const classId = card.querySelector('[name=tt_class]')?.value?.trim() || '';
+        let ri = maxIdx + idx * 4;
+        if (name) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}n`, row_index: ri + 1, b: `timetable${i}_name`, c: name });
+        if (tid) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}i`, row_index: ri + 2, b: `timetable${i}_id`, c: tid });
+        if (classId) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}c`, row_index: ri + 3, b: `class${i}_id`, c: classId });
+      });
+      if (newTtRows.length) {
+        const { error } = await sb.from('course_rows').upsert(newTtRows, { onConflict: 'row_uid' });
+        if (error) return error.message;
+      }
+      return null;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -2691,14 +2940,6 @@
       }
       const profs = Array.from(profNums).sort((a, b) => a - b);
       if (!profs.length) profs.push(1);
-
-      // Extract timetables
-      const ttNums = new Set();
-      for (const k of Object.keys(metaMap)) {
-        const m = k.match(/^timetable(\d+)_name$/);
-        if (m) ttNums.add(parseInt(m[1]));
-      }
-      const tts = Array.from(ttNums).sort((a, b) => a - b);
 
       // Theme colours
       const themeStr = metaMap['theme_colours']?.c || '';
@@ -2815,19 +3056,6 @@
       </div>
     </div>
   </div>`;
-
-      // ── Timetables (dynamic) ──
-      h += `<div class="settings-group">
-    <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-clock""></i>Timetables</span>
-      <button class="btn-sm btn-secondary" type="button" onclick="addTimetableCard()"><i class="fa-solid fa-plus""></i></button>
-    </div>
-    <div class="settings-body" id="timetables-list">`;
-      if (tts.length) {
-        for (const n of tts) h += timetableCardHtml(n, metaMap);
-      } else {
-        h += `<div id="no-tt-msg" class="form-hint" style="padding:4px 0">No timetables yet.</div>`;
-      }
-      h += `</div></div>`;
 
       // ── Grading ──
       const { html: gradeRows, total: gradeTotal } = renderGradingRows(metaMap);
@@ -3232,29 +3460,11 @@
       });
       if (newProfRows.length) await sb.from('course_rows').upsert(newProfRows, { onConflict: 'row_uid' });
 
-      // Timetables: delete all old, insert fresh
-      const oldTtUids = Object.entries(existMap)
-        .filter(([k]) => /^timetable\d+_(name|id)$/.test(k) || /^class\d+_id$/.test(k))
-        .map(([, r]) => r.row_uid);
-      if (oldTtUids.length) await sb.from('course_rows').delete().in('row_uid', oldTtUids);
-
-      const ttCards = [...document.querySelectorAll('#timetables-list .dynamic-card')];
-      const newTtRows = [];
-      ttCards.forEach((card, idx) => {
-        const i = idx + 1;
-        const name = card.querySelector('[name=tt_name]')?.value?.trim() || '';
-        const tid = card.querySelector('[name=tt_id]')?.value?.trim() || '';
-        const classId = card.querySelector('[name=tt_class]')?.value?.trim() || '';
-        let ri = maxIdx + profCards.length * 5 + idx * 4;
-        if (name) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}n`, row_index: ri + 1, b: `timetable${i}_name`, c: name });
-        if (tid) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}i`, row_index: ri + 2, b: `timetable${i}_id`, c: tid });
-        if (classId) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}c`, row_index: ri + 3, b: `class${i}_id`, c: classId });
-      });
-      if (newTtRows.length) await sb.from('course_rows').upsert(newTtRows, { onConflict: 'row_uid' });
+      // Note: Timetables live under the Links tab now (see saveTimetablesWork()), not here.
 
       // Grading (multi-entry categories): delete all old + legacy keys for each category,
       // then renumber fresh from current DOM order — same pattern as professors/timetables.
-      let gradeRowIdx = maxIdx + profCards.length * 5 + ttCards.length * 4 + 20;
+      let gradeRowIdx = maxIdx + profCards.length * 5 + 20;
       for (const cat of GRADING_CATEGORIES.filter(c => c.multi)) {
         const re = new RegExp(`^${cat.id}\\d+_percentage$`);
         const oldGradeUids = Object.entries(existMap)
@@ -3303,9 +3513,58 @@
     // Module hierarchy (modules + materials + funfacts)
     // ─────────────────────────────────────────────────────────────────────────────
 
+    function moduleHeaderHtml(p) {
+      return `<div class="module-header">
+        <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
+        <div class="mod-icon">${p.d ? `<i class="${x(p.d)}"></i>` : ''}</div>
+        <div class="mod-info">
+          <div class="mod-title">${x(p.c || 'Untitled Module')}</div>
+          ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
+        </div>
+        <div class="card-actions">
+          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${x(p.row_uid)}','material')"><i class="fa-regular fa-file-powerpoint" style="margin-right:5px"></i>Add Material</button>
+          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${x(p.row_uid)}','funfact')"><i class="fa-solid fa-lightbulb" style="margin-right:5px"></i>Add Fun Fact</button>
+          <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+        </div>
+      </div>`;
+    }
+
+    function funfactCardHtml(c) {
+      return `<div class="funfact-card" data-uid="${x(c.row_uid)}">
+    <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
+    <i class="fa-solid fa-lightbulb" style="color:var(--secondary-color);font-size:1.1em;flex-shrink:0"></i>
+    <div class="card-main">
+      <div class="card-title">${x((c.b || '').substring(0, 100))}</div>
+    </div>
+    <div class="card-actions">
+      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+      <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+    </div>
+  </div>`;
+    }
+
+    function moduleContentHtml(children) {
+      const materials = children.filter(c => c.type !== 'funfact');
+      const funfacts = children.filter(c => c.type === 'funfact');
+      let h = `<div class="module-content">`;
+      // The materials/funfacts wrapper divs always render, even when empty, so "Add Material"/
+      // "Add Fun Fact" always has somewhere to insert into — only the placeholder text is conditional.
+      if (!children.length) {
+        h += `<div class="empty-content" style="padding:14px;margin:0">No items — use the buttons above.</div>`;
+      }
+      h += `<div class="module-materials">${materials.map(c => materialCardHtml(c)).join('')}</div>`;
+      h += `<div class="module-funfacts">${funfacts.map(c => funfactCardHtml(c)).join('')}</div>`;
+      h += `</div>`;
+      return h;
+    }
+
     function renderHier(rows) {
-      let h = `<div class="add-bar">
-    <button onclick="openAddModal('module')" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Module</button>
+      let h = `<div class="section-topbar">
+    <div class="add-bar">
+      <button onclick="addModule()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Module</button>
+    </div>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('modules')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>`;
       if (!rows.length) return h + `<div class="empty-content">No modules yet.</div>`;
 
@@ -3323,45 +3582,20 @@
 
       for (const g of groups) {
         const p = g.parent;
-        const childUids = g.children.map(c => c.row_uid).join(',');
-        h += `<div class="module" ${p ? `data-uid="${x(p.row_uid)}" data-child-uids="${x(childUids)}"` : ''}>
-      <div class="module-header">
-        ${p ? `<div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>` : ''}
-        <div class="mod-icon">${p && p.d ? `<i class="${x(p.d)}"></i>` : ''}</div>
-        <div class="mod-info">
-          <div class="mod-title">${p ? x(p.c || 'Untitled Module') : 'Orphaned items'}</div>
-          ${p?.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
-        </div>
-        ${p ? `<div class="card-actions">
-          <button class="btn-ghost btn-sm" onclick="openEditModal('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-ghost btn-sm" onclick="addChildUnder('${x(p.row_uid)}','material')"><i class="fa-regular fa-file-powerpoint" style="margin-right:5px"></i>Add Material</button>
-          <button class="btn-ghost btn-sm" onclick="addChildUnder('${x(p.row_uid)}','funfact')"><i class="fa-solid fa-lightbulb" style="margin-right:5px"></i>Add Fun Fact</button>
-          <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="deleteRow('${x(p.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-        </div>`: ''}
-      </div>
-      <div class="module-content">`;
-        if (!g.children.length) {
-          h += `<div class="empty-content" style="padding:14px;margin:0">No items — use the buttons above.</div>`;
+        if (p) {
+          h += `<div class="module" data-uid="${x(p.row_uid)}">
+        ${moduleHeaderHtml(p)}
+        ${moduleContentHtml(g.children)}
+      </div>`;
         } else {
-          for (const c of g.children) {
-            if (c.type === 'funfact') {
-              h += `<div class="funfact-card" data-uid="${x(c.row_uid)}">
-            <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
-            <i class="fa-solid fa-lightbulb" style="color:var(--secondary-color);font-size:1.1em;flex-shrink:0"></i>
-            <div class="card-main">
-              <div class="card-title">${x((c.b || '').substring(0, 100))}</div>
-            </div>
-            <div class="card-actions">
-              <button class="btn-secondary btn-sm" onclick="openEditModal('${x(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-              <button class="btn-red btn-sm" onclick="deleteRow('${x(c.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-            </div>
-          </div>`;
-            } else {
-              h += materialCardHtml(c);
-            }
-          }
+          h += `<div class="module">
+        <div class="module-header">
+          <div class="mod-icon"></div>
+          <div class="mod-info"><div class="mod-title">Orphaned items</div></div>
+        </div>
+        ${moduleContentHtml(g.children)}
+      </div>`;
         }
-        h += `</div></div>`;
       }
       return h;
     }
@@ -3370,9 +3604,70 @@
     // Projects hierarchy
     // ─────────────────────────────────────────────────────────────────────────────
 
+    function projectHeaderHtml(p) {
+      return `<div class="module-header">
+        <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
+        <div class="mod-icon">${p.d ? `<i class="${x(p.d)}"></i>` : ''}</div>
+        <div class="mod-info">
+          <div class="mod-title">${x(p.c || 'Untitled Project')}</div>
+          ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
+        </div>
+        <div class="card-actions">
+          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+          <button class="btn-ghost btn-sm" onclick="addProjectFile('${x(p.row_uid)}')"><i class="fa-solid fa-file" style="margin-right:5px"></i>Add File</button>
+          <button class="btn-ghost btn-sm" onclick="addProjectDescription('${x(p.row_uid)}')"><i class="fa-solid fa-align-left" style="margin-right:5px"></i>Add Description</button>
+          <button class="btn-ghost btn-sm" onclick="addProjectGroup('${x(p.row_uid)}')"><i class="fa-solid fa-users" style="margin-right:5px"></i>Add Group</button>
+          <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+        </div>
+      </div>`;
+    }
+
+    function projectDescCardHtml(d) {
+      return `<div class="material-card project-desc-card" data-uid="${x(d.row_uid)}" style="margin-bottom:8px;background:#f7f8fc">
+    <div class="card-icon"><i class="fa-solid fa-align-left"></i></div>
+    <div class="card-main">
+      <div class="card-title">Project Description</div>
+      <div class="card-detail">${x((d.b || '').substring(0, 80))}</div>
+    </div>
+    <div class="card-actions">
+      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(d.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+      <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+    </div>
+  </div>`;
+    }
+
+    function pgbHeadHtml(g) {
+      const members = [g.e, g.f, g.g, g.h, g.i].filter(Boolean);
+      return `<div class="pgb-headwrap">
+    <div class="pgb-head">
+      <div class="pgb-name"><i class="fa-solid fa-users" style="opacity:0.5;margin-right:6px"></i>${x(g.b || 'Group')}</div>
+      <div class="pgb-chips">
+        ${g.c ? `<span class="pgb-chip"><i class="fa-solid fa-chalkboard-user" style="margin-right:4px;opacity:0.6"></i>${x(g.c)}</span>` : ''}
+        ${g.d ? `<span class="pgb-chip"><i class="fa-solid fa-star" style="margin-right:4px;opacity:0.6"></i>${x(g.d)}</span>` : ''}
+      </div>
+      <div class="card-actions">
+        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(g.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+        <button class="btn-secondary btn-sm" onclick="addGroupFile('${x(g.row_uid)}')"><i class="fa-solid fa-file-circle-plus" style="margin-right:5px"></i>Add File</button>
+        <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+      </div>
+    </div>
+    ${members.length ? `<div class="pgb-members">${members.map(m => `<span class="member-chip">${x(m)}</span>`).join('')}</div>` : ''}
+  </div>`;
+    }
+
+    function projectGroupBlockHtml(g, files) {
+      return `<div class="project-group-block" data-uid="${x(g.row_uid)}">
+    ${pgbHeadHtml(g)}
+    ${files.length ? `<div class="pgb-files">${files.map(f => materialCardHtml(f)).join('')}</div>` : ''}
+  </div>`;
+    }
+
     function renderProjects(rows) {
-      let h = `<div class="add-bar">
-    <button onclick="openAddModal('project')" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Project</button>
+      let h = `<div class="section-topbar">
+    <div class="add-bar">
+      <button onclick="addProject()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Project</button>
+    </div>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('projects')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>`;
       if (!rows.length) return h + `<div class="empty-content">No projects yet.</div>`;
 
@@ -3392,61 +3687,15 @@
       for (const proj of projects) {
         const p = proj.header;
         h += `<div class="module" data-uid="${x(p.row_uid)}">
-      <div class="module-header">
-        <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
-        <div class="mod-icon">${p.d ? `<i class="${x(p.d)}"></i>` : ''}</div>
-        <div class="mod-info">
-          <div class="mod-title">${x(p.c || 'Untitled Project')}</div>
-          ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
-        </div>
-        <div class="card-actions">
-          <button class="btn-ghost btn-sm" onclick="openEditModal('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-ghost btn-sm" onclick="openProjectAddMenu('${x(p.row_uid)}')"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add</button>
-          <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="deleteRow('${x(p.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-        </div>
-      </div>
+      ${projectHeaderHtml(p)}
       <div class="module-content">`;
 
-        if (proj.desc) {
-          const d = proj.desc;
-          h += `<div class="material-card" style="margin-bottom:8px;background:#f7f8fc">
-        <div class="card-icon"><i class="fa-solid fa-align-left"></i></div>
-        <div class="card-main">
-          <div class="card-title">Project Description</div>
-          <div class="card-detail">${x((d.b || '').substring(0, 80))}</div>
-        </div>
-        <div class="card-actions">
-          <button class="btn-secondary btn-sm" onclick="openEditModal('${x(d.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-red btn-sm" onclick="deleteRow('${x(d.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-        </div>
-      </div>`;
-        }
-
+        if (proj.desc) h += projectDescCardHtml(proj.desc);
         for (const f of proj.files) h += materialCardHtml(f);
-
-        for (const grp of proj.groups) {
-          const g = grp.header;
-          const members = [g.e, g.f, g.g, g.h, g.i].filter(Boolean);
-          h += `<div class="project-group-block">
-        <div class="pgb-head">
-          <div class="pgb-name"><i class="fa-solid fa-users" style="opacity:0.5;margin-right:6px"></i>${x(g.b || 'Group')}</div>
-          <div class="pgb-chips">
-            ${g.c ? `<span class="pgb-chip"><i class="fa-solid fa-chalkboard-user" style="margin-right:4px;opacity:0.6"></i>${x(g.c)}</span>` : ''}
-            ${g.d ? `<span class="pgb-chip"><i class="fa-solid fa-star" style="margin-right:4px;opacity:0.6"></i>${x(g.d)}</span>` : ''}
-          </div>
-          <div class="card-actions">
-            <button class="btn-secondary btn-sm" onclick="openEditModal('${x(g.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-            <button class="btn-secondary btn-sm" onclick="addGroupFile('${x(g.row_uid)}')"><i class="fa-solid fa-file-circle-plus" style="margin-right:5px"></i>Add File</button>
-            <button class="btn-red btn-sm" onclick="deleteRow('${x(g.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-          </div>
-        </div>
-        ${members.length ? `<div class="pgb-members">${members.map(m => `<span class="member-chip">${x(m)}</span>`).join('')}</div>` : ''}
-        ${grp.files.length ? `<div class="pgb-files">${grp.files.map(f => materialCardHtml(f)).join('')}</div>` : ''}
-      </div>`;
-        }
+        for (const grp of proj.groups) h += projectGroupBlockHtml(grp.header, grp.files);
 
         if (!proj.desc && !proj.files.length && !proj.groups.length) {
-          h += `<div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add</strong> above.</div>`;
+          h += `<div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div>`;
         }
 
         h += `</div></div>`;
@@ -3454,111 +3703,42 @@
       return h;
     }
 
-    function openProjectAddMenu(parentUid) {
-      const parent = ROW_STORE[parentUid];
-      document.getElementById('modal-title').textContent = 'Add to: ' + (parent?.c || 'Project');
-      document.getElementById('modal-foot').style.display = 'none';
-      document.getElementById('modal-body').innerHTML = `
-    <p style="color:#757575;margin:0 0 12px;font-size:0.9em">What would you like to add?</p>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <button onclick="addProjectChild('${x(parentUid)}','project_file')" class="btn-secondary" style="text-align:left;border-radius:10px;padding:12px 16px">
-        <div style="font-weight:600"><i class="fa-solid fa-file" style="margin-right:8px;opacity:0.6"></i>Project File</div>
-        <div style="font-size:0.82em;opacity:0.65;margin-top:2px">Document, PDF, or link</div>
-      </button>
-      <button onclick="addProjectChild('${x(parentUid)}','project_description')" class="btn-secondary" style="text-align:left;border-radius:10px;padding:12px 16px">
-        <div style="font-weight:600"><i class="fa-solid fa-align-left" style="margin-right:8px;opacity:0.6"></i>Description</div>
-        <div style="font-size:0.82em;opacity:0.65;margin-top:2px">HTML description text</div>
-      </button>
-      <button onclick="addProjectChild('${x(parentUid)}','project_group')" class="btn-secondary" style="text-align:left;border-radius:10px;padding:12px 16px">
-        <div style="font-weight:600"><i class="fa-solid fa-users" style="margin-right:8px;opacity:0.6"></i>Group</div>
-        <div style="font-size:0.82em;opacity:0.65;margin-top:2px">Student group with members</div>
-      </button>
-    </div>
-  `;
-      document.getElementById('modal-overlay').classList.add('open');
-    }
-
-    async function addProjectChild(parentUid, type) {
-      closeModal();
-      setTimeout(() => {
-        document.getElementById('modal-foot').style.display = '';
-      }, 50);
-      await addChildUnder(parentUid, type, ['project', 'project_file', 'project_description', 'project_group', 'group_file'], ['project', 'project_group']);
-    }
-
-    async function addGroupFile(groupUid) {
-      await addChildUnder(groupUid, 'group_file', ['project', 'project_file', 'project_description', 'project_group', 'group_file'], ['project_group', 'project']);
-    }
-
-    // Generic: insert childType after parentUid, before next row matching blockerTypes
-    async function addChildUnder(parentUid, childType, queryTypes, blockerTypes) {
-      const { data } = await sb.from('course_rows').select('row_uid,row_index,type')
-        .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
-        .in('type', queryTypes || ['module', 'material', 'funfact'])
-        .order('row_index');
-      const rows = data || [];
-      const mi = rows.findIndex(r => r.row_uid === parentUid);
-      const parentRow = ROW_STORE[parentUid];
-      let lastChild = parentRow?.row_index || 0;
-      let nextBlocker = null;
-      const bTypes = blockerTypes || ['module'];
-      for (let i = mi + 1; i < rows.length; i++) {
-        if (bTypes.includes(rows[i].type)) { nextBlocker = rows[i].row_index; break; }
-        lastChild = rows[i].row_index;
-      }
-      let newIdx;
-      if (nextBlocker !== null && nextBlocker - lastChild >= 2) newIdx = Math.floor((lastChild + nextBlocker) / 2);
-      else {
-        const { data: all } = await sb.from('course_rows').select('row_index')
-          .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
-          .order('row_index', { ascending: false }).limit(1);
-        newIdx = (all?.[0]?.row_index || 0) + 10;
-      }
-      const uid = S.course + ':' + newIdx;
-      const row = {
-        row_uid: uid, sheet_name: S.course, is_archive: S.isArchive, row_index: newIdx,
-        type: childType, b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: ''
-      };
-      ROW_STORE[uid] = row;
-      document.getElementById('modal-foot').style.display = '';
-      buildModal('Add ' + (TYPE_NAMES[childType] || childType), row);
-    }
-
     // ─────────────────────────────────────────────────────────────────────────────
-    // Cards (links, announcements, notifications)
+    // Cards (links, announcements)
     // ─────────────────────────────────────────────────────────────────────────────
 
-    function renderCards(rows, sec) {
-      const isNotif = sec.types.includes('send_notification');
-      const ADD_ICONS = { button: 'fa-solid fa-link', announcement: 'fa-solid fa-bullhorn' };
-      const btns = isNotif
-        ? `<button onclick="openSendNotifModal()" class="btn-sm"><i class="fa-regular fa-bell" style="margin-right:5px"></i>Send Notification</button>`
-        : sec.types.map(t => `<button onclick="openAddModal('${t}')" class="btn-sm"><i class="${ADD_ICONS[t] || 'fa-solid fa-plus'}" style="margin-right:5px"></i>Add ${TYPE_NAMES[t] || t}</button>`).join('');
-      let h = btns ? `<div class="add-bar">${btns}</div>` : '';
-      if (isNotif && !rows.length) return h + `<div class="empty-content">No notifications sent yet.</div>`;
-      if (!rows.length) return h + `<div class="empty-content">No ${sec.label.toLowerCase()} yet.</div>`;
-      for (const row of rows) {
-        let t1 = '', t2 = '';
-        if (row.type === 'button') { t1 = row.b; t2 = row.d; }
-        else if (row.type === 'announcement') { t1 = row.e; t2 = row.d; }
-        else if (row.type === 'send_notification') { t1 = row.b; t2 = row.c; }
-        else { t1 = row.b || row.c || ''; }
-        const icon = (row.type === 'announcement' || row.type === 'button') ? row.b : '';
-        const actions = isNotif
-          ? `<span class="form-hint" style="font-size:0.8em;color:#9e9e9e">${x((row.j || 'Not sent').substring(0, 30))}</span>`
-          : `<button class="btn-secondary btn-sm" onclick="openEditModal('${x(row.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-         <button class="btn-red btn-sm" onclick="deleteRow('${x(row.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>`;
-        const drag = isNotif ? '' : `<div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>`;
-        h += `<div class="material-card" data-uid="${x(row.row_uid)}">
-      ${drag}
+    function flatCardHtml(row) {
+      let t1 = '', t2 = '';
+      if (row.type === 'button') { t1 = row.b; t2 = row.d; }
+      else if (row.type === 'announcement') { t1 = row.e; t2 = row.d; }
+      else { t1 = row.b || row.c || ''; }
+      const icon = (row.type === 'announcement' || row.type === 'button') ? row.b : '';
+      return `<div class="material-card" data-uid="${x(row.row_uid)}">
+      <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
       ${icon ? `<div class="card-icon"><i class="${x(icon)}"></i></div>` : ''}
       <div class="card-main">
         <div class="card-title">${x((t1 || '').substring(0, 70)) || '(empty)'}</div>
         ${t2 ? `<div class="card-detail">${x((t2 || '').substring(0, 80))}</div>` : ''}
       </div>
-      <div class="card-actions">${actions}</div>
+      <div class="card-actions">
+        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(row.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+        <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+      </div>
+    </div>`;
+    }
+
+    function renderCards(rows, sec, opts = {}) {
+      const ADD_ICONS = { button: 'fa-solid fa-link', announcement: 'fa-solid fa-bullhorn' };
+      let h = '';
+      if (!opts.bare) {
+        const btns = sec.types.map(t => `<button onclick="addFlatRow('${t}')" class="btn-sm"><i class="${ADD_ICONS[t] || 'fa-solid fa-plus'}" style="margin-right:5px"></i>Add ${TYPE_NAMES[t] || t}</button>`).join('');
+        h += `<div class="section-topbar">
+      <div class="add-bar">${btns}</div>
+      <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('${sec.id}')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
     </div>`;
       }
+      if (!rows.length) return h + `<div class="empty-content">No ${sec.label.toLowerCase()} yet.</div>`;
+      for (const row of rows) h += flatCardHtml(row);
       return h;
     }
 
@@ -3571,8 +3751,8 @@
       ${c.d ? `<div class="card-detail">${x(c.d.substring(0, 80))}</div>` : ''}
     </div>
     <div class="card-actions">
-      <button class="btn-secondary btn-sm" onclick="openEditModal('${x(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-      <button class="btn-red btn-sm" onclick="deleteRow('${x(c.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+      <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
     </div>
   </div>`;
     }
@@ -3581,62 +3761,83 @@
     // Row CRUD
     // ─────────────────────────────────────────────────────────────────────────────
 
-    async function openAddModal(type) {
-      const { data } = await sb.from('course_rows').select('row_index')
-        .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
-        .order('row_index', { ascending: false }).limit(1);
-      const idx = (data?.[0]?.row_index || 0) + 10;
-      const uid = S.course + ':' + idx;
-      const row = {
-        row_uid: uid, sheet_name: S.course, is_archive: S.isArchive, row_index: idx,
-        type, b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: ''
-      };
+    // ── Inline editing (replaces the old modal for Modules/Projects/Links/Announcements) ──
+    // Only one row is ever being edited inline at a time; opening a new one commits + collapses
+    // whatever was previously open first. Nothing here touches the database — edits, adds,
+    // deletes, and drag reordering are all purely local until the tab's Save button is clicked.
 
-      // Auto-fill order for module/project
-      if (type === 'module' || type === 'project') {
-        const { data: existing } = await sb.from('course_rows').select('b')
-          .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', type);
-        const maxOrder = Math.max(0, ...(existing || []).map(r => parseInt(r.b) || 0));
-        row.b = String(maxOrder + 1);
-      }
+    let _inlineEditUid = null;
+    let _newRowSeq = 0;
 
-      // Auto-fill current datetime for announcements
-      if (type === 'announcement') {
-        const now = new Date();
-        const dd = String(now.getDate()).padStart(2, '0');
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const yyyy = now.getFullYear();
-        const hh = String(now.getHours()).padStart(2, '0');
-        const min = String(now.getMinutes()).padStart(2, '0');
-        row.d = `${dd}-${mm}-${yyyy}, ${hh}:${min}`;
-      }
+    function attrSel(uid) { return `[data-uid="${String(uid).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`; }
 
+    function addNewRow(type, defaults = {}) {
+      const uid = `${S.course}:new_${Date.now()}_${_newRowSeq++}`;
+      const row = { row_uid: uid, sheet_name: S.course, is_archive: S.isArchive, row_index: 0, type, b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: '', ...defaults };
       ROW_STORE[uid] = row;
-      document.getElementById('modal-foot').style.display = '';
-      buildModal('Add ' + (TYPE_NAMES[type] || type), row);
+      return { uid, row };
     }
 
-    function openEditModal(uid) {
+    function currentDatetimeStr() {
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, '0');
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const yyyy = now.getFullYear();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      return `${dd}-${mm}-${yyyy}, ${hh}:${min}`;
+    }
+
+    // The element whose outerHTML gets replaced when an inline edit closes, and right after
+    // which the edit panel gets inserted. For module/project/project_group this is just the
+    // header portion, so re-rendering it never disturbs already-rendered children.
+    function getEditAnchor(uid, row) {
+      const el = document.querySelector('#section-body ' + attrSel(uid));
+      if (!el) return null;
+      if (row.type === 'module' || row.type === 'project') return el.querySelector(':scope > .module-header') || el;
+      if (row.type === 'project_group') return el.querySelector(':scope > .pgb-headwrap') || el;
+      return el;
+    }
+
+    function openInlineEdit(uid) {
       const row = ROW_STORE[uid];
       if (!row) { toast('Row not in cache — reload section', 'err'); return; }
-      document.getElementById('modal-foot').style.display = '';
-      buildModal('Edit ' + (TYPE_NAMES[row.type] || row.type), row);
+      if (_inlineEditUid === uid) { closeInlineEdit(); return; }
+      closeInlineEdit();
+      const anchor = getEditAnchor(uid, row);
+      if (!anchor) return;
+      _inlineEditUid = uid;
+      const panel = document.createElement('div');
+      panel.className = 'inline-edit-panel';
+      panel.id = 'inline-edit-panel';
+      if (row.type === 'project_group') {
+        panel.innerHTML = buildInlineGroupFieldsHtml(row);
+      } else {
+        const schema = FIELDS[row.type];
+        if (!schema || schema === 'dynamic') { toast('No schema for type: ' + row.type, 'err'); _inlineEditUid = null; return; }
+        panel.innerHTML = buildInlineFieldsHtml(row, schema);
+      }
+      anchor.insertAdjacentElement('afterend', panel);
     }
 
-    function buildModal(title, row) {
-      if (row.type === 'project_group') { buildProjectGroupModal(title, row); return; }
-      document.getElementById('modal-title').textContent = title;
-      document.getElementById('modal-save').onclick = modalSave;
-      document.getElementById('modal-save').innerHTML = '<i class="fa-solid fa-check" style="margin-right:5px"></i>Save';
-      const schema = FIELDS[row.type];
-      if (!schema || schema === 'dynamic') { toast('No schema for type: ' + row.type, 'err'); return; }
-      let h = `
-    <input type="hidden" id="m_uid"     value="${x(row.row_uid)}">
-    <input type="hidden" id="m_sheet"   value="${x(row.sheet_name)}">
-    <input type="hidden" id="m_archive" value="${row.is_archive}">
-    <input type="hidden" id="m_index"   value="${row.row_index}">
-    <input type="hidden" id="m_type"    value="${x(row.type)}">
-  `;
+    function closeInlineEdit() {
+      if (!_inlineEditUid) return;
+      const uid = _inlineEditUid;
+      const row = ROW_STORE[uid];
+      _inlineEditUid = null;
+      const panel = document.getElementById('inline-edit-panel');
+      if (panel) panel.remove();
+      if (!row) return;
+      if (row.type === 'project_group') commitInlineGroupFields(row);
+      else {
+        const schema = FIELDS[row.type];
+        if (schema && schema !== 'dynamic') commitInlineFieldsFromDom(row, schema);
+      }
+      rerenderAnchor(uid);
+    }
+
+    function buildInlineFieldsHtml(row, schema) {
+      let h = '';
       for (const f of schema) {
         const raw = row[f.col] || '';
         const v = raw || f.default || '';
@@ -3682,36 +3883,58 @@
         if (f.hint && !f.sel && !f.icon && !f.dt && !f.link && !f.autofill) h += `<div class="form-hint">${x(f.hint)}</div>`;
         h += `</div>`;
       }
-      document.getElementById('modal-body').innerHTML = h;
-      document.getElementById('modal-overlay').classList.add('open');
+      return h;
     }
 
-    function buildProjectGroupModal(title, row) {
-      document.getElementById('modal-title').textContent = title;
-      document.getElementById('modal-save').onclick = saveProjectGroup;
-      document.getElementById('modal-save').innerHTML = '<i class="fa-solid fa-check" style="margin-right:5px"></i>Save';
+    function commitInlineFieldsFromDom(row, schema) {
+      for (const f of schema) {
+        const el = document.getElementById('mf_' + f.col);
+        if (!el) continue;
+        row[f.col] = f.dt && el.value ? fromIsoDatetime(el.value) : (el.value || '');
+      }
+    }
+
+    function buildInlineGroupFieldsHtml(row) {
       // cols e,f,g,h each store one member; col i stores member5,member6,... comma-separated
       const allMembers = ['e', 'f', 'g', 'h'].map(c => row[c] || '').filter(Boolean);
       if (row.i) allMembers.push(...row.i.split(',').map(s => s.trim()).filter(Boolean));
-      if (!allMembers.length) allMembers.push(''); // start with one empty slot
-      else allMembers.push(''); // one empty slot at end
+      allMembers.push(''); // one empty slot at end
       let membersHtml = '';
       allMembers.forEach((val, i) => { membersHtml += memberRowHtml(i + 1, val); });
-      document.getElementById('modal-body').innerHTML = `
-    <input type="hidden" id="m_uid"     value="${x(row.row_uid)}">
-    <input type="hidden" id="m_sheet"   value="${x(row.sheet_name)}">
-    <input type="hidden" id="m_archive" value="${row.is_archive}">
-    <input type="hidden" id="m_index"   value="${row.row_index}">
-    <input type="hidden" id="m_type"    value="project_group">
+      return `
     <div class="form-group"><label class="form-label"><i class="fa-solid fa-users" style="margin-right:5px;opacity:0.6"></i>Group Name</label><input type="text" id="mf_b" value="${x(row.b || '')}"></div>
     <div class="form-group"><label class="form-label"><i class="fa-solid fa-chalkboard-user" style="margin-right:5px;opacity:0.6"></i>Supervisor</label><input type="text" id="mf_c" value="${x(row.c || '')}"></div>
     <div class="form-group"><label class="form-label"><i class="fa-solid fa-star" style="margin-right:5px;opacity:0.6"></i>Leader</label><input type="text" id="mf_d" value="${x(row.d || '')}"></div>
     <div style="margin-bottom:4px;font-size:0.77em;font-weight:700;color:#9e9e9e;text-transform:uppercase;letter-spacing:0.05em"><i class="fa-solid fa-person" style="margin-right:5px;opacity:0.6"></i>Members</div>
     <div id="members-list">${membersHtml}</div>
-    <button type="button" class="btn-secondary btn-sm" id="add-member-btn" onclick="addMemberSlot()" style="margin-top:4px"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Member</button>
+    <button type="button" class="btn-secondary btn-sm" onclick="addMemberSlot()" style="margin-top:4px"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Member</button>
   `;
-      updateAddMemberBtn();
-      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function commitInlineGroupFields(row) {
+      row.b = (document.getElementById('mf_b')?.value || '').trim();
+      row.c = (document.getElementById('mf_c')?.value || '').trim();
+      row.d = (document.getElementById('mf_d')?.value || '').trim();
+      const members = [...document.querySelectorAll('#members-list .member-input')].map(inp => inp.value.trim()).filter(Boolean);
+      row.e = members[0] || ''; row.f = members[1] || ''; row.g = members[2] || ''; row.h = members[3] || '';
+      row.i = members.slice(4).join(',');
+    }
+
+    function rerenderAnchor(uid) {
+      const row = ROW_STORE[uid];
+      if (!row) return;
+      const anchor = getEditAnchor(uid, row);
+      if (!anchor) return;
+      let html;
+      if (row.type === 'module') html = moduleHeaderHtml(row);
+      else if (row.type === 'project') html = projectHeaderHtml(row);
+      else if (row.type === 'project_group') html = pgbHeadHtml(row);
+      else if (row.type === 'funfact') html = funfactCardHtml(row);
+      else if (row.type === 'material' || row.type === 'project_file' || row.type === 'group_file') html = materialCardHtml(row);
+      else if (row.type === 'project_description') html = projectDescCardHtml(row);
+      else if (row.type === 'button' || row.type === 'announcement') html = flatCardHtml(row);
+      else return;
+      anchor.outerHTML = html;
     }
 
     function memberRowHtml(n, val) {
@@ -3719,7 +3942,7 @@
     <label class="form-label" style="min-width:84px;margin:0"><i class="fa-solid fa-user" style="margin-right:5px;opacity:0.6"></i>Member ${n}</label>
     <input type="text" class="member-input" value="${x(val)}" style="flex:1">
     <button type="button" class="btn-secondary btn-icon" style="flex-shrink:0"
-            onclick="this.closest('.member-row').remove();updateAddMemberBtn()"><i class="fa-solid fa-xmark"></i></button>
+            onclick="this.closest('.member-row').remove()"><i class="fa-solid fa-xmark"></i></button>
   </div>`;
     }
 
@@ -3729,35 +3952,240 @@
       list.insertAdjacentHTML('beforeend', memberRowHtml(count + 1, ''));
     }
 
-    function updateAddMemberBtn() { /* no-op: no cap */ }
+    // ── Staged delete: just removes the DOM node (after confirming). Nothing is deleted from
+    // the database until the tab's Save button diffs the final DOM state against it. ──
 
-    async function saveProjectGroup() {
-      const btn = document.getElementById('modal-save');
-      btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px"></i>Saving…';
-      const row = {
-        row_uid: document.getElementById('m_uid').value,
-        sheet_name: document.getElementById('m_sheet').value,
-        is_archive: document.getElementById('m_archive').value === 'true',
-        row_index: parseInt(document.getElementById('m_index').value),
-        type: 'project_group',
-        b: document.getElementById('mf_b').value.trim(),
-        c: document.getElementById('mf_c').value.trim(),
-        d: document.getElementById('mf_d').value.trim(),
-        e: '', f: '', g: '', h: '', i: '', j: ''
-      };
-      const members = [...document.querySelectorAll('#members-list .member-input')]
-        .map(inp => inp.value.trim()).filter(Boolean);
-      row.e = members[0] || '';
-      row.f = members[1] || '';
-      row.g = members[2] || '';
-      row.h = members[3] || '';
-      row.i = members.slice(4).join(',');
-      const { error } = await sb.from('course_rows').upsert(row, { onConflict: 'row_uid' });
-      btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:5px"></i>Save';
-      if (error) { toast('Save failed: ' + error.message, 'err'); return; }
-      ROW_STORE[row.row_uid] = row;
-      toast('Saved', 'ok'); closeModal();
-      await loadSection(S.section);
+    function stageDeleteRow(btn) {
+      const el = btn.closest('[data-uid]');
+      if (!el) return;
+      if (!confirm('Remove this? It will be permanently deleted once you click Save.')) return;
+      if (_inlineEditUid === el.dataset.uid) {
+        _inlineEditUid = null;
+        const panel = document.getElementById('inline-edit-panel');
+        if (panel) panel.remove();
+      }
+      const moduleContent = el.closest('.module-content');
+      el.remove();
+      if (moduleContent) refreshModuleContentPlaceholder(moduleContent);
+      refreshTopLevelPlaceholder();
+    }
+
+    function refreshModuleContentPlaceholder(contentEl) {
+      const mats = contentEl.querySelector(':scope > .module-materials');
+      const funs = contentEl.querySelector(':scope > .module-funfacts');
+      let placeholder = contentEl.querySelector(':scope > .empty-content');
+      if (mats || funs) {
+        const isEmpty = (!mats || !mats.children.length) && (!funs || !funs.children.length);
+        if (isEmpty && !placeholder) contentEl.insertAdjacentHTML('afterbegin', `<div class="empty-content" style="padding:14px;margin:0">No items — use the buttons above.</div>`);
+        else if (!isEmpty && placeholder) placeholder.remove();
+      } else {
+        const hasContent = !!contentEl.querySelector(':scope > [data-uid], :scope > .project-group-block');
+        if (!hasContent && !placeholder) contentEl.insertAdjacentHTML('beforeend', `<div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div>`);
+        else if (hasContent && placeholder) placeholder.remove();
+      }
+    }
+
+    function refreshTopLevelPlaceholder() {
+      const sec = SECTIONS.find(s => s.id === S.section);
+      if (!sec) return;
+      const body = document.getElementById('section-body');
+      if (!body) return;
+      const listEl = sec.id === 'links' ? (document.getElementById('links-cards-body') || body) : body;
+      const hasItems = !!listEl.querySelector(':scope > [data-uid], :scope > .module');
+      let placeholder = listEl.querySelector(':scope > .empty-content');
+      if (!hasItems && !placeholder) listEl.insertAdjacentHTML('beforeend', `<div class="empty-content">No ${sec.label.toLowerCase()} yet.</div>`);
+      else if (hasItems && placeholder) placeholder.remove();
+    }
+
+    // ── Add flows: create the row locally, insert its (empty) card into the right spot,
+    // then immediately open it for inline editing — no dialogue, no DB write yet. ──
+
+    function addModule() {
+      closeInlineEdit();
+      const body = document.getElementById('section-body');
+      const emptyMsg = body.querySelector(':scope > .empty-content');
+      if (emptyMsg) emptyMsg.remove();
+      const uids = [...body.querySelectorAll(':scope > .module[data-uid]')].map(el => el.dataset.uid);
+      const maxOrder = Math.max(0, ...uids.map(u => parseInt(ROW_STORE[u]?.b) || 0));
+      const { uid, row } = addNewRow('module', { b: String(maxOrder + 1) });
+      const html = `<div class="module" data-uid="${x(uid)}">${moduleHeaderHtml(row)}${moduleContentHtml([])}</div>`;
+      const topbar = body.querySelector(':scope > .section-topbar');
+      if (topbar) topbar.insertAdjacentHTML('afterend', html); else body.insertAdjacentHTML('afterbegin', html);
+      initDnD(SECTIONS.find(s => s.id === 'modules'));
+      openInlineEdit(uid);
+    }
+
+    function addMaterialOrFunfact(moduleUid, type) {
+      closeInlineEdit();
+      const moduleEl = document.querySelector('#section-body > .module' + attrSel(moduleUid));
+      if (!moduleEl) return;
+      const listEl = moduleEl.querySelector(type === 'funfact' ? '.module-funfacts' : '.module-materials');
+      if (!listEl) return;
+      const emptyMsg = moduleEl.querySelector(':scope > .module-content > .empty-content');
+      if (emptyMsg) emptyMsg.remove();
+      const { uid, row } = addNewRow(type);
+      listEl.insertAdjacentHTML('beforeend', type === 'funfact' ? funfactCardHtml(row) : materialCardHtml(row));
+      initDnD(SECTIONS.find(s => s.id === 'modules'));
+      openInlineEdit(uid);
+    }
+
+    function addProject() {
+      closeInlineEdit();
+      const body = document.getElementById('section-body');
+      const emptyMsg = body.querySelector(':scope > .empty-content');
+      if (emptyMsg) emptyMsg.remove();
+      const uids = [...body.querySelectorAll(':scope > .module[data-uid]')].map(el => el.dataset.uid);
+      const maxOrder = Math.max(0, ...uids.map(u => parseInt(ROW_STORE[u]?.b) || 0));
+      const { uid, row } = addNewRow('project', { b: String(maxOrder + 1) });
+      const html = `<div class="module" data-uid="${x(uid)}">${projectHeaderHtml(row)}<div class="module-content"><div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div></div></div>`;
+      body.insertAdjacentHTML('beforeend', html);
+      initDnD(SECTIONS.find(s => s.id === 'projects'));
+      openInlineEdit(uid);
+    }
+
+    function addProjectFile(projectUid) {
+      closeInlineEdit();
+      const moduleEl = document.querySelector('#section-body > .module' + attrSel(projectUid));
+      if (!moduleEl) return;
+      const contentEl = moduleEl.querySelector(':scope > .module-content');
+      if (!contentEl) return;
+      const emptyMsg = contentEl.querySelector(':scope > .empty-content');
+      if (emptyMsg) emptyMsg.remove();
+      const { uid, row } = addNewRow('project_file');
+      contentEl.insertAdjacentHTML('beforeend', materialCardHtml(row));
+      initDnD(SECTIONS.find(s => s.id === 'projects'));
+      openInlineEdit(uid);
+    }
+
+    function hasProjectDescription(projectUid) {
+      const moduleEl = document.querySelector('#section-body > .module' + attrSel(projectUid));
+      return !!(moduleEl && moduleEl.querySelector(':scope > .module-content > .project-desc-card'));
+    }
+
+    function addProjectDescription(projectUid) {
+      if (hasProjectDescription(projectUid)) { toast('This project already has a description — edit it below', 'err'); return; }
+      closeInlineEdit();
+      const moduleEl = document.querySelector('#section-body > .module' + attrSel(projectUid));
+      if (!moduleEl) return;
+      const contentEl = moduleEl.querySelector(':scope > .module-content');
+      if (!contentEl) return;
+      const emptyMsg = contentEl.querySelector(':scope > .empty-content');
+      if (emptyMsg) emptyMsg.remove();
+      const { uid, row } = addNewRow('project_description');
+      contentEl.insertAdjacentHTML('afterbegin', projectDescCardHtml(row));
+      initDnD(SECTIONS.find(s => s.id === 'projects'));
+      openInlineEdit(uid);
+    }
+
+    function addProjectGroup(projectUid) {
+      closeInlineEdit();
+      const moduleEl = document.querySelector('#section-body > .module' + attrSel(projectUid));
+      if (!moduleEl) return;
+      const contentEl = moduleEl.querySelector(':scope > .module-content');
+      if (!contentEl) return;
+      const emptyMsg = contentEl.querySelector(':scope > .empty-content');
+      if (emptyMsg) emptyMsg.remove();
+      const { uid, row } = addNewRow('project_group');
+      contentEl.insertAdjacentHTML('beforeend', projectGroupBlockHtml(row, []));
+      initDnD(SECTIONS.find(s => s.id === 'projects'));
+      openInlineEdit(uid);
+    }
+
+    function addGroupFile(groupUid) {
+      closeInlineEdit();
+      const groupEl = document.querySelector('#section-body .project-group-block' + attrSel(groupUid));
+      if (!groupEl) return;
+      const { uid, row } = addNewRow('group_file');
+      let filesEl = groupEl.querySelector(':scope > .pgb-files');
+      if (!filesEl) {
+        groupEl.insertAdjacentHTML('beforeend', '<div class="pgb-files"></div>');
+        filesEl = groupEl.querySelector(':scope > .pgb-files');
+      }
+      filesEl.insertAdjacentHTML('beforeend', materialCardHtml(row));
+      initDnD(SECTIONS.find(s => s.id === 'projects'));
+      openInlineEdit(uid);
+    }
+
+    function addFlatRow(type) {
+      closeInlineEdit();
+      const defaults = {};
+      if (type === 'announcement') defaults.d = currentDatetimeStr();
+      const { uid, row } = addNewRow(type, defaults);
+      const body = document.getElementById('section-body');
+      const container = document.getElementById('links-cards-body') || body;
+      const emptyMsg = container.querySelector(':scope > .empty-content');
+      if (emptyMsg) emptyMsg.remove();
+      container.insertAdjacentHTML('beforeend', flatCardHtml(row));
+      const sec = SECTIONS.find(s => s.types.includes(type));
+      initDnD(sec);
+      openInlineEdit(uid);
+    }
+
+    // ── Save: diff the section's current DOM state against the database and reconcile ──
+
+    function collectSectionUids(sec) {
+      const body = document.getElementById('section-body');
+      if (sec.hier || sec.proj) {
+        const allUids = [];
+        const topUids = [];
+        body.querySelectorAll(':scope > .module').forEach(modEl => {
+          if (modEl.dataset.uid) { allUids.push(modEl.dataset.uid); topUids.push(modEl.dataset.uid); }
+          modEl.querySelectorAll('.module-content [data-uid]').forEach(el => allUids.push(el.dataset.uid));
+        });
+        return { allUids, topUids };
+      }
+      const container = document.getElementById('links-cards-body') || body;
+      const allUids = [...container.querySelectorAll(':scope > [data-uid]')].map(el => el.dataset.uid);
+      return { allUids, topUids: allUids };
+    }
+
+    async function saveSectionChanges(sectionId) {
+      const sec = SECTIONS.find(s => s.id === sectionId);
+      if (!sec) return;
+      closeInlineEdit();
+
+      const btn = document.getElementById('section-save-btn');
+      const origHtml = btn ? btn.innerHTML : '';
+      const resetBtn = () => { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } };
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Saving…'; }
+
+      if (sectionId === 'links') {
+        const ttErr = await saveTimetablesWork();
+        if (ttErr) { toast('Save failed: ' + ttErr, 'err'); resetBtn(); return; }
+      }
+
+      // Modules are displayed sorted by their Order field (highest on top), so the final
+      // top-level drag order must be written back into that field too — otherwise the next
+      // load would immediately re-sort back to the old order despite the new row_index.
+      const { allUids, topUids } = collectSectionUids(sec);
+      if (sec.hier && topUids.length > 1) {
+        const n = topUids.length;
+        topUids.forEach((uid, i) => { if (ROW_STORE[uid]) ROW_STORE[uid].b = String(n - i); });
+      }
+
+      const { data: existing, error: fetchErr } = await sb.from('course_rows').select('row_uid')
+        .eq('sheet_name', S.course).eq('is_archive', S.isArchive).in('type', sec.types);
+      if (fetchErr) { toast('Save failed: ' + fetchErr.message, 'err'); resetBtn(); return; }
+
+      const existingUids = new Set((existing || []).map(r => r.row_uid));
+      const finalSet = new Set(allUids);
+      const toDelete = [...existingUids].filter(u => !finalSet.has(u));
+      const toUpsert = allUids.map((uid, i) => {
+        const row = ROW_STORE[uid];
+        return row ? { ...row, row_index: (i + 1) * 10 } : null;
+      }).filter(Boolean);
+
+      if (toDelete.length) {
+        const { error } = await sb.from('course_rows').delete().in('row_uid', toDelete);
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+      }
+      if (toUpsert.length) {
+        const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+      }
+
+      toast('Saved', 'ok');
+      await loadSection(sectionId);
     }
 
     async function modalSave() {
@@ -3795,20 +4223,6 @@
       else await loadSection(S.section);
     }
 
-    async function moveRow(uid, dir) {
-      const sec = SECTIONS.find(s => s.id === S.section);
-      if (!sec) return;
-      const { data } = await sb.from('course_rows').select('row_uid,row_index')
-        .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
-        .in('type', sec.types).order('row_index');
-      if (!data) return;
-      const i = data.findIndex(r => r.row_uid === uid), j = i + dir;
-      if (j < 0 || j >= data.length) return;
-      await sb.from('course_rows').update({ row_index: data[j].row_index }).eq('row_uid', data[i].row_uid);
-      await sb.from('course_rows').update({ row_index: data[i].row_index }).eq('row_uid', data[j].row_uid);
-      await loadSection(S.section);
-    }
-
     // ─────────────────────────────────────────────────────────────────────────────
     // Course management
     // ─────────────────────────────────────────────────────────────────────────────
@@ -3836,7 +4250,7 @@
     </div>
     <div class="form-group">
       <label class="form-label"><i class="fa-solid fa-toggle-on" style="margin-right:5px;opacity:0.6"></i>Status</label>
-      <select id="nc_archive"><option value="false">Active</option><option value="true">Archive</option></select>
+      <select id="nc_archive"><option value="false">Active</option><option value="true">Archived</option></select>
     </div>
   `;
       document.getElementById('modal-overlay').classList.add('open');
@@ -3864,7 +4278,7 @@
       document.getElementById('modal-save').onclick = modalSave;
       closeModal(); toast('Course created', 'ok');
       await loadSidebar();
-      S.course = sheet; S.isArchive = archive; S.section = 'info';
+      S.course = sheet; S.isArchive = archive; S.section = getLastSection(sheet, archive);
       renderCourseShell(sheet, archive);
       await loadSidebar();
     }
@@ -3953,117 +4367,6 @@
     setupThemeToggle();
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Send Notification
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    function openSendNotifModal() {
-      document.getElementById('modal-title').innerHTML = '<i class="fa-regular fa-bell" style="margin-right:8px;opacity:0.8"></i>Send Notification';
-      document.getElementById('modal-save').innerHTML = '<i class="fa-solid fa-paper-plane" style="margin-right:5px"></i>Send';
-      document.getElementById('modal-save').onclick = sendNotifFromModal;
-      document.getElementById('modal-foot').style.display = '';
-      document.getElementById('modal-body').innerHTML = `
-    <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-heading" style="margin-right:5px;opacity:0.6"></i>Title *</label>
-      <input type="text" id="snf_title">
-    </div>
-    <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-align-left" style="margin-right:5px;opacity:0.6"></i>Body *</label>
-      <textarea id="snf_text" rows="3"></textarea>
-    </div>
-    <div class="form-group">
-      <label class="form-label"><i class="fa-regular fa-image" style="margin-right:5px;opacity:0.6"></i>Icon <span class="form-hint" style="display:inline">(URL or FA class)</span></label>
-      <input type="text" id="snf_icon">
-    </div>
-    <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-image" style="margin-right:5px;opacity:0.6"></i>Image Banner URL</label>
-      <input type="text" id="snf_image">
-    </div>
-    <div class="form-group">
-      <label class="form-label"><i class="fa-regular fa-image" style="margin-right:5px;opacity:0.6"></i>Badge URL <span class="form-hint" style="display:inline">(mono 72×72)</span></label>
-      <input type="text" id="snf_badge">
-    </div>
-    <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-tag" style="margin-right:5px;opacity:0.6"></i>Tag</label>
-      <input type="text" id="snf_tag">
-    </div>
-    <div class="form-group">
-      <label class="form-label"><i class="fa-regular fa-hand-pointer" style="margin-right:5px;opacity:0.6"></i>Require Interaction</label>
-      <select id="snf_ri"><option value="FALSE">No</option><option value="TRUE">Yes</option></select>
-    </div>
-    <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-code" style="margin-right:5px;opacity:0.6"></i>Action Buttons</label>
-      <textarea id="snf_actions" rows="2"></textarea>
-      <div class="form-hint">Format: Label|URL, Label|URL &nbsp;·&nbsp; Use <code>close</code> as URL to dismiss</div>
-    </div>
-      `;
-      document.getElementById('modal-overlay').classList.add('open');
-    }
-
-    async function sendNotifFromModal() {
-      const btn = document.getElementById('modal-save');
-      const title = (document.getElementById('snf_title')?.value || '').trim();
-      const text = (document.getElementById('snf_text')?.value || '').trim();
-      if (!title || !text) { toast('Title and body are required', 'err'); return; }
-
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px"></i>Sending…';
-
-      try {
-        const session = (await sb.auth.getSession()).data.session;
-        if (!session) throw new Error('Not authenticated');
-
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/send-fcm`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            course: S.course,
-            title,
-            text,
-            icon: (document.getElementById('snf_icon')?.value || '').trim(),
-            image: (document.getElementById('snf_image')?.value || '').trim(),
-            badge: (document.getElementById('snf_badge')?.value || '').trim(),
-            tag: (document.getElementById('snf_tag')?.value || '').trim(),
-            requireInteraction: document.getElementById('snf_ri')?.value || 'FALSE',
-            actions: (document.getElementById('snf_actions')?.value || '').trim(),
-          }),
-        });
-
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
-
-        // Record the notification in course_rows
-        const { data: maxRow } = await sb.from('course_rows').select('row_index')
-          .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
-          .order('row_index', { ascending: false }).limit(1);
-        const idx = (maxRow?.[0]?.row_index || 0) + 10;
-        await sb.from('course_rows').insert({
-          row_uid: `${S.course}:notif_${Date.now()}`,
-          sheet_name: S.course, is_archive: S.isArchive,
-          row_index: idx, type: 'send_notification',
-          b: title, c: text,
-          d: (document.getElementById('snf_icon')?.value || '').trim(),
-          e: (document.getElementById('snf_image')?.value || '').trim(),
-          f: (document.getElementById('snf_badge')?.value || '').trim(),
-          g: (document.getElementById('snf_tag')?.value || '').trim(),
-          h: document.getElementById('snf_ri')?.value || 'FALSE',
-          i: (document.getElementById('snf_actions')?.value || '').trim(),
-          j: `Sent ✓ (${result.sent})`,
-        });
-
-        toast(`Sent to ${result.sent} subscriber${result.sent !== 1 ? 's' : ''} (${result.total} total)`, 'ok');
-        closeModal();
-        await loadSection(S.section);
-      } catch (err) {
-        toast('Error: ' + (err && err.message ? err.message : String(err)), 'err');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-paper-plane" style="margin-right:5px"></i>Send';
-      }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────────
     // Drag & Drop
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4078,6 +4381,16 @@
       touchStartThreshold: 5,
     };
 
+    // Drag-and-drop only ever reorders DOM nodes now — nothing is persisted here. The tab's
+    // Save button reads the final DOM order directly (see collectSectionUids/saveSectionChanges).
+    // Because Add actions insert into the *existing* DOM (rather than reloading the whole
+    // section from the database), this gets called again after every add — so it must not
+    // attach a second, duplicate Sortable instance to a container that's already managed.
+    function ensureSortable(el, opts) {
+      if (!el || Sortable.get(el)) return;
+      Sortable.create(el, opts);
+    }
+
     function initDnD(sec) {
       if (!sec || !window.Sortable) return;
       const body = document.getElementById('section-body');
@@ -4087,87 +4400,30 @@
         // Top level: sort .module blocks as whole units
         const modules = body.querySelectorAll(':scope > .module[data-uid]');
         if (modules.length > 1) {
-          Sortable.create(body, {
-            ...DND_OPTS,
-            filter: '.add-bar, .empty-content',
-            onEnd(evt) {
-              if (evt.oldIndex === evt.newIndex) return;
-              const allUids = [];
-              const moduleUids = [];
-              body.querySelectorAll(':scope > .module[data-uid]').forEach(modEl => {
-                allUids.push(modEl.dataset.uid);
-                moduleUids.push(modEl.dataset.uid);
-                const kids = modEl.dataset.childUids;
-                if (kids) allUids.push(...kids.split(',').filter(Boolean));
-              });
-              // Modules are displayed sorted by their Order field, so dragging must renumber
-              // it (highest = top) — otherwise the next render would snap back to the old order.
-              persistDnDOrder(allUids, moduleUids);
-            }
-          });
+          ensureSortable(body, { ...DND_OPTS, filter: '.section-topbar, .empty-content' });
         }
-        // Inner level: sort materials/funfacts within each module
-        body.querySelectorAll('.module-content').forEach(mc => {
-          const items = mc.querySelectorAll(':scope > [data-uid]');
-          if (items.length < 2) return;
-          const modEl = mc.closest('.module[data-uid]');
-          Sortable.create(mc, {
-            ...DND_OPTS,
-            filter: '.empty-content',
-            onEnd(evt) {
-              if (evt.oldIndex === evt.newIndex) return;
-              const uids = [...mc.querySelectorAll(':scope > [data-uid]')].map(el => el.dataset.uid);
-              if (modEl) modEl.dataset.childUids = uids.join(',');
-              persistDnDOrder(uids);
-            }
-          });
+        // Inner level: materials and fun facts live in two physically separate lists, so
+        // dragging can only reorder within each kind — a fun fact can never end up above a
+        // material, since it's never possible to drag between the two containers.
+        body.querySelectorAll('.module-materials, .module-funfacts').forEach(listEl => {
+          ensureSortable(listEl, { ...DND_OPTS, filter: '.inline-edit-panel' });
         });
       } else if (sec.proj) {
         // Top level: sort project .module blocks
         const modules = body.querySelectorAll(':scope > .module[data-uid]');
         if (modules.length > 1) {
-          Sortable.create(body, {
-            ...DND_OPTS,
-            filter: '.add-bar, .empty-content',
-            onEnd(evt) {
-              if (evt.oldIndex === evt.newIndex) return;
-              const uids = [...body.querySelectorAll(':scope > .module[data-uid]')].map(el => el.dataset.uid);
-              persistDnDOrder(uids);
-            }
-          });
+          ensureSortable(body, { ...DND_OPTS, filter: '.section-topbar, .empty-content' });
         }
       } else {
-        // Simple flat list of material-cards
-        const cards = body.querySelectorAll(':scope > .material-card[data-uid]');
+        // Simple flat list of material-cards. On the Links tab, cards live nested inside
+        // #links-cards-body (inside the unified settings-group shell) rather than directly
+        // under #section-body, so Sortable needs to operate on that inner container instead.
+        const container = document.getElementById('links-cards-body') || body;
+        const cards = container.querySelectorAll(':scope > .material-card[data-uid]');
         if (cards.length > 1) {
-          Sortable.create(body, {
-            ...DND_OPTS,
-            filter: '.add-bar, .empty-content',
-            onEnd(evt) {
-              if (evt.oldIndex === evt.newIndex) return;
-              const uids = [...body.querySelectorAll(':scope > .material-card[data-uid]')].map(el => el.dataset.uid);
-              persistDnDOrder(uids);
-            }
-          });
+          ensureSortable(container, { ...DND_OPTS, filter: '.section-topbar, .empty-content, .inline-edit-panel' });
         }
       }
-    }
-
-    async function persistDnDOrder(uids, moduleOrderUids) {
-      const entries = uids.map(uid => ({ uid, row: ROW_STORE[uid] })).filter(e => e.row);
-      if (entries.length < 2) return;
-      const sortedIdxs = entries.map(e => e.row.row_index).sort((a, b) => a - b);
-      const updates = entries.map((e, i) => ({ ...e.row, row_index: sortedIdxs[i] }));
-      if (moduleOrderUids && moduleOrderUids.length > 1) {
-        const n = moduleOrderUids.length;
-        moduleOrderUids.forEach((uid, i) => {
-          const u = updates.find(r => r.row_uid === uid);
-          if (u) u.b = String(n - i);
-        });
-      }
-      for (const row of updates) ROW_STORE[row.row_uid] = row;
-      const { error } = await sb.from('course_rows').upsert(updates, { onConflict: 'row_uid' });
-      if (error) toast('Reorder failed: ' + error.message, 'err');
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
