@@ -36,6 +36,9 @@
       --dark-text: #e0e0e0;
       --dark-text-muted: #9e9e9e;
       --dark-border: #333333;
+
+      /* One shared column width for the header, tabs and body so their edges line up. */
+      --content-max: 1040px;
     }
 
     *,
@@ -47,13 +50,15 @@
     html {
       margin: 0;
       padding: 0;
+      /* Painting the root background (not just body) keeps the elastic/rubber-band overscroll
+         area the same colour as the page instead of flashing white. */
       background-color: var(--background-color);
     }
 
     body {
-      margin: 0 auto;
+      margin: 0;
       padding: 0;
-      max-width: 1400px;
+      width: 100%;
       font-family: 'Google Sans Flex', 'Roboto', sans-serif;
       color: var(--text-color);
       background: var(--background-color);
@@ -62,12 +67,7 @@
       display: flex;
       flex-direction: column;
       min-height: 100dvh;
-    }
-
-    @media (max-width: 1400px) {
-      body {
-        border-radius: 0;
-      }
+      overscroll-behavior-y: none;
     }
 
     /* ── Buttons ── */
@@ -145,16 +145,17 @@
       box-shadow: none;
     }
 
-    /* ── Loading ── */
+    /* ── Loading — mimics the real app shell (top bar + sidebar + main column) with shimmer
+       blocks standing in for content, same idea as teaching/index.html's #skeleton-loader. */
     #app-loading {
       position: fixed;
       inset: 0;
       background: var(--background-color);
       display: flex;
-      align-items: center;
-      justify-content: center;
+      flex-direction: column;
       z-index: 9999;
       transition: opacity 0.4s;
+      overflow: hidden;
     }
 
     #app-loading.hidden {
@@ -162,43 +163,44 @@
       pointer-events: none;
     }
 
-    .loading-spinner {
-      width: 60px;
-      height: 60px;
-      position: relative;
+    .skel-topbar {
+      height: 52px;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
     }
 
-    .loading-spinner div {
-      box-sizing: border-box;
-      display: block;
-      position: absolute;
-      width: 60px;
-      height: 60px;
-      margin: 3px;
-      border: 4px solid var(--primary-color);
-      border-radius: 50%;
-      animation: spin 1.2s cubic-bezier(.5, 0, .5, 1) infinite;
-      border-color: var(--primary-color) transparent transparent transparent;
+    .skel-shell-body {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+      justify-content: center;
     }
 
-    .loading-spinner div:nth-child(1) {
-      animation-delay: -.45s;
+    .skel-sidebar {
+      width: 252px;
+      flex-shrink: 0;
+      padding: 24px 14px;
+      display: none;
     }
 
-    .loading-spinner div:nth-child(2) {
-      animation-delay: -.30s;
-      border-top-color: var(--tertiary-color);
-    }
-
-    .loading-spinner div:nth-child(3) {
-      animation-delay: -.15s;
-      border-top-color: rgba(57, 73, 171, 0.5);
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
+    @media (min-width: 640px) {
+      .skel-sidebar {
+        display: block;
       }
+    }
+
+    .skel-main {
+      flex: 1;
+      max-width: var(--content-max);
+      padding: 24px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .skel-tabs-row {
+      display: flex;
+      gap: 6px;
     }
 
     /* ── Login ── */
@@ -313,32 +315,21 @@
       flex: 1;
     }
 
+    /* Matches the gradient used by every other "head" bar in the app (login-head, modal-head,
+       course-header, module-header) — doesn't adapt to light/dark theme, same as those. */
     .top-bar {
-      background: var(--background-color);
-      color: var(--primary-dark);
+      background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+      color: white;
       padding: 0 20px;
       height: 52px;
       display: flex;
       align-items: center;
       gap: 12px;
-      border-bottom: 1px solid #e8eaf0;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
       flex-shrink: 0;
       position: sticky;
       top: 0;
       z-index: 100;
-    }
-
-    .top-bar .btn-ghost {
-      background: rgba(57, 73, 171, 0.07);
-      border-color: rgba(57, 73, 171, 0.18);
-      color: var(--primary-dark);
-      box-shadow: none;
-    }
-
-    .top-bar .btn-ghost:hover {
-      background: rgba(57, 73, 171, 0.14);
-      filter: none;
-      box-shadow: none;
     }
 
     .top-bar-title {
@@ -352,6 +343,8 @@
       opacity: 0.88;
     }
 
+    /* Desktop-only trigger for the docked sidebar — mobile uses the floating FAB instead
+       since the top bar isn't within thumb reach there. */
     .hamburger {
       display: flex;
       flex-direction: column;
@@ -364,58 +357,60 @@
       cursor: pointer;
       width: 36px;
       height: 36px;
+      flex-shrink: 0;
     }
 
     .hamburger span {
       display: block;
       width: 20px;
       height: 2px;
-      background: var(--primary-dark);
+      background: white;
       border-radius: 2px;
     }
 
-    .sidebar-backdrop {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.4);
-      z-index: 99;
-    }
-
-    .sidebar-backdrop.show {
-      display: block;
-    }
-
-    /* ── Sidebar ── */
+    /* ── Sidebar — a normal docked panel on desktop (visible by default, pushes the main
+       column, toggled via the top-bar hamburger). Below 768px it becomes an off-canvas
+       drawer instead, hidden by default and opened via the floating FAB — the two states
+       (.desktop-hidden / .mobile-open) are kept separate so toggling one on one breakpoint
+       can never leak into the other's behavior. */
     .sidebar {
       position: fixed;
       top: 52px;
-      left: -252px;
+      left: 0;
       width: 252px;
       height: calc(100dvh - 52px);
-      background: var(--background-color);
-      border-right: 1px solid #e8eaf0;
+      background: var(--card-background);
+      border-right: 1px solid #e0e0e0;
       display: flex;
       flex-direction: column;
       overflow: hidden;
       z-index: 200;
-      transition: left 0.25s cubic-bezier(.4, 0, .2, 1);
+      transition: transform 0.28s cubic-bezier(.4, 0, .2, 1);
     }
 
-    .sidebar.open {
-      left: 0;
+    @media (min-width: 769px) {
+      .sidebar.desktop-hidden {
+        transform: translateX(-100%);
+      }
     }
 
     .sidebar-top {
       padding: 14px 12px 12px;
       border-bottom: 1px solid #e8eaf0;
-      background: var(--background-color);
+    }
+
+    /* All mobile-only (see the max-width:768px block) — the sidebar is docked and always
+       visible on desktop, so none of these should ever appear there. */
+    .sidebar-fab,
+    .sidebar-backdrop,
+    .sidebar-close {
+      display: none;
     }
 
     .sidebar-scroll {
       overflow-y: auto;
       flex: 1;
-      padding: 6px 10px 24px;
+      padding: 6px 10px 16px;
     }
 
     .sidebar-label {
@@ -435,6 +430,56 @@
       flex: 1;
       height: 1px;
       background: #e8eaf0;
+    }
+
+    /* The Archived label doubles as a collapse/expand toggle, so it needs the global button
+       reset (no pill background/shadow) plus a chevron pinned to the end instead of the
+       trailing rule line the plain (non-interactive) Active label uses. */
+    .sidebar-label-toggle {
+      background: none;
+      border: none;
+      box-shadow: none;
+      width: 100%;
+      cursor: pointer;
+      font-family: inherit;
+      border-radius: 0;
+    }
+
+    .sidebar-label-toggle::after {
+      content: none;
+    }
+
+    .sidebar-label-toggle:hover,
+    .sidebar-label-toggle:active {
+      box-shadow: none;
+      filter: none;
+      transform: none;
+      color: #90a4ae;
+    }
+
+    .sb-archive-chevron {
+      margin-left: auto;
+      transition: transform 0.25s ease;
+      flex-shrink: 0;
+    }
+
+    .sidebar-label-toggle.expanded .sb-archive-chevron {
+      transform: rotate(180deg);
+    }
+
+    #sb-archive {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      max-height: 2000px;
+      transition: max-height 0.3s cubic-bezier(.4, 0, .2, 1), opacity 0.2s ease;
+      opacity: 1;
+    }
+
+    #sb-archive.sb-archive-collapsed {
+      max-height: 0;
+      opacity: 0;
+      pointer-events: none;
     }
 
     .course-btn {
@@ -532,12 +577,16 @@
     .main-area {
       flex: 1;
       background: var(--background-color);
-      transition: margin-left 0.25s cubic-bezier(.4, 0, .2, 1);
     }
 
     @media (min-width: 769px) {
-      #admin-app.sidebar-open .main-area {
+      .main-area {
         margin-left: 252px;
+        transition: margin-left 0.28s cubic-bezier(.4, 0, .2, 1);
+      }
+
+      #admin-app.sidebar-desktop-hidden .main-area {
+        margin-left: 0;
       }
     }
 
@@ -564,13 +613,18 @@
       background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
       color: white;
       padding: 22px 24px;
-      margin: 14px 14px 0;
+      /* max-width - 28 so its outer edges line up with the 14px-inset content of the tabs/body
+         columns below it; margin-bottom leaves room for the drop shadow to show. */
+      margin: 16px auto 6px;
+      width: calc(100% - 28px);
+      max-width: calc(var(--content-max) - 28px);
       border-radius: 16px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 6px 18px rgba(26, 35, 126, 0.18);
       display: flex;
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
+      animation: headerIn 0.4s cubic-bezier(.22, 1, .36, 1) both;
     }
 
     /* Archived courses get a desaturated grey header instead of the active brand gradient, as a
@@ -615,7 +669,10 @@
       flex-wrap: wrap;
       gap: 6px 2px;
       padding: 10px 14px 0;
-      background: var(--background-color);
+      max-width: var(--content-max);
+      margin: 0 auto;
+      background: transparent;
+      animation: headerIn 0.4s 0.05s cubic-bezier(.22, 1, .36, 1) both;
     }
 
     .section-tab {
@@ -663,16 +720,13 @@
 
     .section-body {
       padding: 12px 14px 32px;
+      max-width: var(--content-max);
+      width: 100%;
+      margin: 0 auto;
     }
 
     .section-body.loaded {
       animation: sectionIn 0.18s ease both;
-    }
-
-    .section-loading {
-      padding: 40px;
-      text-align: center;
-      color: #9e9e9e;
     }
 
     /* ── Unselectable UI text ── */
@@ -704,8 +758,7 @@
     .grade-total,
     .form-hint,
     .color-label,
-    .empty-content,
-    .section-loading {
+    .empty-content {
       user-select: none;
       cursor: default;
     }
@@ -729,6 +782,7 @@
 
     .section-topbar .add-bar {
       flex: 1;
+      justify-content: flex-end;
     }
 
     .btn-save-section {
@@ -748,11 +802,19 @@
       border: 1px solid #e0e0e0;
       border-top: none;
       border-radius: 0 0 12px 12px;
-      padding: 14px 16px 4px;
-      margin: -1px 0 10px;
+      padding: 8px 16px 4px;
+      margin: 0 0 10px;
     }
 
-    .module > .inline-edit-panel,
+    /* Applied to whatever's being edited so the panel sits flush underneath it instead of
+       leaving a gap from the card's own margin/rounded corners. */
+    .inline-editing-anchor {
+      margin-bottom: 0 !important;
+      border-bottom-left-radius: 0 !important;
+      border-bottom-right-radius: 0 !important;
+    }
+
+    .module>.inline-edit-panel,
     .project-group-block .inline-edit-panel {
       margin-left: 0;
       margin-right: 0;
@@ -1400,6 +1462,15 @@
       gap: 6px;
     }
 
+    .confirm-modal {
+      max-width: 400px;
+    }
+
+    .confirm-modal #confirm-body {
+      white-space: pre-line;
+      line-height: 1.5;
+    }
+
     /* Animations */
     @keyframes fadeSlideIn {
       from {
@@ -1416,12 +1487,25 @@
     @keyframes sectionIn {
       from {
         opacity: 0;
-        transform: translateY(6px);
+        transform: translateY(12px);
       }
 
       to {
         opacity: 1;
         transform: translateY(0);
+      }
+    }
+
+    /* Used by the course header + tab strip so switching courses eases in rather than snapping. */
+    @keyframes headerIn {
+      from {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.995);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
       }
     }
 
@@ -1437,12 +1521,127 @@
       animation: fadeSlideIn 0.22s ease both;
     }
 
-    .settings-panel {
-      animation: sectionIn 0.2s ease both;
+    /* Section content eases in on every tab switch; the first few direct children cascade
+       slightly so a freshly loaded tab feels like it settles into place. */
+    .section-body.loaded {
+      animation: sectionIn 0.3s cubic-bezier(.22, 1, .36, 1) both;
     }
 
-    .section-body>* {
-      animation: sectionIn 0.18s ease both;
+    .section-body.loaded>* {
+      animation: sectionIn 0.34s cubic-bezier(.22, 1, .36, 1) both;
+    }
+
+    .section-body.loaded>*:nth-child(1) {
+      animation-delay: 0.02s;
+    }
+
+    .section-body.loaded>*:nth-child(2) {
+      animation-delay: 0.06s;
+    }
+
+    .section-body.loaded>*:nth-child(3) {
+      animation-delay: 0.10s;
+    }
+
+    .section-body.loaded>*:nth-child(4) {
+      animation-delay: 0.14s;
+    }
+
+    .section-body.loaded>*:nth-child(n+5) {
+      animation-delay: 0.18s;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .material-card,
+      .module,
+      .funfact-card,
+      .course-header,
+      .section-tabs,
+      .section-body.loaded,
+      .section-body.loaded>* {
+        animation: none !important;
+      }
+    }
+
+    /* ── Shimmer skeletons — same technique as teaching/index.html: a grey block with a
+       light sweep animated across it, shaped like whatever real content will land there. */
+    @keyframes shimmer {
+      100% {
+        transform: translateX(100%);
+      }
+    }
+
+    .skeleton {
+      position: relative;
+      overflow: hidden;
+      background-color: #e0e0e0;
+      border-radius: 10px;
+    }
+
+    .skeleton::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      transform: translateX(-100%);
+      background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+      animation: shimmer 1.5s infinite;
+    }
+
+    html[data-theme="dark"] .skeleton,
+    html:not([data-theme="light"]) .skeleton {
+      background-color: var(--dark-surface-light);
+    }
+
+    /* For a skeleton block sitting on top of the brand-gradient header, which never adapts
+       to light/dark theme, so this doesn't need a theme override either. */
+    .skeleton-on-dark {
+      background-color: rgba(255, 255, 255, 0.22) !important;
+    }
+
+    html[data-theme="dark"] .skeleton::after,
+    html:not([data-theme="light"]) .skeleton::after {
+      background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    }
+
+    .skeleton-course-item {
+      height: 44px;
+      margin-bottom: 3px;
+      border-radius: 10px;
+    }
+
+    .skeleton-course-header {
+      height: 96px;
+      border-radius: 16px;
+    }
+
+    .skeleton-tab {
+      height: 34px;
+      width: 90px;
+      border-radius: 8px;
+      flex: 0 0 auto;
+    }
+
+    .skeleton-card {
+      height: 62px;
+      border-radius: 15px;
+      margin-bottom: 6px;
+    }
+
+    /* Section content is replaced with this shape while a tab/course loads; freezing the
+       container's min-height beforehand (done in JS) keeps the page from collapsing and
+       re-expanding as content swaps, which is what causes the scrollbar to flicker. */
+    .skeleton-section {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .skeleton::after {
+        animation: none !important;
+      }
     }
 
     /* Toast */
@@ -1498,18 +1697,130 @@
 
     /* ── Mobile ── */
     @media (max-width: 768px) {
+      /* Most sizes in this file are em-based off body, so this scales text throughout
+         (buttons, cards, tabs, forms) without needing to touch each rule individually. */
+      body {
+        font-size: 14px;
+      }
+
       .top-bar-user {
         display: none;
       }
 
+      /* The hamburger is desktop-only — mobile opens the sidebar via the floating FAB instead. */
+      .hamburger {
+        display: none;
+      }
+
+      /* Sign out collapses to icon-only on mobile — drop the label and the icon's trailing
+         margin (which existed to space it from the label) so the button doesn't end up
+         lopsided with dead space on one side. */
+      .signout-text {
+        display: none;
+      }
+
+      #signout-btn {
+        padding: 8px 10px;
+      }
+
+      #signout-btn i {
+        margin-right: 0 !important;
+      }
+
+      /* Below 768px the docked sidebar becomes an off-canvas drawer: hidden by default,
+         opened via the floating FAB (there's no room to keep it permanently visible). Wider
+         than the desktop panel and with roomier touch targets, since it's now a thumb-driven
+         mobile overlay rather than a mouse-driven docked panel. */
       .sidebar {
-        width: 80%;
-        max-width: 260px;
-        left: -100vw;
+        left: -100%;
+        width: 85%;
+        max-width: 320px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+        transition: left 0.3s cubic-bezier(.4, 0, .2, 1);
+      }
+
+      .sidebar.mobile-open {
+        left: 0;
+      }
+
+      .sidebar-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 12px 12px 16px;
+      }
+
+      .sidebar-top button {
+        flex: 1;
+      }
+
+      .sidebar-close {
+        flex-shrink: 0;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f0f2fc;
+        border: 1px solid #e0e0e0;
+        color: #607d8b;
+        box-shadow: none;
+      }
+
+      .sidebar-scroll {
+        padding: 8px 10px 90px;
+      }
+
+      .course-btn {
+        padding: 13px 14px;
+        font-size: 0.92em;
+      }
+
+      .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        z-index: 199;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+      }
+
+      .sidebar-backdrop.active {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .sidebar-fab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+        color: white;
+        font-size: 1.2em;
+        border: none;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+        z-index: 250;
+        cursor: pointer;
+        transition: transform 0.3s ease;
+      }
+
+      .sidebar-fab.active {
+        transform: rotate(45deg);
       }
 
       .course-header {
-        margin: 10px 10px 0;
+        width: calc(100% - 20px);
+        margin: 10px auto 6px;
         padding: 16px 18px;
         gap: 8px;
       }
@@ -1624,22 +1935,6 @@
       color: var(--dark-text);
     }
 
-    html[data-theme="dark"] .top-bar {
-      background: var(--dark-bg);
-      border-color: var(--dark-border);
-      color: var(--dark-text);
-    }
-
-    html[data-theme="dark"] .top-bar .btn-ghost {
-      background: rgba(255, 255, 255, 0.07);
-      border-color: rgba(255, 255, 255, 0.12);
-      color: var(--dark-text);
-    }
-
-    html[data-theme="dark"] .hamburger span {
-      background: var(--dark-text);
-    }
-
     html[data-theme="dark"] #app-loading {
       background: var(--dark-bg);
     }
@@ -1668,6 +1963,12 @@
     html[data-theme="dark"] .sidebar-top {
       background: var(--dark-surface);
       border-color: var(--dark-border);
+    }
+
+    html[data-theme="dark"] .sidebar-close {
+      background: var(--dark-surface-light);
+      border-color: var(--dark-border);
+      color: var(--dark-text-muted);
     }
 
     html[data-theme="dark"] .sidebar-label {
@@ -1711,10 +2012,6 @@
       background: var(--dark-surface-light);
       color: var(--dark-text);
       border-color: var(--dark-border);
-    }
-
-    html[data-theme="dark"] .section-loading {
-      color: var(--dark-text-muted);
     }
 
     html[data-theme="dark"] .material-card {
@@ -1902,22 +2199,6 @@
         color: var(--dark-text);
       }
 
-      html:not([data-theme="light"]) .top-bar {
-        background: var(--dark-bg);
-        border-color: var(--dark-border);
-        color: var(--dark-text);
-      }
-
-      html:not([data-theme="light"]) .top-bar .btn-ghost {
-        background: rgba(255, 255, 255, 0.07);
-        border-color: rgba(255, 255, 255, 0.12);
-        color: var(--dark-text);
-      }
-
-      html:not([data-theme="light"]) .hamburger span {
-        background: var(--dark-text);
-      }
-
       html:not([data-theme="light"]) #app-loading {
         background: var(--dark-bg);
       }
@@ -1946,6 +2227,12 @@
       html:not([data-theme="light"]) .sidebar-top {
         background: var(--dark-surface);
         border-color: var(--dark-border);
+      }
+
+      html:not([data-theme="light"]) .sidebar-close {
+        background: var(--dark-surface-light);
+        border-color: var(--dark-border);
+        color: var(--dark-text-muted);
       }
 
       html:not([data-theme="light"]) .sidebar-label {
@@ -1989,10 +2276,6 @@
         background: var(--dark-surface-light);
         color: var(--dark-text);
         border-color: var(--dark-border);
-      }
-
-      html:not([data-theme="light"]) .section-loading {
-        color: var(--dark-text-muted);
       }
 
       html:not([data-theme="light"]) .material-card {
@@ -2174,10 +2457,27 @@
 <body>
 
   <div id="app-loading">
-    <div class="loading-spinner">
-      <div></div>
-      <div></div>
-      <div></div>
+    <div class="skel-topbar"></div>
+    <div class="skel-shell-body">
+      <div class="skel-sidebar">
+        <div class="skeleton skeleton-course-item" style="height:38px"></div>
+        <div class="skeleton skeleton-course-item" style="margin-top:18px"></div>
+        <div class="skeleton skeleton-course-item"></div>
+        <div class="skeleton skeleton-course-item"></div>
+        <div class="skeleton skeleton-course-item"></div>
+      </div>
+      <div class="skel-main">
+        <div class="skel-tabs-row">
+          <div class="skeleton skeleton-tab"></div>
+          <div class="skeleton skeleton-tab"></div>
+          <div class="skeleton skeleton-tab"></div>
+          <div class="skeleton skeleton-tab"></div>
+        </div>
+        <div class="skeleton skeleton-course-header"></div>
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
     </div>
   </div>
 
@@ -2185,7 +2485,7 @@
     <div class="login-card">
       <div class="login-head">
         <h1>Admin Panel</h1>
-        <p>Teaching Hub</p>
+        <p>Bredli's Teaching Hub</p>
       </div>
       <div class="login-body">
         <p>Please sign in with your <strong>EPOKA Mail</strong>.</p>
@@ -2221,30 +2521,42 @@
 
   <div id="admin-app">
     <div class="top-bar">
-      <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">
+      <button class="hamburger" id="desktop-hamburger" onclick="toggleSidebar()" aria-label="Toggle course list" title="Toggle course list">
         <span></span><span></span><span></span>
       </button>
-      <span class="top-bar-title"><i class="fa-solid fa-screwdriver-wrench"
-          style="margin-right:8px;opacity:0.85;font-size:0.9em"></i>Admin Panel</span>
+      <span class="top-bar-title"><i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;opacity:0.85;font-size:0.9em"></i><span class="top-bar-title-text">Admin Panel</span></span>
       <span class="top-bar-user" id="top-user"></span>
-      <button class="btn-ghost btn-sm" onclick="signOut()"><i class="fa-solid fa-right-from-bracket"
-          style="margin-right:5px"></i>Sign out</button>
+      <button class="btn-ghost btn-sm" id="signout-btn" onclick="signOut()"><i class="fa-solid fa-right-from-bracket"
+          style="margin-right:5px"></i><span class="signout-text">Sign out</span></button>
     </div>
-    <div class="sidebar-backdrop" id="sb-backdrop" onclick="toggleSidebar()"></div>
+    <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-top">
         <button onclick="openNewCourseModal()"
           style="width:100%;border-radius:12px;font-size:0.875em;padding:10px 16px;justify-content:center;display:flex;align-items:center"><i
             class="fa-solid fa-plus" style="margin-right:7px"></i>New Course</button>
+        <button class="sidebar-close" onclick="toggleSidebar()" aria-label="Close course list" title="Close">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
       </div>
       <div class="sidebar-scroll">
         <div class="sidebar-label"><i class="fa-solid fa-circle" style="color:#43a047;font-size:0.65em"></i>Active
         </div>
-        <div id="sb-active"></div>
-        <div class="sidebar-label"><i class="fa-solid fa-box-archive" style="font-size:0.8em"></i>Archived</div>
-        <div id="sb-archive"></div>
+        <div id="sb-active">
+          <div class="skeleton skeleton-course-item"></div>
+          <div class="skeleton skeleton-course-item"></div>
+          <div class="skeleton skeleton-course-item"></div>
+        </div>
+        <button type="button" class="sidebar-label sidebar-label-toggle" id="sb-archive-toggle" onclick="toggleArchiveGroup()">
+          <i class="fa-solid fa-box-archive" style="font-size:0.8em"></i>Archived
+          <i class="fa-solid fa-chevron-down sb-archive-chevron" id="sb-archive-chevron"></i>
+        </button>
+        <div id="sb-archive" class="sb-archive-collapsed"></div>
       </div>
     </aside>
+    <button id="sidebar-fab" class="sidebar-fab" onclick="toggleSidebar()" title="Course list" aria-label="Toggle course list">
+      <i class="fa-solid fa-graduation-cap"></i>
+    </button>
     <main class="main-area" id="main-area">
       <div class="no-course">
         <div>
@@ -2287,6 +2599,22 @@
             style="margin-right:5px"></i>Cancel</button>
         <button class="btn-sm" id="modal-save" onclick="modalSave()"><i class="fa-solid fa-check"
             style="margin-right:5px"></i>Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="confirm-overlay" onmousedown="_confirmOverlayMD=event.target===this"
+    onclick="if(_confirmOverlayMD&&event.target===this)_resolveConfirm(false)">
+    <div class="modal confirm-modal">
+      <div class="modal-head">
+        <h3 id="confirm-title">Please Confirm</h3>
+      </div>
+      <div class="modal-body" id="confirm-body"></div>
+      <div class="modal-foot">
+        <button class="btn-secondary btn-sm" onclick="_resolveConfirm(false)"><i class="fa-solid fa-xmark"
+            style="margin-right:5px"></i>Cancel</button>
+        <button class="btn-sm" id="confirm-ok-btn" onclick="_resolveConfirm(true)"><i class="fa-solid fa-check"
+            style="margin-right:5px"></i>Confirm</button>
       </div>
     </div>
   </div>
@@ -2481,6 +2809,7 @@
       { id: 'projects', label: 'Projects', icon: 'fa-solid fa-diagram-project', types: ['project', 'project_file', 'project_description', 'project_group', 'group_file'], proj: true },
       { id: 'announce', label: 'Announcements', icon: 'fa-solid fa-bullhorn', types: ['announcement'] },
       { id: 'links', label: 'Links', icon: 'fa-solid fa-link', types: ['button'] },
+      { id: 'grading', label: 'Grading', icon: 'fa-solid fa-chart-simple', types: ['metadata'] },
       { id: 'info', label: 'Info', icon: 'fa-solid fa-circle-info', types: ['metadata'] },
     ];
 
@@ -2640,20 +2969,41 @@
       document.getElementById('error-screen').style.display = w === 'error' ? 'flex' : 'none';
       document.getElementById('admin-app').style.display = w === 'admin' ? 'flex' : 'none';
       if (w !== 'admin') hideLoading();
-      if (w === 'admin') startIdleWatch(); else stopIdleWatch();
+      if (w === 'admin') { startIdleWatch(); applyArchiveGroupState(); } else stopIdleWatch();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Sidebar
     // ─────────────────────────────────────────────────────────────────────────────
 
+    // The sidebar is a normal always-visible docked panel on desktop, so this only ever
+    // matters on mobile, where it's an off-canvas drawer opened via the floating FAB.
     function toggleSidebar() {
-      const s = document.getElementById('sidebar');
-      const b = document.getElementById('sb-backdrop');
-      const open = s.classList.toggle('open');
-      const isMobile = window.innerWidth <= 768;
-      b.classList.toggle('show', open && isMobile);
-      document.getElementById('admin-app').classList.toggle('sidebar-open', open);
+      const sidebar = document.getElementById('sidebar');
+      if (window.innerWidth <= 768) {
+        const open = sidebar.classList.toggle('mobile-open');
+        document.getElementById('sidebar-backdrop').classList.toggle('active', open);
+        document.getElementById('sidebar-fab').classList.toggle('active', open);
+      } else {
+        const hidden = sidebar.classList.toggle('desktop-hidden');
+        document.getElementById('admin-app').classList.toggle('sidebar-desktop-hidden', hidden);
+      }
+    }
+
+    // Archive-group expand/collapse persists across visits.
+    function toggleArchiveGroup() {
+      const body = document.getElementById('sb-archive');
+      const btn = document.getElementById('sb-archive-toggle');
+      const expanded = body.classList.toggle('sb-archive-collapsed') === false;
+      btn.classList.toggle('expanded', expanded);
+      try { localStorage.setItem('admin_archive_expanded', expanded ? '1' : '0'); } catch { }
+    }
+
+    function applyArchiveGroupState() {
+      let expanded = false;
+      try { expanded = localStorage.getItem('admin_archive_expanded') === '1'; } catch { }
+      document.getElementById('sb-archive').classList.toggle('sb-archive-collapsed', !expanded);
+      document.getElementById('sb-archive-toggle').classList.toggle('expanded', expanded);
     }
 
     let _sidebarPrefetch = null;
@@ -2682,16 +3032,13 @@
         if (r.b === 'title') map[k].title = r.c;
         if (r.b === 'semester') map[k].semester = r.c;
         if (r.b === 'year') map[k].year = r.c;
+        if (r.b === 'header_decoration') map[k].icon = r.c;
       }
       const cmp = (a, b) => (a.code || a.sheet_name).localeCompare(b.code || b.sheet_name);
       const active = Object.values(map).filter(c => !c.is_archive).sort(cmp);
       const archive = Object.values(map).filter(c => c.is_archive).sort(cmp);
       renderSidebarGroup('sb-active', active, false);
       renderSidebarGroup('sb-archive', archive, true);
-      if (window.innerWidth > 768) {
-        document.getElementById('sidebar').classList.add('open');
-        document.getElementById('admin-app').classList.add('sidebar-open');
-      }
     }
 
     function renderSidebarGroup(id, courses, isArchive) {
@@ -2704,7 +3051,7 @@
         if (c.code && c.code !== name) parts.push(c.code);
         if (c.semester) parts.push(c.semester);
         if (c.year) parts.push(c.year);
-        const icon = isArchive ? 'fa-solid fa-box-archive' : 'fa-solid fa-graduation-cap';
+        const icon = isArchive ? 'fa-solid fa-box-archive' : (c.icon || 'fa-solid fa-graduation-cap');
         return `<button class="course-btn${active ? ' active' : ''}"
                 onclick="selectCourse('${x(c.sheet_name)}',${isArchive},this)">
       <i class="${icon} cb-icon"></i>
@@ -2735,11 +3082,10 @@
       S.course = name; S.isArchive = isArchive; S.section = getLastSection(name, isArchive);
       document.querySelectorAll('.course-btn').forEach(b => b.classList.remove('active'));
       if (el) el.classList.add('active');
-      if (window.innerWidth <= 768) {
-        document.getElementById('sidebar').classList.remove('open');
-        document.getElementById('sb-backdrop').classList.remove('show');
-        document.getElementById('admin-app').classList.remove('sidebar-open');
+      if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('mobile-open')) {
+        toggleSidebar();
       }
+      lockHeight(document.getElementById('main-area'));
       renderCourseShell(name, isArchive);
     }
 
@@ -2748,7 +3094,7 @@
     <div class="course-header${isArchive ? ' is-archive' : ''}">
       <div class="ch-title-wrap" style="flex:1;min-width:0">
         <h2 id="ch-title">${x(name)}</h2>
-        <div id="ch-meta" class="ch-meta"></div>
+        <div id="ch-meta" class="ch-meta"><span class="skeleton skeleton-on-dark" style="display:inline-block;width:160px;height:12px;vertical-align:middle"></span></div>
       </div>
       <div class="ch-actions">
         <span class="header-chip">${isArchive ? 'Archive' : 'Active'}</span>
@@ -2767,7 +3113,7 @@
                   onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon}" style="margin-right:5px;font-size:0.88em"></i>` : ''}${s.label}</button>`;
           }).join('')}
     </div>
-    <div class="section-body" id="section-body"><div class="section-loading"><i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;opacity:0.55"></i>Loading…</div></div>
+    <div class="section-body" id="section-body">${sectionSkeletonHtml()}</div>
   `;
       fillCourseHeader(name, isArchive);
       loadSection(S.section);
@@ -2784,7 +3130,32 @@
       if (!titleEl) return;
       titleEl.textContent = m.title || m.code || name;
       const parts = [m.code && m.code !== (m.title || m.code) ? m.code : null, m.semester, m.year, m.credits ? m.credits + ' ECTS' : null].filter(Boolean);
-      if (parts.length) metaEl.textContent = parts.join(' · ');
+      metaEl.textContent = parts.join(' · ');
+    }
+
+    // Shimmer placeholder shown the instant a tab/course switch starts — shaped like a card
+    // list, which is a reasonable stand-in for any of the section types.
+    function sectionSkeletonHtml() {
+      return `<div class="skeleton-section">
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+    <div class="skeleton skeleton-card"></div>
+  </div>`;
+    }
+
+    // Freezing min-height right before swapping in the skeleton (and clearing it once real
+    // content lands) keeps the page from collapsing then re-expanding between the two —
+    // that collapse/expand was what made the browser's scrollbar flicker on every switch.
+    function lockHeight(el) {
+      if (el) el.style.minHeight = el.offsetHeight + 'px';
+    }
+
+    function finishSectionLoad(body) {
+      body.style.minHeight = '';
+      const main = document.getElementById('main-area');
+      if (main) main.style.minHeight = '';
+      body.classList.remove('loaded');
+      requestAnimationFrame(() => body.classList.add('loaded'));
     }
 
     function selectSection(id, el) {
@@ -2792,7 +3163,9 @@
       saveLastSection(S.course, S.isArchive, id);
       document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
       if (el) el.classList.add('active');
-      document.getElementById('section-body').innerHTML = '<div class="section-loading"><i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;opacity:0.55"></i>Loading…</div>';
+      const body = document.getElementById('section-body');
+      lockHeight(body);
+      body.innerHTML = sectionSkeletonHtml();
       loadSection(id);
     }
 
@@ -2800,6 +3173,7 @@
       const sec = SECTIONS.find(s => s.id === id);
       if (!sec) return;
       if (id === 'info') { await loadMetadataSettings(); return; }
+      if (id === 'grading') { await loadGradingSettings(); return; }
       if (id === 'links') { await loadLinksSection(sec); return; }
       const { data, error } = await sb.from('course_rows').select('*')
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
@@ -2810,8 +3184,8 @@
       if (sec.hier) body.innerHTML = renderHier(data || []);
       else if (sec.proj) body.innerHTML = renderProjects(data || []);
       else body.innerHTML = renderCards(data || [], sec);
-      body.classList.remove('loaded');
-      requestAnimationFrame(() => { body.classList.add('loaded'); initDnD(sec); });
+      finishSectionLoad(body);
+      initDnD(sec);
     }
 
     // Links tab shows the Timetables editor (moved out of Info, which was overcrowded) above
@@ -2836,7 +3210,7 @@
       }
       const tts = Array.from(ttNums).sort((a, b) => a - b);
 
-      let h = `<div class="section-topbar" style="justify-content:flex-end">
+      let h = `<div class="section-topbar">
     <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('links')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>`;
 
@@ -2863,8 +3237,8 @@
   </div>`;
 
       body.innerHTML = h;
-      body.classList.remove('loaded');
-      requestAnimationFrame(() => { body.classList.add('loaded'); initDnD(sec); });
+      finishSectionLoad(body);
+      initDnD(sec);
     }
 
     // Timetables (metadata rows): delete all old + insert fresh from current DOM order.
@@ -2908,6 +3282,92 @@
     // Info / Metadata Settings
     // ─────────────────────────────────────────────────────────────────────────────
 
+    async function loadGradingSettings() {
+      const { data, error } = await sb.from('course_rows').select('*')
+        .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata')
+        .order('row_index');
+      const body = document.getElementById('section-body');
+      if (error) { body.innerHTML = `<div class="empty-content">Error: ${x(error.message)}</div>`; return; }
+
+      const metaMap = {};
+      for (const r of (data || [])) { ROW_STORE[r.row_uid] = r; if (isKnownMetaKey(r.b)) metaMap[r.b] = r; }
+
+      const { html: gradeRows, total: gradeTotal } = renderGradingRows(metaMap);
+      const h = `<div class="section-topbar">
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveGradingSettings()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+  </div>
+  <div class="settings-panel">
+    <div class="settings-group">
+      <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-chart-simple"></i>Grading</span></div>
+      <div class="settings-body">
+        <table class="grade-table" id="grade-table">${gradeRows}</table>
+        <div class="grade-total">Total: <strong id="grade-total" style="color:${Math.abs(gradeTotal - 100) < 0.01 ? 'var(--success-color)' : (gradeTotal > 100 ? 'var(--danger-color)' : 'var(--primary-color)')}">${gradeTotal}</strong> %</div>
+      </div>
+    </div>
+  </div>`;
+      body.innerHTML = h;
+      finishSectionLoad(body);
+    }
+
+    async function saveGradingSettings() {
+      const btn = document.getElementById('section-save-btn');
+      const origHtml = btn ? btn.innerHTML : '';
+      const resetBtn = () => { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } };
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Saving…'; }
+
+      const { data: existing } = await sb.from('course_rows').select('row_uid,b,row_index')
+        .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata');
+      const existMap = {};
+      let maxIdx = 0;
+      for (const r of (existing || [])) { existMap[r.b] = r; if (r.row_index > maxIdx) maxIdx = r.row_index; }
+
+      const toUpsert = [];
+      const base = { sheet_name: S.course, is_archive: S.isArchive, type: 'metadata', d: '', e: '', f: '', g: '', h: '', i: '', j: '' };
+
+      // Fixed (non-multi) categories — e.g. Final, Attendance
+      const doneMap = {};
+      document.querySelectorAll('.grade-done').forEach(s => doneMap[s.dataset.donekey] = s.value);
+      for (const inp of document.querySelectorAll('.grade-val')) {
+        const key = inp.dataset.key;
+        const val = inp.value.trim();
+        const done = doneMap[key] || '';
+        if (!val && !existMap[key]) continue;
+        const uid = existMap[key]?.row_uid || `${S.course}:adm_${key}`;
+        const idx = existMap[key]?.row_index || (maxIdx += 10, maxIdx);
+        toUpsert.push({ ...base, row_uid: uid, row_index: idx, b: key, c: val, d: done });
+      }
+
+      if (toUpsert.length) {
+        const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+      }
+
+      // Multi-entry categories: delete all old + legacy keys for each category, then renumber
+      // fresh from current DOM order — same pattern as professors/timetables.
+      let gradeRowIdx = maxIdx + 20;
+      for (const cat of GRADING_CATEGORIES.filter(c => c.multi)) {
+        const re = new RegExp(`^${cat.id}\\d+_percentage$`);
+        const oldGradeUids = Object.entries(existMap)
+          .filter(([k]) => re.test(k) || k === cat.legacyKey)
+          .map(([, r]) => r.row_uid);
+        if (oldGradeUids.length) await sb.from('course_rows').delete().in('row_uid', oldGradeUids);
+
+        const newGradeRows = [];
+        document.querySelectorAll(`tr.grading-row[data-cat="${cat.id}"]`).forEach((tr, idx) => {
+          const i = idx + 1;
+          const val = tr.querySelector('.grade-val-multi')?.value?.trim() || '';
+          const done = tr.querySelector('.grade-done-multi')?.value || '';
+          if (!val) return;
+          const key = `${cat.id}${i}_percentage`;
+          newGradeRows.push({ ...base, row_uid: `${S.course}:adm_${key}`, row_index: ++gradeRowIdx, b: key, c: val, d: done });
+        });
+        if (newGradeRows.length) await sb.from('course_rows').upsert(newGradeRows, { onConflict: 'row_uid' });
+      }
+
+      toast('Grading saved', 'ok');
+      resetBtn();
+    }
+
     async function loadMetadataSettings() {
       const { data, error } = await sb.from('course_rows').select('*')
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata')
@@ -2927,7 +3387,7 @@
         const parts = String(metaMap['startdate'].c).split('-');
         const yr = parseInt(parts[0]), mo = parseInt(parts[1]);
         if (!isNaN(yr) && !isNaN(mo) && yr > 2000) {
-          const derived = mo >= 9 ? `${yr}-${yr + 1}` : `${yr - 1}-${yr}`;
+          const derived = mo >= 9 ? `${yr}–${yr + 1}` : `${yr - 1}–${yr}`;
           metaMap['year'] = { c: derived };
         }
       }
@@ -2950,44 +3410,46 @@
       const v = k => x(metaMap[k]?.c || '');
       const vDate = k => { const s = metaMap[k]?.c || ''; if (!s) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const d = new Date(s); if (!isNaN(d)) return d.toISOString().slice(0, 10); return ''; };
 
-      let h = `<div class="settings-panel">`;
+      let h = `<div class="section-topbar">
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSettings()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+  </div><div class="settings-panel">`;
 
       // ── Course Identity ──
       h += `<div class="settings-group">
     <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-id-card"></i>Course Identity</span></div>
     <div class="settings-body"><div class="sg-grid">
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-hashtag" style="margin-right:5px;opacity:0.6"></i>Course Code</label>
+        <label class="form-label">Course Code</label>
         <input type="text" class="meta-field" data-metakey="code" value="${v('code')}">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-heading" style="margin-right:5px;opacity:0.6"></i>Title</label>
+        <label class="form-label">Title</label>
         <input type="text" class="meta-field" data-metakey="title" value="${v('title')}">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-calendar" style="margin-right:5px;opacity:0.6"></i>Academic Year</label>
-        <input type="text" class="meta-field" data-metakey="year" value="${v('year')}">
+        <label class="form-label">Academic Year</label>
+        <input type="text" class="meta-field" data-metakey="year" placeholder="e.g. 2024" value="${v('year')}" oninput="onYearInput(this)" onblur="normalizeYearField(this)">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-calendar-week" style="margin-right:5px;opacity:0.6"></i>Semester</label>
+        <label class="form-label">Semester</label>
         <select class="meta-field" data-metakey="semester">
           ${['', 'Fall Semester', 'Spring Semester', 'Summer Semester'].map(o => `<option value="${x(o)}"${(metaMap['semester']?.c || '') === (o) ? ` selected` : ''}>${o || '—'}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-graduation-cap" style="margin-right:5px;opacity:0.6"></i>Level</label>
+        <label class="form-label">Level</label>
         <select class="meta-field" data-metakey="level">
           ${['', 'Undergraduate', 'Graduate', 'Integrated Second Cycle', 'Postgraduate'].map(o => `<option value="${x(o)}"${(metaMap['level']?.c || '') === (o) ? ` selected` : ''}>${o || '—'}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-tag" style="margin-right:5px;opacity:0.6"></i>Type</label>
+        <label class="form-label">Type</label>
         <select class="meta-field" data-metakey="type">
           ${['', 'Compulsory', 'Elective', 'Optional'].map(o => `<option value="${x(o)}"${(metaMap['type']?.c || '') === (o) ? ` selected` : ''}>${o || '—'}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-coins" style="margin-right:5px;opacity:0.6"></i>Credits (ECTS)</label>
+        <label class="form-label">Credits (ECTS)</label>
         <input type="number" class="meta-field" data-metakey="credits" min="1" max="10" step="1" value="${v('credits')}">
       </div>
     </div></div>
@@ -2998,19 +3460,19 @@
     <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-calendar-days"></i>Dates</span></div>
     <div class="settings-body"><div class="sg-grid">
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-calendar-day" style="margin-right:5px;opacity:0.6"></i>Start Date</label>
+        <label class="form-label">Start Date</label>
         <input type="date" class="meta-field" data-metakey="startdate" value="${vDate('startdate')}">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-calendar-check" style="margin-right:5px;opacity:0.6"></i>End Date</label>
+        <label class="form-label">End Date</label>
         <input type="date" class="meta-field" data-metakey="enddate" value="${vDate('enddate')}">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-umbrella-beach" style="margin-right:5px;opacity:0.6"></i>Holiday Weeks</label>
+        <label class="form-label">Holiday Weeks</label>
         <input type="number" class="meta-field" data-metakey="holidayweeks" min="0" max="2" step="1" value="${v('holidayweeks') || '0'}">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-plane-departure" style="margin-right:5px;opacity:0.6"></i>Holiday Start Date</label>
+        <label class="form-label">Holiday Start Date</label>
         <input type="date" class="meta-field" data-metakey="holiday_startdate" value="${vDate('holiday_startdate')}">
       </div>
     </div></div>
@@ -3033,7 +3495,7 @@
     <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-palette"></i>Appearance</span></div>
     <div class="settings-body">
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-icons" style="margin-right:5px;opacity:0.6"></i>Header Icon <span class="form-hint" style="display:inline;margin-left:6px">Font Awesome class · e.g. fa-solid fa-tent-arrows-down</span></label>
+        <label class="form-label">Header Icon <span class="form-hint" style="display:inline;margin-left:6px">Font Awesome class · e.g. fa-solid fa-tent-arrows-down</span></label>
         <div class="icon-input-wrap">
           <input type="text" class="meta-field" data-metakey="header_decoration"
                  value="${x(hdVal)}"
@@ -3042,7 +3504,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-swatchbook" style="margin-right:5px;opacity:0.6"></i>Theme Colours</label>
+        <label class="form-label">Theme Colours</label>
         <div class="color-picker-row">
           ${COLOR_NAMES.map((name, i) => {
         const val = (themeParts[i] && themeParts[i].startsWith('#')) ? themeParts[i] : COLOR_DEFAULTS[i];
@@ -3057,20 +3519,7 @@
     </div>
   </div>`;
 
-      // ── Grading ──
-      const { html: gradeRows, total: gradeTotal } = renderGradingRows(metaMap);
-      h += `<div class="settings-group">
-    <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-chart-simple"></i>Grading</span></div>
-    <div class="settings-body">
-      <table class="grade-table" id="grade-table">${gradeRows}</table>
-      <div class="grade-total">Total: <strong id="grade-total" style="color:${Math.abs(gradeTotal - 100) < 0.01 ? 'var(--success-color)' : (gradeTotal > 100 ? 'var(--danger-color)' : 'var(--primary-color)')}">${gradeTotal}</strong> %</div>
-    </div>
-  </div>`;
-
-      h += `</div>
-  <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-    <button onclick="saveSettings()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
-  </div>`;
+      h += `</div>`;
 
       if (extras.length) {
         h += `<div style="margin-top:18px;margin-bottom:8px;font-size:0.72em;font-weight:700;color:#9e9e9e;text-transform:uppercase;letter-spacing:0.07em">Custom / Other Keys</div>`;
@@ -3089,6 +3538,7 @@
       }
 
       body.innerHTML = h;
+      finishSectionLoad(body);
     }
 
     function updateDynamicCardLabel(input, fallback) {
@@ -3108,11 +3558,11 @@
     </div>
     <div class="dynamic-card-body sg-grid1">
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-signature" style="margin-right:5px;opacity:0.6"></i>Name</label>
+        <label class="form-label">Name</label>
         <input type="text" name="prof_name" value="${x(name)}" oninput="updateDynamicCardLabel(this,'New Professor')">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-link" style="margin-right:5px;opacity:0.6"></i>Profile URL</label>
+        <label class="form-label">Profile URL</label>
         <div class="icon-input-wrap">
           <input type="text" name="prof_link" value="${x(link)}"
                  oninput="updateLinkPreview(this,this.nextElementSibling)">
@@ -3123,7 +3573,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-regular fa-image" style="margin-right:5px;opacity:0.6"></i>Photo URL</label>
+        <label class="form-label">Photo URL</label>
         <div class="icon-input-wrap">
           <input type="text" name="prof_photo" value="${x(photo)}"
                  oninput="updatePhotoPreview(this,this.nextElementSibling)">
@@ -3162,15 +3612,15 @@
     </div>
     <div class="dynamic-card-body sg-grid3">
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-signature" style="margin-right:5px;opacity:0.6"></i>Name</label>
+        <label class="form-label">Name</label>
         <input type="text" name="tt_name" value="${x(name)}" oninput="updateDynamicCardLabel(this,'New Timetable')">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-hashtag" style="margin-right:5px;opacity:0.6"></i>Timetable ID</label>
+        <label class="form-label">Timetable ID</label>
         <input type="text" name="tt_id" value="${x(tid)}">
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa-solid fa-chalkboard" style="margin-right:5px;opacity:0.6"></i>Class ID</label>
+        <label class="form-label">Class ID</label>
         <input type="text" name="tt_class" value="${x(classId)}">
       </div>
     </div>
@@ -3398,6 +3848,11 @@
     }
 
     async function saveSettings() {
+      const btn = document.getElementById('section-save-btn');
+      const origHtml = btn ? btn.innerHTML : '';
+      const resetBtn = () => { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } };
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Saving…'; }
+
       // Load existing metadata rows
       const { data: existing } = await sb.from('course_rows').select('row_uid,b,row_index')
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata');
@@ -3422,22 +3877,9 @@
         pushField(key, inp.value.trim());
       }
 
-      // Grading fields (col d = Done status)
-      const doneMap = {};
-      document.querySelectorAll('.grade-done').forEach(s => doneMap[s.dataset.donekey] = s.value);
-      for (const inp of document.querySelectorAll('.grade-val')) {
-        const key = inp.dataset.key;
-        const val = inp.value.trim();
-        const done = doneMap[key] || '';
-        if (!val && !existMap[key]) continue;
-        const uid = existMap[key]?.row_uid || `${S.course}:adm_${key}`;
-        const idx = existMap[key]?.row_index || (maxIdx += 10, maxIdx);
-        toUpsert.push({ ...base, row_uid: uid, row_index: idx, b: key, c: val, d: done });
-      }
-
       if (toUpsert.length) {
         const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
-        if (error) { toast('Save failed: ' + error.message, 'err'); return; }
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
       }
 
       // Professors: delete all old, insert fresh
@@ -3460,31 +3902,11 @@
       });
       if (newProfRows.length) await sb.from('course_rows').upsert(newProfRows, { onConflict: 'row_uid' });
 
-      // Note: Timetables live under the Links tab now (see saveTimetablesWork()), not here.
-
-      // Grading (multi-entry categories): delete all old + legacy keys for each category,
-      // then renumber fresh from current DOM order — same pattern as professors/timetables.
-      let gradeRowIdx = maxIdx + profCards.length * 5 + 20;
-      for (const cat of GRADING_CATEGORIES.filter(c => c.multi)) {
-        const re = new RegExp(`^${cat.id}\\d+_percentage$`);
-        const oldGradeUids = Object.entries(existMap)
-          .filter(([k]) => re.test(k) || k === cat.legacyKey)
-          .map(([, r]) => r.row_uid);
-        if (oldGradeUids.length) await sb.from('course_rows').delete().in('row_uid', oldGradeUids);
-
-        const newGradeRows = [];
-        document.querySelectorAll(`tr.grading-row[data-cat="${cat.id}"]`).forEach((tr, idx) => {
-          const i = idx + 1;
-          const val = tr.querySelector('.grade-val-multi')?.value?.trim() || '';
-          const done = tr.querySelector('.grade-done-multi')?.value || '';
-          if (!val) return;
-          const key = `${cat.id}${i}_percentage`;
-          newGradeRows.push({ ...base, row_uid: `${S.course}:adm_${key}`, row_index: ++gradeRowIdx, b: key, c: val, d: done });
-        });
-        if (newGradeRows.length) await sb.from('course_rows').upsert(newGradeRows, { onConflict: 'row_uid' });
-      }
+      // Note: Timetables live under the Links tab now (see saveTimetablesWork()), and Grading
+      // lives in its own tab now (see saveGradingSettings()) — neither is touched here.
 
       toast('Settings saved', 'ok');
+      resetBtn();
       await loadSidebar();
       await fillCourseHeader(S.course, S.isArchive);
     }
@@ -3499,9 +3921,9 @@
     <input type="hidden" id="m_archive" value="${row.is_archive}">
     <input type="hidden" id="m_index" value="${row.row_index}">
     <input type="hidden" id="m_type" value="_custom">
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-key" style="margin-right:5px;opacity:0.6"></i>Key</label><input type="text" id="mf_b" value="${x(row.b)}"></div>
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-pen" style="margin-right:5px;opacity:0.6"></i>Value</label><input type="text" id="mf_c" value="${x(row.c || '')}"></div>
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-circle-info" style="margin-right:5px;opacity:0.6"></i>Status (col D)</label><input type="text" id="mf_d" value="${x(row.d || '')}"></div>
+    <div class="form-group"><label class="form-label">Key</label><input type="text" id="mf_b" value="${x(row.b)}"></div>
+    <div class="form-group"><label class="form-label">Value</label><input type="text" id="mf_c" value="${x(row.c || '')}"></div>
+    <div class="form-group"><label class="form-label">Status (col D)</label><input type="text" id="mf_d" value="${x(row.d || '')}"></div>
   `;
       FIELDS['_custom'] = [{ col: 'b' }, { col: 'c' }, { col: 'd' }];
       document.getElementById('modal-foot').style.display = '';
@@ -3561,10 +3983,10 @@
 
     function renderHier(rows) {
       let h = `<div class="section-topbar">
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('modules')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
     <div class="add-bar">
       <button onclick="addModule()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Module</button>
     </div>
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('modules')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>`;
       if (!rows.length) return h + `<div class="empty-content">No modules yet.</div>`;
 
@@ -3664,10 +4086,10 @@
 
     function renderProjects(rows) {
       let h = `<div class="section-topbar">
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('projects')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
     <div class="add-bar">
       <button onclick="addProject()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Project</button>
     </div>
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('projects')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>`;
       if (!rows.length) return h + `<div class="empty-content">No projects yet.</div>`;
 
@@ -3728,13 +4150,13 @@
     }
 
     function renderCards(rows, sec, opts = {}) {
-      const ADD_ICONS = { button: 'fa-solid fa-link', announcement: 'fa-solid fa-bullhorn' };
+      const ADD_ICONS = { button: 'fa-solid fa-link', announcement: 'fa-solid fa-plus' };
       let h = '';
       if (!opts.bare) {
         const btns = sec.types.map(t => `<button onclick="addFlatRow('${t}')" class="btn-sm"><i class="${ADD_ICONS[t] || 'fa-solid fa-plus'}" style="margin-right:5px"></i>Add ${TYPE_NAMES[t] || t}</button>`).join('');
         h += `<div class="section-topbar">
-      <div class="add-bar">${btns}</div>
       <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('${sec.id}')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+      <div class="add-bar">${btns}</div>
     </div>`;
       }
       if (!rows.length) return h + `<div class="empty-content">No ${sec.label.toLowerCase()} yet.</div>`;
@@ -3817,7 +4239,9 @@
         if (!schema || schema === 'dynamic') { toast('No schema for type: ' + row.type, 'err'); _inlineEditUid = null; return; }
         panel.innerHTML = buildInlineFieldsHtml(row, schema);
       }
+      anchor.classList.add('inline-editing-anchor');
       anchor.insertAdjacentElement('afterend', panel);
+      setDnDDisabled(true);
     }
 
     function closeInlineEdit() {
@@ -3825,6 +4249,7 @@
       const uid = _inlineEditUid;
       const row = ROW_STORE[uid];
       _inlineEditUid = null;
+      setDnDDisabled(false);
       const panel = document.getElementById('inline-edit-panel');
       if (panel) panel.remove();
       if (!row) return;
@@ -3836,13 +4261,22 @@
       rerenderAnchor(uid);
     }
 
+    // Sortable's own `filter`/`handle` gating isn't enough once a panel is open — dragging a
+    // card out from under an open editor (or reordering while its commit-on-close logic is
+    // about to run) is confusing, so dragging is fully suspended for the section while any
+    // inline editor is open.
+    function setDnDDisabled(disabled) {
+      document.querySelectorAll('#section-body, #section-body .module-materials, #section-body .module-funfacts, #links-cards-body')
+        .forEach(el => { const s = window.Sortable && Sortable.get(el); if (s) s.option('disabled', disabled); });
+    }
+
     function buildInlineFieldsHtml(row, schema) {
       let h = '';
       for (const f of schema) {
         const raw = row[f.col] || '';
         const v = raw || f.default || '';
         const pid = 'icon_prev_' + f.col;
-        h += `<div class="form-group"><label class="form-label">${f.fi ? `<i class="${f.fi}" style="margin-right:5px;opacity:0.6"></i>` : ''}${x(f.label)}</label>`;
+        h += `<div class="form-group"><label class="form-label">${x(f.label)}</label>`;
         if (f.ta) {
           h += `<textarea id="mf_${f.col}">${xh(v)}</textarea>`;
         } else if (f.sel) {
@@ -3902,9 +4336,9 @@
       let membersHtml = '';
       allMembers.forEach((val, i) => { membersHtml += memberRowHtml(i + 1, val); });
       return `
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-users" style="margin-right:5px;opacity:0.6"></i>Group Name</label><input type="text" id="mf_b" value="${x(row.b || '')}"></div>
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-chalkboard-user" style="margin-right:5px;opacity:0.6"></i>Supervisor</label><input type="text" id="mf_c" value="${x(row.c || '')}"></div>
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-star" style="margin-right:5px;opacity:0.6"></i>Leader</label><input type="text" id="mf_d" value="${x(row.d || '')}"></div>
+    <div class="form-group"><label class="form-label">Group Name</label><input type="text" id="mf_b" value="${x(row.b || '')}"></div>
+    <div class="form-group"><label class="form-label">Supervisor</label><input type="text" id="mf_c" value="${x(row.c || '')}"></div>
+    <div class="form-group"><label class="form-label">Leader</label><input type="text" id="mf_d" value="${x(row.d || '')}"></div>
     <div style="margin-bottom:4px;font-size:0.77em;font-weight:700;color:#9e9e9e;text-transform:uppercase;letter-spacing:0.05em"><i class="fa-solid fa-person" style="margin-right:5px;opacity:0.6"></i>Members</div>
     <div id="members-list">${membersHtml}</div>
     <button type="button" class="btn-secondary btn-sm" onclick="addMemberSlot()" style="margin-top:4px"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Member</button>
@@ -3939,7 +4373,7 @@
 
     function memberRowHtml(n, val) {
       return `<div class="form-group member-row" style="display:flex;align-items:center;gap:6px">
-    <label class="form-label" style="min-width:84px;margin:0"><i class="fa-solid fa-user" style="margin-right:5px;opacity:0.6"></i>Member ${n}</label>
+    <label class="form-label" style="min-width:84px;margin:0">Member ${n}</label>
     <input type="text" class="member-input" value="${x(val)}" style="flex:1">
     <button type="button" class="btn-secondary btn-icon" style="flex-shrink:0"
             onclick="this.closest('.member-row').remove()"><i class="fa-solid fa-xmark"></i></button>
@@ -3955,10 +4389,11 @@
     // ── Staged delete: just removes the DOM node (after confirming). Nothing is deleted from
     // the database until the tab's Save button diffs the final DOM state against it. ──
 
-    function stageDeleteRow(btn) {
+    async function stageDeleteRow(btn) {
       const el = btn.closest('[data-uid]');
       if (!el) return;
-      if (!confirm('Remove this? It will be permanently deleted once you click Save.')) return;
+      const ok = await confirmDialog('It will be permanently deleted once you click Save.', { title: 'Remove this?', okLabel: 'Remove', danger: true });
+      if (!ok) return;
       if (_inlineEditUid === el.dataset.uid) {
         _inlineEditUid = null;
         const panel = document.getElementById('inline-edit-panel');
@@ -4215,7 +4650,7 @@
     }
 
     async function deleteRow(uid) {
-      if (!confirm('Delete this row?')) return;
+      if (!await confirmDialog('This row will be permanently deleted.', { title: 'Delete this row?', okLabel: 'Delete', danger: true })) return;
       const { error } = await sb.from('course_rows').delete().eq('row_uid', uid);
       if (error) { toast('Delete failed: ' + error.message, 'err'); return; }
       delete ROW_STORE[uid]; toast('Deleted', 'ok');
@@ -4234,22 +4669,22 @@
       document.getElementById('modal-foot').style.display = '';
       document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-key" style="margin-right:5px;opacity:0.6"></i>Sheet Name (DB key)</label>
+      <label class="form-label">Sheet Name (DB key)</label>
       <input type="text" id="nc_sheet">
       <div class="form-hint">Unique ID — letters, digits, underscores. Cannot be changed later.</div>
     </div>
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-hashtag" style="margin-right:5px;opacity:0.6"></i>Course Code</label><input type="text" id="nc_code"></div>
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-heading" style="margin-right:5px;opacity:0.6"></i>Course Title</label><input type="text" id="nc_title"></div>
-    <div class="form-group"><label class="form-label"><i class="fa-solid fa-calendar" style="margin-right:5px;opacity:0.6"></i>Academic Year</label><input type="text" id="nc_year"></div>
+    <div class="form-group"><label class="form-label">Course Code</label><input type="text" id="nc_code"></div>
+    <div class="form-group"><label class="form-label">Course Title</label><input type="text" id="nc_title"></div>
+    <div class="form-group"><label class="form-label">Academic Year</label><input type="text" id="nc_year" placeholder="e.g. 2024" oninput="onYearInput(this)" onblur="normalizeYearField(this)"></div>
     <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-calendar-week" style="margin-right:5px;opacity:0.6"></i>Semester</label>
+      <label class="form-label">Semester</label>
       <select id="nc_sem">
         <option value="">— Select —</option>
         <option>Fall Semester</option><option>Spring Semester</option><option>Summer Semester</option>
       </select>
     </div>
     <div class="form-group">
-      <label class="form-label"><i class="fa-solid fa-toggle-on" style="margin-right:5px;opacity:0.6"></i>Status</label>
+      <label class="form-label">Status</label>
       <select id="nc_archive"><option value="false">Active</option><option value="true">Archived</option></select>
     </div>
   `;
@@ -4284,19 +4719,19 @@
     }
 
     async function archiveCourse(n) {
-      if (!confirm(`Archive "${n}"?`)) return;
+      if (!await confirmDialog(`"${n}" will be moved to the archived courses list.`, { title: `Archive "${n}"?`, okLabel: 'Archive' })) return;
       const { error } = await sb.from('course_rows').update({ is_archive: true }).eq('sheet_name', n).eq('is_archive', false);
       if (error) { toast('Failed: ' + error.message, 'err'); return; }
       toast('Archived', 'ok'); S.course = null; clearMain(); await loadSidebar();
     }
     async function restoreCourse(n) {
-      if (!confirm(`Restore "${n}" to active?`)) return;
+      if (!await confirmDialog(`"${n}" will be moved back to the active courses list.`, { title: `Restore "${n}"?`, okLabel: 'Restore' })) return;
       const { error } = await sb.from('course_rows').update({ is_archive: false }).eq('sheet_name', n).eq('is_archive', true);
       if (error) { toast('Failed: ' + error.message, 'err'); return; }
       toast('Restored', 'ok'); S.course = null; clearMain(); await loadSidebar();
     }
     async function deleteCourse(n, a) {
-      if (!confirm(`Permanently delete ALL data for "${n}"?\n\nThis CANNOT be undone.`)) return;
+      if (!await confirmDialog('This CANNOT be undone.', { title: `Permanently delete ALL data for "${n}"?`, okLabel: 'Delete Everything', danger: true })) return;
       const { error } = await sb.from('course_rows').delete().eq('sheet_name', n).eq('is_archive', a);
       if (error) { toast('Failed: ' + error.message, 'err'); return; }
       toast(`"${n}" deleted`, 'ok'); S.course = null; clearMain(); await loadSidebar();
@@ -4379,6 +4814,7 @@
       delay: 250,
       delayOnTouchOnly: true,
       touchStartThreshold: 5,
+      preventOnFilter: false,
     };
 
     // Drag-and-drop only ever reorders DOM nodes now — nothing is persisted here. The tab's
@@ -4433,6 +4869,48 @@
     function closeModal() {
       document.getElementById('modal-overlay').classList.remove('open');
       document.getElementById('modal-foot').style.display = '';
+    }
+
+    // Styled stand-in for window.confirm(). Resolves true/false; used with await.
+    let _confirmOverlayMD = false;
+    let _confirmResolve = null;
+    function _resolveConfirm(val) {
+      document.getElementById('confirm-overlay').classList.remove('open');
+      const resolve = _confirmResolve;
+      _confirmResolve = null;
+      if (resolve) resolve(val);
+    }
+    function confirmDialog(message, opts = {}) {
+      const { title = 'Please Confirm', okLabel = 'Confirm', danger = false } = opts;
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-body').textContent = message;
+      const okBtn = document.getElementById('confirm-ok-btn');
+      okBtn.className = 'btn-sm' + (danger ? ' btn-red' : '');
+      okBtn.innerHTML = `<i class="fa-solid fa-check" style="margin-right:5px"></i>${x(okLabel)}`;
+      if (_confirmResolve) _resolveConfirm(false);
+      document.getElementById('confirm-overlay').classList.add('open');
+      return new Promise(resolve => { _confirmResolve = resolve; });
+    }
+
+    // Academic Year field: the instant a 4-digit start year is typed, the next year is filled
+    // in live ("2024" -> "2024–2025") with the cursor left right after the typed digits so the
+    // user can keep typing or tab away. onblur is a safety net that normalizes anything typed
+    // or pasted in another shape (e.g. "2024-2025", "2024/2025") to the same en-dash format.
+    function onYearInput(el) {
+      const raw = el.value;
+      if (/^\d{4}$/.test(raw)) {
+        el.value = `${raw}–${parseInt(raw, 10) + 1}`;
+        el.setSelectionRange(4, 4);
+      }
+    }
+    function normalizeYearField(el) {
+      const raw = el.value.trim();
+      if (!raw) return;
+      const m = raw.match(/(\d{4})\D*(\d{4})?/);
+      if (!m) return;
+      const start = parseInt(m[1], 10);
+      const end = m[2] ? parseInt(m[2], 10) : start + 1;
+      el.value = `${start}–${end}`;
     }
 
     function x(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
