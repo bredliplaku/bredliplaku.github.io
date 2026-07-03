@@ -815,12 +815,6 @@
       transform-origin: top;
     }
 
-    /* Plays when the panel is being torn down (JS adds .closing, waits, then removes). */
-    .inline-edit-panel.closing {
-      animation: inlinePanelIn 0.16s cubic-bezier(.4, 0, .2, 1) reverse forwards;
-      pointer-events: none;
-    }
-
     /* Save / Cancel row at the bottom of every inline editor. */
     .inline-edit-foot {
       display: flex;
@@ -1585,8 +1579,7 @@
       .section-tabs,
       .section-body.loaded,
       .section-body.loaded>*,
-      .inline-edit-panel,
-      .inline-edit-panel.closing {
+      .inline-edit-panel {
         animation: none !important;
       }
     }
@@ -2692,6 +2685,23 @@
     let _sessionHandled = false;
     let _overlayMD = false;
 
+    // ── Unsaved-changes tracking ──
+    // True once the user has staged any change in the current tab that isn't yet in the DB:
+    // typing in a field, adding/deleting a row, or reordering. Reset when a section (re)loads
+    // (loadSection) or a save succeeds. Used to prompt before switching tab/course.
+    let _sectionDirty = false;
+    function markDirty() { _sectionDirty = true; }
+    // Typing in any field inside the section body counts as an edit. Delegated on document so it
+    // keeps working after the section body is re-rendered. (Programmatic value/innerHTML changes
+    // don't fire these events, so a fresh render never trips the flag on its own.)
+    document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#section-body')) markDirty(); });
+    document.addEventListener('change', e => { if (e.target.closest && e.target.closest('#section-body')) markDirty(); });
+    // Leaving the whole page (refresh/close/navigate away) can only use the browser's own native
+    // prompt — a custom dialog isn't allowed here. In-app course/tab switches use confirmLeaveIfDirty.
+    window.addEventListener('beforeunload', e => {
+      if (_sectionDirty || (typeof inlinePanelDirty === 'function' && inlinePanelDirty())) { e.preventDefault(); e.returnValue = ''; }
+    });
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Config
     // ─────────────────────────────────────────────────────────────────────────────
@@ -2851,6 +2861,11 @@
       { id: 'info', label: 'Info', icon: 'fa-solid fa-circle-info', types: ['metadata'] },
     ];
 
+    // Distinct row_index band per section so the public site's global row_index ordering never
+    // interleaves rows from two different sections (see saveSectionChanges). Metadata (grading/
+    // info) isn't here — it's parsed by key on the public side, so its order is irrelevant.
+    const SECTION_ROW_BASE = { modules: 100000, projects: 200000, announce: 300000, links: 400000 };
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Auth
     // ─────────────────────────────────────────────────────────────────────────────
@@ -3006,7 +3021,7 @@
       document.getElementById('login-screen').style.display = w === 'login' ? 'flex' : 'none';
       document.getElementById('error-screen').style.display = w === 'error' ? 'flex' : 'none';
       document.getElementById('admin-app').style.display = w === 'admin' ? 'flex' : 'none';
-      if (w !== 'admin') hideLoading();
+      if (w !== 'admin') { hideLoading(); applyCourseTheme(''); } // reset brand colour off any course
       if (w === 'admin') { startIdleWatch(); applyArchiveGroupState(); } else stopIdleWatch();
     }
 
@@ -3116,7 +3131,34 @@
       try { localStorage.setItem(lastSectionKey(course, isArchive), id); } catch { }
     }
 
-    function selectCourse(name, isArchive, el) {
+    // Persists whatever tab is currently open, dispatching to the right save routine. Returns
+    // true only if the save actually succeeded (so navigation can be aborted on failure).
+    async function saveCurrentSection() {
+      if (S.section === 'info') return await saveSettings();
+      if (S.section === 'grading') return await saveGradingSettings();
+      return await saveSectionChanges(S.section);
+    }
+
+    // Gate before leaving the current tab/course. Returns true if it's safe to proceed. If there
+    // are unsaved changes, asks Save / Discard / Cancel first.
+    async function confirmLeaveIfDirty() {
+      if (!_sectionDirty && !inlinePanelDirty()) return true;
+      const choice = await confirmDialog('You have unsaved changes in this tab.',
+        { title: 'Save changes?', okLabel: 'Save', okIcon: 'fa-floppy-disk', altLabel: 'Discard' });
+      if (choice === true) {
+        const ok = await saveCurrentSection();
+        if (!ok) return false; // save failed — stay put so nothing is lost
+        _sectionDirty = false;
+        return true;
+      }
+      if (choice === 'alt') { _sectionDirty = false; return true; } // discard
+      return false; // cancel — stay
+    }
+
+    async function selectCourse(name, isArchive, el) {
+      if (name === S.course && isArchive === S.isArchive) return;
+      if (!(await confirmLeaveIfDirty())) return;
+      closeInlineEdit(true); // drop any open editor without re-prompting
       S.course = name; S.isArchive = isArchive; S.section = getLastSection(name, isArchive);
       document.querySelectorAll('.course-btn').forEach(b => b.classList.remove('active'));
       if (el) el.classList.add('active');
@@ -3157,12 +3199,39 @@
       loadSection(S.section);
     }
 
+    // Darkens a hex colour toward black (matches teaching/index.html's darkenHex) — used to
+    // derive --primary-dark from a course's primary colour.
+    function darkenHex(hex, amount = 0.25) {
+      hex = String(hex || '').replace('#', '');
+      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+      const r = Math.max(0, Math.round(parseInt(hex.substring(0, 2), 16) * (1 - amount)));
+      const g = Math.max(0, Math.round(parseInt(hex.substring(2, 4), 16) * (1 - amount)));
+      const b = Math.max(0, Math.round(parseInt(hex.substring(4, 6), 16) * (1 - amount)));
+      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+
+    // Recolours the whole admin UI to the current course's primary colour (col-1 of the course's
+    // theme_colours metadata). Falls back to the default blue (:root) when the course sets none.
+    function applyCourseTheme(themeStr) {
+      const root = document.documentElement;
+      const first = String(themeStr || '').split(',')[0].trim();
+      const hex = first ? (first.startsWith('#') ? first : '#' + first) : '';
+      if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) {
+        root.style.setProperty('--primary-color', hex);
+        root.style.setProperty('--primary-dark', darkenHex(hex, 0.25));
+      } else {
+        root.style.removeProperty('--primary-color');
+        root.style.removeProperty('--primary-dark');
+      }
+    }
+
     async function fillCourseHeader(name, isArchive) {
       const { data } = await sb.from('course_rows').select('b,c')
         .eq('sheet_name', name).eq('is_archive', isArchive).eq('type', 'metadata')
-        .in('b', ['code', 'title', 'semester', 'credits', 'year']);
+        .in('b', ['code', 'title', 'semester', 'credits', 'year', 'theme_colours']);
       const m = {};
       for (const r of (data || [])) m[r.b] = r.c;
+      applyCourseTheme(m.theme_colours);
       const titleEl = document.getElementById('ch-title');
       const metaEl = document.getElementById('ch-meta');
       if (!titleEl) return;
@@ -3196,7 +3265,10 @@
       requestAnimationFrame(() => body.classList.add('loaded'));
     }
 
-    function selectSection(id, el) {
+    async function selectSection(id, el) {
+      if (id === S.section) return;
+      if (!(await confirmLeaveIfDirty())) return; // unsaved changes, user cancelled
+      closeInlineEdit(true); // drop any open editor without re-prompting
       S.section = id;
       saveLastSection(S.course, S.isArchive, id);
       document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
@@ -3210,6 +3282,7 @@
     async function loadSection(id) {
       const sec = SECTIONS.find(s => s.id === id);
       if (!sec) return;
+      _sectionDirty = false; // fresh load — nothing staged yet
       if (id === 'info') { await loadMetadataSettings(); return; }
       if (id === 'grading') { await loadGradingSettings(); return; }
       if (id === 'links') { await loadLinksSection(sec); return; }
@@ -3377,7 +3450,7 @@
 
       if (toUpsert.length) {
         const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
-        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
 
       // Multi-entry categories: delete all old + legacy keys for each category, then renumber
@@ -3390,7 +3463,7 @@
           .map(([, r]) => r.row_uid);
         if (oldGradeUids.length) {
           const { error } = await sb.from('course_rows').delete().in('row_uid', oldGradeUids);
-          if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+          if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
         }
 
         const newGradeRows = [];
@@ -3404,12 +3477,14 @@
         });
         if (newGradeRows.length) {
           const { error } = await sb.from('course_rows').upsert(newGradeRows, { onConflict: 'row_uid' });
-          if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+          if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
         }
       }
 
       toast('Grading saved', 'ok');
       resetBtn();
+      _sectionDirty = false;
+      return true;
     }
 
     async function loadMetadataSettings() {
@@ -3923,7 +3998,7 @@
 
       if (toUpsert.length) {
         const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
-        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
 
       // Professors: delete all old, insert fresh
@@ -3932,7 +4007,7 @@
         .map(([, r]) => r.row_uid);
       if (oldProfUids.length) {
         const { error } = await sb.from('course_rows').delete().in('row_uid', oldProfUids);
-        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
 
       const profCards = [...document.querySelectorAll('#professors-list .dynamic-card')];
@@ -3949,7 +4024,7 @@
       });
       if (newProfRows.length) {
         const { error } = await sb.from('course_rows').upsert(newProfRows, { onConflict: 'row_uid' });
-        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
 
       // Note: Timetables live under the Links tab now (see saveTimetablesWork()), and Grading
@@ -3957,8 +4032,10 @@
 
       toast('Settings saved', 'ok');
       resetBtn();
+      _sectionDirty = false;
       await loadSidebar();
       await fillCourseHeader(S.course, S.isArchive);
+      return true;
     }
 
     function openEditCustomMeta(uid) {
@@ -4247,6 +4324,7 @@
       const uid = `${S.course}:new_${Date.now()}_${_newRowSeq++}`;
       const row = { row_uid: uid, sheet_name: S.course, is_archive: S.isArchive, row_index: 0, type, b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: '', ...defaults };
       ROW_STORE[uid] = row;
+      markDirty(); // a new (unsaved) row now exists
       return { uid, row };
     }
 
@@ -4336,10 +4414,10 @@
         const choice = await confirmDialog('You have unsaved changes to this item.',
           { title: 'Save changes?', okLabel: 'Save', okIcon: 'fa-floppy-disk', altLabel: 'Discard' });
         if (choice === true) { await inlineSave(); return; }
-        if (choice === 'alt') { closeInlineEditAnimated(true); return; }
+        if (choice === 'alt') { closeInlineEdit(true); return; }
         return; // Cancel — keep editing
       }
-      closeInlineEditAnimated(false);
+      closeInlineEdit(false);
     }
 
     // Save the open panel exactly like the big section Save (commit → persist → reload). Because
@@ -4366,16 +4444,6 @@
       return JSON.stringify(readInlineFieldsFromDom(schema));
     }
 
-    // Plays the close animation, then tears down. Used only for the user-facing close paths;
-    // the save flow removes immediately since the whole section re-renders anyway.
-    function closeInlineEditAnimated(discard) {
-      const panel = document.getElementById('inline-edit-panel');
-      if (!panel) { closeInlineEdit(discard); return; }
-      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (reduce) { closeInlineEdit(discard); return; }
-      panel.classList.add('closing');
-      setTimeout(() => closeInlineEdit(discard), 150);
-    }
 
     // Sortable's own `filter`/`handle` gating isn't enough once a panel is open — dragging a
     // card out from under an open editor (or reordering while its commit-on-close logic is
@@ -4531,6 +4599,7 @@
       el.remove();
       if (moduleContent) refreshModuleContentPlaceholder(moduleContent);
       refreshTopLevelPlaceholder();
+      markDirty(); // a row was removed but not yet persisted
     }
 
     function refreshModuleContentPlaceholder(contentEl) {
@@ -4570,7 +4639,9 @@
       if (emptyMsg) emptyMsg.remove();
       const uids = [...body.querySelectorAll(':scope > .module[data-uid]')].map(el => el.dataset.uid);
       const maxOrder = Math.max(0, ...uids.map(u => parseInt(ROW_STORE[u]?.b) || 0));
-      const { uid, row } = addNewRow('module', { b: String(maxOrder + 1) });
+      // f = Default State. Empty means "Hidden" on the public site, so a new module must default
+      // to SHOW (Expanded) or it silently never appears — that's the "0 modules" footgun.
+      const { uid, row } = addNewRow('module', { b: String(maxOrder + 1), f: 'SHOW' });
       const html = `<div class="module" data-uid="${x(uid)}">${moduleHeaderHtml(row)}${moduleContentHtml([])}</div>`;
       const topbar = body.querySelector(':scope > .section-topbar');
       if (topbar) topbar.insertAdjacentHTML('afterend', html); else body.insertAdjacentHTML('afterbegin', html);
@@ -4599,7 +4670,8 @@
       if (emptyMsg) emptyMsg.remove();
       const uids = [...body.querySelectorAll(':scope > .module[data-uid]')].map(el => el.dataset.uid);
       const maxOrder = Math.max(0, ...uids.map(u => parseInt(ROW_STORE[u]?.b) || 0));
-      const { uid, row } = addNewRow('project', { b: String(maxOrder + 1) });
+      // See addModule: empty f = Hidden on the public site, so default a new project to SHOW.
+      const { uid, row } = addNewRow('project', { b: String(maxOrder + 1), f: 'SHOW' });
       const html = `<div class="module" data-uid="${x(uid)}">${projectHeaderHtml(row)}<div class="module-content"><div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div></div></div>`;
       body.insertAdjacentHTML('beforeend', html);
       initDnD(SECTIONS.find(s => s.id === 'projects'));
@@ -4714,41 +4786,49 @@
 
       if (sectionId === 'links') {
         const ttErr = await saveTimetablesWork();
-        if (ttErr) { toast('Save failed: ' + ttErr, 'err'); resetBtn(); return; }
+        if (ttErr) { toast('Save failed: ' + ttErr, 'err'); resetBtn(); return false; }
       }
 
-      // Modules are displayed sorted by their Order field (highest on top), so the final
-      // top-level drag order must be written back into that field too — otherwise the next
-      // load would immediately re-sort back to the old order despite the new row_index.
+      // Both modules and projects show their top-level items sorted by the Order field (`b`),
+      // so the final drag order is written back into it — highest on top. This is also what
+      // auto-corrects a blank/duplicate Order: every top item is renumbered from its position,
+      // so there are never gaps or clashes. (Was modules-only; projects now get it too.)
       const { allUids, topUids } = collectSectionUids(sec);
-      if (sec.hier && topUids.length > 1) {
+      if ((sec.hier || sec.proj) && topUids.length > 1) {
         const n = topUids.length;
         topUids.forEach((uid, i) => { if (ROW_STORE[uid]) ROW_STORE[uid].b = String(n - i); });
       }
 
       const { data: existing, error: fetchErr } = await sb.from('course_rows').select('row_uid')
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive).in('type', sec.types);
-      if (fetchErr) { toast('Save failed: ' + fetchErr.message, 'err'); resetBtn(); return; }
+      if (fetchErr) { toast('Save failed: ' + fetchErr.message, 'err'); resetBtn(); return false; }
 
+      // The public site fetches ALL of a course's rows ordered by row_index globally and walks
+      // them in sequence to attach materials to their parent module/project. If two sections
+      // reused the same row_index values (both started at 10), a project row could land between
+      // a module and its materials and scramble the grouping. Giving each section its own
+      // 10k band keeps them from ever colliding: modules < projects < announcements < links.
+      const base = SECTION_ROW_BASE[sectionId] || 0;
       const existingUids = new Set((existing || []).map(r => r.row_uid));
       const finalSet = new Set(allUids);
       const toDelete = [...existingUids].filter(u => !finalSet.has(u));
       const toUpsert = allUids.map((uid, i) => {
         const row = ROW_STORE[uid];
-        return row ? { ...row, row_index: (i + 1) * 10 } : null;
+        return row ? { ...row, row_index: base + (i + 1) * 10 } : null;
       }).filter(Boolean);
 
       if (toDelete.length) {
         const { error } = await sb.from('course_rows').delete().in('row_uid', toDelete);
-        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
       if (toUpsert.length) {
         const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
-        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return; }
+        if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
 
       toast('Saved', 'ok');
       await loadSection(sectionId);
+      return true;
     }
 
     async function modalSave() {
@@ -4943,6 +5023,7 @@
       delayOnTouchOnly: true,
       touchStartThreshold: 5,
       preventOnFilter: false,
+      onEnd: () => markDirty(), // a reorder is an unsaved change
     };
 
     // Drag-and-drop only ever reorders DOM nodes now — nothing is persisted here. The tab's
