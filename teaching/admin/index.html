@@ -790,29 +790,39 @@
       filter: brightness(1.06);
     }
 
-    /* Inline edit panel — replaces the old modal dialogue; expands directly below whatever
-       is being edited, using the same field markup the modal used to render inside itself. */
-    @keyframes inlinePanelIn {
-      from {
-        opacity: 0;
-        transform: translateY(-8px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+    /* Inline edit panel — replaces the old modal dialogue; expands directly below whatever is
+       being edited. It animates as a true accordion: the outer element is a 1-row grid whose
+       row goes 0fr → 1fr, so it grows/shrinks height from zero and pushes the siblings below it
+       down (never overlapping the card above). All the visible chrome lives on .iep-inner, which
+       clips its own content while the row collapses. */
+    .inline-edit-panel {
+      display: grid;
+      grid-template-rows: 0fr;
+      opacity: 0;
+      margin: 0;
+      transition: grid-template-rows 0.26s cubic-bezier(.4, 0, .2, 1),
+        opacity 0.18s ease, margin-bottom 0.26s cubic-bezier(.4, 0, .2, 1);
     }
 
-    .inline-edit-panel {
+    .inline-edit-panel.open {
+      grid-template-rows: 1fr;
+      opacity: 1;
+      margin-bottom: 10px;
+    }
+
+    .iep-inner {
+      overflow: hidden;
+      min-height: 0;
       background: #f7f8fc;
       border: 1px solid #e0e0e0;
       border-top: none;
       border-radius: 0 0 12px 12px;
       padding: 8px 16px 4px;
-      margin: 0 0 10px;
-      animation: inlinePanelIn 0.22s cubic-bezier(.4, 0, .2, 1);
-      transform-origin: top;
+    }
+
+    .module>.inline-edit-panel .iep-inner,
+    .project-group-block .inline-edit-panel .iep-inner {
+      border-radius: 0;
     }
 
     /* Save / Cancel row at the bottom of every inline editor. */
@@ -833,11 +843,10 @@
       border-bottom-right-radius: 0 !important;
     }
 
-    .module>.inline-edit-panel,
-    .project-group-block .inline-edit-panel {
-      margin-left: 0;
-      margin-right: 0;
-      border-radius: 0;
+    @media (prefers-reduced-motion: reduce) {
+      .inline-edit-panel {
+        transition: none;
+      }
     }
 
     .add-bar button {
@@ -1057,6 +1066,29 @@
       font-size: 0.8em;
       opacity: 0.82;
       margin-top: 1px;
+    }
+
+    /* A project shown inside the Modules view (for ordering only) — flatter than a real module
+       header so it clearly reads as a reference, not editable content. */
+    .module.project-ref {
+      opacity: 0.96;
+    }
+
+    .module.project-ref>.module-header {
+      background: linear-gradient(135deg, #55608a, #6b78a8);
+    }
+
+    .proj-ref-badge {
+      display: inline-block;
+      font-size: 0.62em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: rgba(255, 255, 255, 0.22);
+      padding: 2px 7px;
+      border-radius: 6px;
+      margin-right: 8px;
+      vertical-align: middle;
     }
 
     .module-content {
@@ -1578,8 +1610,7 @@
       .course-header,
       .section-tabs,
       .section-body.loaded,
-      .section-body.loaded>*,
-      .inline-edit-panel {
+      .section-body.loaded>* {
         animation: none !important;
       }
     }
@@ -2065,7 +2096,7 @@
       border-top-color: var(--dark-border);
     }
 
-    html[data-theme="dark"] .inline-edit-panel {
+    html[data-theme="dark"] .iep-inner {
       background: var(--dark-surface-light);
       border-color: var(--dark-border);
     }
@@ -2341,7 +2372,7 @@
         border-top-color: var(--dark-border);
       }
 
-      html:not([data-theme="light"]) .inline-edit-panel {
+      html:not([data-theme="light"]) .iep-inner {
         background: var(--dark-surface-light);
         border-color: var(--dark-border);
       }
@@ -3189,7 +3220,7 @@
       ${SECTIONS.map((s, i, arr) => {
             const r = i === 0 ? 'border-radius:20px 8px 8px 20px'
               : i === arr.length - 1 ? 'border-radius:8px 20px 20px 8px' : '';
-            return `<button class="section-tab${s.id === S.section ? ' active' : ''}" style="${r}"
+            return `<button class="section-tab${s.id === S.section ? ' active' : ''}" style="${r}" data-sec="${s.id}"
                   onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon}" style="margin-right:5px;font-size:0.88em"></i>` : ''}${s.label}</button>`;
           }).join('')}
     </div>
@@ -3286,9 +3317,13 @@
       if (id === 'info') { await loadMetadataSettings(); return; }
       if (id === 'grading') { await loadGradingSettings(); return; }
       if (id === 'links') { await loadLinksSection(sec); return; }
+      // The Modules view is the single place where module & project ORDER is set, so it also
+      // loads project header rows (type 'project') to show them as draggable refs alongside
+      // modules. Their content stays in the Projects tab.
+      const fetchTypes = sec.hier ? [...sec.types, 'project'] : sec.types;
       const { data, error } = await sb.from('course_rows').select('*')
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
-        .in('type', sec.types).order('row_index');
+        .in('type', fetchTypes).order('row_index');
       const body = document.getElementById('section-body');
       if (error) { body.innerHTML = `<div class="empty-content">Error: ${x(error.message)}</div>`; return; }
       for (const r of (data || [])) ROW_STORE[r.row_uid] = r;
@@ -3297,7 +3332,14 @@
       else body.innerHTML = renderCards(data || [], sec);
       finishSectionLoad(body);
       initDnD(sec);
+      // Arriving here from an Edit click on a project ref in the Modules view: open that
+      // project's inline editor now that the Projects tab has rendered.
+      if (sec.proj && _openProjectAfterLoad) {
+        const uid = _openProjectAfterLoad; _openProjectAfterLoad = null;
+        openInlineEdit(uid);
+      }
     }
+    let _openProjectAfterLoad = null;
 
     // Links tab shows the Timetables editor (moved out of Info, which was overcrowded) above
     // the regular list of Link Button cards. Both save together via the one Save button at the
@@ -4115,25 +4157,30 @@
       <button onclick="addModule()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Module</button>
     </div>
   </div>`;
-      if (!rows.length) return h + `<div class="empty-content">No modules yet.</div>`;
+      if (!rows.length) return h + `<div class="empty-content">No modules or projects yet.</div>`;
 
-      const groups = []; let cur = null;
+      // Walk the row_index-ordered rows into top-level items. A 'module' starts a module group
+      // (materials/funfacts attach to it); a 'project' is a standalone ref (its content lives in
+      // the Projects tab). Everything else attaches to the current module group only.
+      const items = []; let cur = null;
       for (const row of rows) {
-        if (row.type === 'module') { cur = { parent: row, children: [] }; groups.push(cur); }
+        if (row.type === 'module') { cur = { kind: 'module', parent: row, children: [] }; items.push(cur); }
+        else if (row.type === 'project') { cur = null; items.push({ kind: 'project', parent: row }); }
         else if (cur) cur.children.push(row);
-        else { if (!groups.length) groups.push({ parent: null, children: [] }); groups[groups.length - 1].children.push(row); }
+        else { if (!items.length || items[items.length - 1].kind !== 'orphan') items.push({ kind: 'orphan', parent: null, children: [] }); items[items.length - 1].children.push(row); }
       }
 
-      // Display modules with the highest Order value on top; orphaned items (no parent module) stay pinned first.
-      const orphanGroup = groups.length && groups[0].parent === null ? groups.shift() : null;
-      groups.sort((a, b) => (parseFloat(b.parent.b) || 0) - (parseFloat(a.parent.b) || 0));
-      if (orphanGroup) groups.unshift(orphanGroup);
+      // Modules and projects share one Order (`b`); highest on top. Orphaned items stay pinned first.
+      const orphan = items.length && items[0].kind === 'orphan' ? items.shift() : null;
+      items.sort((a, b) => (parseFloat(b.parent?.b) || 0) - (parseFloat(a.parent?.b) || 0));
+      if (orphan) items.unshift(orphan);
 
-      for (const g of groups) {
-        const p = g.parent;
-        if (p) {
-          h += `<div class="module" data-uid="${x(p.row_uid)}">
-        ${moduleHeaderHtml(p)}
+      for (const g of items) {
+        if (g.kind === 'project') {
+          h += projectRefCardHtml(g.parent);
+        } else if (g.kind === 'module') {
+          h += `<div class="module" data-uid="${x(g.parent.row_uid)}">
+        ${moduleHeaderHtml(g.parent)}
         ${moduleContentHtml(g.children)}
       </div>`;
         } else {
@@ -4149,13 +4196,42 @@
       return h;
     }
 
+    // Compact, drag-to-reorder stand-in for a project shown inside the Modules view. It carries
+    // the project's data-uid so it takes part in the unified top-level ordering, but its only
+    // action is Edit, which jumps to the Projects tab (where its content is edited).
+    function projectRefCardHtml(p) {
+      return `<div class="module project-ref" data-uid="${x(p.row_uid)}">
+    <div class="module-header">
+      <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
+      <div class="mod-icon">${p.d ? `<i class="${x(p.d)}"></i>` : '<i class="fa-solid fa-diagram-project"></i>'}</div>
+      <div class="mod-info">
+        <div class="mod-title"><span class="proj-ref-badge">Project</span>${x(p.c || 'Untitled Project')}</div>
+        ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
+      </div>
+      <div class="card-actions">
+        <button class="btn-ghost btn-sm" onclick="editProjectFromModules('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+      </div>
+    </div>
+  </div>`;
+    }
+
+    // Edit a project from the Modules view → switch to the Projects tab and open its editor.
+    // Goes through selectSection so unsaved module-order changes still prompt to save.
+    async function editProjectFromModules(uid) {
+      _openProjectAfterLoad = uid;
+      const tab = document.querySelector('.section-tab[data-sec="projects"]');
+      await selectSection('projects', tab);
+      if (S.section !== 'projects') _openProjectAfterLoad = null; // switch was cancelled
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Projects hierarchy
     // ─────────────────────────────────────────────────────────────────────────────
 
     function projectHeaderHtml(p) {
+      // No drag handle here: project ORDER is set in the Modules view (where projects appear as
+      // refs alongside modules). This tab is for editing project content only.
       return `<div class="module-header">
-        <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
         <div class="mod-icon">${p.d ? `<i class="${x(p.d)}"></i>` : ''}</div>
         <div class="mod-info">
           <div class="mod-title">${x(p.c || 'Untitled Project')}</div>
@@ -4232,6 +4308,9 @@
           else if (row.type === 'group_file' && curGrp) curGrp.files.push(row);
         }
       }
+
+      // Same Order as the Modules view / public page: highest on top.
+      projects.sort((a, b) => (parseFloat(b.header.b) || 0) - (parseFloat(a.header.b) || 0));
 
       for (const proj of projects) {
         const p = proj.header;
@@ -4359,35 +4438,42 @@
       // Clicking the same Edit toggle again is a request to close (and may prompt to save).
       if (_inlineEditUid === uid) { requestCloseInlineEdit(); return; }
       closeInlineEdit();
+      // Drop any panel still mid-collapse from a previous close so we never get two at once.
+      document.getElementById('inline-edit-panel')?.remove();
       const anchor = getEditAnchor(uid, row);
       if (!anchor) return;
+      let inner;
+      if (row.type === 'project_group') {
+        inner = buildInlineGroupFieldsHtml(row);
+      } else {
+        const schema = FIELDS[row.type];
+        if (!schema || schema === 'dynamic') { toast('No schema for type: ' + row.type, 'err'); return; }
+        inner = buildInlineFieldsHtml(row, schema);
+      }
       _inlineEditUid = uid;
       const panel = document.createElement('div');
       panel.className = 'inline-edit-panel';
       panel.id = 'inline-edit-panel';
-      if (row.type === 'project_group') {
-        panel.innerHTML = buildInlineGroupFieldsHtml(row);
-      } else {
-        const schema = FIELDS[row.type];
-        if (!schema || schema === 'dynamic') { toast('No schema for type: ' + row.type, 'err'); _inlineEditUid = null; return; }
-        panel.innerHTML = buildInlineFieldsHtml(row, schema);
-      }
-      // Every panel gets the same Save / Cancel footer. Save persists exactly like the big
-      // section Save; Cancel closes (prompting to save first if there are unsaved edits).
-      panel.insertAdjacentHTML('beforeend', `<div class="inline-edit-foot">
+      // All chrome/fields live on .iep-inner so the outer grid row can collapse to zero height.
+      // Every panel gets the same Save / Cancel footer (Save persists like the big section Save).
+      panel.innerHTML = `<div class="iep-inner">${inner}<div class="inline-edit-foot">
         <button type="button" class="btn-secondary btn-sm" onclick="requestCloseInlineEdit()"><i class="fa-solid fa-xmark" style="margin-right:5px"></i>Cancel</button>
         <button type="button" class="btn-sm btn-save-section" onclick="inlineSave()"><i class="fa-solid fa-floppy-disk" style="margin-right:5px"></i>Save</button>
-      </div>`);
+      </div></div>`;
       anchor.classList.add('inline-editing-anchor');
       anchor.insertAdjacentElement('afterend', panel);
       _inlineEditSnapshot = readInlineFieldsJson(row);
       setDnDDisabled(true);
+      // Force a reflow at 0fr, then flip to .open so the accordion actually animates the expand.
+      void panel.offsetHeight;
+      panel.classList.add('open');
     }
 
     // Tears the panel down. Commits DOM → ROW_STORE first (unless discarding) — this MUST happen
-    // before the panel is removed, since the fields live inside it; removing first was the bug
-    // that made every inline edit silently revert on close.
-    function closeInlineEdit(discard) {
+    // before the panel is removed, since the fields live inside it. When `animate` is set (the
+    // user-facing Cancel / toggle paths), the panel collapses shut first; programmatic callers
+    // (Save, switching rows) tear down instantly since the section re-renders anyway.
+    function closeInlineEdit(discard, animate) {
       if (!_inlineEditUid) return;
       const uid = _inlineEditUid;
       const row = ROW_STORE[uid];
@@ -4398,12 +4484,21 @@
           if (schema && schema !== 'dynamic') commitInlineFieldsFromDom(row, schema);
         }
       }
+      // Clear state up front so a follow-up open can't double-commit or race this teardown.
       _inlineEditUid = null;
       _inlineEditSnapshot = null;
       setDnDDisabled(false);
       const panel = document.getElementById('inline-edit-panel');
-      if (panel) panel.remove();
-      if (row) rerenderAnchor(uid);
+      // Remove the panel and re-render the edited card together at the end, so the card stays
+      // flush-attached while the panel collapses, then swaps instantly (no fade) once it's gone.
+      const finish = () => { if (panel) panel.remove(); if (row) rerenderAnchor(uid); };
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (panel && animate && !reduce) {
+        panel.classList.remove('open'); // collapse shut, then tear down after the transition
+        setTimeout(finish, 300);
+      } else {
+        finish();
+      }
     }
 
     // User-facing close (Cancel button, or toggling the Edit button off). Prompts to save when
@@ -4414,10 +4509,10 @@
         const choice = await confirmDialog('You have unsaved changes to this item.',
           { title: 'Save changes?', okLabel: 'Save', okIcon: 'fa-floppy-disk', altLabel: 'Discard' });
         if (choice === true) { await inlineSave(); return; }
-        if (choice === 'alt') { closeInlineEdit(true); return; }
+        if (choice === 'alt') { closeInlineEdit(true, true); return; } // discard, animated
         return; // Cancel — keep editing
       }
-      closeInlineEdit(false);
+      closeInlineEdit(false, true); // commit, animated collapse
     }
 
     // Save the open panel exactly like the big section Save (commit → persist → reload). Because
@@ -4761,10 +4856,18 @@
     function collectSectionUids(sec) {
       const body = document.getElementById('section-body');
       if (sec.hier || sec.proj) {
+        // allUids = rows this section actually owns (for the upsert/delete diff and row_index).
+        // topUids = every top-level card in DOM order (used only to assign the shared Order).
+        // In the Modules view, project refs are top-level too, but they are NOT owned here — their
+        // rows stay untouched apart from the Order (`b`) written back in saveSectionChanges.
         const allUids = [];
         const topUids = [];
         body.querySelectorAll(':scope > .module').forEach(modEl => {
-          if (modEl.dataset.uid) { allUids.push(modEl.dataset.uid); topUids.push(modEl.dataset.uid); }
+          const uid = modEl.dataset.uid;
+          if (!uid) return;
+          topUids.push(uid);
+          if (modEl.classList.contains('project-ref')) return; // owned by the Projects tab
+          allUids.push(uid);
           modEl.querySelectorAll('.module-content [data-uid]').forEach(el => allUids.push(el.dataset.uid));
         });
         return { allUids, topUids };
@@ -4789,12 +4892,18 @@
         if (ttErr) { toast('Save failed: ' + ttErr, 'err'); resetBtn(); return false; }
       }
 
-      // Both modules and projects show their top-level items sorted by the Order field (`b`),
-      // so the final drag order is written back into it — highest on top. This is also what
-      // auto-corrects a blank/duplicate Order: every top item is renumbered from its position,
-      // so there are never gaps or clashes. (Was modules-only; projects now get it too.)
       const { allUids, topUids } = collectSectionUids(sec);
-      if ((sec.hier || sec.proj) && topUids.length > 1) {
+
+      // The shared module/project Order (`b`) is owned by the MODULES view — its top-level cards
+      // (modules + project refs) are renumbered from their drag order, highest on top. This is
+      // what keeps modules and projects on one clash-free number line: a new module dropped after
+      // project #9 becomes #10, not another #9. The Projects tab never touches the Order.
+      if (sec.hier && topUids.length > 1) {
+        // Surface a pre-existing clash (e.g. two items hand-typed to the same number) before we
+        // silently renumber, so the fix is visible rather than mysterious.
+        const seen = new Set(); let clash = false;
+        for (const uid of topUids) { const b = (ROW_STORE[uid]?.b || '').trim(); if (b && seen.has(b)) clash = true; seen.add(b); }
+        if (clash) toast('Some Order numbers clashed — renumbered automatically', 'err');
         const n = topUids.length;
         topUids.forEach((uid, i) => { if (ROW_STORE[uid]) ROW_STORE[uid].b = String(n - i); });
       }
@@ -4803,11 +4912,9 @@
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive).in('type', sec.types);
       if (fetchErr) { toast('Save failed: ' + fetchErr.message, 'err'); resetBtn(); return false; }
 
-      // The public site fetches ALL of a course's rows ordered by row_index globally and walks
-      // them in sequence to attach materials to their parent module/project. If two sections
-      // reused the same row_index values (both started at 10), a project row could land between
-      // a module and its materials and scramble the grouping. Giving each section its own
-      // 10k band keeps them from ever colliding: modules < projects < announcements < links.
+      // Each section keeps its own 10k row_index band so the public site's global row_index walk
+      // never interleaves two sections' rows (which would misattach materials to a parent). The
+      // public page interleaves modules & projects for display by sorting on the shared Order.
       const base = SECTION_ROW_BASE[sectionId] || 0;
       const existingUids = new Set((existing || []).map(r => r.row_uid));
       const finalSet = new Set(allUids);
@@ -4824,6 +4931,16 @@
       if (toUpsert.length) {
         const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
         if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
+      }
+
+      // Modules view also owns project ordering: persist the reordered project refs' Order only,
+      // leaving their content and row_index (their own band) untouched.
+      if (sec.hier) {
+        const projRows = topUids.map(uid => ROW_STORE[uid]).filter(r => r && r.type === 'project');
+        if (projRows.length) {
+          const { error } = await sb.from('course_rows').upsert(projRows.map(r => ({ ...r })), { onConflict: 'row_uid' });
+          if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
+        }
       }
 
       toast('Saved', 'ok');
