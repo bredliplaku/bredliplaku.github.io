@@ -8,8 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Courses</title>
     <link rel="icon" type="image/png" href="../favicon.png">
-    <link rel="preconnect" href="https://script.google.com" crossorigin>
-    <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+    <link rel="preconnect" href="https://sreqxyznaymvksygradu.supabase.co" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;700&display=swap"
         rel="stylesheet">
 
@@ -172,9 +171,6 @@
 
     <script>
         // Configuration
-        const ACTIVE_SPREADSHEET_ID = '15cRRYI0EXQmYWzsSr2x0zDsjEBlLGqfwVjDUtHuiVuU';
-        const ARCHIVE_SPREADSHEET_ID = '1dn2pHwmAzVa-a-DVW8v3FfAJK544ftGu5ukEFXs56pw';
-        let currentSpreadsheetId = ACTIVE_SPREADSHEET_ID;
         let isArchiveMode = false;
 
         // Global variables
@@ -324,9 +320,6 @@
             // Check if URL indicates archive mode initially
             if (new URLSearchParams(window.location.search).has('archive')) {
                 isArchiveMode = true;
-                currentSpreadsheetId = ARCHIVE_SPREADSHEET_ID;
-                // No updateArchiveUI() call here, as it's removed.
-                // The populateCourseButtons will handle the button state.
             }
 
             // Initialize backend and load courses
@@ -399,7 +392,6 @@
             // -------------------------------------------------------------------
 
             isArchiveMode = !isArchiveMode;
-            currentSpreadsheetId = isArchiveMode ? ARCHIVE_SPREADSHEET_ID : ACTIVE_SPREADSHEET_ID;
 
             // Update the URL visibly so users can share links to Archive states
             const url = new URL(window.location);
@@ -423,7 +415,7 @@
                 window.history.replaceState(null, '', window.location.pathname + window.location.search);
             }
 
-            resetForNewSpreadsheet();
+            resetForModeSwitch();
         }
 
         // Catch the browser back/forward buttons to elegantly flip archive state
@@ -431,8 +423,7 @@
             if (e.state && e.state.archive !== undefined) {
                 if (isArchiveMode !== e.state.archive) {
                     isArchiveMode = e.state.archive;
-                    currentSpreadsheetId = isArchiveMode ? ARCHIVE_SPREADSHEET_ID : ACTIVE_SPREADSHEET_ID;
-                    resetForNewSpreadsheet();
+                    resetForModeSwitch();
                 }
             } else {
                 // If there's no state object (e.g. back to initial load), check the URL again
@@ -440,13 +431,12 @@
                 const shouldBeArchive = urlParams.has('archive');
                 if (isArchiveMode !== shouldBeArchive) {
                     isArchiveMode = shouldBeArchive;
-                    currentSpreadsheetId = isArchiveMode ? ARCHIVE_SPREADSHEET_ID : ACTIVE_SPREADSHEET_ID;
-                    resetForNewSpreadsheet();
+                    resetForModeSwitch();
                 }
             }
         });
 
-        function resetForNewSpreadsheet() {
+        function resetForModeSwitch() {
             // Show loading state
             document.body.classList.add('is-loading');
 
@@ -1233,12 +1223,11 @@
                 if (hash && hash !== 'module-' && !availableCourses.includes(hash)) {
                     if (!isArchiveMode && !new URLSearchParams(window.location.search).has('archive')) {
                         isArchiveMode = true;
-                        currentSpreadsheetId = ARCHIVE_SPREADSHEET_ID;
                         const url = new URL(window.location);
                         url.searchParams.set('archive', '');
                         let newUrlString = url.toString().replace(/archive=(&|$)/, 'archive$1');
                         window.history.replaceState({ archive: true }, '', newUrlString || url);
-                        resetForNewSpreadsheet();
+                        resetForModeSwitch();
                         return true;
                     }
                 }
@@ -1253,7 +1242,6 @@
 
         const SUPABASE_URL = 'https://sreqxyznaymvksygradu.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyZXF4eXpuYXltdmtzeWdyYWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMDQ5NzksImV4cCI6MjA5NTc4MDk3OX0.-B-vzU8ZRkUnEp697N0nclLvomdP2k-dt9fPcJNV-gY';
-        const BRAIN_URL = 'https://script.google.com/macros/s/AKfycbxf7BAQIWUwmKqkzxSdfKOSJEWOpogKgA3SznEYikeTaCTgGB4YhBSQFz2_MSLs4BX0Wg/exec';
 
         function sbFetch(endpoint) {
             return fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
@@ -1270,43 +1258,7 @@
             return rows.map(r => [r.type, r.b, r.c, r.d, r.e, r.f, r.g, r.h, r.i, r.j]);
         }
 
-        function handleTokenResponse(resp) {
-            if (resp.error !== undefined) {
-                showImprovedNotification('error', 'Auth Error', `Authentication error: ${resp.error}`);
-                return;
-            }
-            if (!resp.access_token) {
-                showImprovedNotification('error', 'Auth Error', 'Did not receive access token');
-                return;
-            }
-            try {
-                localStorage.setItem('gapi_token', JSON.stringify(gapi.client.getToken()));
-                isSignedIn = true;
-                updateAuthButtonDisplay(true);
-                fetchAvailableCourses().then(() => {
-                    selectInitialCourse();
-                }).catch(err => console.error('Error:', err));
-                showImprovedNotification('success', 'Signed In', 'Successfully signed in');
-            } catch (error) {
-                showImprovedNotification('error', 'Auth Error', 'Error during sign-in process');
-            }
-        }
 
-        async function fetchAvailableCourses() {
-            try {
-                let response = await gapi.client.sheets.spreadsheets.get({ spreadsheetId: COURSE_MATERIALS_SPREADSHEET_ID });
-                const sheets = response.result.sheets || [];
-                // ONLY expose sheets that do NOT start with a dot (hide .Subscribers)
-                availableCourses = sheets
-                    .filter(sheet => !sheet.properties.title.startsWith('.'))
-                    .map(sheet => sheet.properties.title);
-                await populateCourseButtons();
-                return availableCourses;
-            } catch (error) {
-                showImprovedNotification('error', 'Courses Error', 'Failed to fetch available courses');
-                throw error;
-            }
-        }
 
         function formatCourseCode(code) {
             return code.replace(/_/g, ' ');
@@ -2872,16 +2824,6 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
             );
         }
 
-        function updateAuthButtonDisplay(isSignedIn) {
-            const signInBtn = document.getElementById('sign-in-btn');
-            const signOutBtn = document.getElementById('sign-out-btn');
-            if (signInBtn) {
-                signInBtn.style.display = isSignedIn ? 'none' : 'inline-block';
-                // Add this line to make the button work with the modern library
-                signInBtn.onclick = () => tokenClient.requestAccessToken({ prompt: '' });
-            }
-            if (signOutBtn) signOutBtn.style.display = isSignedIn ? 'inline-block' : 'none';
-        }
 
         function generateGradeDistribution(metadata) {
             const bar = document.getElementById('distribution-bar');
