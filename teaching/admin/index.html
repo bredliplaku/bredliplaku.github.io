@@ -293,6 +293,21 @@
       .course-header h2 {
         font-size: 1.2em !important;
       }
+
+      .error-card h2 {
+        font-size: 1.5em !important;
+      }
+
+      /* main.css stacks these into columns on mobile (teaching's accordion
+         design); admin headers and material cards are single-row layouts on
+         every screen size. */
+      .module-header {
+        flex-direction: row;
+      }
+
+      .material-card {
+        flex-direction: row;
+      }
     }
 
     .btn-google {
@@ -2998,6 +3013,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <!-- Google Identity Services — used only for One Tap sign-in (ID token → Supabase).
+       The onload hook re-triggers One Tap if the login screen appeared before this loaded. -->
+  <script src="https://accounts.google.com/gsi/client" async defer
+    onload="window._gsiOnLoad && window._gsiOnLoad()"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.4/Sortable.min.js"></script>
   <script>
     const SUPABASE_URL = 'https://sreqxyznaymvksygradu.supabase.co';
@@ -3293,8 +3312,80 @@
 
     async function signOut() {
       _sessionHandled = false;
+      // Stop One Tap from silently re-selecting the same Google account the moment the
+      // login screen reappears — without this, signing out becomes an instant re-login loop.
+      try { google.accounts.id.disableAutoSelect(); } catch { }
       await sb.auth.signOut();
       window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Google One Tap — signs in without any redirect or popup window. GIS shows a
+    // browser-mediated prompt (FedCM) with the user's Google account; picking it hands
+    // us an ID token that Supabase verifies via signInWithIdToken(). The classic
+    // signIn() button stays as the fallback (full-page redirect, also popup-free) for
+    // when One Tap can't display: GIS blocked, prompt dismissed earlier (Google then
+    // applies a cooldown), or no Google session in the browser.
+    //
+    // Nonce contract (per Supabase docs): Google receives the SHA-256 HASH of the
+    // nonce inside the ID token; Supabase receives the RAW nonce and checks that its
+    // hash matches the token's claim — proving the token was minted for this page load.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    const GOOGLE_CLIENT_ID = '740588046540-npg0crodtcuinveu6bua9rd6c3hb2s1m.apps.googleusercontent.com';
+    let _oneTapNonce = null;
+    let _oneTapInited = false;
+    let _oneTapWanted = false; // login screen showed before the GIS script finished loading
+
+    window._gsiOnLoad = () => { if (_oneTapWanted) showOneTap(); };
+
+    async function initOneTap() {
+      if (_oneTapInited) return true;
+      if (!window.google?.accounts?.id || !window.crypto?.subtle) return false;
+
+      const raw = crypto.getRandomValues(new Uint8Array(32));
+      _oneTapNonce = btoa(String.fromCharCode(...raw)).replace(/[+/=]/g, '');
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(_oneTapNonce));
+      const hashedNonce = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: onOneTapCredential,
+        nonce: hashedNonce,
+        context: 'signin',
+        auto_select: true,          // returning admin with one Google account: zero-click sign-in
+        itp_support: true,          // Safari/ITP-friendly UX
+        use_fedcm_for_prompt: true  // browser-native FedCM prompt — the non-popup path Chrome mandates
+      });
+      _oneTapInited = true;
+      return true;
+    }
+
+    async function showOneTap() {
+      _oneTapWanted = false;
+      if (!(await initOneTap())) { _oneTapWanted = true; return; } // GIS not ready yet; retried from _gsiOnLoad
+      google.accounts.id.prompt();
+    }
+
+    function cancelOneTap() {
+      // Close any prompt still on screen once we leave the login screen.
+      if (_oneTapInited) { try { google.accounts.id.cancel(); } catch { } }
+    }
+
+    async function onOneTapCredential(resp) {
+      const btn = document.getElementById('signin-btn');
+      const origHTML = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:8px"></i>Signing in...';
+      const { error } = await sb.auth.signInWithIdToken({
+        provider: 'google',
+        token: resp.credential,
+        nonce: _oneTapNonce
+      });
+      if (error) {
+        toast('Sign-in failed: ' + error.message, 'err');
+        btn.disabled = false; btn.innerHTML = origHTML;
+      }
+      // On success onAuthStateChange fires SIGNED_IN → handleSession() routes into the app.
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -3375,6 +3466,7 @@
       document.getElementById('admin-app').style.display = w === 'admin' ? 'flex' : 'none';
       if (w !== 'admin') { hideLoading(); applyCourseTheme(''); } // reset brand colour off any course
       if (w === 'admin') { startIdleWatch(); applyArchiveGroupState(); } else stopIdleWatch();
+      if (w === 'login') showOneTap(); else cancelOneTap();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
