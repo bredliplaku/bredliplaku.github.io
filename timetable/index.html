@@ -58,6 +58,9 @@
             height: var(--iframe-h, 600px);
         }
 
+        /* .table-container (native timetable) styles are shared with the
+           teaching page and live in /css/main.css. */
+
         #lecturer-iframe {
             width: 100%;
             height: 600px;
@@ -237,16 +240,7 @@
                 </div>
             </div>
 
-            <form id="timetable-form" action="https://eis.epoka.edu.al/publictimetable" method="POST"
-                target="timetable-iframe" style="display:none;">
-                <input type="hidden" id="timetable-select" name="form[timetable]" value="">
-                <input type="hidden" id="class-select" name="form[programGrade]" value="">
-            </form>
-
-            <div id="timetable-container" class="iframe-container">
-                <div class="iframe-loader"></div>
-                <iframe id="timetable-iframe" name="timetable-iframe"></iframe>
-            </div>
+            <div id="native-timetable-container" class="table-container" style="display: none;"></div>
             <div id="lecturer-container" class="iframe-container">
                 <div class="iframe-loader"></div>
                 <iframe id="lecturer-iframe" name="lecturer-iframe"></iframe>
@@ -288,7 +282,6 @@
             setupThemeToggle();
             setupSwipeGestures();
             startLoadingAnimation();
-            IframeResize.attach(document.getElementById('timetable-container'));
             IframeResize.attach(document.getElementById('lecturer-container'));
             loadAllData();
         }
@@ -539,10 +532,10 @@
                     isFirst = false;
                 });
 
-                const form = document.getElementById('timetable-form');
-                if (form) {
-                    mainContainer.insertBefore(buttonsContainer, form);
-                    mainContainer.insertBefore(contentsWrapper, form);
+                const anchor = document.getElementById('native-timetable-container');
+                if (anchor) {
+                    mainContainer.insertBefore(buttonsContainer, anchor);
+                    mainContainer.insertBefore(contentsWrapper, anchor);
                 }
                 
                 setupCategoryButtons();
@@ -800,10 +793,9 @@
         };
 
         function hideAllIframes() {
-            const tContainer = document.getElementById('timetable-container');
+            const tContainer = document.getElementById('native-timetable-container');
             tContainer.classList.remove('visible', 'active');
             tContainer.style.display = 'none';
-            // We do not remove is-loaded here so it doesn't show spinner again unless intentionally reloaded
             const lContainer = document.getElementById('lecturer-container');
             lContainer.classList.remove('visible', 'active');
             lContainer.style.display = 'none';
@@ -812,32 +804,40 @@
             currentTimetableId = currentClassId = currentLecturerKey = null;
         }
 
-        function loadTimetable(timetableVal, classVal, btn) {
+        async function loadTimetable(timetableVal, classVal, btn) {
             if (currentTimetableId === timetableVal && currentClassId === classVal) { hideAllIframes(); return; }
             hideAllIframes(); // Start fresh
 
-            const tContainer = document.getElementById('timetable-container');
-            tContainer.style.display = 'block';
-            tContainer.classList.remove('is-loaded'); // Show spinner while loading
-
-            // Per-timetable saved height (namespaced: page + timetable + class)
-            IframeResize.apply(tContainer, `bp_tt_h::timetable::${timetableVal}::${classVal}`);
-
-            document.getElementById('timetable-select').value = timetableVal;
-            document.getElementById('class-select').value = classVal;
-
-            const iframe = document.getElementById('timetable-iframe');
-            iframe.onload = () => {
-                tContainer.classList.add('is-loaded');
-            };
-            document.getElementById('timetable-form').submit();
+            const container = document.getElementById('native-timetable-container');
+            container.style.display = 'block';
+            container.innerHTML = '<div class="iframe-loader"></div>';
 
             setTimeout(() => {
-                tContainer.classList.add('visible', 'active');
+                container.classList.add('visible', 'active');
             }, 10);
 
             currentTimetableId = timetableVal; currentClassId = classVal; currentLecturerKey = null;
             highlightActiveButton(btn);
+
+            try {
+                const response = await fetch(`${BRAIN_URL}?tId=${encodeURIComponent(timetableVal)}&cId=${encodeURIComponent(classVal)}`);
+                if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+                const html = await response.text();
+                // The user may have switched timetables (or closed this one)
+                // while the request was in flight — drop stale responses.
+                if (currentTimetableId !== timetableVal || currentClassId !== classVal) return;
+                if (!html.includes('<table')) {
+                    container.innerHTML = html.includes('tt-error')
+                        ? html
+                        : '<div class="tt-error">No timetable found for this class.</div>';
+                    return;
+                }
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Timetable load error:', error);
+                if (currentTimetableId !== timetableVal || currentClassId !== classVal) return;
+                container.innerHTML = '<div class="tt-error">Could not load the timetable. Please try again later.</div>';
+            }
         }
 
         function loadIframeWithID(id, btn) {

@@ -23,7 +23,6 @@
     </script>
     <link rel="stylesheet" href="../css/main.css">
     <script defer src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
-    <script src="../js/iframe-resize.js"></script>
 </head>
 
 <body class="is-loading">
@@ -111,16 +110,7 @@
             <div class="course-actions" id="course-action-buttons"></div>
 
             <div class="course-schedule" id="timetable-container">
-                <form id="timetable-form" action="https://eis.epoka.edu.al/publictimetable" method="POST"
-                    target="timetable-iframe">
-                    <input type="hidden" name="form[timetable]" id="timetable-id-input" value="161">
-                    <input type="hidden" id="class-select" name="form[programGrade]" value="27">
-                    <input type="hidden" name="form[_token]" value="your_csrf_token_here">
-                </form>
-
-                <div class="iframe-container" id="iframe-container">
-                    <div class="iframe-loader"></div> <iframe id="timetable-iframe" name="timetable-iframe"></iframe>
-                </div>
+                <div id="native-timetable-container" class="table-container" style="display: none;"></div>
             </div>
 
             <div id="announcement-banner" class="announcement-banner" style="display: none;"></div>
@@ -1074,84 +1064,79 @@
             if (timetableContainer) {
                 timetableContainer.style.display = 'none';
             }
-            // Drag-to-resize handle for the timetable iframe (js/iframe-resize.js)
-            IframeResize.attach(document.getElementById('iframe-container'));
         }
 
-        function toggleTimetable(index, btnName) {
+        // The timetable/class pair currently shown (or being fetched); lets a
+        // late fetch response recognise it has been superseded or dismissed.
+        let activeTimetableKey = null;
+
+        async function toggleTimetable(index, btnName) {
             const timetableContainer = document.getElementById("timetable-container");
-            const iframeContainer = document.getElementById("iframe-container");
-            const iframe = document.getElementById('timetable-iframe');
+            const container = document.getElementById("native-timetable-container");
 
             const clickedButton = document.getElementById(`timetable-btn-${index}`);
             const targetTimetableId = clickedButton.dataset.timetableId;
             const targetClassId = clickedButton.dataset.classId;
 
-            const isVisible = iframeContainer.classList.contains('visible');
             const isCurrentlyActive = clickedButton.classList.contains('active');
-
             const allTimetableBtns = document.querySelectorAll('.timetable-btn');
 
             if (isCurrentlyActive) {
                 // --- HIDING THE CURRENTLY OPEN TIMETABLE ---
-                iframeContainer.classList.remove('visible');
+                activeTimetableKey = null;
+                container.classList.remove('visible');
                 clickedButton.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btnName}`;
                 clickedButton.classList.remove('active');
 
                 setTimeout(() => {
-                    timetableContainer.style.display = 'none';
-                }, 700); // This must match your CSS transition duration
-            } else {
-                // --- SHOWING OR SWITCHING ---
-                allTimetableBtns.forEach(btn => {
-                    btn.classList.remove('active');
-                    btn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btn.dataset.btnName || 'Timetable'}`;
-                });
+                    // Only collapse if nothing new was opened during the fade-out.
+                    if (!activeTimetableKey) timetableContainer.style.display = 'none';
+                }, 500); // This must match the .table-container opacity transition
+                return;
+            }
 
-                document.getElementById('timetable-id-input').value = targetTimetableId || '';
-                document.getElementById('class-select').value = targetClassId || '';
+            // --- SHOWING OR SWITCHING ---
+            allTimetableBtns.forEach(btn => {
+                btn.classList.remove('active');
+                btn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btn.dataset.btnName || 'Timetable'}`;
+            });
+            clickedButton.innerHTML = `<i class="fa-solid fa-calendar-xmark"></i> ${btnName}`;
+            clickedButton.classList.add('active');
 
-                // Height for this specific course+timetable: the user's saved
-                // drag height wins, else the admin-configured default, else the
-                // CSS default. Key is namespaced so it can never apply to a
-                // different course or timetable button.
-                IframeResize.apply(
-                    iframeContainer,
-                    `bp_teach_h::${currentCourse}::${targetTimetableId || ''}::${targetClassId || ''}`,
-                    clickedButton.dataset.height
+            const requestKey = `${targetTimetableId || ''}::${targetClassId || ''}`;
+            activeTimetableKey = requestKey;
+
+            timetableContainer.style.display = '';
+            container.style.display = 'block';
+            container.innerHTML = '<div class="iframe-loader"></div>';
+            setTimeout(() => {
+                container.classList.add('visible');
+            }, 10);
+
+            try {
+                // Supabase Edge Function proxies EIS (which sends no CORS headers)
+                // and returns the extracted table fragment. Authenticated with the
+                // same anon key as every other Supabase call on this page.
+                const response = await fetch(
+                    `${SUPABASE_URL}/functions/v1/timetable?tId=${encodeURIComponent(targetTimetableId || '')}&cId=${encodeURIComponent(targetClassId || '')}`,
+                    { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
                 );
-
-                if (isVisible) {
-                    // Switch to a new timetable while one is already open
-                    iframeContainer.classList.remove('visible');
-                    iframeContainer.classList.remove('is-loaded');
-                    clickedButton.innerHTML = `<i class="fa-solid fa-calendar-xmark"></i> ${btnName}`;
-                    clickedButton.classList.add('active');
-
-                    setTimeout(() => {
-                        iframe.onload = () => {
-                            iframeContainer.classList.add('is-loaded');
-                            iframeContainer.classList.add('visible');
-                        };
-                        document.getElementById('timetable-form').submit();
-                    }, 500);
-                } else {
-                    // Open from hidden state
-                    iframeContainer.classList.remove('is-loaded');
-                    timetableContainer.style.display = '';
-
-                    iframe.onload = () => {
-                        iframeContainer.classList.add('is-loaded');
-                    };
-                    document.getElementById('timetable-form').submit();
-
-                    setTimeout(() => {
-                        iframeContainer.classList.add('visible');
-                    }, 10);
-
-                    clickedButton.innerHTML = `<i class="fa-solid fa-calendar-xmark"></i> ${btnName}`;
-                    clickedButton.classList.add('active');
+                if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+                const html = await response.text();
+                // The user may have switched timetables (or closed this one)
+                // while the request was in flight — drop stale responses.
+                if (activeTimetableKey !== requestKey) return;
+                if (!html.includes('<table')) {
+                    container.innerHTML = html.includes('tt-error')
+                        ? html
+                        : '<div class="tt-error">No timetable found for this class.</div>';
+                    return;
                 }
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Timetable load error:', error);
+                if (activeTimetableKey !== requestKey) return;
+                container.innerHTML = '<div class="tt-error">Could not load the timetable. Please try again later.</div>';
             }
         }
 
@@ -1869,7 +1854,6 @@
                     timetableBtn.dataset.timetableId = tId;
                     timetableBtn.dataset.classId = cId !== undefined ? cId : '';
                     timetableBtn.dataset.btnName = btnName;
-                    timetableBtn.dataset.height = metadata[`timetable${i}_height`] || '';
                     timetableBtn.onclick = () => toggleTimetable(i, btnName);
                     container.appendChild(timetableBtn);
                     addedAny = true;
@@ -2011,9 +1995,10 @@
                 btn.classList.remove('active');
             });
 
-            const iframeContainer = document.getElementById('iframe-container');
-            if (iframeContainer) {
-                iframeContainer.classList.remove('visible');
+            activeTimetableKey = null;
+            const nativeContainer = document.getElementById('native-timetable-container');
+            if (nativeContainer) {
+                nativeContainer.classList.remove('visible');
             }
 
             // Hide the entire timetable section completely
@@ -2466,17 +2451,6 @@
         }
 
         function updateCourseMetadata(metadata) {
-            // Dynamically update the hidden form inputs using the fetched metadata
-            const timetableIdInput = document.getElementById('timetable-id-input');
-            const classSelectInput = document.getElementById('class-select');
-
-            if (timetableIdInput) {
-                timetableIdInput.value = metadata.timetable_id || '';
-            }
-            if (classSelectInput) {
-                classSelectInput.value = metadata.class_id || '';
-            }
-
             document.getElementById('course-code').textContent = metadata.code ? formatCourseCode(metadata.code) : 'Course Code';
 
             const profContainer = document.getElementById('professors-container');
