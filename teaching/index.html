@@ -23,6 +23,10 @@
     </script>
     <link rel="stylesheet" href="../css/main.css">
     <script defer src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
+    <!-- Sanitizes the timetable HTML from the EIS proxy before it's set as innerHTML.
+         The proxy already strips <script> tags, but that's not full sanitization —
+         this is the real defense-in-depth layer against anything else executable. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 </head>
 
 <body class="is-loading">
@@ -110,7 +114,9 @@
             <div class="course-actions" id="course-action-buttons"></div>
 
             <div class="course-schedule" id="timetable-container">
-                <div id="native-timetable-container" class="table-container" style="display: none;"></div>
+                <div id="native-timetable-container" class="table-container">
+                    <div class="tt-inner"></div>
+                </div>
             </div>
 
             <div id="announcement-banner" class="announcement-banner" style="display: none;"></div>
@@ -1064,6 +1070,13 @@
             if (timetableContainer) {
                 timetableContainer.style.display = 'none';
             }
+
+            // Delegated once on the (never-replaced) container — safe across
+            // every innerHTML swap loadTimetable() does inside it.
+            const nativeContainer = document.getElementById('native-timetable-container');
+            if (nativeContainer) {
+                wireTimetableTooltips(nativeContainer);
+            }
         }
 
         // The timetable/class pair currently shown (or being fetched); lets a
@@ -1073,6 +1086,7 @@
         async function toggleTimetable(index, btnName) {
             const timetableContainer = document.getElementById("timetable-container");
             const container = document.getElementById("native-timetable-container");
+            const inner = container.querySelector('.tt-inner');
 
             const clickedButton = document.getElementById(`timetable-btn-${index}`);
             const targetTimetableId = clickedButton.dataset.timetableId;
@@ -1084,14 +1098,15 @@
             if (isCurrentlyActive) {
                 // --- HIDING THE CURRENTLY OPEN TIMETABLE ---
                 activeTimetableKey = null;
-                container.classList.remove('visible');
+                hideTtPopover();
+                container.classList.remove('visible'); // animates the collapse
                 clickedButton.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btnName}`;
                 clickedButton.classList.remove('active');
 
                 setTimeout(() => {
-                    // Only collapse if nothing new was opened during the fade-out.
+                    // Only fully hide if nothing new was opened during the collapse.
                     if (!activeTimetableKey) timetableContainer.style.display = 'none';
-                }, 500); // This must match the .table-container opacity transition
+                }, 400); // This must match the .table-container grid-template-rows transition
                 return;
             }
 
@@ -1107,18 +1122,24 @@
             activeTimetableKey = requestKey;
 
             timetableContainer.style.display = '';
-            container.style.display = 'block';
-            container.innerHTML = '<div class="iframe-loader"></div>';
-            setTimeout(() => {
-                container.classList.add('visible');
-            }, 10);
+            inner.innerHTML = '<div class="iframe-loader"></div>';
+            // Force a reflow so the collapsed (0fr) state is committed as the
+            // transition's start value before .visible flips it to 1fr —
+            // otherwise the browser coalesces both and skips the open animation
+            // (rAF alone is unreliable coming out of a display:none subtree).
+            void container.offsetHeight;
+            container.classList.add('visible');
 
             try {
                 // Supabase Edge Function proxies EIS (which sends no CORS headers)
-                // and returns the extracted table fragment. Authenticated with the
-                // same anon key as every other Supabase call on this page.
+                // and returns the extracted table fragment. verify_jwt is off for
+                // this function (see supabase/config.toml) — it's a public,
+                // read-only proxy invoked straight from the browser, and a CORS
+                // preflight can never carry these headers anyway. Sent for
+                // consistency with the rest of the page's Supabase calls, though
+                // the function itself doesn't require them.
                 const response = await fetch(
-                    `${SUPABASE_URL}/functions/v1/timetable?tId=${encodeURIComponent(targetTimetableId || '')}&cId=${encodeURIComponent(targetClassId || '')}`,
+                    `${SUPABASE_URL}/functions/v1/eis-timetable?tId=${encodeURIComponent(targetTimetableId || '')}&cId=${encodeURIComponent(targetClassId || '')}`,
                     { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
                 );
                 if (!response.ok) throw new Error(`HTTP error ${response.status}`);
@@ -1127,17 +1148,101 @@
                 // while the request was in flight — drop stale responses.
                 if (activeTimetableKey !== requestKey) return;
                 if (!html.includes('<table')) {
-                    container.innerHTML = html.includes('tt-error')
-                        ? html
+                    inner.innerHTML = html.includes('tt-error')
+                        ? DOMPurify.sanitize(html)
                         : '<div class="tt-error">No timetable found for this class.</div>';
                     return;
                 }
-                container.innerHTML = html;
+                // The proxy already strips <script> tags, but that alone isn't full
+                // sanitization — this is the real defense-in-depth layer against
+                // anything else executable, in case EIS's own page ever changes.
+                // FORCE_BODY is required for ADD_TAGS:['style'] to actually stick —
+                // without it DOMPurify treats <style> as document metadata and drops
+                // it regardless of the allowlist, since the fragment isn't a full page.
+                inner.innerHTML = DOMPurify.sanitize(html, { ADD_TAGS: ['style'], FORCE_BODY: true });
             } catch (error) {
                 console.error('Timetable load error:', error);
                 if (activeTimetableKey !== requestKey) return;
-                container.innerHTML = '<div class="tt-error">Could not load the timetable. Please try again later.</div>';
+                inner.innerHTML = '<div class="tt-error">Could not load the timetable. Please try again later.</div>';
             }
+        }
+
+        // --- Timetable cell "more info" popover ---
+        // EIS's own page shows this on click via tippy.js + jQuery, loaded from
+        // its own site — none of which we pull in (and we strip <script> tags
+        // from the proxied fragment on purpose). Each course cell still carries
+        // its data-tippy-html attribute though (plain data, not a script), so we
+        // read that directly and render our own lightweight popover instead.
+        let ttPopoverEl = null;
+
+        function ensureTtPopover() {
+            if (ttPopoverEl) return ttPopoverEl;
+            ttPopoverEl = document.createElement('div');
+            ttPopoverEl.className = 'tt-popover';
+            ttPopoverEl.innerHTML = '<button type="button" class="tt-popover-close" aria-label="Close">&times;</button><div class="tt-popover-body"></div>';
+            document.body.appendChild(ttPopoverEl);
+            ttPopoverEl.querySelector('.tt-popover-close').onclick = hideTtPopover;
+            return ttPopoverEl;
+        }
+
+        function hideTtPopover() {
+            if (ttPopoverEl) {
+                ttPopoverEl.classList.remove('visible');
+                ttPopoverEl._forCell = null;
+            }
+        }
+
+        function showTtPopover(cell) {
+            const raw = cell.dataset.tippyHtml;
+            if (!raw) return;
+            const popover = ensureTtPopover();
+            // Sanitized separately here: the initial DOMPurify pass over the
+            // fragment doesn't recurse into data-* attribute values, so this
+            // string was never actually sanitized until now.
+            popover.querySelector('.tt-popover-body').innerHTML =
+                DOMPurify.sanitize(raw, { ADD_TAGS: ['style'], FORCE_BODY: true });
+            popover.classList.add('visible');
+            popover._forCell = cell;
+
+            const margin = 10;
+            const rect = cell.getBoundingClientRect();
+            const popW = popover.offsetWidth;
+            const popH = popover.offsetHeight;
+
+            let left = rect.left + rect.width / 2 - popW / 2;
+            left = Math.max(margin, Math.min(left, window.innerWidth - popW - margin));
+
+            let top = rect.bottom + 8;
+            if (top + popH > window.innerHeight - margin) top = rect.top - popH - 8;
+            top = Math.max(margin, top);
+
+            popover.style.left = `${left}px`;
+            popover.style.top = `${top}px`;
+        }
+
+        function wireTimetableTooltips(container) {
+            container.addEventListener('click', e => {
+                const cell = e.target.closest('[data-tippy-html]');
+                if (!cell) return;
+                e.stopPropagation();
+                if (ttPopoverEl && ttPopoverEl.classList.contains('visible') && ttPopoverEl._forCell === cell) {
+                    hideTtPopover();
+                    return;
+                }
+                showTtPopover(cell);
+            });
+
+            // Dismiss on outside click, Escape, or scroll (a fixed-position
+            // popover would otherwise drift away from the cell it's anchored to).
+            document.addEventListener('click', e => {
+                if (ttPopoverEl && ttPopoverEl.classList.contains('visible') && !ttPopoverEl.contains(e.target)) {
+                    hideTtPopover();
+                }
+            });
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Escape') hideTtPopover();
+            });
+            window.addEventListener('scroll', hideTtPopover, { passive: true, capture: true });
         }
 
         /**
@@ -1996,6 +2101,7 @@
             });
 
             activeTimetableKey = null;
+            hideTtPopover();
             const nativeContainer = document.getElementById('native-timetable-container');
             if (nativeContainer) {
                 nativeContainer.classList.remove('visible');

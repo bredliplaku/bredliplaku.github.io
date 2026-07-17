@@ -174,12 +174,60 @@
       box-shadow: none;
     }
 
-    /* Mimics the real app shell (top bar + sidebar + main) with shimmer blocks. */
-    #app-loading {
+    /* Neutral, content-free spinner shown the instant the page loads — before
+       any auth check has run. Anyone without a confirmed session (the common
+       case for a random visitor) never sees anything more than this: no
+       sidebar shapes, no tab row, nothing hinting at the admin UI's layout.
+       Swapped for #app-loading only once a session is confirmed to exist
+       (see promoteToFullSkeleton()). */
+    #boot-spinner {
       position: fixed;
       inset: 0;
       background: var(--background-color);
       display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.3s;
+    }
+
+    #boot-spinner.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Plain CSS ring — no dependency on the FontAwesome kit script, which is
+       loaded deferred and can itself take a moment to fetch/initialize. The
+       very first thing a visitor sees shouldn't wait on that. */
+    .boot-spinner-ring {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 3px solid rgba(127, 127, 127, 0.25);
+      border-top-color: var(--primary-color);
+      animation: bootSpinnerRotate 0.85s linear infinite;
+    }
+
+    @keyframes bootSpinnerRotate {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .boot-spinner-ring {
+        animation: none;
+      }
+    }
+
+    /* Mimics the real app shell (top bar + sidebar + main) with shimmer blocks.
+       Only shown once a session is confirmed (promoteToFullSkeleton) — never
+       by default — so it can't leak the admin layout to a signed-out visitor. */
+    #app-loading {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--background-color);
       flex-direction: column;
       z-index: 9999;
       transition: opacity 0.4s;
@@ -2191,6 +2239,10 @@
       color: var(--dark-text);
     }
 
+    html[data-theme="dark"] #boot-spinner {
+      background: var(--dark-bg);
+    }
+
     /* Pure black (not a lighter surface) so the #3a3a3a shimmer blocks keep contrast. */
     html[data-theme="dark"] #app-loading {
       background: var(--dark-bg);
@@ -2511,6 +2563,10 @@
         color: var(--dark-text);
       }
 
+      html:not([data-theme="light"]) #boot-spinner {
+        background: var(--dark-bg);
+      }
+
       html:not([data-theme="light"]) #app-loading {
         background: var(--dark-bg);
       }
@@ -2827,6 +2883,10 @@
 </head>
 
 <body>
+
+  <div id="boot-spinner">
+    <div class="boot-spinner-ring"></div>
+  </div>
 
   <div id="app-loading">
     <div class="skel-topbar"></div>
@@ -3239,6 +3299,27 @@
       return false;
     }
 
+    // Sizes the ambiguous-session fallback (below) from the browser's own reported
+    // connection quality instead of a blind guess. A token refresh is one network
+    // round trip, so the wait only needs to be a small multiple of the actual RTT —
+    // fast connections shouldn't be held to the same grace period as slow ones.
+    // Falls back to a flat, moderate default on browsers without the Network
+    // Information API (Safari, Firefox).
+    function estimateAuthTimeoutMs() {
+      if (navigator.onLine === false) return 0; // no network at all — no point waiting
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (conn) {
+        if (typeof conn.rtt === 'number' && conn.rtt > 0) {
+          return Math.min(6000, Math.max(1200, conn.rtt * 6));
+        }
+        const byEffectiveType = { 'slow-2g': 6000, '2g': 5000, '3g': 3000, '4g': 1500 };
+        if (conn.effectiveType && byEffectiveType[conn.effectiveType] != null) {
+          return byEffectiveType[conn.effectiveType];
+        }
+      }
+      return 3000;
+    }
+
     // Bootstrap: race getSession() against a timeout so a slow token-refresh network call
     // never leaves the user stuck on a blank screen. Crucially, a timeout only shows the
     // login screen as a fallback — it does NOT delete the stored session. If getSession()
@@ -3248,26 +3329,31 @@
       let didTimeout = false;
       const timeoutId = setTimeout(() => {
         didTimeout = true;
-        if (!_sessionHandled) showScreen('login');
-      }, 10000);
+        if (!_sessionHandled) { hideBootSpinner(); showScreen('login'); }
+      }, estimateAuthTimeoutMs());
 
       try {
         const { data: { session } } = await sb.auth.getSession();
         if (session && !_sessionHandled) {
           clearTimeout(timeoutId);
           _sessionHandled = true;
+          promoteToFullSkeleton();
           await handleSession(session);
         } else if (!session && !hasStoredSession() && !_sessionHandled && !didTimeout) {
           // Nothing to restore at all — genuinely logged out, safe to show login right away.
           clearTimeout(timeoutId);
+          hideBootSpinner();
           showScreen('login');
         }
         // else: getSession() came back empty despite a stored session existing. Don't flash
-        // the login screen — keep the spinner up and let onAuthStateChange (SIGNED_IN /
-        // TOKEN_REFRESHED / SIGNED_OUT) decide, with the timeout above as the final fallback.
+        // the login screen — keep the neutral boot spinner up (never the full admin-shaped
+        // skeleton, since this session may turn out to be stale/invalid) and let
+        // onAuthStateChange (SIGNED_IN / TOKEN_REFRESHED / SIGNED_OUT) decide, with the
+        // timeout above as the final fallback.
       } catch {
         if (!hasStoredSession() && !_sessionHandled) {
           clearTimeout(timeoutId);
+          hideBootSpinner();
           showScreen('login');
         }
       }
@@ -3275,9 +3361,11 @@
 
     // Handle subsequent auth changes (post-redirect sign-in, token refresh, sign-out)
     sb.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_OUT') { _sessionHandled = false; showScreen('login'); return; }
+      if (event === 'SIGNED_OUT') { _sessionHandled = false; hideBootSpinner(); showScreen('login'); return; }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session && !_sessionHandled) {
-        _sessionHandled = true; await handleSession(session);
+        _sessionHandled = true;
+        promoteToFullSkeleton();
+        await handleSession(session);
       }
     });
 
@@ -3436,6 +3524,21 @@
       await loadSidebar();
     }
 
+    function hideBootSpinner() {
+      const el = document.getElementById('boot-spinner');
+      el.classList.add('hidden');
+      setTimeout(() => el.style.display = 'none', 300);
+    }
+
+    // Swaps the neutral boot spinner for the admin-shaped skeleton (sidebar,
+    // tabs, cards). Only ever called once a session is confirmed to exist —
+    // never by default — so the fake UI can't leak the admin layout to a
+    // signed-out visitor.
+    function promoteToFullSkeleton() {
+      hideBootSpinner();
+      document.getElementById('app-loading').style.display = 'flex';
+    }
+
     function hideLoading() {
       const el = document.getElementById('app-loading');
       el.classList.add('hidden');
@@ -3443,6 +3546,7 @@
     }
 
     function showScreen(w) {
+      hideBootSpinner();
       document.getElementById('login-screen').style.display = w === 'login' ? 'flex' : 'none';
       document.getElementById('error-screen').style.display = w === 'error' ? 'flex' : 'none';
       document.getElementById('admin-app').style.display = w === 'admin' ? 'flex' : 'none';

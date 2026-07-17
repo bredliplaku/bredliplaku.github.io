@@ -1505,21 +1505,57 @@ html[data-theme="dark"] .iframe-resize-handle.dragging {
    the BRAIN Apps Script proxy and injected as a real table, so its height is
    natural (no manual/drag resize) and the EIS fragment's own media queries
    respond to the real viewport — mobile gets the proper compact view. */
+/* Proper expand/collapse: grid-template-rows 0fr → 1fr animates real height
+   (the same technique the admin inline-edit panels use), so opening grows the
+   card and closing shrinks it instead of just fading. The single child
+   .tt-inner is required — the row-height animation needs one overflow-hidden
+   item to clip against. All card visuals live on .tt-inner so a collapsed
+   container is genuinely zero-height (no leftover background sliver). */
 .table-container {
-    position: relative;
     width: 100%;
-    min-height: 220px;
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows .4s cubic-bezier(.4, 0, .2, 1),
+        opacity .3s ease-out;
+}
+
+.table-container.visible {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
+.tt-inner {
+    min-height: 0;
+    /* overflow-y clips the content as the row collapses; overflow-x keeps wide
+       tables horizontally scrollable */
+    overflow-y: hidden;
     overflow-x: auto;
     background: var(--card-background);
     border-radius: 15px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    padding: 12px;
-    opacity: 0;
-    transition: opacity .5s ease-out;
+    /* Only horizontal padding is constant. Vertical padding rides the same
+       transition so it collapses to 0 with the height — padding on the
+       overflow element itself would otherwise leave a ~24px sliver when the
+       row is 0fr. */
+    padding: 0 12px;
+    transition: padding .4s cubic-bezier(.4, 0, .2, 1);
 }
 
-.table-container.visible {
-    opacity: 1;
+.table-container.visible .tt-inner {
+    padding: 12px;
+}
+
+/* Gives the loading state a real height to expand into — the shared
+   .iframe-loader is absolutely positioned (zero layout height), which here
+   would collapse the card to just its padding while the fetch is in flight. */
+.tt-inner .iframe-loader {
+    position: static;
+    transform: none;
+    min-height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* The EIS fragment assumes Bootstrap table styles, which this site doesn't
@@ -1539,13 +1575,13 @@ html[data-theme="dark"] .iframe-resize-handle.dragging {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 180px;
+    min-height: 140px;
     color: var(--danger-color);
     font-weight: 600;
     text-align: center;
 }
 
-html[data-theme="dark"] .table-container {
+html[data-theme="dark"] .tt-inner {
     background: var(--dark-surface);
 }
 
@@ -1559,7 +1595,7 @@ html[data-theme="dark"] .table-container td {
 }
 
 @media (prefers-color-scheme: dark) {
-    html:not([data-theme="light"]) .table-container {
+    html:not([data-theme="light"]) .tt-inner {
         background: var(--dark-surface);
     }
 
@@ -1570,6 +1606,115 @@ html[data-theme="dark"] .table-container td {
     html:not([data-theme="light"]) .table-container th,
     html:not([data-theme="light"]) .table-container td {
         border-color: var(--dark-border);
+    }
+}
+
+/* Overrides the EIS fragment's own (often !important) font sizes, which scale
+   up to 1.3rem assuming embedding in a much wider layout than our compact
+   card. The extra specificity (#native-timetable-container) plus !important
+   guarantees the win regardless of which of the fragment's own breakpoints is
+   active — its <style> tag is inserted into the DOM after this stylesheet has
+   already loaded, and would otherwise win same-specificity ties by order. */
+#native-timetable-container .timetable-table th {
+    font-size: 0.78rem !important;
+    padding: 6px 3px !important;
+}
+
+#native-timetable-container .timetable-day-course {
+    padding: 3px 5px !important;
+    cursor: pointer;
+}
+
+#native-timetable-container .tt-code,
+#native-timetable-container .tt-full-name {
+    font-size: 0.8rem !important;
+}
+
+#native-timetable-container .tt-details {
+    font-size: 0.72rem !important;
+}
+
+#native-timetable-container .tt-rooms,
+#native-timetable-container .tt-lecturers i {
+    font-size: 0.68rem !important;
+}
+
+/* Floating "more info" card — our own replacement for the tippy.js popup EIS's
+   own page uses (dropped along with its <script> tags). Reads the same
+   data-tippy-html attribute EIS already embeds per cell; see
+   wireTimetableTooltips() in teaching/index.html. */
+.tt-popover {
+    display: none;
+    position: fixed;
+    z-index: 1500;
+    max-width: min(320px, calc(100vw - 20px));
+    background: var(--card-background);
+    border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+    padding: 14px 16px;
+    font-size: 0.85rem;
+    color: var(--text-color);
+}
+
+.tt-popover.visible {
+    display: block;
+}
+
+.tt-popover-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border-radius: 50%;
+    line-height: 1;
+    font-size: 1.1em;
+    background: transparent;
+    color: var(--text-color);
+    border: none;
+    box-shadow: none;
+    opacity: 0.6;
+}
+
+.tt-popover-close:hover {
+    opacity: 1;
+    box-shadow: none;
+    filter: none;
+    background: rgba(127, 127, 127, 0.15);
+}
+
+.tt-popover-body {
+    padding-right: 20px;
+}
+
+/* EIS bakes a light (whitesmoke) chip background as an inline style into the
+   popover content — the room boxes. In dark mode our popover text is light, so
+   without this those chips render light-on-light and become unreadable. Force
+   dark text on the chip and its children; theme-agnostic since it's always a
+   light background. (whitesmoke is the only light inline bg EIS emits here.) */
+.tt-popover [style*="whitesmoke"],
+.tt-popover [style*="whitesmoke"] * {
+    color: #333 !important;
+}
+
+html[data-theme="dark"] .tt-popover {
+    background: var(--dark-surface-light);
+    color: var(--dark-text);
+}
+
+html[data-theme="dark"] .tt-popover-close {
+    color: var(--dark-text);
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) .tt-popover {
+        background: var(--dark-surface-light);
+        color: var(--dark-text);
+    }
+
+    html:not([data-theme="light"]) .tt-popover-close {
+        color: var(--dark-text);
     }
 }
 

@@ -240,7 +240,9 @@
                 </div>
             </div>
 
-            <div id="native-timetable-container" class="table-container" style="display: none;"></div>
+            <div id="native-timetable-container" class="table-container" style="display: none;">
+                <div class="tt-inner"></div>
+            </div>
             <div id="lecturer-container" class="iframe-container">
                 <div class="iframe-loader"></div>
                 <iframe id="lecturer-iframe" name="lecturer-iframe"></iframe>
@@ -809,12 +811,18 @@
             hideAllIframes(); // Start fresh
 
             const container = document.getElementById('native-timetable-container');
-            container.style.display = 'block';
-            container.innerHTML = '<div class="iframe-loader"></div>';
+            const inner = container.querySelector('.tt-inner');
+            // Empty string (not 'block') so the stylesheet's display:grid applies —
+            // 'block' would kill the grid-template-rows expand/collapse animation.
+            container.style.display = '';
+            inner.innerHTML = '<div class="iframe-loader"></div>';
 
-            setTimeout(() => {
-                container.classList.add('visible', 'active');
-            }, 10);
+            // Force a reflow so the collapsed (0fr) state is committed as the
+            // transition's start value before .visible flips it to 1fr —
+            // otherwise the browser coalesces both and skips the open animation
+            // (rAF alone is unreliable coming out of a display:none subtree).
+            void container.offsetHeight;
+            container.classList.add('visible', 'active');
 
             currentTimetableId = timetableVal; currentClassId = classVal; currentLecturerKey = null;
             highlightActiveButton(btn);
@@ -827,16 +835,16 @@
                 // while the request was in flight — drop stale responses.
                 if (currentTimetableId !== timetableVal || currentClassId !== classVal) return;
                 if (!html.includes('<table')) {
-                    container.innerHTML = html.includes('tt-error')
+                    inner.innerHTML = html.includes('tt-error')
                         ? html
                         : '<div class="tt-error">No timetable found for this class.</div>';
                     return;
                 }
-                container.innerHTML = html;
+                inner.innerHTML = html;
             } catch (error) {
                 console.error('Timetable load error:', error);
                 if (currentTimetableId !== timetableVal || currentClassId !== classVal) return;
-                container.innerHTML = '<div class="tt-error">Could not load the timetable. Please try again later.</div>';
+                inner.innerHTML = '<div class="tt-error">Could not load the timetable. Please try again later.</div>';
             }
         }
 
