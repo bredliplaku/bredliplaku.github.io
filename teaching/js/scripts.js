@@ -132,8 +132,16 @@
         }
 
         function init() {
+            applyThemeDefaults();
             setRandomSpinnerGif();
             updateYear();
+            applyOwnerBranding();
+            // Opt-out kill switch: config.catCompanion === false removes the element,
+            // after which every cat function no-ops on its null getElementById lookup.
+            if (window.TEACHING_CONFIG && window.TEACHING_CONFIG.catCompanion === false) {
+                const catEl = document.getElementById('cat-companion');
+                if (catEl) catEl.remove();
+            }
             initContainers();
             setupMobileFab();
             applyClickFeedback('#sort-button');
@@ -182,6 +190,17 @@
             const courseButtons = document.getElementById('course-buttons-container');
 
             if (courseContent) {
+                // On mobile the cat is perched INSIDE course-content; the innerHTML wipe
+                // below would destroy that node outright (getElementById returns null from
+                // then on and the cat never returns until reload — this is the "cat vanishes
+                // when I switch to/from Archived" bug). Detach it to <body> first, dropping
+                // cat-perched so it's cleanly hidden until positionCatCompanion() re-homes it.
+                const perchedCat = document.getElementById('cat-companion');
+                if (perchedCat && perchedCat.parentElement === courseContent) {
+                    perchedCat.classList.remove('cat-perched');
+                    document.body.appendChild(perchedCat);
+                }
+
                 // Lock the height to its current pixel dimension
                 courseContent.style.minHeight = courseContent.offsetHeight + 'px';
 
@@ -285,7 +304,13 @@
             const contentEl = document.getElementById('course-content');
             const perchedCat = document.getElementById('cat-companion');
             if (perchedCat && perchedCat.parentElement === contentEl) {
-                document.body.appendChild(perchedCat); // survive the wipe below, see renderContent()
+                // Move it out of the doomed content AND drop cat-perched. During the async
+                // reload gap the cat sits directly in <body>; an orphaned cat-perched there
+                // leaves it as a 0-height element stranded at the page bottom on mobile
+                // (reads as "the cat vanished when I switched to Archived"). Cleared here it's
+                // cleanly hidden until positionCatCompanion() re-perches it on the new content.
+                perchedCat.classList.remove('cat-perched');
+                document.body.appendChild(perchedCat);
             }
             contentEl.innerHTML = '';
 
@@ -1439,8 +1464,8 @@
             }
         }
 
-        const SUPABASE_URL = 'https://sreqxyznaymvksygradu.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyZXF4eXpuYXltdmtzeWdyYWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMDQ5NzksImV4cCI6MjA5NTc4MDk3OX0.-B-vzU8ZRkUnEp697N0nclLvomdP2k-dt9fPcJNV-gY';
+        const SUPABASE_URL = window.TEACHING_CONFIG.supabaseUrl;
+        const SUPABASE_ANON_KEY = window.TEACHING_CONFIG.supabaseAnonKey;
 
         function sbFetch(endpoint) {
             return fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
@@ -3092,6 +3117,40 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
         function updateYear() {
             const yearEl = document.getElementById('currentYear');
             if (yearEl) yearEl.textContent = new Date().getFullYear();
+        }
+
+        // Fills the footer's owner-specific bits (and favicon) from config.js so the
+        // markup itself stays identical across deployments (only config.js differs).
+        function applyOwnerBranding() {
+            const owner = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.owner) || {};
+            const cv = document.getElementById('footer-cv');
+            if (cv && owner.cvUrl) cv.href = owner.cvUrl;
+            const email = document.getElementById('footer-email');
+            if (email && owner.email) email.href = `mailto:${owner.email}`;
+            const name = document.getElementById('footer-owner');
+            if (name && owner.name) name.textContent = owner.name;
+            const startYear = document.getElementById('footer-start-year');
+            if (startYear && owner.startYear) startYear.textContent = owner.startYear;
+            const home = document.getElementById('footer-home');
+            if (home && owner.homeUrl) home.href = owner.homeUrl;
+            const favicon = document.querySelector('link[rel="icon"]');
+            if (favicon && owner.faviconUrl) favicon.href = owner.faviconUrl;
+        }
+
+        // Applies the default colour palette from config.js as CSS custom properties.
+        // Runs before any per-course theming, so a course's own colours still override.
+        function applyThemeDefaults() {
+            const t = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.theme) || {};
+            const root = document.documentElement.style;
+            const map = {
+                '--primary-color': t.primary,
+                '--primary-dark': t.primaryDark,
+                '--secondary-color': t.secondary,
+                '--tertiary-color': t.tertiary,
+                '--accent-color': t.accent,
+                '--success-color': t.success,
+            };
+            Object.entries(map).forEach(([prop, val]) => { if (val) root.setProperty(prop, val); });
         }
 
         function showImprovedNotification(type, title, message, duration) {

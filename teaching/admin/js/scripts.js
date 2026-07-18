@@ -1,5 +1,5 @@
-    const SUPABASE_URL = 'https://sreqxyznaymvksygradu.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyZXF4eXpuYXltdmtzeWdyYWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMDQ5NzksImV4cCI6MjA5NTc4MDk3OX0.-B-vzU8ZRkUnEp697N0nclLvomdP2k-dt9fPcJNV-gY';
+    const SUPABASE_URL = window.TEACHING_CONFIG.supabaseUrl;
+    const SUPABASE_ANON_KEY = window.TEACHING_CONFIG.supabaseAnonKey;
     const { createClient } = supabase;
     // Synchronously pre-clear only genuinely unusable session blobs BEFORE createClient
     // (corrupt JSON, or missing the refresh_token needed to revive the session). An expired
@@ -71,7 +71,16 @@
     // The five slots of the theme_colours metadata, in order, and the site-wide defaults used
     // when a course sets none (must match teaching/index.html's fallback palette).
     const THEME_COLOR_NAMES = ['Primary', 'Secondary', 'Tertiary', 'Accent', 'Success'];
-    const THEME_COLOR_DEFAULTS = ['#3949ab', '#ffa726', '#2196f3', '#9c27b0', '#43a047'];
+    // Default course palette offered in the colour picker — drawn from config.js so a
+    // deployment's brand colours are what new courses (and "reset to default") land on.
+    const _cfgTheme = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.theme) || {};
+    const THEME_COLOR_DEFAULTS = [
+        _cfgTheme.primary || '#3949ab',
+        _cfgTheme.secondary || '#ffa726',
+        _cfgTheme.tertiary || '#2196f3',
+        _cfgTheme.accent || '#9c27b0',
+        _cfgTheme.success || '#43a047',
+    ];
 
     const FA_SEARCH_URL = 'https://fontawesome.com/search?ic=free-collection';
 
@@ -338,7 +347,7 @@
     // hash matches the token's claim — proving the token was minted for this page load.
     // ─────────────────────────────────────────────────────────────────────────────
 
-    const GOOGLE_CLIENT_ID = '740588046540-975b4g8i4915hps31p1ioi0e000f4boi.apps.googleusercontent.com';
+    const GOOGLE_CLIENT_ID = window.TEACHING_CONFIG.googleClientId;
     let _oneTapNonce = null;
     let _oneTapInited = false;
     let _oneTapWanted = false; // login screen showed before the GIS script finished loading
@@ -2777,6 +2786,35 @@
 
     const _yr = document.getElementById('currentYear');
     if (_yr) _yr.textContent = new Date().getFullYear();
+
+    // Footer branding + favicon + default colour palette from config.js, so the markup
+    // and CSS stay identical across deployments (only config.js differs).
+    (function applyConfig() {
+        const cfg = window.TEACHING_CONFIG || {};
+        const owner = cfg.owner || {};
+        const cv = document.getElementById('footer-cv');
+        if (cv && owner.cvUrl) cv.href = owner.cvUrl;
+        const email = document.getElementById('footer-email');
+        if (email && owner.email) email.href = 'mailto:' + owner.email;
+        const name = document.getElementById('footer-owner');
+        if (name && owner.name) name.textContent = owner.name;
+        const startYear = document.getElementById('footer-start-year');
+        if (startYear && owner.startYear) startYear.textContent = owner.startYear;
+        const home = document.getElementById('footer-home');
+        if (home && owner.homeUrl) home.href = owner.homeUrl;
+        const favicon = document.querySelector('link[rel="icon"]');
+        if (favicon && owner.faviconUrl) favicon.href = owner.faviconUrl;
+
+        const t = cfg.theme || {};
+        const root = document.documentElement.style;
+        const map = {
+            '--primary-color': t.primary, '--primary-dark': t.primaryDark,
+            '--secondary-color': t.secondary, '--tertiary-color': t.tertiary,
+            '--accent-color': t.accent, '--success-color': t.success,
+        };
+        Object.keys(map).forEach(k => { if (map[k]) root.setProperty(k, map[k]); });
+    })();
+
     setupThemeToggle();
 
     // ─────────────────────────────────────────────────────────────────────────────
