@@ -123,7 +123,7 @@
 
             <div class="search-container">
                 <i class="fa-solid fa-search search-icon"></i>
-                <input type="search" id="search-bar" placeholder="Search">
+                <input type="search" id="search-bar" placeholder="Search...">
                 <button id="sort-button" class="sort-button" title="Sort Modules">
                     <i class="fa-solid fa-sort-amount-down"></i>
                 </button>
@@ -162,7 +162,7 @@
 
     <div id="cat-companion">
         <div id="cat-speech-bubble"></div>
-        <img id="cat-image" src="../miscellaneous/whisker.webp" alt="A friendly cat companion">
+        <img id="cat-image" src="../miscellaneous/catto.gif" alt="A friendly cat companion">
     </div>
 
     <script>
@@ -1093,6 +1093,26 @@
         // late fetch response recognise it has been superseded or dismissed.
         let activeTimetableKey = null;
 
+        // Remembers, per course, whether a timetable was left open and which
+        // one — same pattern as moduleStates_/courseSortOrders, keyed off
+        // currentCourse so switching courses (or reloading on one) restores
+        // exactly what that course's link last showed.
+        function saveTimetableState(open, index) {
+            const cacheKey = `timetableState_${currentCourse}`;
+            try {
+                if (open) localStorage.setItem(cacheKey, JSON.stringify({ open: true, index }));
+                else localStorage.removeItem(cacheKey);
+            } catch (e) { /* ignore */ }
+        }
+
+        function restoreTimetableState() {
+            let saved = null;
+            try { saved = JSON.parse(localStorage.getItem(`timetableState_${currentCourse}`)); } catch (e) { /* ignore */ }
+            if (!saved || !saved.open) return;
+            const btn = document.getElementById(`timetable-btn-${saved.index}`);
+            if (btn) toggleTimetable(saved.index, btn.dataset.btnName || 'Timetable');
+        }
+
         async function toggleTimetable(index, btnName) {
             const timetableContainer = document.getElementById("timetable-container");
             const container = document.getElementById("native-timetable-container");
@@ -1108,15 +1128,32 @@
             if (isCurrentlyActive) {
                 // --- HIDING THE CURRENTLY OPEN TIMETABLE ---
                 activeTimetableKey = null;
+                saveTimetableState(false);
                 hideTtPopover();
                 container.classList.remove('visible'); // animates the collapse
                 clickedButton.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btnName}`;
                 clickedButton.classList.remove('active');
 
-                setTimeout(() => {
+                // Wait for the actual collapse transition to finish (rather than a
+                // setTimeout guessing its duration) before pulling the outer wrapper
+                // out of the document with display:none. A timer that merely matches
+                // the CSS duration on paper drifts under real load — exactly while a
+                // big table is being clipped/repainted — firing early and snapping
+                // the tail of the animation off. Listening for the real event can't
+                // drift, and the fallback timer is just a safety net if the
+                // transition never fires at all (e.g. reduced-motion).
+                let settled = false;
+                const finish = () => {
+                    if (settled) return;
+                    settled = true;
+                    container.removeEventListener('transitionend', onEnd);
+                    clearTimeout(fallback);
                     // Only fully hide if nothing new was opened during the collapse.
                     if (!activeTimetableKey) timetableContainer.style.display = 'none';
-                }, 400); // This must match the .table-container grid-template-rows transition
+                };
+                const onEnd = e => { if (e.target === container && e.propertyName === 'grid-template-rows') finish(); };
+                container.addEventListener('transitionend', onEnd);
+                const fallback = setTimeout(finish, 600);
                 return;
             }
 
@@ -1130,6 +1167,7 @@
 
             const requestKey = `${targetTimetableId || ''}::${targetClassId || ''}`;
             activeTimetableKey = requestKey;
+            saveTimetableState(true, index);
 
             timetableContainer.style.display = '';
             inner.innerHTML = '<div class="iframe-loader"></div>';
@@ -1179,10 +1217,9 @@
         }
 
         // Trims dead weight from the EIS table before fitting:
-        //   • Time columns: empty ones are trimmed off BOTH ends (before the
-        //     first lecture and after the last), never in between, keeping one
-        //     padding column on each side so the cut isn't abrupt. The Week and
-        //     Day columns (0 and 1) are always kept.
+        //   • Time columns: empty ones are trimmed off BOTH ends, right up to
+        //     the first and last lecture — never in between. The Week and Day
+        //     columns (0 and 1) are always kept.
         //   • Rows: left untouched EXCEPT an empty Saturday, which is removed.
         //     Other empty days stay — a two-week exam timetable must keep its
         //     shape, so we don't collapse arbitrary blank days.
@@ -1207,7 +1244,6 @@
                     c += cs;
                 }
             });
-            const totalCols = Math.max(0, ...matrix.map(row => row.length));
 
             // --- Trim empty time columns off both ends (cols 0/1 = Week/Day) ---
             let firstUsed = Infinity, lastUsed = -Infinity;
@@ -1219,9 +1255,10 @@
             }));
 
             if (lastUsed >= 2) {
-                // One padding column each side, clamped to the real time range.
-                const leftKeep = Math.max(2, firstUsed - 1);
-                const rightKeep = Math.min(totalCols - 1, lastUsed + 1);
+                // Trim empty time columns right up to the first and last lecture
+                // (no padding column on either side).
+                const leftKeep = firstUsed;
+                const rightKeep = lastUsed;
                 const kept = c => c < 2 || (c >= leftKeep && c <= rightKeep);
 
                 const handled = new Set();
@@ -1277,6 +1314,27 @@
             }
         }
 
+        // Shortens day names to Mon/Tue/… so the Day column can be as narrow as
+        // the time columns. Must run AFTER pruneTimetable (which matches the
+        // Saturday row by its full name) and BEFORE equalizeColumns (which
+        // measures column widths off the current text) — the column would
+        // otherwise stay sized for "Wednesday" even after the label shortens.
+        function abbreviateDays(table) {
+            const body = table.tBodies[0];
+            if (!body) return;
+            const ABBR = {
+                monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu',
+                friday: 'Fri', saturday: 'Sat', sunday: 'Sun'
+            };
+            Array.from(body.rows).forEach(row => {
+                Array.from(row.cells).forEach(cell => {
+                    if (cell.tagName !== 'TH') return;
+                    const key = (cell.textContent || '').trim().toLowerCase();
+                    if (ABBR[key]) cell.textContent = ABBR[key];
+                });
+            });
+        }
+
         // Gives every time column the same width (distributed equally), keeping
         // the total time-width the same so the fit scale — and thus the on-screen
         // text size — is unchanged. Content that no longer fits a column is cut
@@ -1319,6 +1377,7 @@
             if (!table) return;
             inner.classList.add('tt-fitted');
             pruneTimetable(table);
+            abbreviateDays(table);
             equalizeColumns(table);
 
             // Wrap the table once so the wrapper can clip its unscaled layout box
@@ -1332,9 +1391,6 @@
             }
 
             // Measure at natural width, then fill (wide) or scale down (narrow).
-            // Reset tt-scaled first so the width measurement isn't affected by a
-            // stale state (the clamp is height-only, but keep it clean for resize).
-            inner.classList.remove('tt-scaled');
             table.style.transform = 'none';
             // width/tableLayout were set by equalizeColumns; measure that.
             const naturalW = table.offsetWidth;
@@ -1343,9 +1399,6 @@
                 table.style.width = '100%';
                 wrap.style.height = '';
             } else {
-                // Scaled to fit → switch names to the tighter one-line clamp, then
-                // measure height with that applied.
-                inner.classList.add('tt-scaled');
                 const scale = avail / naturalW;
                 const naturalH = table.offsetHeight;
                 table.style.transform = `scale(${scale})`;
@@ -1852,6 +1905,7 @@
 
                     updateCourseMetadata(data.metadata);
                     populateActionButtons(data.actionButtons, data.metadata);
+                    restoreTimetableState();
                     applyColorTheme(data.metadata); // Sets the new colours
                     renderAnnouncements(data.announcements);
                     setupSortAndRender(); // Renders the content into the hidden main-container
@@ -2267,7 +2321,7 @@
 
             let funFactsHtml = '';
             module.funFacts.forEach(funFact => {
-                funFactsHtml += `<div class="fun-fact">${funFact.text}</div>`;
+                funFactsHtml += `<div class="fun-fact"><i class="fa-solid fa-lightbulb fun-fact-icon"></i><span class="fun-fact-text">${funFact.text}</span></div>`;
             });
 
             return `
@@ -2275,6 +2329,7 @@
         <div class="module-header">
             ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
             <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
+            <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
         </div>
         <div class="module-content">
             ${filesHtml}
@@ -2957,6 +3012,7 @@
                 <div class="module-header">
                     ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
                     <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
                 </div>
                 <div class="module-content">`;
 
@@ -2986,7 +3042,7 @@ ${material.openLink ? `<button onclick="handleActionClick(this, '${material.open
                     });
                     if (inGrid) { html += `</div>`; }
                     module.funFacts.forEach(funFact => {
-                        html += `<div class="fun-fact">${funFact.text}</div>`;
+                        html += `<div class="fun-fact"><i class="fa-solid fa-lightbulb fun-fact-icon"></i><span class="fun-fact-text">${funFact.text}</span></div>`;
                     });
                     html += `</div></div>`;
                 }

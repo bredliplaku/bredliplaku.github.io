@@ -3359,7 +3359,6 @@
       }
     })();
 
-    // Handle subsequent auth changes (post-redirect sign-in, token refresh, sign-out)
     sb.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') { _sessionHandled = false; hideBootSpinner(); showScreen('login'); return; }
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session && !_sessionHandled) {
@@ -3692,8 +3691,7 @@
       return await saveSectionChanges(S.section);
     }
 
-    // Gate before leaving the current tab/course. Returns true if it's safe to proceed. If there
-    // are unsaved changes, asks Save / Discard / Cancel first.
+    // Returns true if it's safe to leave the current tab/course.
     async function confirmLeaveIfDirty() {
       if (!_sectionDirty && !inlinePanelDirty()) return true;
       const choice = await confirmDialog('You have unsaved changes in this tab.',
@@ -3863,9 +3861,8 @@
     }
     let _openProjectAfterLoad = null;
 
-    // Links tab shows the Timetables editor (moved out of Info, which was overcrowded) above
-    // the regular list of Link Button cards. Both save together via the one Save button at the
-    // top of the tab (saveSectionChanges('links') also calls saveTimetablesWork() internally).
+    // Links tab shows the Timetables editor above the Link Button cards; both save together
+    // via the one Save button (saveSectionChanges('links') also calls saveTimetablesWork()).
     async function loadLinksSection(sec) {
       const body = document.getElementById('section-body');
       const [metaRes, btnRes] = await Promise.all([
@@ -3999,7 +3996,6 @@
       const toUpsert = [];
       const base = { sheet_name: S.course, is_archive: S.isArchive, type: 'metadata', d: '', e: '', f: '', g: '', h: '', i: '', j: '' };
 
-      // Fixed (non-multi) categories — e.g. Final, Attendance
       const doneMap = {};
       document.querySelectorAll('.grade-done').forEach(s => doneMap[s.dataset.donekey] = s.value);
       for (const inp of document.querySelectorAll('.grade-val')) {
@@ -4065,7 +4061,6 @@
         else extras.push(r);
       }
 
-      // Auto-derive academic year from startdate when year field is empty
       if (!metaMap['year']?.c && metaMap['startdate']?.c) {
         const parts = String(metaMap['startdate'].c).split('-');
         const yr = parseInt(parts[0]), mo = parseInt(parts[1]);
@@ -4075,7 +4070,6 @@
         }
       }
 
-      // Extract professors
       const profNums = new Set();
       for (const k of Object.keys(metaMap)) {
         const m = k.match(/^professor(\d+)$/);
@@ -4084,7 +4078,6 @@
       const profs = Array.from(profNums).sort((a, b) => a - b);
       if (!profs.length) profs.push(1);
 
-      // Theme colours
       const themeStr = metaMap['theme_colours']?.c || '';
       const themeParts = themeStr.split(',').map(s => s.trim());
 
@@ -4109,7 +4102,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">Academic Year</label>
-        <input type="text" class="meta-field" data-metakey="year" placeholder="e.g. 2024" value="${v('year')}" oninput="onYearInput(this)" onblur="normalizeYearField(this)">
+        <input type="text" class="meta-field" data-metakey="year" value="${v('year')}" oninput="onYearInput(this)" onblur="normalizeYearField(this)">
       </div>
       <div class="form-group">
         <label class="form-label">Semester</label>
@@ -4254,7 +4247,6 @@
       if (lbl) lbl.textContent = input.value.trim() || fallback;
     }
 
-    // Professor card HTML
     function professorCardHtml(n, metaMap) {
       const name = metaMap[`professor${n}`]?.c || '';
       const link = metaMap[`professor${n}_link`]?.c || '';
@@ -4308,7 +4300,6 @@
       }
     }
 
-    // Timetable card HTML
     function timetableCardHtml(n, metaMap) {
       const name = metaMap[`timetable${n}_name`]?.c || '';
       const tid = metaMap[`timetable${n}_id`]?.c || '';
@@ -4422,7 +4413,7 @@
       }
 
       if (!viewUrl) {
-        if (force) toast('Unrecognised link — paste a Google Drive or OneDrive URL', 'err');
+        if (force) toast('Unrecognised link, use a Google Drive or OneDrive URL', 'err');
         return;
       }
       const viewEl = document.getElementById('mf_e');
@@ -4455,7 +4446,6 @@
       return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : null;
     }
 
-    // Swatch picked → mirror into the hex box, then sync + repaint the preview.
     function onThemeSwatchInput(i) {
       const sw = document.getElementById('tc_' + i);
       const tx = document.getElementById('tcx_' + i);
@@ -4583,7 +4573,6 @@
       return { html, total };
     }
 
-    // Relabels a category's rows: bare label when there's exactly one, numbered when there are 2+.
     function relabelGradingCategory(catId) {
       const cat = GRADING_CATEGORIES.find(c => c.id === catId);
       if (!cat) return;
@@ -4622,7 +4611,6 @@
       const resetBtn = () => { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } };
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Saving…'; }
 
-      // Load existing metadata rows
       const { data: existing } = await sb.from('course_rows').select('row_uid,b,row_index')
         .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata');
       const existMap = {};
@@ -4639,7 +4627,6 @@
         toUpsert.push({ ...base, row_uid: uid, row_index: idx, b: key, c: val, ...extra });
       };
 
-      // Static meta fields
       for (const inp of document.querySelectorAll('.meta-field')) {
         const key = inp.dataset.metakey;
         if (!key) continue;
@@ -4651,7 +4638,6 @@
         if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
 
-      // Professors: delete all old, insert fresh
       const oldProfUids = Object.entries(existMap)
         .filter(([k]) => /^professor\d+(_link|_photo)?$/.test(k))
         .map(([, r]) => r.row_uid);
@@ -4677,8 +4663,7 @@
         if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
       }
 
-      // Note: Timetables live under the Links tab now (see saveTimetablesWork()), and Grading
-      // lives in its own tab now (see saveGradingSettings()) — neither is touched here.
+      // Timetables and Grading save separately (saveTimetablesWork/saveGradingSettings), not here.
 
       toast('Settings saved', 'ok');
       resetBtn();
@@ -4750,7 +4735,7 @@
       // The materials/funfacts wrapper divs always render, even when empty, so "Add Material"/
       // "Add Fun Fact" always has somewhere to insert into — only the placeholder text is conditional.
       if (!children.length) {
-        h += `<div class="empty-content" style="padding:14px;margin:0">No items — use the buttons above.</div>`;
+        h += `<div class="empty-content" style="padding:14px;margin:0">No items. Use the buttons above.</div>`;
       }
       h += `<div class="module-materials">${materials.map(c => materialCardHtml(c)).join('')}</div>`;
       h += `<div class="module-funfacts">${funfacts.map(c => funfactCardHtml(c)).join('')}</div>`;
@@ -4931,7 +4916,7 @@
         for (const grp of proj.groups) h += projectGroupBlockHtml(grp.header, grp.files);
 
         if (!proj.desc && !proj.files.length && !proj.groups.length) {
-          h += `<div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div>`;
+          h += `<div class="empty-content" style="padding:14px;margin:0">No content yet. Click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div>`;
         }
 
         h += `</div></div>`;
@@ -5042,7 +5027,7 @@
 
     function openInlineEdit(uid) {
       const row = ROW_STORE[uid];
-      if (!row) { toast('Row not in cache — reload section', 'err'); return; }
+      if (!row) { toast('Row not in cache, reload the section', 'err'); return; }
       // Clicking the same Edit toggle again is a request to close (and may prompt to save).
       if (_inlineEditUid === uid) { requestCloseInlineEdit(); return; }
       closeInlineEdit();
@@ -5199,7 +5184,7 @@
       </div>`;
         } else if (f.autofill) {
           h += `<div class="icon-input-wrap">
-        <input type="text" id="mf_${f.col}" value="${x(v)}" placeholder="Paste Google Drive or OneDrive link…"
+        <input type="text" id="mf_${f.col}" value="${x(v)}" placeholder="Paste a Google Drive or OneDrive link"
                onpaste="setTimeout(()=>autofillDriveLink(this),50)"
                onblur="autofillDriveLink(this)">
         <button type="button" class="btn btn-sm" style="flex-shrink:0;padding:6px 12px;font-size:0.82em"
@@ -5318,11 +5303,11 @@
       let placeholder = contentEl.querySelector(':scope > .empty-content');
       if (mats || funs) {
         const isEmpty = (!mats || !mats.children.length) && (!funs || !funs.children.length);
-        if (isEmpty && !placeholder) contentEl.insertAdjacentHTML('afterbegin', `<div class="empty-content" style="padding:14px;margin:0">No items — use the buttons above.</div>`);
+        if (isEmpty && !placeholder) contentEl.insertAdjacentHTML('afterbegin', `<div class="empty-content" style="padding:14px;margin:0">No items. Use the buttons above.</div>`);
         else if (!isEmpty && placeholder) placeholder.remove();
       } else {
         const hasContent = !!contentEl.querySelector(':scope > [data-uid], :scope > .project-group-block');
-        if (!hasContent && !placeholder) contentEl.insertAdjacentHTML('beforeend', `<div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div>`);
+        if (!hasContent && !placeholder) contentEl.insertAdjacentHTML('beforeend', `<div class="empty-content" style="padding:14px;margin:0">No content. Click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div>`);
         else if (hasContent && placeholder) placeholder.remove();
       }
     }
@@ -5382,7 +5367,7 @@
       const maxOrder = Math.max(0, ...uids.map(u => parseInt(ROW_STORE[u]?.b) || 0));
       // See addModule: empty f = Hidden on the public site, so default a new project to SHOW.
       const { uid, row } = addNewRow('project', { b: String(maxOrder + 1), f: 'SHOW' });
-      const html = `<div class="module" data-uid="${x(uid)}">${projectHeaderHtml(row)}<div class="module-content"><div class="empty-content" style="padding:14px;margin:0">No content — click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div></div></div>`;
+      const html = `<div class="module" data-uid="${x(uid)}">${projectHeaderHtml(row)}<div class="module-content"><div class="empty-content" style="padding:14px;margin:0">No content. Click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div></div></div>`;
       body.insertAdjacentHTML('beforeend', html);
       initDnD(SECTIONS.find(s => s.id === 'projects'));
       openInlineEdit(uid);
@@ -5408,7 +5393,7 @@
     }
 
     function addProjectDescription(projectUid) {
-      if (hasProjectDescription(projectUid)) { toast('This project already has a description — edit it below', 'err'); return; }
+      if (hasProjectDescription(projectUid)) { toast('This project already has a description, edit it below', 'err'); return; }
       closeInlineEdit();
       const moduleEl = document.querySelector('#section-body > .module' + attrSel(projectUid));
       if (!moduleEl) return;
@@ -5518,7 +5503,7 @@
         // silently renumber, so the fix is visible rather than mysterious.
         const seen = new Set(); let clash = false;
         for (const uid of topUids) { const b = (ROW_STORE[uid]?.b || '').trim(); if (b && seen.has(b)) clash = true; seen.add(b); }
-        if (clash) toast('Some Order numbers clashed — renumbered automatically', 'err');
+        if (clash) toast('Some Order numbers clashed. Renumbered automatically...', 'err');
         const n = topUids.length;
         topUids.forEach((uid, i) => { if (ROW_STORE[uid]) ROW_STORE[uid].b = String(n - i); });
       }
@@ -5611,15 +5596,15 @@
     <div class="form-group">
       <label class="form-label">Sheet Name (DB key)</label>
       <input type="text" id="nc_sheet">
-      <div class="form-hint">Unique ID — letters, digits, underscores. Cannot be changed later.</div>
+      <div class="form-hint">Unique ID: letters, digits, underscores. Cannot be changed later.</div>
     </div>
     <div class="form-group"><label class="form-label">Course Code</label><input type="text" id="nc_code"></div>
     <div class="form-group"><label class="form-label">Course Title</label><input type="text" id="nc_title"></div>
-    <div class="form-group"><label class="form-label">Academic Year</label><input type="text" id="nc_year" placeholder="e.g. 2024" oninput="onYearInput(this)" onblur="normalizeYearField(this)"></div>
+    <div class="form-group"><label class="form-label">Academic Year</label><input type="text" id="nc_year" oninput="onYearInput(this)" onblur="normalizeYearField(this)"></div>
     <div class="form-group">
       <label class="form-label">Semester</label>
       <select id="nc_sem">
-        <option value="">— Select —</option>
+        <option value=""></option>
         <option>Fall Semester</option><option>Spring Semester</option><option>Summer Semester</option>
       </select>
     </div>
@@ -5751,7 +5736,7 @@
         const taken = await takenCourseNames(true);
         if (!taken) { toast('Could not check the archived course names', 'err'); return; }
         if (taken.has(target)) {
-          toast(`"${target}" is already archived — change this course's semester or year first`, 'err');
+          toast(`"${target}" is already archived. Change this course's semester or year first`, 'err');
           return;
         }
       }
@@ -5890,7 +5875,6 @@
       if (!body) return;
 
       if (sec.hier) {
-        // Top level: sort .module blocks as whole units
         const modules = body.querySelectorAll(':scope > .module[data-uid]');
         if (modules.length > 1) {
           ensureSortable(body, { ...DND_OPTS, filter: '.section-topbar, .empty-content' });
@@ -5902,7 +5886,6 @@
           ensureSortable(listEl, { ...DND_OPTS, filter: '.inline-edit-panel' });
         });
       } else if (sec.proj) {
-        // Top level: sort project .module blocks
         const modules = body.querySelectorAll(':scope > .module[data-uid]');
         if (modules.length > 1) {
           ensureSortable(body, { ...DND_OPTS, filter: '.section-topbar, .empty-content' });
