@@ -1369,6 +1369,90 @@
       toast('View & Download links filled', 'ok');
     }
 
+    // ── Google Drive Picker ──
+    // The paste-a-link flow above stays; this is the second option: browse Drive and
+    // click a file. It needs an OAuth access token carrying a Drive scope — the admin
+    // login (One Tap ID token, or the redirect flow) never requests one, so we mint a
+    // token on demand with the GIS token client. Google shows a consent screen the first
+    // time only; after that requestAccessToken() returns silently. The picked file's URL
+    // is dropped into the autofill input, which reuses autofillDriveLink() to fill the
+    // View/Download links exactly as a pasted link would.
+    const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+    const GOOGLE_API_KEY = window.TEACHING_CONFIG.googleApiKey || '';
+    const GOOGLE_APP_ID = String(GOOGLE_CLIENT_ID).split('-')[0]; // project number = numeric client-id prefix
+    let _driveToken = null;         // { value, expiresAt }
+    let _driveTokenClient = null;
+    let _pickerApiLoaded = false;
+
+    function loadPickerApi() {
+      return new Promise((resolve, reject) => {
+        if (_pickerApiLoaded) return resolve();
+        if (!window.gapi) return reject(new Error('Google API not loaded yet — try again in a moment'));
+        gapi.load('picker', {
+          callback: () => { _pickerApiLoaded = true; resolve(); },
+          onerror: () => reject(new Error('Drive picker failed to load')),
+        });
+      });
+    }
+
+    function getDriveToken() {
+      return new Promise((resolve, reject) => {
+        // Reuse a still-valid token (with a 60s safety margin) to avoid re-prompting.
+        if (_driveToken && _driveToken.expiresAt > Date.now() + 60000) return resolve(_driveToken.value);
+        if (!window.google?.accounts?.oauth2) return reject(new Error('Google sign-in not loaded yet'));
+        if (!_driveTokenClient) {
+          _driveTokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID, scope: DRIVE_SCOPE, callback: () => {},
+          });
+        }
+        // Reassign per call so this Promise gets the result; empty prompt = silent when
+        // already granted, consent only on first use.
+        _driveTokenClient.callback = (resp) => {
+          if (resp.error) return reject(new Error(resp.error));
+          _driveToken = { value: resp.access_token, expiresAt: Date.now() + (Number(resp.expires_in) * 1000) };
+          resolve(resp.access_token);
+        };
+        // hint = the signed-in admin's email so Google skips the account chooser and
+        // reuses the already-signed-in account instead of asking every time.
+        _driveTokenClient.requestAccessToken({ prompt: '', hint: S.admin?.email || '' });
+      });
+    }
+
+    async function openDrivePicker(inp) {
+      if (!inp) return;
+      try {
+        const [token] = await Promise.all([getDriveToken(), loadPickerApi()]);
+        const myDrive = new google.picker.DocsView(google.picker.ViewId.DOCS)
+          .setIncludeFolders(true).setSelectFolderEnabled(false);
+        const sharedDrives = new google.picker.DocsView(google.picker.ViewId.DOCS)
+          .setEnableDrives(true).setIncludeFolders(true).setSelectFolderEnabled(false);
+        // Size the dialog to the viewport (the CSS override then keeps it centred), so it
+        // stays usable on phones instead of overflowing at Google's fixed default size.
+        const w = Math.min(1051, Math.max(320, Math.floor(window.innerWidth * 0.95)));
+        const h = Math.min(650, Math.max(380, Math.floor(window.innerHeight * 0.9)));
+        const builder = new google.picker.PickerBuilder()
+          .setAppId(GOOGLE_APP_ID)
+          .setOrigin(window.location.protocol + '//' + window.location.host)
+          .setOAuthToken(token)
+          .addView(myDrive)
+          .addView(sharedDrives)
+          .setSize(w, h)
+          .setCallback((data) => onDrivePicked(data, inp));
+        if (GOOGLE_API_KEY) builder.setDeveloperKey(GOOGLE_API_KEY);
+        builder.build().setVisible(true);
+      } catch (e) {
+        toast('Could not open Google Drive: ' + e.message, 'err');
+      }
+    }
+
+    function onDrivePicked(data, inp) {
+      if (!data || data.action !== google.picker.Action.PICKED) return;
+      const doc = data.docs && data.docs[0];
+      if (!doc) return;
+      inp.value = doc.url || `https://drive.google.com/file/d/${doc.id}/view`;
+      autofillDriveLink(inp, true); // reuse the paste path to fill View/Download links
+    }
+
     function previewFaIcon(inp, previewId) {
       const el = document.getElementById(previewId);
       if (!el) return;
@@ -2130,9 +2214,12 @@
       </div>`;
         } else if (f.autofill) {
           h += `<div class="icon-input-wrap">
-        <input type="text" id="mf_${f.col}" value="${x(v)}" placeholder="Paste a Google Drive or OneDrive link"
+        <input type="text" id="mf_${f.col}" value="${x(v)}" placeholder="Pick from Drive or paste a Drive / OneDrive link"
                onpaste="setTimeout(()=>autofillDriveLink(this),50)"
                onblur="autofillDriveLink(this)">
+        <button type="button" class="btn btn-sm" title="Pick a file from Google Drive"
+                style="flex-shrink:0;padding:6px 11px;font-size:0.95em"
+                onclick="openDrivePicker(document.getElementById('mf_${f.col}'))"><i class="fa-brands fa-google-drive"></i></button>
         <button type="button" class="btn btn-sm" style="flex-shrink:0;padding:6px 12px;font-size:0.82em"
                 onclick="autofillDriveLink(document.getElementById('mf_${f.col}'),true)">Fill</button>
       </div>`;
