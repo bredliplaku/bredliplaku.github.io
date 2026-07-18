@@ -1178,6 +1178,136 @@
             }
         }
 
+        // Trims dead weight from the EIS table before fitting:
+        //   • Time columns: empty ones are trimmed off BOTH ends (before the
+        //     first lecture and after the last), never in between, keeping one
+        //     padding column on each side so the cut isn't abrupt. The Week and
+        //     Day columns (0 and 1) are always kept.
+        //   • Rows: left untouched EXCEPT an empty Saturday, which is removed.
+        //     Other empty days stay — a two-week exam timetable must keep its
+        //     shape, so we don't collapse arbitrary blank days.
+        // Idempotent, so re-running on resize is safe.
+        function pruneTimetable(table) {
+            const rows = Array.from(table.rows);
+            const isCourse = cell => !!(cell.querySelector && cell.querySelector('.timetable-day-course'));
+
+            // Occupancy matrix resolving colspan/rowspan into real column indexes
+            // (matrix[row][col] = the cell covering that slot).
+            const matrix = [];
+            rows.forEach((tr, r) => {
+                matrix[r] = matrix[r] || [];
+                let c = 0;
+                for (const cell of tr.cells) {
+                    while (matrix[r][c] !== undefined) c++;
+                    const cs = cell.colSpan || 1, rs = cell.rowSpan || 1;
+                    for (let i = 0; i < rs; i++) {
+                        matrix[r + i] = matrix[r + i] || [];
+                        for (let j = 0; j < cs; j++) matrix[r + i][c + j] = cell;
+                    }
+                    c += cs;
+                }
+            });
+            const totalCols = Math.max(0, ...matrix.map(row => row.length));
+
+            // --- Trim empty time columns off both ends (cols 0/1 = Week/Day) ---
+            let firstUsed = Infinity, lastUsed = -Infinity;
+            matrix.forEach(row => row.forEach((cell, c) => {
+                if (c >= 2 && cell && isCourse(cell)) {
+                    firstUsed = Math.min(firstUsed, c);
+                    lastUsed = Math.max(lastUsed, c);
+                }
+            }));
+
+            if (lastUsed >= 2) {
+                // One padding column each side, clamped to the real time range.
+                const leftKeep = Math.max(2, firstUsed - 1);
+                const rightKeep = Math.min(totalCols - 1, lastUsed + 1);
+                const kept = c => c < 2 || (c >= leftKeep && c <= rightKeep);
+
+                const handled = new Set();
+                matrix.forEach(row => {
+                    row.forEach((cell, c) => {
+                        if (!cell || handled.has(cell)) return;
+                        handled.add(cell);
+                        const start = row.indexOf(cell);
+                        const span = cell.colSpan || 1;
+                        let keptCols = 0;
+                        for (let k = start; k < start + span; k++) if (kept(k)) keptCols++;
+                        if (keptCols === 0) cell.remove();
+                        else if (keptCols < span) cell.colSpan = keptCols;
+                    });
+                });
+            }
+
+            // --- Remove an empty Saturday row-group only ---
+            // Group tbody rows by their day cell (matrix column 1); each week's
+            // Saturday is its own cell, so multi-week tables are handled too.
+            const groups = new Map();
+            rows.forEach((tr, r) => {
+                if (tr.parentElement.tagName !== 'TBODY') return;
+                const dayCell = matrix[r][1];
+                if (!dayCell) return;
+                if (!groups.has(dayCell)) groups.set(dayCell, []);
+                groups.get(dayCell).push(r);
+            });
+            groups.forEach((rIdxs, dayCell) => {
+                if (!/saturday/i.test(dayCell.textContent || '')) return; // only Saturday
+                const hasCourse = rIdxs.some(r => matrix[r].some((cell, c) => c >= 2 && cell && isCourse(cell)));
+                if (hasCourse) return; // keep a Saturday that actually has lectures
+                const weekCell = matrix[rIdxs[0]][0];
+                // Never remove the rows that *define* the week-number cell.
+                if (weekCell && rIdxs.some(r => Array.from(rows[r].cells).includes(weekCell))) return;
+                rIdxs.forEach(r => rows[r].remove());
+                if (weekCell) weekCell.rowSpan = Math.max(1, weekCell.rowSpan - rIdxs.length);
+            });
+
+            // --- Drop the Week column when the timetable spans a single week ---
+            // The week-number cells are the numeric <th>s in the body; one means
+            // one week, so the whole column (its header + that cell) is dead.
+            const body = table.tBodies[0];
+            if (body) {
+                const weekCells = Array.from(body.querySelectorAll('th'))
+                    .filter(th => /^\s*\d+\s*$/.test(th.textContent || ''));
+                if (weekCells.length === 1) {
+                    weekCells[0].remove();
+                    const headRow = table.tHead && table.tHead.rows[0];
+                    const weekHead = headRow && headRow.cells[0];
+                    if (weekHead && /week/i.test(weekHead.textContent || '')) weekHead.remove();
+                }
+            }
+        }
+
+        // Gives every time column the same width (distributed equally), keeping
+        // the total time-width the same so the fit scale — and thus the on-screen
+        // text size — is unchanged. Content that no longer fits a column is cut
+        // off with an ellipsis (see the .tt-fitted CSS). The Week/Day columns are
+        // left at their natural width; only the time slots are equalised.
+        function equalizeColumns(table) {
+            const head = table.tHead && table.tHead.rows[0];
+            if (!head) return;
+            const cells = Array.from(head.cells);
+            // Clear any widths from a previous run so the auto measurement below
+            // reflects real content, not last time's equalised columns.
+            cells.forEach(c => { c.style.width = ''; });
+            table.style.tableLayout = 'auto';
+            table.style.width = 'auto';
+            const isTime = c => /\d{1,2}:\d{2}/.test(c.textContent || '');
+            const timeCells = cells.filter(isTime);
+            const fixedCells = cells.filter(c => !isTime(c));
+            if (timeCells.length < 2) return;
+
+            const fixedWidths = fixedCells.map(c => Math.ceil(c.getBoundingClientRect().width));
+            const totalTimeW = timeCells.reduce((s, c) => s + c.getBoundingClientRect().width, 0);
+            const n = timeCells.length;
+            const colW = Math.max(44, Math.round(totalTimeW / n));
+            const fixedTotal = fixedWidths.reduce((a, b) => a + b, 0);
+
+            table.style.tableLayout = 'fixed';
+            table.style.width = (fixedTotal + n * colW) + 'px';
+            fixedCells.forEach((c, i) => { c.style.width = fixedWidths[i] + 'px'; });
+            timeCells.forEach(c => { c.style.width = colW + 'px'; });
+        }
+
         // Forces the EIS fragment's full desktop presentation (course names +
         // room details, not the stripped mobile view) and scales the whole
         // table down so it always fits the container width — no horizontal
@@ -1188,6 +1318,8 @@
             const table = inner && inner.querySelector('table');
             if (!table) return;
             inner.classList.add('tt-fitted');
+            pruneTimetable(table);
+            equalizeColumns(table);
 
             // Wrap the table once so the wrapper can clip its unscaled layout box
             // (a CSS transform doesn't shrink the space the element reserves).
@@ -1200,14 +1332,20 @@
             }
 
             // Measure at natural width, then fill (wide) or scale down (narrow).
+            // Reset tt-scaled first so the width measurement isn't affected by a
+            // stale state (the clamp is height-only, but keep it clean for resize).
+            inner.classList.remove('tt-scaled');
             table.style.transform = 'none';
-            table.style.width = 'auto';
+            // width/tableLayout were set by equalizeColumns; measure that.
             const naturalW = table.offsetWidth;
             const avail = wrap.clientWidth;
             if (naturalW <= avail) {
                 table.style.width = '100%';
                 wrap.style.height = '';
             } else {
+                // Scaled to fit → switch names to the tighter one-line clamp, then
+                // measure height with that applied.
+                inner.classList.add('tt-scaled');
                 const scale = avail / naturalW;
                 const naturalH = table.offsetHeight;
                 table.style.transform = `scale(${scale})`;
