@@ -1077,6 +1077,16 @@
             if (nativeContainer) {
                 wireTimetableTooltips(nativeContainer);
             }
+
+            // Re-fit the timetable to the new width on resize / orientation change.
+            let ttResizeTimer;
+            window.addEventListener('resize', () => {
+                clearTimeout(ttResizeTimer);
+                ttResizeTimer = setTimeout(() => {
+                    const c = document.getElementById('native-timetable-container');
+                    if (c && c.classList.contains('visible')) fitTimetable(c);
+                }, 150);
+            });
         }
 
         // The timetable/class pair currently shown (or being fetched); lets a
@@ -1160,10 +1170,48 @@
                 // without it DOMPurify treats <style> as document metadata and drops
                 // it regardless of the allowlist, since the fragment isn't a full page.
                 inner.innerHTML = DOMPurify.sanitize(html, { ADD_TAGS: ['style'], FORCE_BODY: true });
+                fitTimetable(container);
             } catch (error) {
                 console.error('Timetable load error:', error);
                 if (activeTimetableKey !== requestKey) return;
                 inner.innerHTML = '<div class="tt-error">Could not load the timetable. Please try again later.</div>';
+            }
+        }
+
+        // Forces the EIS fragment's full desktop presentation (course names +
+        // room details, not the stripped mobile view) and scales the whole
+        // table down so it always fits the container width — no horizontal
+        // scrollbar, nothing hidden. On wide screens where it already fits, it
+        // just fills the container like a normal table (no scaling).
+        function fitTimetable(container) {
+            const inner = container.querySelector('.tt-inner');
+            const table = inner && inner.querySelector('table');
+            if (!table) return;
+            inner.classList.add('tt-fitted');
+
+            // Wrap the table once so the wrapper can clip its unscaled layout box
+            // (a CSS transform doesn't shrink the space the element reserves).
+            let wrap = inner.querySelector('.tt-scale-wrap');
+            if (!wrap || table.parentNode !== wrap) {
+                wrap = document.createElement('div');
+                wrap.className = 'tt-scale-wrap';
+                table.parentNode.insertBefore(wrap, table);
+                wrap.appendChild(table);
+            }
+
+            // Measure at natural width, then fill (wide) or scale down (narrow).
+            table.style.transform = 'none';
+            table.style.width = 'auto';
+            const naturalW = table.offsetWidth;
+            const avail = wrap.clientWidth;
+            if (naturalW <= avail) {
+                table.style.width = '100%';
+                wrap.style.height = '';
+            } else {
+                const scale = avail / naturalW;
+                const naturalH = table.offsetHeight;
+                table.style.transform = `scale(${scale})`;
+                wrap.style.height = (naturalH * scale) + 'px';
             }
         }
 
@@ -1174,6 +1222,7 @@
         // its data-tippy-html attribute though (plain data, not a script), so we
         // read that directly and render our own lightweight popover instead.
         let ttPopoverEl = null;
+        let ttOpenedAt = 0;
 
         function ensureTtPopover() {
             if (ttPopoverEl) return ttPopoverEl;
@@ -1203,6 +1252,7 @@
                 DOMPurify.sanitize(raw, { ADD_TAGS: ['style'], FORCE_BODY: true });
             popover.classList.add('visible');
             popover._forCell = cell;
+            ttOpenedAt = Date.now();
 
             const margin = 10;
             const rect = cell.getBoundingClientRect();
@@ -1242,7 +1292,11 @@
             document.addEventListener('keydown', e => {
                 if (e.key === 'Escape') hideTtPopover();
             });
-            window.addEventListener('scroll', hideTtPopover, { passive: true, capture: true });
+            // Ignore scrolls fired by the opening tap itself (mobile taps often
+            // emit a tiny scroll) — only genuine later scrolls dismiss it.
+            window.addEventListener('scroll', () => {
+                if (Date.now() - ttOpenedAt > 400) hideTtPopover();
+            }, { passive: true, capture: true });
         }
 
         /**
