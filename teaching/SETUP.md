@@ -141,6 +141,66 @@ at `…/teaching/admin/`.
 
 ---
 
+## The Class Timetable pages
+
+`/timetable/` (public) and `/timetable/admin/` (editor) share this deployment's
+Supabase project, Google client and `admins` allowlist — **there is nothing extra to
+provision.**
+
+**The dependency runs one way: `timetable/` needs `teaching/`, never the reverse.**
+The timetable pages reuse teaching's `js/config.js` (so there's still one file to
+configure), its `js/timetable.js` renderer, and its `admin/css/styles.css`.
+
+Nothing under `teaching/` refers to `timetable/`, so a colleague can take `teaching/`
+without it and everything works — they simply have no timetable page. (As before,
+`teaching/` does still use the repo-root `css/main.css`, `favicon.png` and
+`miscellaneous/catto.webp`; those are site-wide assets, not timetable ones.) Taking
+`timetable/` *without* `teaching/` is the combination that doesn't work.
+
+What they add on top of the steps above:
+
+1. **The table.** `supabase/schema.sql` also creates `timetable_rows` (documented at the
+   top of that block). If you ran the schema before this existed, re-run just that
+   section — it's `create table if not exists`, so it won't disturb `course_rows`.
+2. **The Edge Function is already yours.** The timetable page calls the same
+   `eis-timetable` function from step 4 with the same `tId`/`cId` contract. No second
+   function, no redeploy.
+3. **Redirect URLs.** Add the admin panel's own URL to **Authentication → URL
+   Configuration → Redirect URLs**, alongside the teaching ones:
+
+   ```
+   https://<your-username>.github.io/timetable/admin/
+   https://<your-domain>/timetable/admin/          ← only with a custom domain
+   http://localhost:5500/timetable/admin/          ← only if you test locally
+   ```
+
+   Missing this produces exactly the failure described in step 5.4 — sign-in silently
+   dumps you on the Site URL instead of coming back here.
+
+Google Cloud Console needs **no** changes: same origin, same OAuth client.
+
+### Editing the timetable
+
+`/timetable/admin/` has four tabs:
+
+| Tab | What it controls |
+|---|---|
+| **Semester** | Start/end dates and the mid-semester break, with a live preview of the week counter and progress bar |
+| **Header** | The info chips and action buttons above the timetable |
+| **Categories** | The tab strip on the public page. Each is either *class timetables* (two EIS ids) or *lecturers* (one) — drag to reorder |
+| **Entries** | The buttons inside the selected category. **Test** previews the real EIS table before you save, so you can confirm the ids |
+
+Both EIS ids come out of the public timetable URL, and a lecturer id out of the live one:
+
+```
+…/publictimetable/{timetableId}/show/programgrade/{classId}/
+…/publictimetable/live/{lecturerId}
+```
+
+Each tab saves independently and warns before you leave with unsaved changes.
+
+---
+
 ## Getting the author's updates later
 
 Because **only `config.js` differs** from the original, you can pull improvements cleanly:
