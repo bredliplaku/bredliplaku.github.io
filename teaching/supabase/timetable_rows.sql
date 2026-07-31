@@ -22,11 +22,13 @@
 --   info_item       'settings'       icon class  text            —           —
 --   action_button   'settings'       label       icon class      url         css class
 --   category        'settings'       name        icon class      kind²       —
---   entry           <category name>  label       timetable_id    class_id    —
---   lecturer        <category name>  label       lecturer_id     —           —
+--   entry           <category name>  label       timetable_id    class_id    hidden³
+--   lecturer        <category name>  label       lecturer_id     —           hidden³
 --
 --   ¹ semester_start | semester_end | holiday_start | holiday_weeks
 --   ² 'timetable' (needs both EIS ids) or 'lecturer' (needs one)
+--   ³ '1' if hidden from the public page (toggled per-entry in the admin) —
+--     just a value in the already-existing `e` slot, no schema change needed.
 --
 -- row_index orders rows within a section: the tab order of categories, and the
 -- button order of the entries inside each category.

@@ -45,7 +45,6 @@
     { id: 'semester', label: 'Semester', icon: 'fa-solid fa-calendar-days' },
     { id: 'header', label: 'Header', icon: 'fa-solid fa-heading' },
     { id: 'categories', label: 'Categories', icon: 'fa-solid fa-layer-group' },
-    { id: 'entries', label: 'Entries', icon: 'fa-solid fa-list-ul' },
   ];
 
   const SETTING_KEYS = ['semester_start', 'semester_end', 'holiday_start', 'holiday_weeks'];
@@ -54,7 +53,7 @@
   // step with every successful save, so a tab switch never needs a round trip.
   let ROWS = {};
 
-  const S = { admin: null, section: 'semester', category: null };
+  const S = { admin: null, section: 'semester' };
 
   let _sessionHandled = false;
   let _confirmResolve = null;
@@ -82,7 +81,23 @@
     if (_dirty) { e.preventDefault(); e.returnValue = ''; }
   });
 
+  // Every save is a real network round trip and only clears _dirty once it
+  // resolves. Without this, clicking Save and immediately clicking a
+  // different tab races the network: the tab click lands while _dirty is
+  // still true (the save just hasn't finished yet), so confirmLeaveIfDirty()
+  // shows "unsaved changes" for a save that's already in flight and about to
+  // succeed — reads as "I have to save twice." wireSection() wraps each save
+  // button's click in trackSave() so confirmLeaveIfDirty() can await the
+  // in-flight save first and judge the flag it actually leaves behind.
+  let _savePromise = null;
+  function trackSave(promise) {
+    _savePromise = promise;
+    promise.finally(() => { if (_savePromise === promise) _savePromise = null; });
+    return promise;
+  }
+
   async function confirmLeaveIfDirty() {
+    if (_savePromise) await _savePromise.catch(() => { });
     if (!_dirty) return true;
     const answer = await confirmDialog(
       'You have unsaved changes in this tab. Leave without saving?',
@@ -407,7 +422,7 @@
   // Slugging is lossy — "Year 1" and "Year-1" both become "year_1" — so it is
   // NEVER the sole discriminator for a repeatable row. Positional rows (chips,
   // buttons, entries) key off their index instead, and category names are
-  // validated for slug-uniqueness in saveCategories() before being used here.
+  // validated for slug-uniqueness in saveCategoriesTab() before being used here.
   function slug(s) {
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'x';
   }
@@ -462,7 +477,6 @@
       semester: renderSemester,
       header: renderHeader,
       categories: renderCategories,
-      entries: renderEntries,
     })[id]();
 
     // Next frame so the entry animation actually plays on a fresh render.
@@ -722,7 +736,13 @@
   }
 
 
-  /* === TAB 3: CATEGORIES ================================================== */
+  /* === TAB 3: CATEGORIES (each with its own entries nested inside) ========
+     Categories and their entries used to be two separate tabs — reordering a
+     category and reordering its buttons meant switching back and forth for
+     no reason, since they're really one thing (a tab on the public page and
+     what's inside it). Now every category's entries render right inside its
+     own card, and one Save persists the whole tree in one pass.
+     ====================================================================== */
 
   function renderCategories() {
     const cats = rowsOfType('category');
@@ -737,9 +757,9 @@
         <div class="settings-group">
           <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-layer-group"></i>Tabs on the public page</span></div>
           <div class="settings-body">
-            <div class="form-hint" style="margin-bottom:10px">Drag to reorder — this is the tab order visitors see.</div>
+            <div class="form-hint" style="margin-bottom:10px">Drag a category by its handle to reorder the public tabs; drag an entry to reorder its buttons.</div>
             <div id="category-list">
-              ${cats.map(r => categoryCardHtml(r.b, r.c, r.d)).join('') ||
+              ${cats.map(r => categoryBlockHtml(r.b, r.c, r.d)).join('') ||
       '<div class="form-hint" id="no-cat-msg" style="padding:4px 0">No categories yet.</div>'}
             </div>
           </div>
@@ -747,11 +767,12 @@
       </div>`;
   }
 
-  function categoryCardHtml(name = '', icon = '', kind = 'timetable') {
+  function categoryBlockHtml(name = '', icon = '', kind = 'timetable') {
     const isLecturer = kind === 'lecturer';
-    return `<div class="dynamic-card" data-kind="category" data-original="${x(name)}">
+    const entries = name ? rowsInSection(name, isLecturer ? 'lecturer' : 'entry') : [];
+    return `<div class="dynamic-card category-block" data-original="${x(name)}">
       <div class="dynamic-card-head">
-        <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle" style="margin-right:8px;opacity:0.5;cursor:grab"></i><span class="dcl-text">${x(name || 'New Category')}</span></span>
+        <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle cat-drag-handle" style="margin-right:8px"></i><span class="dcl-text">${x(name || 'New Category')}</span></span>
         <button class="btn-red btn-sm" type="button" data-remove="1"><i class="fa-solid fa-trash"></i></button>
       </div>
       <div class="dynamic-card-body sg-grid3">
@@ -771,16 +792,69 @@
           </select>
         </div>
       </div>
+      <div class="category-entries">
+        <div class="category-entries-head">
+          <span><i class="fa-solid fa-list-ul" style="margin-right:6px;opacity:0.7"></i>Entries</span>
+          <button class="btn-sm btn-secondary" type="button" data-add-entry="1"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Entry</button>
+        </div>
+        <div class="entry-list" data-kind="${isLecturer ? 'lecturer' : 'entry'}">
+          ${entries.map(r => entryCardHtml(isLecturer, r.b, r.c, r.d, r.e === '1')).join('') ||
+      '<div class="form-hint entry-list-empty" style="padding:4px 0">No entries yet.</div>'}
+        </div>
+      </div>
     </div>`;
   }
 
-  async function saveCategories(btn) {
-    const cards = [...document.querySelectorAll('#category-list .dynamic-card')];
-    const cats = cards.map(card => ({
+  function entryCardHtml(isLecturer, label = '', first = '', second = '', hidden = false) {
+    const fields = isLecturer
+      ? `<div class="form-group">
+           <label class="form-label">Lecturer ID</label>
+           <input type="text" name="entry_first" value="${x(first)}" inputmode="numeric" placeholder="e.g. 655">
+         </div>`
+      : `<div class="form-group">
+           <label class="form-label">Timetable ID</label>
+           <input type="text" name="entry_first" value="${x(first)}" inputmode="numeric" placeholder="e.g. 42">
+         </div>
+         <div class="form-group">
+           <label class="form-label">Class ID</label>
+           <input type="text" name="entry_second" value="${x(second)}" inputmode="numeric" placeholder="e.g. 118">
+         </div>`;
+
+    return `<div class="dynamic-card${hidden ? ' is-hidden' : ''}" data-hidden="${hidden ? 'true' : 'false'}">
+      <div class="dynamic-card-head">
+        <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle" style="margin-right:8px;opacity:0.5;cursor:grab"></i><span class="dcl-text">${x(label || 'New Entry')}</span></span>
+        ${hideToggleHtml(hidden)}
+        ${isLecturer ? '' : '<button class="btn-secondary btn-sm" type="button" data-test="1"><i class="fa-solid fa-flask" style="margin-right:5px"></i>Test</button>'}
+        <button class="btn-red btn-sm" type="button" data-remove="1"><i class="fa-solid fa-trash"></i></button>
+      </div>
+      <div class="dynamic-card-body ${isLecturer ? 'sg-grid2' : 'sg-grid3'}">
+        <div class="form-group">
+          <label class="form-label">Label</label>
+          <input type="text" name="entry_label" value="${x(label)}" data-label-source="New Entry">
+        </div>
+        ${fields}
+      </div>
+    </div>`;
+  }
+
+  // A hidden entry stays in the admin (so it can be found and re-shown) but
+  // is skipped by the public page's groupRows() — for a class that's
+  // temporarily off, or a lecturer view not ready to publish yet, without
+  // losing the IDs by deleting the row outright.
+  function hideToggleHtml(hidden) {
+    return `<button class="btn-ghost btn-sm" type="button" data-toggle-hidden="1"
+              title="${hidden ? 'Hidden from the public page — click to show' : 'Visible on the public page — click to hide'}">
+              <i class="fa-solid ${hidden ? 'fa-eye-slash' : 'fa-eye'}"></i>
+            </button>`;
+  }
+
+  async function saveCategoriesTab(btn) {
+    const catCards = [...document.querySelectorAll('#category-list > .category-block')];
+    const cats = catCards.map(card => ({
       name: fieldValue(card, 'cat_name'),
       icon: fieldValue(card, 'cat_icon'),
       kind: fieldValue(card, 'cat_kind') === 'lecturer' ? 'lecturer' : 'timetable',
-      original: card.dataset.original || '',
+      card,
     })).filter(c => c.name);
 
     const names = cats.map(c => c.name);
@@ -796,38 +870,49 @@
       return;
     }
 
-    // A rename changes the `section` value the entries are filed under, so the
-    // entry rows have to move with it or they'd be orphaned.
-    const renames = cats.filter(c => c.original && c.original !== c.name);
+    // Build every entry row up front, across ALL categories, keyed by each
+    // category's CURRENT (possibly just-renamed) name. A category removed via
+    // its own trash icon (already confirmed at that point — see the delegated
+    // click handler below) simply has no card here, so its entries are
+    // naturally left out of this set; replaceRows()'s diff below deletes
+    // whatever's no longer in it. Because the final set is keyed by the
+    // current name rather than the old one, a rename needs no separate "move
+    // the old rows" step either — this one combined write replaces both.
+    const entryRows = [];
+    for (const cat of cats) {
+      const list = cat.card.querySelector('.entry-list');
+      const isLecturer = cat.kind === 'lecturer';
+      const items = [...list.querySelectorAll(':scope > .dynamic-card')].map(card => ({
+        label: fieldValue(card, 'entry_label'),
+        first: fieldValue(card, 'entry_first'),
+        second: fieldValue(card, 'entry_second'),
+        hidden: card.dataset.hidden === 'true',
+      })).filter(e => e.label);
 
-    // Renames are applied one at a time, so a cycle (A→B while B→A) would have
-    // the first move overwrite the rows the second one still needs. Rare enough
-    // that splitting it into two saves is a fair ask, and far better than
-    // silently destroying one category's entries.
-    const cycle = renames.find(r => renames.some(o => o !== r && o.original === r.name));
-    if (cycle) {
-      toast(`Renaming to "${cycle.name}" swaps it with another category — do it in two saves`, 'err');
-      return;
+      const bad = items.find(e =>
+        !/^\d+$/.test(e.first) || (!isLecturer && !/^\d+$/.test(e.second)));
+      if (bad) {
+        toast(`"${bad.label}" in ${cat.name} needs numeric ID${isLecturer ? '' : 's'}`, 'err');
+        return;
+      }
+      const labels = items.map(e => e.label);
+      if (new Set(labels).size !== labels.length) {
+        toast(`Entry labels must be unique within ${cat.name}`, 'err');
+        return;
+      }
+
+      items.forEach((item, i) => entryRows.push({
+        ...BLANK,
+        row_uid: entryUid(cat.name, i),
+        section: cat.name,
+        row_index: i,
+        type: isLecturer ? 'lecturer' : 'entry',
+        b: item.label, c: item.first, d: isLecturer ? '' : item.second,
+        e: item.hidden ? '1' : '',
+      }));
     }
-    // Deleting a category takes its entries with it — otherwise they'd linger
-    // invisibly and reappear if the name were ever reused.
-    const keptOriginals = new Set(cats.map(c => c.original).filter(Boolean));
-    const removed = rowsOfType('category')
-      .map(r => r.b)
-      .filter(name => !keptOriginals.has(name));
 
-    if (removed.length) {
-      const orphaned = removed.reduce(
-        (n, name) => n + rowsInSection(name, 'entry').length + rowsInSection(name, 'lecturer').length, 0);
-      const ok = await confirmDialog(
-        orphaned
-          ? `Deleting ${removed.join(', ')} will also delete ${orphaned} entr${orphaned === 1 ? 'y' : 'ies'} inside ${removed.length === 1 ? 'it' : 'them'}.`
-          : `Delete ${removed.join(', ')}?`,
-        { title: 'Delete Category', okLabel: 'Delete', danger: true, okIcon: 'fa-trash' });
-      if (!ok) return;
-    }
-
-    const rows = cats.map((c, i) => ({
+    const categoryRows = cats.map((c, i) => ({
       ...BLANK,
       row_uid: uid('settings', 'cat', c.name),
       section: 'settings',
@@ -838,157 +923,11 @@
 
     await withSaveButton(btn, async () => {
       try {
-        const isEntryRow = row => row.type === 'entry' || row.type === 'lecturer';
-
-        // Deletions run BEFORE renames: renaming a category onto a name that's
-        // being deleted in the same save would otherwise move the entries in
-        // and then have the deletion sweep them straight back out.
-        for (const name of removed) {
-          await replaceRows(row => row.section === name && isEntryRow(row), []);
-        }
-
-        // Then the moves — before the category rows themselves, so a failure
-        // here leaves the entries still reachable under the old name.
-        for (const r of renames) {
-          const moving = [...rowsInSection(r.original, 'entry'), ...rowsInSection(r.original, 'lecturer')]
-            .map((row, i) => ({ ...row, row_uid: entryUid(r.name, i), row_index: i, section: r.name }));
-          if (moving.length) {
-            await replaceRows(row => row.section === r.original && isEntryRow(row), moving);
-          }
-        }
-
-        await replaceRows(row => row.type === 'category', rows);
-
-        // Kind may have flipped, and the selected category may be gone.
-        if (!names.includes(S.category)) S.category = names[0] || null;
-
+        await replaceRows(row => row.type === 'category', categoryRows);
+        await replaceRows(row => row.type === 'entry' || row.type === 'lecturer', entryRows);
         clearDirty();
         toast('Categories saved', 'ok');
         selectSection('categories');   // re-render so data-original tracks the new names
-      } catch (err) {
-        toast('Save failed: ' + err.message, 'err');
-      }
-    });
-  }
-
-
-  /* === TAB 4: ENTRIES ===================================================== */
-
-  function renderEntries() {
-    const cats = rowsOfType('category');
-    if (!cats.length) {
-      return `<div class="empty-content">No categories yet — add one in the <strong>Categories</strong> tab first.</div>`;
-    }
-
-    if (!cats.some(c => c.b === S.category)) S.category = cats[0].b;
-    const cat = cats.find(c => c.b === S.category);
-    const isLecturer = cat.d === 'lecturer';
-    const entries = rowsInSection(cat.b, isLecturer ? 'lecturer' : 'entry');
-
-    return `
-      <div class="section-topbar">
-        <div class="add-bar">
-          <select id="entry-category-select" style="max-width:220px">
-            ${cats.map(c => `<option value="${x(c.b)}"${c.b === S.category ? ' selected' : ''}>${x(c.b)}</option>`).join('')}
-          </select>
-          <button class="btn-sm btn-secondary" type="button" id="add-entry-btn"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Entry</button>
-        </div>
-        <button class="btn-sm btn-save-section" id="section-save-btn"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
-      </div>
-      <div class="settings-panel">
-        <div class="settings-group">
-          <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="${x(cat.c || 'fa-solid fa-layer-group')}"></i>${x(cat.b)}</span></div>
-          <div class="settings-body">
-            <div class="form-hint" style="margin-bottom:10px">
-              ${isLecturer
-        ? 'Lecturer ID is the number in <code>eis.epoka.edu.al/publictimetable/live/<b>ID</b></code>.'
-        : 'Both IDs come from the EIS public timetable URL: <code>…/publictimetable/<b>timetable</b>/show/programgrade/<b>class</b>/</code>. Use <b>Test</b> to check them before saving.'}
-              Drag to reorder.
-            </div>
-            <div id="entry-list" data-kind="${isLecturer ? 'lecturer' : 'entry'}">
-              ${entries.map(r => entryCardHtml(isLecturer, r.b, r.c, r.d)).join('') ||
-      '<div class="form-hint" id="no-entry-msg" style="padding:4px 0">No entries yet.</div>'}
-            </div>
-          </div>
-        </div>
-      </div>`;
-  }
-
-  function entryCardHtml(isLecturer, label = '', first = '', second = '') {
-    const fields = isLecturer
-      ? `<div class="form-group">
-           <label class="form-label">Lecturer ID</label>
-           <input type="text" name="entry_first" value="${x(first)}" inputmode="numeric" placeholder="e.g. 655">
-         </div>`
-      : `<div class="form-group">
-           <label class="form-label">Timetable ID</label>
-           <input type="text" name="entry_first" value="${x(first)}" inputmode="numeric" placeholder="e.g. 42">
-         </div>
-         <div class="form-group">
-           <label class="form-label">Class ID</label>
-           <input type="text" name="entry_second" value="${x(second)}" inputmode="numeric" placeholder="e.g. 118">
-         </div>`;
-
-    return `<div class="dynamic-card" data-kind="entry">
-      <div class="dynamic-card-head">
-        <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle" style="margin-right:8px;opacity:0.5;cursor:grab"></i><span class="dcl-text">${x(label || 'New Entry')}</span></span>
-        ${isLecturer ? '' : '<button class="btn-secondary btn-sm" type="button" data-test="1"><i class="fa-solid fa-flask" style="margin-right:5px"></i>Test</button>'}
-        <button class="btn-red btn-sm" type="button" data-remove="1"><i class="fa-solid fa-trash"></i></button>
-      </div>
-      <div class="dynamic-card-body ${isLecturer ? 'sg-grid2' : 'sg-grid3'}">
-        <div class="form-group">
-          <label class="form-label">Label</label>
-          <input type="text" name="entry_label" value="${x(label)}" data-label-source="New Entry">
-        </div>
-        ${fields}
-      </div>
-    </div>`;
-  }
-
-  async function saveEntries(btn) {
-    const list = document.getElementById('entry-list');
-    if (!list) return;
-
-    const isLecturer = list.dataset.kind === 'lecturer';
-    const category = S.category;
-
-    const entries = [...list.querySelectorAll('.dynamic-card')].map(card => ({
-      label: fieldValue(card, 'entry_label'),
-      first: fieldValue(card, 'entry_first'),
-      second: fieldValue(card, 'entry_second'),
-    })).filter(e => e.label);
-
-    // EIS ids are always numeric; catching a typo here beats a mystery "no
-    // timetable found" on the public page.
-    const bad = entries.find(e =>
-      !/^\d+$/.test(e.first) || (!isLecturer && !/^\d+$/.test(e.second)));
-    if (bad) {
-      toast(`"${bad.label}" needs numeric ID${isLecturer ? '' : 's'}`, 'err');
-      return;
-    }
-
-    const labels = entries.map(e => e.label);
-    if (new Set(labels).size !== labels.length) {
-      toast('Entry labels must be unique within a category', 'err');
-      return;
-    }
-
-    const rows = entries.map((e, i) => ({
-      ...BLANK,
-      row_uid: entryUid(category, i),
-      section: category,
-      row_index: i,
-      type: isLecturer ? 'lecturer' : 'entry',
-      b: e.label,
-      c: e.first,
-      d: isLecturer ? '' : e.second,
-    }));
-
-    await withSaveButton(btn, async () => {
-      try {
-        await replaceRows(r => r.section === category && (r.type === 'entry' || r.type === 'lecturer'), rows);
-        clearDirty();
-        toast('Entries saved', 'ok');
       } catch (err) {
         toast('Save failed: ' + err.message, 'err');
       }
@@ -1068,17 +1007,48 @@
     if (S.section === 'semester') updateSemesterPreview();
   });
 
-  // Delete / Test, delegated so newly added cards work without rebinding.
+  // Delete / hide-toggle / Test / per-category Add Entry — all delegated so
+  // newly added or nested cards work without rebinding.
   sectionBody.addEventListener('click', async e => {
     const removeBtn = e.target.closest('[data-remove]');
     if (removeBtn) {
       const card = removeBtn.closest('.dynamic-card');
       const name = card.querySelector('.dcl-text')?.textContent || 'this item';
-      if (await confirmDialog(`Remove ${name}? It's deleted from the site when you save.`,
-        { title: 'Remove', okLabel: 'Remove', danger: true, okIcon: 'fa-trash' })) {
+      // A category card carries its own entries nested inside it now, so
+      // removing one removes them too — worth naming in the confirm rather
+      // than only discovering it after Save.
+      const isCategory = card.classList.contains('category-block');
+      const entryCount = isCategory ? card.querySelectorAll('.entry-list > .dynamic-card').length : 0;
+      const message = entryCount
+        ? `Remove ${name}? Its ${entryCount} entr${entryCount === 1 ? 'y' : 'ies'} will be removed too when you save.`
+        : `Remove ${name}? It's deleted from the site when you save.`;
+      if (await confirmDialog(message, { title: 'Remove', okLabel: 'Remove', danger: true, okIcon: 'fa-trash' })) {
         card.remove();
         markDirty();
       }
+      return;
+    }
+
+    const toggleBtn = e.target.closest('[data-toggle-hidden]');
+    if (toggleBtn) {
+      const card = toggleBtn.closest('.dynamic-card');
+      const hidden = card.dataset.hidden !== 'true';
+      card.dataset.hidden = String(hidden);
+      card.classList.toggle('is-hidden', hidden);
+      toggleBtn.outerHTML = hideToggleHtml(hidden);
+      markDirty();
+      return;
+    }
+
+    const addEntryBtn = e.target.closest('[data-add-entry]');
+    if (addEntryBtn) {
+      const list = addEntryBtn.closest('.category-block')?.querySelector('.entry-list');
+      if (!list) return;
+      list.querySelector('.entry-list-empty')?.remove();
+      list.insertAdjacentHTML('beforeend', entryCardHtml(list.dataset.kind === 'lecturer'));
+      markDirty();
+      initSortable(list, '.drag-handle');
+      list.lastElementChild?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
       return;
     }
 
@@ -1092,10 +1062,9 @@
     const saveBtn = document.getElementById('section-save-btn');
     if (saveBtn) {
       const savers = {
-        semester: saveSemester, header: saveHeader,
-        categories: saveCategories, entries: saveEntries,
+        semester: saveSemester, header: saveHeader, categories: saveCategoriesTab,
       };
-      saveBtn.addEventListener('click', () => savers[id](saveBtn));
+      saveBtn.addEventListener('click', () => trackSave(savers[id](saveBtn)));
     }
 
     if (id === 'semester') updateSemesterPreview();
@@ -1108,26 +1077,13 @@
     }
 
     if (id === 'categories') {
-      wireAdd('add-category-btn', 'category-list', 'no-cat-msg', () => categoryCardHtml());
-      initDnD('category-list');
-    }
-
-    if (id === 'entries') {
-      const select = document.getElementById('entry-category-select');
-      if (select) {
-        select.addEventListener('change', async () => {
-          if (!(await confirmLeaveIfDirty())) {
-            select.value = S.category;   // put the picker back
-            return;
-          }
-          S.category = select.value;
-          selectSection('entries');
-        });
-      }
-      const list = document.getElementById('entry-list');
-      wireAdd('add-entry-btn', 'entry-list', 'no-entry-msg',
-        () => entryCardHtml(list?.dataset.kind === 'lecturer'));
-      initDnD('entry-list');
+      wireAdd('add-category-btn', 'category-list', 'no-cat-msg', () => categoryBlockHtml());
+      // The outer list (categories) and every nested .entry-list are each
+      // their own independent Sortable, distinguished by handle class so a
+      // drag started on an entry's handle can never also register as a
+      // category-level drag on the block containing it.
+      initDnD('category-list', '.cat-drag-handle');
+      document.querySelectorAll('.entry-list').forEach(list => initSortable(list, '.drag-handle'));
     }
   }
 
@@ -1142,6 +1098,9 @@
       // card must still be registered as an unsaved change and be draggable.
       markDirty();
       initDnD(listId);
+      // A freshly added category starts with its own (empty) entry list,
+      // which needs its own Sortable instance too.
+      document.querySelectorAll('.entry-list').forEach(l => initSortable(l, '.drag-handle'));
       // The new card lands below the fold on a long list.
       list.lastElementChild?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
     });
@@ -1149,7 +1108,6 @@
 
   const DND_OPTS = {
     animation: 180,
-    handle: '.drag-handle',
     ghostClass: 'dnd-ghost',
     chosenClass: 'dnd-chosen',
     forceFallback: true,
@@ -1160,12 +1118,15 @@
   };
 
   // Order is never persisted on drop — each tab's Save reads the final DOM
-  // order. Called again after every add, so it must not attach a second
-  // Sortable to a container that already has one.
-  function initDnD(listId) {
-    const el = document.getElementById(listId);
+  // order. Idempotent (checked via Sortable.get), so it's safe to call again
+  // after every add rather than tracking which lists already have one.
+  function initSortable(el, handle) {
     if (!el || !window.Sortable || Sortable.get(el)) return;
-    Sortable.create(el, DND_OPTS);
+    Sortable.create(el, { ...DND_OPTS, handle });
+  }
+
+  function initDnD(listId, handle = '.drag-handle') {
+    initSortable(document.getElementById(listId), handle);
   }
 
 

@@ -142,14 +142,17 @@ function groupRows(rows) {
                 }
                 break;
             case 'entry':
-                if (r.b) {
+                // e === '1' means the admin toggled this entry hidden — kept in the
+                // database (so it can be found and re-shown) but left out of what
+                // visitors see, same as if the row didn't exist yet.
+                if (r.b && r.e !== '1') {
                     (grouped.entries[r.section] ||= []).push({
                         label: r.b, timetableId: r.c || '', classId: r.d || '',
                     });
                 }
                 break;
             case 'lecturer':
-                if (r.b) {
+                if (r.b && r.e !== '1') {
                     (grouped.entries[r.section] ||= []).push({
                         label: r.b, lecturerId: r.c || '',
                     });

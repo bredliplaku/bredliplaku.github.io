@@ -181,14 +181,13 @@ Google Cloud Console needs **no** changes: same origin, same OAuth client.
 
 ### Editing the timetable
 
-`/timetable/admin/` has four tabs:
+`/timetable/admin/` has three tabs:
 
 | Tab | What it controls |
 |---|---|
 | **Semester** | Start/end dates and the mid-semester break, with a live preview of the week counter and progress bar |
 | **Header** | The info chips and action buttons above the timetable |
-| **Categories** | The tab strip on the public page. Each is either *class timetables* (two EIS ids) or *lecturers* (one) — drag to reorder |
-| **Entries** | The buttons inside the selected category. **Test** previews the real EIS table before you save, so you can confirm the ids |
+| **Categories** | The tab strip on the public page **and** the entries inside each one, nested right in the category's own card — no separate tab to switch to. Each category is either *class timetables* (two EIS ids) or *lecturers* (one). Drag a category by its own handle to reorder the public tabs; drag an entry by its handle to reorder the buttons inside it |
 
 Both EIS ids come out of the public timetable URL, and a lecturer id out of the live one:
 
@@ -196,6 +195,11 @@ Both EIS ids come out of the public timetable URL, and a lecturer id out of the 
 …/publictimetable/{timetableId}/show/programgrade/{classId}/
 …/publictimetable/live/{lecturerId}
 ```
+
+Every entry has an eye icon next to its Test/Delete buttons — click it to hide that
+one class or lecturer from the public page without deleting it (its IDs stay saved,
+dimmed in the list, ready to re-show later). **Test** previews the real EIS table
+before you save, so you can confirm the ids for a class timetable entry.
 
 Each tab saves independently and warns before you leave with unsaved changes.
 

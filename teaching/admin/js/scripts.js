@@ -39,6 +39,20 @@
     // don't fire these events, so a fresh render never trips the flag on its own.)
     document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#section-body')) markDirty(); });
     document.addEventListener('change', e => { if (e.target.closest && e.target.closest('#section-body')) markDirty(); });
+
+    // The save functions are genuinely async (one or more Supabase round trips) and every one of
+    // them clears _sectionDirty only once it resolves. Without this, clicking Save and immediately
+    // clicking a different tab/course races the network: the click lands while _sectionDirty is
+    // still true (the save hasn't finished yet), so confirmLeaveIfDirty() shows "unsaved changes"
+    // for a save that IS in flight and about to succeed — reads as "I have to save twice." Wrap
+    // every save call with trackSave() so confirmLeaveIfDirty() can await the in-flight save
+    // first and then see the flag it actually left behind, instead of a stale mid-flight one.
+    let _savePromise = null;
+    function trackSave(promise) {
+      _savePromise = promise;
+      promise.finally(() => { if (_savePromise === promise) _savePromise = null; });
+      return promise;
+    }
     // Leaving the whole page (refresh/close/navigate away) can only use the browser's own native
     // prompt — a custom dialog isn't allowed here. In-app course/tab switches use confirmLeaveIfDirty.
     window.addEventListener('beforeunload', e => {
@@ -632,13 +646,17 @@
     // Persists whatever tab is currently open, dispatching to the right save routine. Returns
     // true only if the save actually succeeded (so navigation can be aborted on failure).
     async function saveCurrentSection() {
-      if (S.section === 'info') return await saveSettings();
-      if (S.section === 'grading') return await saveGradingSettings();
-      return await saveSectionChanges(S.section);
+      if (S.section === 'info') return await trackSave(saveSettings());
+      if (S.section === 'grading') return await trackSave(saveGradingSettings());
+      return await trackSave(saveSectionChanges(S.section));
     }
 
     // Returns true if it's safe to leave the current tab/course.
     async function confirmLeaveIfDirty() {
+      // A save started by clicking Save directly (not through this function) may still be in
+      // flight — let it finish and clear _sectionDirty on its own before judging the flag,
+      // rather than interrupting it with a stale "unsaved changes" prompt.
+      if (_savePromise) await _savePromise.catch(() => { });
       if (!_sectionDirty && !inlinePanelDirty()) return true;
       const choice = await confirmDialog('You have unsaved changes in this tab.',
         { title: 'Save changes?', okLabel: 'Save', okIcon: 'fa-floppy-disk', altLabel: 'Discard' });
@@ -829,7 +847,7 @@
       const tts = Array.from(ttNums).sort((a, b) => a - b);
 
       let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('links')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('links'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>`;
 
       h += `<div class="settings-group" style="margin-bottom:14px">
@@ -912,7 +930,7 @@
 
       const { html: gradeRows, total: gradeTotal } = renderGradingRows(metaMap);
       const h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveGradingSettings()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveGradingSettings())"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>
   <div class="settings-panel">
     <div class="settings-group">
@@ -1031,7 +1049,7 @@
       const vDate = k => { const s = metaMap[k]?.c || ''; if (!s) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const d = new Date(s); if (!isNaN(d)) return d.toISOString().slice(0, 10); return ''; };
 
       let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSettings()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSettings())"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div><div class="settings-panel">`;
 
       // ── Course Identity ──
@@ -1817,7 +1835,7 @@
 
     function renderHier(rows) {
       let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('modules')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('modules'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
     <div class="add-bar">
       <button onclick="addModule()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Module</button>
     </div>
@@ -1954,7 +1972,7 @@
 
     function renderProjects(rows) {
       let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('projects')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('projects'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
     <div class="add-bar">
       <button onclick="addProject()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Project</button>
     </div>
@@ -2026,7 +2044,7 @@
       if (!opts.bare) {
         const btns = sec.types.map(t => `<button onclick="addFlatRow('${t}')" class="btn-sm"><i class="${ADD_ICONS[t] || 'fa-solid fa-plus'}" style="margin-right:5px"></i>Add ${TYPE_NAMES[t] || t}</button>`).join('');
         h += `<div class="section-topbar">
-      <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveSectionChanges('${sec.id}')"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+      <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('${sec.id}'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
       <div class="add-bar">${btns}</div>
     </div>`;
       }
@@ -2191,7 +2209,7 @@
     // written in the same pass.
     async function inlineSave() {
       if (!S.section) { closeInlineEdit(); return; }
-      await saveSectionChanges(S.section);
+      await trackSave(saveSectionChanges(S.section));
     }
 
     // Whether the panel's current field values differ from what it opened with.

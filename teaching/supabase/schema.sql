@@ -42,13 +42,15 @@ create index if not exists course_rows_lookup_idx
 --   info_item       'settings'       icon class  text            —           —
 --   action_button   'settings'       label       icon class      url         css class
 --   category        'settings'       name        icon class      kind²       —
---   entry           <category name>  label       timetable_id    class_id    —
---   lecturer        <category name>  label       lecturer_id     —           —
+--   entry           <category name>  label       timetable_id    class_id    hidden³
+--   lecturer        <category name>  label       lecturer_id     —           hidden³
 --
 --   ¹ semester_start | semester_end | holiday_start | holiday_weeks
 --   ² 'timetable' (EIS class timetable, needs both ids) or 'lecturer' (EIS live
 --     lecturer view, needs one id). An explicit column rather than the old
 --     sheet-named-"Lecturers" convention, which broke silently on rename.
+--   ³ '1' if the admin toggled this entry hidden — kept in the table (so it
+--     can be found and re-shown) but skipped by the public page.
 --
 -- row_index orders rows within a section: the tab order of categories, and the
 -- button order of the entries inside each category.
