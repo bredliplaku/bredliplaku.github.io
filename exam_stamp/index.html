@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <!-- GitHub Pages 301-redirects /exam_stamp to /exam_stamp/; some dev servers
+         (VS Code Live Server) just serve the index as-is. Without the trailing
+         slash every relative path resolves one directory too high — and since
+         the site root also has css/styles.css and js/scripts.js, two of them
+         load the WRONG file rather than 404ing, which is near-impossible to
+         spot. Runs first, before any relative asset is requested. -->
+    <script>
+        (function () {
+            const p = location.pathname;
+            if (!p.endsWith('/') && !p.split('/').pop().includes('.')) {
+                location.replace(p + '/' + location.search + location.hash);
+            }
+        })();
+    </script>
+
+    <meta name="theme-color" content="#f4f4f4">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f4f4">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121212">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Stamp each student's name onto an exam PDF and download the whole set as a ZIP.">
+    <title>Exam Stamp</title>
+    <link rel="icon" type="image/png" href="../favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;700&display=swap"
+        rel="stylesheet">
+
+    <!-- Set the theme before first paint so a dark-mode user never sees a
+         white flash while the stylesheet and scripts are still loading. -->
+    <script>
+        (function () {
+            const theme = localStorage.getItem('theme-preference') || 'auto';
+            if (theme !== 'auto') {
+                document.documentElement.setAttribute('data-theme', theme);
+            }
+        })();
+    </script>
+
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="css/styles.css">
+
+    <script src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
+
+    <!-- Everything runs in the browser: no exam paper and no student name ever
+         leaves this machine.
+           pdf-lib  — writes the stamped copies
+           pdf.js   — renders the cover-page preview
+           JSZip    — packs the copies into one download
+         (SheetJS is fetched on demand, only if a spreadsheet is dropped.) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <!-- Lets pdf-lib embed a real TTF, which is what the Merriweather and
+         handwritten options need — the 14 built-in PDF fonts are the only
+         ones available without it. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+    <script defer src="../teaching/js/config.js"></script>
+    <script defer src="js/common.js"></script>
+    <script defer src="js/scripts.js"></script>
+</head>
+
+<body>
+
+    <div class="main-content-wrapper">
+
+        <div class="container">
+
+            <div class="app-header">
+                <h2>Exam tools</h2>
+                <h1><i class="fa-solid fa-stamp"></i> Exam Stamp</h1>
+                <p class="es-lede">
+                    One personalised copy of the exam per student: their name on the cover page, plus a very faint
+                    repeat of it across every page, enough to trace a photo back to whose paper it was, quiet enough
+                    that nobody sitting the exam is bothered by it.
+                </p>
+                <div class="app-info" id="app-info">
+                    <span class="info-item" id="chip-names"><i class="fa-solid fa-users"></i><span>0 names</span></span>
+                    <span class="info-item" id="chip-pdf"><i class="fa-solid fa-file-pdf"></i><span>No PDF</span></span>
+                    <span class="info-item" id="chip-status"><i class="fa-solid fa-lock"></i><span>Runs offline in
+                            your browser</span></span>
+                </div>
+                <div class="progress-bar" id="progress-bar">
+                    <div class="progress" id="progress"></div>
+                </div>
+            </div>
+
+            <!-- ── Step 1 — the class list ──────────────────────────────── -->
+            <div class="module active" id="mod-names">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-users"></i> Student list</div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">1</div>
+                </div>
+                <div class="module-content">
+                    <div class="form-group">
+                        <label for="names-input">Type or paste the names, one per line, or separated by
+                            commas</label>
+                        <textarea id="names-input" class="form-control" rows="2" spellcheck="false"></textarea>
+                    </div>
+
+                    <div class="course-actions" id="names-actions">
+                        <button id="btn-upload-names" class="btn-blue"><i class="fa-solid fa-file-import"></i> Upload a
+                            list</button>
+                        <button id="btn-sort-names" class="btn-grey"><i class="fa-solid fa-arrow-down-a-z"></i>
+                            Sort</button>
+                        <button id="btn-clear-names" class="btn-red"><i class="fa-solid fa-eraser"></i> Clear</button>
+                    </div>
+                    <input type="file" id="names-file" accept=".txt,.csv,.tsv,.xlsx,.xls" hidden>
+
+                    <label class="es-check">
+                        <input type="checkbox" id="lines-only">
+                        <span>Each line is a name, don't split on commas</span>
+                    </label>
+
+                    <div class="es-chips" id="name-chips"></div>
+                    <div class="es-hint" id="names-summary">No names yet.</div>
+
+                    <div class="es-step-nav">
+                        <button class="es-next btn-primary" data-next="mod-pdf">Next <i
+                                class="fa-solid fa-arrow-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Step 2 — the paper, and where the name goes ──────────── -->
+            <div class="module" id="mod-pdf">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-file-pdf"></i> Exam paper</div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">2</div>
+                </div>
+                <div class="module-content">
+                    <div class="es-dropzone" id="pdf-drop">
+                        <i class="fa-solid fa-file-circle-plus"></i>
+                        <div class="es-dropzone-text">
+                            <strong id="pdf-drop-title">Drop the exam PDF here</strong>
+                            <span class="es-hint">or click to choose a file, it is never uploaded anywhere. Add
+                                more than one paper and each becomes a group.</span>
+                        </div>
+                    </div>
+                    <input type="file" id="pdf-file" accept="application/pdf,.pdf" multiple hidden>
+
+                    <div class="es-papers hidden" id="paper-list"></div>
+                    <div class="es-hint hidden" id="paper-hint">The letter is the group. Drag the arrows to change
+                        which paper is A, B, C…; students follow their paper.</div>
+
+                    <div id="preview-wrap" class="hidden">
+                        <div class="es-preview-toolbar">
+                            <div class="es-pager">
+                                <button id="page-prev" class="btn-grey icon-only-btn" title="Previous page"
+                                    aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></button>
+                                <span id="page-label">Page 1 of 1</span>
+                                <button id="page-next" class="btn-grey icon-only-btn" title="Next page"
+                                    aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></button>
+                            </div>
+                            <span class="es-hint"><i class="fa-solid fa-hand-pointer"></i> Click or drag on the page to
+                                place the name. Arrow keys nudge it.</span>
+                        </div>
+
+                        <div class="es-preview" id="preview-stage">
+                            <canvas id="pdf-canvas"></canvas>
+                            <canvas id="overlay-canvas" tabindex="0" aria-label="Name position, drag to move"></canvas>
+                        </div>
+
+                        <div class="es-stamp-note" id="stamp-note"></div>
+
+                        <div class="es-grid">
+                            <div class="form-group">
+                                <label for="stamp-template">Text to stamp</label>
+                                <input id="stamp-template" class="form-control" value="{name}" spellcheck="false">
+                                <span class="es-hint">{name} is replaced per student. e.g. <code>Name:
+                                        {name}</code></span>
+                            </div>
+                            <div class="form-group">
+                                <label for="preview-name">Preview with</label>
+                                <select id="preview-name" class="form-control"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="stamp-font">Font <span class="es-val" id="stamp-font-state"></span></label>
+                                <select id="stamp-font" class="form-control es-font-select"></select>
+                                <span class="es-hint" id="stamp-font-note"></span>
+                            </div>
+                            <div class="form-group">
+                                <label for="stamp-size">Size <span class="es-val" id="stamp-size-val">14
+                                        pt</span></label>
+                                <input type="range" id="stamp-size" class="es-range" min="6" max="48" step="1"
+                                    value="14">
+                            </div>
+                            <div class="form-group">
+                                <label>Style and alignment</label>
+                                <div class="es-toolbar">
+                                    <div class="es-btn-group" id="stamp-style" role="group"
+                                        aria-label="Text style">
+                                        <button type="button" class="es-tool-btn" id="stamp-bold" data-style="bold"
+                                            aria-pressed="false" title="Bold"><b>B</b></button>
+                                        <button type="button" class="es-tool-btn" id="stamp-italic"
+                                            data-style="italic" aria-pressed="false" title="Italic"><i
+                                                class="es-italic-glyph">I</i></button>
+                                        <button type="button" class="es-tool-btn" id="stamp-line" data-style="line"
+                                            aria-pressed="false" title="Rule underneath"><u>U</u></button>
+                                    </div>
+                                    <div class="es-btn-group" id="stamp-align" role="group" aria-label="Alignment">
+                                        <button type="button" class="es-tool-btn" data-align="left"
+                                            aria-pressed="false" title="Text starts at the point"><i
+                                                class="fa-solid fa-align-left"></i></button>
+                                        <button type="button" class="es-tool-btn" data-align="center"
+                                            aria-pressed="true" title="Text is centred on the point"><i
+                                                class="fa-solid fa-align-center"></i></button>
+                                        <button type="button" class="es-tool-btn" data-align="right"
+                                            aria-pressed="false" title="Text ends at the point"><i
+                                                class="fa-solid fa-align-right"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="stamp-color">Colour</label>
+                                <div class="es-colour" data-for="stamp-color">
+                                    <input type="color" id="stamp-color" class="es-colour-well" value="#1a237e"
+                                        aria-label="Pick a colour">
+                                    <input type="text" class="form-control es-colour-hex" value="#1a237e"
+                                        spellcheck="false" maxlength="7" aria-label="Colour hex code">
+                                    <div class="es-swatches"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="es-step-nav">
+                        <button class="es-next btn-primary" data-next="mod-groups">Next <i
+                                class="fa-solid fa-arrow-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Step 3 — who sits which paper ────────────────────────── -->
+            <div class="module" id="mod-groups">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-shuffle"></i> Groups</div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">3</div>
+                </div>
+                <div class="module-content">
+                    <div class="es-empty-note" id="groups-single">
+                        <i class="fa-solid fa-circle-info"></i>
+                        <span>One exam paper, so everybody gets the same one. Add a second PDF in step 2 and this
+                            turns into a group split.</span>
+                    </div>
+
+                    <div id="groups-panel" class="hidden">
+                        <div class="es-hint" id="group-count"></div>
+
+                        <div class="course-actions" id="group-actions">
+                            <button id="btn-shuffle" class="btn-purple"><i class="fa-solid fa-dice"></i>
+                                Shuffle</button>
+                            <button id="btn-alternate" class="btn-blue"><i class="fa-solid fa-arrow-down-1-9"></i>
+                                Alternate in list order</button>
+                        </div>
+                        <div class="es-hint">The shuffle uses the browser's cryptographic random source and deals
+                            round-robin, so it is genuinely unpredictable and the groups stay even to within one
+                            student. Anything you set by hand below is kept.</div>
+
+                        <div class="es-group-stats" id="group-stats"></div>
+
+                        <div class="es-group-toolbar">
+                            <div class="es-group-search">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input id="group-search" class="form-control" type="search"
+                                    placeholder="Find a student…" spellcheck="false">
+                            </div>
+                            <select id="group-filter" class="form-control" aria-label="Filter by group"></select>
+                            <div class="es-group-bulk">
+                                <select id="group-bulk" class="form-control" aria-label="Group to assign"></select>
+                                <button id="btn-assign-shown" class="btn-blue">Apply to all</button>
+                            </div>
+                        </div>
+
+                        <div class="es-group-list" id="group-list"></div>
+                    </div>
+
+                    <div class="es-step-nav">
+                        <button class="es-next btn-primary" data-next="mod-watermark">Next <i
+                                class="fa-solid fa-arrow-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Step 4 — the faint tracer pattern ────────────────────── -->
+            <div class="module" id="mod-watermark">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-fingerprint"></i> Tracer pattern</div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">4</div>
+                </div>
+                <div class="module-content">
+                    <label class="es-check">
+                        <input type="checkbox" id="wm-enabled">
+                        <span>Repeat the name faintly across every page</span>
+                    </label>
+
+                    <div id="wm-body" class="disabled">
+                        <div id="wm-preview-wrap" class="hidden">
+                            <div class="es-preview-toolbar">
+                                <div class="es-pager">
+                                    <button id="wm-page-prev" class="btn-grey icon-only-btn" title="Previous page"
+                                        aria-label="Previous page"><i class="fa-solid fa-chevron-left"></i></button>
+                                    <span id="wm-page-label">Page 2 of 2</span>
+                                    <button id="wm-page-next" class="btn-grey icon-only-btn" title="Next page"
+                                        aria-label="Next page"><i class="fa-solid fa-chevron-right"></i></button>
+                                </div>
+                                <span class="es-hint" id="wm-preview-note"></span>
+                            </div>
+                            <div class="es-preview es-preview-sm" id="wm-preview-stage">
+                                <canvas id="wm-canvas"></canvas>
+                                <canvas id="wm-overlay"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="es-empty-note hidden" id="wm-no-pdf">
+                            <i class="fa-solid fa-circle-info"></i>
+                            <span>Add the exam paper in step 2 to see the pattern on a real page.</span>
+                        </div>
+
+                        <div class="es-grid" id="wm-controls">
+                            <div class="form-group">
+                                <label for="wm-template">Pattern text</label>
+                                <input id="wm-template" class="form-control" value="{name}" spellcheck="false">
+                                <span class="es-hint">{name}, {group}, and {date} for today's date</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="wm-font">Font <span class="es-val" id="wm-font-state"></span></label>
+                                <select id="wm-font" class="form-control es-font-select"></select>
+                                <span class="es-hint">A monospace or serif face stays legible at this size and
+                                    faintness.</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="wm-opacity">Faintness <span class="es-val"
+                                        id="wm-opacity-val">7%</span></label>
+                                <input type="range" id="wm-opacity" class="es-range" min="1" max="30" step="1"
+                                    value="7">
+                                <span class="es-hint">Low enough to ignore, high enough to read in a photo</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="wm-size">Size <span class="es-val" id="wm-size-val">15 pt</span></label>
+                                <input type="range" id="wm-size" class="es-range" min="6" max="40" step="1"
+                                    value="15">
+                            </div>
+                            <div class="form-group">
+                                <label for="wm-angle">Angle <span class="es-val" id="wm-angle-val">30°</span></label>
+                                <input type="range" id="wm-angle" class="es-range" min="-90" max="90" step="5"
+                                    value="30">
+                            </div>
+                            <div class="form-group">
+                                <label for="wm-gap">Spacing <span class="es-val" id="wm-gap-val">70 pt</span></label>
+                                <input type="range" id="wm-gap" class="es-range" min="10" max="220" step="5"
+                                    value="70">
+                            </div>
+                            <div class="form-group">
+                                <label for="wm-color">Colour</label>
+                                <div class="es-colour" data-for="wm-color">
+                                    <input type="color" id="wm-color" class="es-colour-well" value="#000000"
+                                        aria-label="Pick a colour">
+                                    <input type="text" class="form-control es-colour-hex" value="#000000"
+                                        spellcheck="false" maxlength="7" aria-label="Colour hex code">
+                                    <div class="es-swatches"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <label class="es-check">
+                            <input type="checkbox" id="wm-cover">
+                            <span>Include the cover page in the pattern</span>
+                        </label>
+                    </div>
+
+                    <div class="es-step-nav">
+                        <button class="es-next btn-primary" data-next="mod-output">Next <i
+                                class="fa-solid fa-arrow-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Step 5 — naming and the download ─────────────────────── -->
+            <div class="module" id="mod-output">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-file-zipper"></i> Output</div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">5</div>
+                </div>
+                <div class="module-content">
+                    <div class="es-grid">
+                        <div class="form-group">
+                            <label for="file-pattern">One file per student, named</label>
+                            <input id="file-pattern" class="form-control" value="{file}_{name}.pdf" spellcheck="false">
+                            <span class="es-hint">{file} is the exam's own file name, {name} the student's, {group}
+                                the group letter. Also {index} (1, 2, 3…) and {n} (01, 02, 03…). A "/" makes a
+                                folder inside the ZIP.</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="zip-name">ZIP file name</label>
+                            <input id="zip-name" class="form-control" value="exam-stamped.zip" spellcheck="false">
+                        </div>
+                    </div>
+                    <div class="es-hint" id="output-example">Add names and a PDF to see an example.</div>
+
+                    <div class="es-step-nav">
+                        <span class="es-hint">Every setting on this page is remembered in this browser.</span>
+                        <button id="btn-reset-prefs" class="btn-grey btn-sm"><i class="fa-solid fa-rotate-left"></i>
+                            Reset to defaults</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="course-actions" id="main-actions">
+                <button id="btn-test" class="btn-orange"><i class="fa-solid fa-vial"></i> Download one to
+                    check</button>
+                <button id="btn-generate" class="btn-green"><i class="fa-solid fa-file-zipper"></i> Download
+                    all</button>
+                <button id="btn-cancel" class="btn-red hidden"><i class="fa-solid fa-xmark"></i> Cancel</button>
+            </div>
+
+        </div>
+
+        <footer class="footer">
+            <div class="social-links">
+                <a id="footer-home" href="/" rel="noopener noreferrer"><i class="fa-solid fa-house"
+                        title="Home"></i></a>
+                <a id="footer-cv" href="#" target="_blank" rel="noopener noreferrer" title="CV"><i
+                        class="fa-regular fa-id-card"></i></a>
+                <a id="footer-email" href="#" target="_blank" rel="noopener noreferrer" title="Email"><i
+                        class="fa-regular fa-envelope"></i></a>
+                <button id="theme-toggle" class="theme-toggle" aria-label="Theme: Auto" title="Theme: Auto">
+                    <i id="theme-toggle-icon" class="fa-solid fa-adjust" aria-hidden="true"></i>
+                </button>
+            </div>
+            <p style="font-size:0.8em; text-transform: uppercase; letter-spacing: 2px; font-weight: 700;">
+                <i class="fa-regular fa-copyright"></i> <span id="footer-start-year">2023</span>–<span
+                    id="currentYear"></span> <span id="footer-owner">Bredli Plaku</span>. All Rights Reserved.
+            </p>
+        </footer>
+    </div>
+
+    <!-- Drop anything anywhere: PDFs become the exam paper, text and
+         spreadsheets become the class list. -->
+    <div class="es-drop-overlay" id="drop-overlay">
+        <div class="es-drop-overlay-inner">
+            <i class="fa-solid fa-hand-holding-heart"></i>
+            <strong>Drop it</strong>
+            <span>PDF → exam paper &nbsp;·&nbsp; TXT / CSV / XLSX → class list</span>
+        </div>
+    </div>
+
+    <div class="in-page-notifications" id="notification-area"></div>
+</body>
+
+</html>
