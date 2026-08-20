@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      5.5
+// @version      5.6
 // @description  Automatically enhance EIS and log in with your preferred method.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
@@ -50,6 +50,11 @@
     // Google Account Chooser Automation (accounts.google.com)
     // ************************************************************************
     if (window.location.hostname === 'accounts.google.com') {
+        // SAFETY GUARD: Only run if the current page URL explicitly points to EIS OAuth parameters
+        if (!window.location.href.includes('eis.epoka.edu.al')) {
+            return;
+        }
+
         const savedEmail = targetEmail.trim().toLowerCase();
         if (!savedEmail) return;
 
