@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         EIS Grade Autofiller
 // @namespace    https://bredliplaku.com/
-// @version      1.2
+// @version      1.5
 // @description  Matches names and fills grades from Excel to EIS
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_grader.user.js
 // @downloadURL  https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_grader.user.js
+// @icon         https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/miscellaneous/EPOKA_icon.png
 // @match        https://eis.epoka.edu.al/courseminorgrades/*/minorgrades*
 // @run-at       document-start
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js

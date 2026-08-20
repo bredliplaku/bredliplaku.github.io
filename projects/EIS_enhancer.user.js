@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      5.4
+// @version      5.5
 // @description  Automatically enhance EIS and log in with your preferred method.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
 // @downloadURL  https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
+// @icon         https://raw.githubusercontent.com/bredliplaku/bredliplaku.github.io/refs/heads/main/miscellaneous/EPOKA_icon.png
 // @match        https://eis.epoka.edu.al/*
 // @match        https://accounts.google.com/*
 // @grant        GM_getValue
