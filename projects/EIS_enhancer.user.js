@@ -391,7 +391,28 @@
     // Update Page Title & Text
     // ************************************************************************
     function updatePageTitle() {
-        document.title = document.title.replace(/\bEpoka\b/g, "EPOKA");
+        // Look for form-header-title first, then fallback to page-title
+        const headerElement = document.querySelector('h3.form-header-title') || document.querySelector('h3.page-title');
+
+        // If the header isn't rendered yet, bail out completely
+        // to prevent flashing the default title intermediate state.
+        if (!headerElement) return;
+
+        let extractedText = '';
+        for (let i = 0; i < headerElement.childNodes.length; i++) {
+            if (headerElement.childNodes[i].nodeType === Node.TEXT_NODE) {
+                extractedText += headerElement.childNodes[i].textContent;
+            }
+        }
+
+        extractedText = extractedText.trim().replace(/\s+/g, ' ');
+
+        if (extractedText.length > 0) {
+            let newTitle = extractedText.replace(/\bEpoka\b/gi, 'EPOKA');
+            if (document.title !== newTitle) {
+                document.title = newTitle;
+            }
+        }
     }
 
     function replaceEpokaText(node) {
@@ -402,37 +423,38 @@
         }
     }
 
-    function scanAndReplace() {
-        updatePageTitle();
+    // Run body text replacement immediately
+    if (document.body) {
         replaceEpokaText(document.body);
         solidifyIcons();
     }
-    scanAndReplace();
 
+    // Use a high-level observer on documentElement to catch headers as early as possible
     const observer = new MutationObserver((mutations) => {
         let shouldProcess = false;
         mutations.forEach(mutation => {
             if (mutation.addedNodes.length > 0) {
-                mutation.addedNodes.forEach(node => replaceEpokaText(node));
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        replaceEpokaText(node);
+                    }
+                });
                 shouldProcess = true;
             }
         });
         if (shouldProcess) {
             solidifyIcons();
+            updatePageTitle(); // Tries to apply the dynamic title the exact millisecond the header drops
         }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
 
-    const headObserver = new MutationObserver(() => updatePageTitle());
-    const titleElement = document.querySelector('head > title');
-    if (titleElement) {
-        headObserver.observe(titleElement, { childList: true });
-    }
+    observer.observe(document.documentElement, { childList: true, subtree: true });
 
     // ************************************************************************
     // DOM Ready Behaviours (Theme Settings & Smart Cache Collapsers)
     // ************************************************************************
     document.addEventListener('DOMContentLoaded', () => {
+        updatePageTitle();
 
         // 1. Force Sidebar Theme to 'Fixed'
         // Added a short timeout so the site's native JS is ready to catch the event

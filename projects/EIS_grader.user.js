@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         EIS Grade Autofiller
 // @namespace    https://bredliplaku.com/
-// @version      1.1
+// @version      1.2
 // @description  Matches names and fills grades from Excel to EIS
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_grader.user.js
 // @downloadURL  https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_grader.user.js
 // @match        https://eis.epoka.edu.al/courseminorgrades/*/minorgrades*
+// @run-at       document-start
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 // @grant        none
 // ==/UserScript==
@@ -14,33 +15,76 @@
 (function () {
     'use strict';
 
-    // Wait for jQuery to be loaded
-    var checkReady = setInterval(function () {
-        if (window.jQuery) {
-            clearInterval(checkReady);
+    // Use a MutationObserver to inject buttons instantly without a laggy timer
+    function waitForTarget() {
+        // If jQuery and the button are already on the page, run immediately
+        if (window.jQuery && window.jQuery('#edit-grades-btn').length > 0) {
             init();
+            return;
         }
-    }, 100);
+
+        // Otherwise, watch the page build process
+        var observer = new MutationObserver(function (mutations, me) {
+            if (window.jQuery && window.jQuery('#edit-grades-btn').length > 0) {
+                me.disconnect(); // Stop observing once found
+                init();
+            }
+        });
+
+        // Start observing the whole document for changes
+        observer.observe(document, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    // Start looking immediately
+    waitForTarget();
 
     function init() {
         var $ = window.jQuery;
 
-        // Target specifically the button group inside the Student List container
-        var $targetContainer = $('#edit-grades-btn').parent();
+        // Target the Edit button directly
+        var $editBtn = $('#edit-grades-btn');
 
-        if ($targetContainer.length === 0) return;
+        // We know it exists because of the observer, but keep this safety check
+        if ($editBtn.length === 0) return;
 
-        // Create the button container
-        var $btnGroup = $('<div style="display:inline-block; margin-right: 5px;"></div>');
+        // 1. Inject the helpful instructions with padding and case-insensitive note
+        var infoHtml = `
+            <div class="alert alert-info" style="margin-bottom: 20px; padding: 20px; border-radius: 6px; font-size: 14px; line-height: 1.5;">
+                <strong><i class="fa fa-info-circle"></i> Grade Autofiller Instructions:</strong><br>
+                Ensure your Excel file has a header row. Label the student column as <b>Name</b>, <b>ID</b>, or <b>Code</b>, and the grade column as <b>Total</b>, <b>Grade</b>, or <b>Score</b>.<br>
+                <span style="color: #31708f;"><em>Note: Header matching is <strong>not case-sensitive</strong> (e.g., "NAME" and "name" both work). If no recognised headers are found, the script will automatically use the first column for the student and the last column for the grade.</em></span>
+            </div>
+        `;
+        // Insert the instructions right above the student list table
+        $('#student_list_table').before(infoHtml);
 
-        // Create Buttons
+        // 2. Fix Bootstrap's border-radius issue when 'Clear all' is hidden
+        if ($('#eis-btn-fix').length === 0) {
+            $('head').append(`
+                <style id="eis-btn-fix">
+                    /* When 'Clear all' is hidden, force 'Paste Grades' to have rounded left corners */
+                    #clear-grades-btn[style*="none"] + .btn {
+                        border-top-left-radius: 4px !important;
+                        border-bottom-left-radius: 4px !important;
+                    }
+                </style>
+            `);
+        }
+
+        // 3. Create the buttons
         var $pasteBtn = $('<button type="button" class="btn btn-info" title="Try to paste from clipboard automatically"><i class="fa fa-clipboard"></i> Paste Grades</button>');
         var $importBtn = $('<button type="button" class="btn btn-success"><i class="fa fa-file-excel-o"></i> Import from Excel</button>');
-        var $fileInput = $('<input type="file" accept=".xlsx, .xls" style="display:none;" />');
 
-        // Append elements
-        $btnGroup.append($pasteBtn).append($importBtn).append($fileInput);
-        $targetContainer.prepend($btnGroup);
+        // Append file input to the body so it doesn't break the .btn-group :last-child CSS for the Edit button
+        var $fileInput = $('<input type="file" accept=".xlsx, .xls" style="display:none;" />');
+        $('body').append($fileInput);
+
+        // 4. Insert them directly before the edit button
+        // Resulting order: Clear All -> Paste -> Import -> Edit
+        $editBtn.before($pasteBtn, $importBtn);
 
         // 1. PASTE HANDLER
         $pasteBtn.click(async function () {
@@ -93,94 +137,104 @@
         }
 
         if (sheetNames.length === 1) {
-            // Only one sheet? Process it immediately.
             processSheet($, workbook, sheetNames[0]);
         } else {
-            // Multiple sheets? Ask the user.
             showSheetSelector($, workbook);
         }
     }
 
     function processSheet($, workbook, sheetName) {
         var sheet = workbook.Sheets[sheetName];
-        // Use sheet_to_json with header: 1 to get a robust array of arrays
-        // This handles ranges, hidden rows, and data types better than plain text conversion
         var jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
         prepareData($, jsonData);
     }
 
-    function showSheetSelector($, workbook) {
+    // Modal Helper to handle Bootstrap instantiation safely
+    function showBootstrapModal(modalHtml) {
+        var $ = window.jQuery;
         $('#eis-grade-modal').remove();
+        $('.modal-backdrop').remove();
+        $('body').append(modalHtml);
+        $('#eis-grade-modal').modal({ backdrop: 'static', keyboard: false });
+        $('#eis-grade-modal').modal('show');
 
+        $('#eis-grade-modal').on('hidden.bs.modal', function () {
+            $(this).remove();
+        });
+    }
+
+    function showSheetSelector($, workbook) {
         var sheetButtons = workbook.SheetNames.map(function (name) {
-            return `<button class="btn btn-default sheet-select-btn" data-sheet="${name}" style="margin: 5px; width: 100%; text-align: left; border-radius: 6px;">
-                        <i class="fa fa-table"></i> ${name}
-                    </button>`;
+            return '<button class="btn btn-default btn-block sheet-select-btn" data-sheet="' + name + '" style="text-align: left; margin-bottom: 5px;"><i class="fa fa-table"></i> ' + name + '</button>';
         }).join('');
 
         var modalHtml = `
-            <div id="eis-grade-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10000; display:flex; justify-content:center; align-items:center;">
-                <div style="background:white; padding:20px; width:400px; max-width:90%; border-radius:12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    <h4 style="margin-top:0; color:#333; border-bottom: 1px solid #eee; padding-bottom: 10px;">Select Worksheet</h4>
-                    <p style="color:#666; font-size:13px;">This file has multiple sheets. Which one contains the grades?</p>
-                    <div style="max-height: 300px; overflow-y: auto; margin-bottom: 15px;">
-                        ${sheetButtons}
-                    </div>
-                    <div style="text-align:right;">
-                        <button id="eis-close-btn" class="btn btn-default btn-sm" style="border-radius: 4px;">Cancel</button>
+            <div class="modal fade" id="eis-grade-modal" tabindex="-1" role="dialog">
+                <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title">Select Worksheet</h4>
+                        </div>
+                        <div class="modal-body">
+                            <p class="text-muted">This file has multiple sheets. Which one contains the grades?</p>
+                            <div style="max-height: 300px; overflow-y: auto; margin-bottom: 15px;">
+                                ${sheetButtons}
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
 
-        $('body').append(modalHtml);
+        showBootstrapModal(modalHtml);
 
         $('.sheet-select-btn').click(function () {
             var sheetName = $(this).data('sheet');
-            $('#eis-grade-modal').remove();
+            $('#eis-grade-modal').modal('hide');
             processSheet($, workbook, sheetName);
-        });
-
-        $('#eis-close-btn').click(function () {
-            $('#eis-grade-modal').remove();
         });
     }
 
     function showPasteModal($) {
-        $('#eis-grade-modal').remove();
-
         var modalHtml = `
-            <div id="eis-grade-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10000; display:flex; justify-content:center; align-items:center;">
-                <div style="background:white; padding:20px; width:600px; max-width:90%; border-radius:12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-                    <h3 style="margin-top:0; color:#333;">Paste Grades</h3>
-                    <p style="color:#666; font-size:13px;">
-                        <b>Automatic paste failed.</b><br>
-                        Please manually copy your Excel table (including headers) and paste it below.<br>
-                        <em style="color:#888;">(Ensure "Name" and "Total" columns exist)</em>
-                    </p>
-                    <textarea id="eis-paste-area" style="width:100%; height:200px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:monospace; white-space:pre; overflow:auto;" placeholder="Paste here..."></textarea>
-                    <div style="margin-top:15px; text-align:right;">
-                        <span id="eis-status-msg" style="float:left; color:#d9534f; font-weight:bold; margin-top:7px;"></span>
-                        <button id="eis-close-btn" class="btn btn-default" style="border-radius: 4px;">Cancel</button>
-                        <button id="eis-process-btn" class="btn btn-primary" style="border-radius: 4px;">Next</button>
+            <div class="modal fade" id="eis-grade-modal" tabindex="-1" role="dialog">
+                <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title">Paste Grades</h4>
+                        </div>
+                        <div class="modal-body">
+                            <p class="text-muted">
+                                <strong>Automatic paste failed.</strong><br>
+                                Please manually copy your Excel table (including headers) and paste it below.<br>
+                            </p>
+                            <textarea id="eis-paste-area" class="form-control" style="height:200px; font-family:monospace; white-space:pre;"></textarea>
+                            <span id="eis-status-msg" class="text-danger" style="font-weight:bold; display:block; margin-top:10px;"></span>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                            <button type="button" id="eis-process-btn" class="btn btn-primary">Next</button>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
 
-        $('body').append(modalHtml);
+        showBootstrapModal(modalHtml);
+
         $('#eis-paste-area').focus();
-
-        $('#eis-close-btn').click(function () {
-            $('#eis-grade-modal').remove();
-        });
-
         $('#eis-process-btn').click(function () {
             var text = $('#eis-paste-area').val();
             if (!text.trim()) {
                 $('#eis-status-msg').text("Please paste data first.");
                 return;
             }
+            $('#eis-grade-modal').modal('hide');
             var rows = text.trim().split('\n').map(row => row.split('\t'));
             prepareData($, rows);
         });
@@ -188,20 +242,16 @@
 
     function cleanName(name) {
         if (name === null || name === undefined) return "";
-        // Ensure name is string (handles numeric IDs from excel)
         name = String(name).trim();
         return name.replace(/\s+(R|EX|R\s+EX)$/i, '').trim();
     }
 
-    // 1. Parse data logic
     function prepareData($, rows) {
         if (!rows || rows.length === 0) {
             alert("No data found.");
             return;
         }
 
-        // SMART HEADER SEARCH
-        // Scan the first 20 rows to find the header row.
         var headerRowIndex = -1;
         var nameIndex = -1;
         var totalIndex = -1;
@@ -222,7 +272,6 @@
                 if (h === 'total' || h.includes('total') || h.includes('grade') || h.includes('points') || h.includes('score')) tempTotalIdx = c;
             }
 
-            // If we found both potential columns in one row, we assume this is the header
             if (tempNameIdx !== -1 && tempTotalIdx !== -1) {
                 headerRowIndex = r;
                 nameIndex = tempNameIdx;
@@ -231,10 +280,8 @@
             }
         }
 
-        // Fallback: If no header row found, assume row 0 is header and try to guess or use defaults
         if (headerRowIndex === -1) {
             headerRowIndex = 0;
-            // If headers are missing, usually first column is ID/Name and last is Grade
             if (rows[0].length >= 2) {
                 nameIndex = 0;
                 totalIndex = rows[0].length - 1;
@@ -249,11 +296,9 @@
             return;
         }
 
-        // Build Map
         var gradeMap = {};
-        for (var r = headerRowIndex + 1; r < rows.length; r++) {
-            var cols = rows[r];
-            // Skip empty rows or short rows
+        for (var i = headerRowIndex + 1; i < rows.length; i++) {
+            var cols = rows[i];
             if (!cols || cols.length <= nameIndex) continue;
 
             var rawName = cols[nameIndex];
@@ -261,67 +306,63 @@
 
             if (rawName !== undefined && rawName !== null && String(rawName).trim() !== "") {
                 var clean = cleanName(rawName).toLowerCase();
-                // Ensure 0 is treated as "0" and not false/empty
                 var gradeVal = (rawGrade !== undefined && rawGrade !== null && String(rawGrade).trim() !== "") ? String(rawGrade).trim() : "";
                 gradeMap[clean] = gradeVal;
             }
         }
 
-        // Show Config Modal before filling
         showConfigModal($, gradeMap);
     }
 
-    // 2. Configuration Modal
     function showConfigModal($, gradeMap) {
-        $('#eis-grade-modal').remove();
-
-        // Detect if it is a Midterm or Final Exam to show/hide Attendance option
         var headerText = $('.form-header-title').text().toUpperCase();
         var isExam = headerText.includes('MIDTERM') || headerText.includes('FINAL');
         var hasCheckboxes = $('.attendance-checkbox').length > 0;
-
         var showAttendanceOption = isExam && hasCheckboxes;
 
         var attendanceOptionHtml = '';
         if (showAttendanceOption) {
-            attendanceOptionHtml = `<label style="display:block; font-weight:normal;"><input type="radio" name="empty_opt" value="attendance"> Uncheck Attendance</label>`;
+            attendanceOptionHtml = `<div class="radio"><label><input type="radio" name="empty_opt" value="attendance"> Uncheck Attendance</label></div>`;
         }
 
         var modalHtml = `
-            <div id="eis-grade-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10000; display:flex; justify-content:center; align-items:center;">
-                <div style="background:white; padding:25px; width:550px; max-width:90%; border-radius:12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); font-family: sans-serif;">
-                    <h3 style="margin-top:0; color:#333; border-bottom:1px solid #eee; padding-bottom:10px;">Import Configuration</h3>
-
-                    <div style="margin-bottom: 15px; margin-top: 15px;">
-                        <label style="font-weight:bold; display:block; margin-bottom:5px;">1. Students missing in Excel:</label>
-                        <div style="margin-left: 10px;">
-                            <label style="display:block; font-weight:normal;"><input type="radio" name="missing_opt" value="skip" checked> Leave empty</label>
-                            <label style="display:block; font-weight:normal;"><input type="radio" name="missing_opt" value="grade"> Grade as <input type="number" id="missing_val" value="0" style="width:60px; padding:2px; border:1px solid #ccc; border-radius:4px;"></label>
+            <div class="modal fade" id="eis-grade-modal" tabindex="-1" role="dialog">
+                <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title">Import Configuration</h4>
                         </div>
-                    </div>
-
-                    <div style="margin-bottom: 15px;">
-                        <label style="font-weight:bold; display:block; margin-bottom:5px;">2. Students with empty grade in Excel:</label>
-                        <div style="margin-left: 10px;">
-                            <label style="display:block; font-weight:normal;"><input type="radio" name="empty_opt" value="skip" checked> Leave empty</label>
-                            <label style="display:block; font-weight:normal;"><input type="radio" name="empty_opt" value="grade"> Grade as <input type="number" id="empty_val" value="0" style="width:60px; padding:2px; border:1px solid #ccc; border-radius:4px;"></label>
-                            ${attendanceOptionHtml}
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>1. Students missing in Excel:</label>
+                                <div class="radio"><label><input type="radio" name="missing_opt" value="skip" checked> Leave empty</label></div>
+                                <div class="radio form-inline">
+                                    <label><input type="radio" name="missing_opt" value="grade"> Grade as </label>
+                                    <input type="number" id="missing_val" class="form-control input-sm" value="0" style="width:70px; margin-left:5px;">
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="form-group">
+                                <label>2. Students with empty grade in Excel:</label>
+                                <div class="radio"><label><input type="radio" name="empty_opt" value="skip" checked> Leave empty</label></div>
+                                <div class="radio form-inline">
+                                    <label><input type="radio" name="empty_opt" value="grade"> Grade as </label>
+                                    <input type="number" id="empty_val" class="form-control input-sm" value="0" style="width:70px; margin-left:5px;">
+                                </div>
+                                ${attendanceOptionHtml}
+                            </div>
                         </div>
-                    </div>
-
-                    <div style="text-align:right; border-top:1px solid #eee; padding-top:15px;">
-                        <button id="eis-close-btn" class="btn btn-default" style="border-radius:4px;">Cancel</button>
-                        <button id="eis-final-process-btn" class="btn btn-primary" style="border-radius:4px;">Process Grades</button>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                            <button type="button" id="eis-final-process-btn" class="btn btn-primary">Process Grades</button>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
 
-        $('body').append(modalHtml);
-
-        $('#eis-close-btn').click(function () {
-            $('#eis-grade-modal').remove();
-        });
+        showBootstrapModal(modalHtml);
 
         $('#eis-final-process-btn').click(function () {
             var config = {
@@ -330,12 +371,11 @@
                 emptyOpt: $('input[name="empty_opt"]:checked').val(),
                 emptyVal: $('#empty_val').val()
             };
-            $('#eis-grade-modal').remove();
+            $('#eis-grade-modal').modal('hide');
             fillGrades($, gradeMap, config);
         });
     }
 
-    // Helper to find the correct column index
     function getStudentNameIndex($) {
         var $headers = $('#student_list_table thead tr th');
         var index = -1;
@@ -344,97 +384,83 @@
             var text = $(this).text().trim().toLowerCase();
             if (text.includes('name') || text.includes('student') || text.includes('exam code')) {
                 index = i;
-                return false; // break
+                return false;
             }
         });
 
-        // Fallback to 2 (standard student list) if detection fails
         return index !== -1 ? index : 2;
     }
 
-    // 3. Fill Logic
     function fillGrades($, gradeMap, config) {
-        // Ensure Edit Mode
         var $editBtn = $('#edit-grades-btn');
         if ($editBtn.is(':visible')) {
             $editBtn.click();
         }
 
         var $tableRows = $('#student_list_table tbody tr');
-        var nameColIndex = getStudentNameIndex($); // Dynamically get index
+        var nameColIndex = getStudentNameIndex($);
 
         console.log("EIS Script: Page Name/ID column detected at index: " + nameColIndex);
 
-        // Statistics Counters
         var stats = {
-            matchedFilled: 0,      // Found in Excel, had a grade, filled it
-            emptyFilled: 0,        // Found in Excel, empty grade, filled with default
-            emptyAttendance: 0,    // Found in Excel, empty grade, unchecked attendance
-            emptySkipped: 0,       // Found in Excel, empty grade, skipped
-            missingFilled: 0,      // Not in Excel, filled with default
-            missingSkipped: 0,     // Not in Excel, skipped
+            matchedFilled: 0,
+            emptyFilled: 0,
+            emptyAttendance: 0,
+            emptySkipped: 0,
+            missingFilled: 0,
+            missingSkipped: 0,
             totalStudents: 0
         };
 
         $tableRows.each(function () {
             var $tr = $(this);
             var $nameTd = $tr.find('td').eq(nameColIndex);
-            // Safety check for header rows or malformed rows
+
             if ($nameTd.length === 0) return;
 
             var htmlNameRaw = $nameTd.text();
             var htmlNameClean = cleanName(htmlNameRaw).toLowerCase();
 
             var $input = $tr.find('input[type="text"][name$="[points]"]');
-            if ($input.length === 0) return; // Skip if input not found
+            if ($input.length === 0) return;
 
             stats.totalStudents++;
 
-            // Logic Flow
             if (gradeMap.hasOwnProperty(htmlNameClean)) {
-                // Student exists in Excel
                 var gradeValue = gradeMap[htmlNameClean];
 
                 if (gradeValue !== "") {
-                    // Has a grade -> Fill it
                     updateInput($input, gradeValue);
                     visualSuccess($tr, $input);
                     stats.matchedFilled++;
                 } else {
-                    // Empty grade in Excel -> Check Config
                     if (config.emptyOpt === 'grade') {
                         updateInput($input, config.emptyVal);
                         visualSuccess($tr, $input);
                         stats.emptyFilled++;
                     } else if (config.emptyOpt === 'attendance') {
-                        // Handle Attendance Uncheck
                         var $chk = $tr.find('.attendance-checkbox');
                         if ($chk.length > 0) {
-                            // If it is checked, click it to uncheck (triggering handlers)
-                            // Use .prop for standard checkbox, or look for the Uniform plugin wrapper class 'checked'
                             var isChecked = $chk.prop('checked') || $chk.parent().hasClass('checked');
                             if (isChecked) {
-                                $chk.click(); // Click triggers the EIS events
-                                $tr.css('background-color', '#f2dede'); // Light red/pink for NA
+                                $chk.click();
+                                $tr.css('background-color', '#f2dede');
                                 stats.emptyAttendance++;
                             } else {
-                                // Already unchecked but matches criteria
                                 stats.emptyAttendance++;
                             }
                         } else {
-                            stats.emptySkipped++; // No checkbox available
+                            stats.emptySkipped++;
                         }
                     } else {
-                        // skip
                         stats.emptySkipped++;
                     }
                 }
 
             } else {
-                // Student Missing in Excel -> Check Config
                 if (config.missingOpt === 'grade') {
                     updateInput($input, config.missingVal);
-                    $tr.css('background-color', '#fcf8e3'); // Light yellow for filled missing
+                    $tr.css('background-color', '#fcf8e3');
                     $input.css('border', '2px solid #8a6d3b');
                     stats.missingFilled++;
                 } else {
@@ -448,45 +474,47 @@
 
     function showReportModal($, stats) {
         var modalHtml = `
-            <div id="eis-grade-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10000; display:flex; justify-content:center; align-items:center;">
-                <div style="background:white; padding:25px; width:450px; max-width:90%; border-radius:12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); font-family: sans-serif;">
-                    <h3 style="margin-top:0; color:#333; border-bottom:1px solid #eee; padding-bottom:10px; text-align:center;">Processing Complete</h3>
-
-                    <div style="padding: 10px 0; font-size: 14px; line-height: 1.6;">
-                        <div style="display:flex; justify-content:space-between; border-bottom: 1px solid #eee; padding:5px 0;">
-                            <strong>Total Students (on page):</strong> <span>${stats.totalStudents}</span>
+            <div class="modal fade" id="eis-grade-modal" tabindex="-1" role="dialog">
+                <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title text-center">Processing Complete</h4>
                         </div>
+                        <div class="modal-body">
+                            <ul class="list-group">
+                                <li class="list-group-item">
+                                    <strong>Total Students (on page):</strong>
+                                    <span class="badge pull-right">${stats.totalStudents}</span>
+                                </li>
+                                <li class="list-group-item list-group-item-success">
+                                    <strong>Matched & Filled:</strong>
+                                    <span class="badge pull-right">${stats.matchedFilled}</span>
+                                </li>
+                            </ul>
 
-                        <div style="display:flex; justify-content:space-between; color:#2e7d32; padding:5px 0;">
-                            <strong>Matched & Filled:</strong> <span>${stats.matchedFilled}</span>
+                            <h5 style="font-weight: bold; margin-top: 15px;">Empty in Excel:</h5>
+                            <ul class="list-group">
+                                <li class="list-group-item">Filled with default <span class="badge pull-right">${stats.emptyFilled}</span></li>
+                                <li class="list-group-item">Attendance Unchecked <span class="badge pull-right">${stats.emptyAttendance}</span></li>
+                                <li class="list-group-item">Skipped <span class="badge pull-right">${stats.emptySkipped}</span></li>
+                            </ul>
+
+                            <h5 style="font-weight: bold; margin-top: 15px;">Missing in Excel:</h5>
+                            <ul class="list-group">
+                                <li class="list-group-item">Filled with default <span class="badge pull-right">${stats.missingFilled}</span></li>
+                                <li class="list-group-item">Skipped <span class="badge pull-right">${stats.missingSkipped}</span></li>
+                            </ul>
                         </div>
-
-                        <div style="margin-top:10px; font-weight:bold; color:#555;">Empty in Excel:</div>
-                        <div style="padding-left:15px; color:#666;">
-                            <div style="display:flex; justify-content:space-between;">- Filled with default: <span>${stats.emptyFilled}</span></div>
-                            <div style="display:flex; justify-content:space-between;">- Attendance Unchecked: <span>${stats.emptyAttendance}</span></div>
-                            <div style="display:flex; justify-content:space-between;">- Skipped: <span>${stats.emptySkipped}</span></div>
+                        <div class="modal-footer" style="text-align: center;">
+                            <button type="button" class="btn btn-primary" data-dismiss="modal" style="min-width: 100px;">OK</button>
                         </div>
-
-                        <div style="margin-top:10px; font-weight:bold; color:#555;">Missing in Excel:</div>
-                        <div style="padding-left:15px; color:#666;">
-                            <div style="display:flex; justify-content:space-between;">- Filled with default: <span>${stats.missingFilled}</span></div>
-                            <div style="display:flex; justify-content:space-between;">- Skipped: <span>${stats.missingSkipped}</span></div>
-                        </div>
-                    </div>
-
-                    <div style="text-align:center; border-top:1px solid #eee; padding-top:15px; margin-top:10px;">
-                        <button id="eis-close-report-btn" class="btn btn-primary" style="min-width: 100px; border-radius: 4px;">OK</button>
                     </div>
                 </div>
             </div>
         `;
 
-        $('body').append(modalHtml);
-
-        $('#eis-close-report-btn').click(function () {
-            $('#eis-grade-modal').remove();
-        });
+        showBootstrapModal(modalHtml);
     }
 
     function updateInput($input, val) {
@@ -497,7 +525,7 @@
     }
 
     function visualSuccess($tr, $input) {
-        $tr.css('background-color', '#dff0d8'); // Light green
+        $tr.css('background-color', '#dff0d8');
         $input.css('border', '2px solid #3c763d');
     }
 
