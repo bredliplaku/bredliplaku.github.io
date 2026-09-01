@@ -161,12 +161,6 @@ function groupRows(rows) {
         }
     });
 
-    // Sort entries within each section: by code (numeric number) then by text.
-    // E.g. "PIR 123" -> "CE 211" -> "CE 322"
-    Object.keys(grouped.entries).forEach(sec => {
-        grouped.entries[sec].sort((a, b) => compareCourseLabels(a.label, b.label));
-    });
-
     // Only keep categories that have at least one visible (non-hidden) entry.
     // If all entries in a category are hidden (or the category has no entries),
     // the whole category module is hidden from the public timetable page.
@@ -175,10 +169,22 @@ function groupRows(rows) {
     return grouped;
 }
 
+// Strips academic and professional titles from names for accurate alphabetical sorting
+// Supported titles & combinations: Prof., Dr., Assoc., Acad., MSc., Mr., Ms., Mrs.
+function stripTitles(str) {
+    let s = String(str || '').trim();
+    const titleToken = /\b(?:Prof(?:essor)?|Dr|Assoc(?:\.?\s*Prof(?:essor)?)?|Acad(?:emician)?|M\.?Sc|Mr|Ms|Mrs)\.?/i;
+    const titlePattern = new RegExp(`^(?:${titleToken.source}\\s*)+`, 'i');
+    const stripped = s.replace(titlePattern, '').trim();
+    return stripped || s;
+}
+
 function parseCourseLabel(label) {
     const str = String(label || '').trim();
-    // Extract number from string, e.g. "PIR 123", "CE 211", "CE 322", "CE213", "BAFAL 309"
-    const match = str.match(/^(.*?)(?:[\s\-_]*)(\d+)(.*)$/);
+    const cleanStr = stripTitles(str);
+
+    // Extract number from string, e.g. "PIR 123", "CE 211", "CE 322", "CE213", "Group 1"
+    const match = cleanStr.match(/^(.*?)(?:[\s\-_]*)(\d+)(.*)$/);
     if (match) {
         const prefix = match[1].trim();
         const num = parseInt(match[2], 10);
@@ -187,15 +193,17 @@ function parseCourseLabel(label) {
         return {
             hasNum: true,
             num,
-            text,
+            text: text || cleanStr,
             raw: str,
+            clean: cleanStr,
         };
     }
     return {
         hasNum: false,
         num: Infinity,
-        text: str,
+        text: cleanStr,
         raw: str,
+        clean: cleanStr,
     };
 }
 
@@ -208,14 +216,19 @@ function compareCourseLabels(aLabel, bLabel) {
         if (a.num !== b.num) {
             return a.num - b.num;
         }
-        return a.text.localeCompare(b.text, undefined, { numeric: true, sensitivity: 'base' });
+        const textCmp = a.text.localeCompare(b.text, undefined, { numeric: true, sensitivity: 'base' });
+        if (textCmp !== 0) return textCmp;
+        return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
     }
 
     // Items with course numbers come before non-numbered items
     if (a.hasNum && !b.hasNum) return -1;
     if (!a.hasNum && b.hasNum) return 1;
 
-    // Otherwise sort by natural alphabetical text
+    // Non-numbered items (e.g. Lecturer names): sort by clean name (ignoring titles)
+    const cleanCmp = a.clean.localeCompare(b.clean, undefined, { numeric: true, sensitivity: 'base' });
+    if (cleanCmp !== 0) return cleanCmp;
+
     return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
 }
 
