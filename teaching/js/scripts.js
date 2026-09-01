@@ -1134,9 +1134,10 @@ async function tryPublicAccess() {
         const semesters = {};
         rows.forEach(r => {
             if (!seen.has(r.sheet_name)) { seen.add(r.sheet_name); availableCourses.push(r.sheet_name); }
-            if (r.b === 'code') codes[r.sheet_name] = r.c;
-            if (r.b === 'year') years[r.sheet_name] = r.c;
-            if (r.b === 'semester') semesters[r.sheet_name] = r.c;
+            const bKey = String(r.b || '').trim().toLowerCase();
+            if (bKey === 'code') codes[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'year') years[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'semester') semesters[r.sheet_name] = String(r.c || '').trim();
         });
 
         if (availableCourses.length === 0) return false;
@@ -1197,21 +1198,62 @@ function yearStart(y) {
     return m ? parseInt(m[1], 10) : -1;
 }
 
+// Strips academic and professional titles (Prof., Dr., Assoc., Acad., MSc., Mr., Ms., Mrs. and combinations)
+function stripTitles(str) {
+    let s = String(str || '').trim();
+    const titleToken = /\b(?:Prof(?:essor)?|Dr|Assoc(?:\.?\s*Prof(?:essor)?)?|Acad(?:emician)?|M\.?Sc|Mr|Ms|Mrs)\.?/i;
+    const titlePattern = new RegExp(`^(?:${titleToken.source}\\s*)+`, 'i');
+    const stripped = s.replace(titlePattern, '').trim();
+    return stripped || s;
+}
+
 // Extracts the course number (e.g. 211 from "CE 211") and prefix text (e.g. "CE").
 function parseCourseCode(str) {
     const s = String(str || '').trim();
-    const numMatch = s.match(/\d+/);
-    const num = numMatch ? parseInt(numMatch[0], 10) : Infinity;
-    const text = s.replace(/\d+/g, '').replace(/[_-\s]+/g, ' ').trim();
-    return { num, text, raw: s };
+    const cleanStr = stripTitles(s);
+    const match = cleanStr.match(/^(.*?)(?:[\s\-_]*)(\d+)(.*)$/);
+    if (match) {
+        const prefix = match[1].trim();
+        const num = parseInt(match[2], 10);
+        const suffix = match[3].trim();
+        const text = [prefix, suffix].filter(Boolean).join(' ').trim();
+        return {
+            hasNum: true,
+            num,
+            text: text || cleanStr,
+            raw: s,
+            clean: cleanStr,
+        };
+    }
+    return {
+        hasNum: false,
+        num: Infinity,
+        text: cleanStr,
+        raw: s,
+        clean: cleanStr,
+    };
 }
 
 function compareCourseCodes(aCode, bCode) {
     const a = parseCourseCode(aCode);
     const b = parseCourseCode(bCode);
-    if (a.num !== b.num) return a.num - b.num;
-    const textCmp = a.text.localeCompare(b.text, undefined, { sensitivity: 'base' });
-    if (textCmp !== 0) return textCmp;
+
+    // Both have numbers: sort first by number (e.g. 123 < 211 < 322), then by text
+    if (a.hasNum && b.hasNum) {
+        if (a.num !== b.num) return a.num - b.num;
+        const textCmp = a.text.localeCompare(b.text, undefined, { sensitivity: 'base' });
+        if (textCmp !== 0) return textCmp;
+        return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    // Items with numbers come before non-numbered items
+    if (a.hasNum && !b.hasNum) return -1;
+    if (!a.hasNum && b.hasNum) return 1;
+
+    // Non-numbered items: sort alphabetically
+    const cleanCmp = a.clean.localeCompare(b.clean, undefined, { numeric: true, sensitivity: 'base' });
+    if (cleanCmp !== 0) return cleanCmp;
+
     return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
 }
 
@@ -1511,9 +1553,10 @@ async function fetchCourseCodes() {
             const years = {};
             const semesters = {};
             rows.forEach(r => {
-                if (r.b === 'code') codes[r.sheet_name] = r.c;
-                if (r.b === 'year') years[r.sheet_name] = r.c;
-                if (r.b === 'semester') semesters[r.sheet_name] = r.c;
+                const bKey = String(r.b || '').trim().toLowerCase();
+                if (bKey === 'code') codes[r.sheet_name] = String(r.c || '').trim();
+                if (bKey === 'year') years[r.sheet_name] = String(r.c || '').trim();
+                if (bKey === 'semester') semesters[r.sheet_name] = String(r.c || '').trim();
             });
             Object.assign(courseMap, codes);
             Object.assign(courseYearMap, years);

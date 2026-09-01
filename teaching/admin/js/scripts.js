@@ -568,13 +568,15 @@ async function loadSidebar() {
   if (error) { toast('Sidebar error: ' + error.message, 'err'); return; }
   const map = {};
   for (const r of (data || [])) {
-    const k = r.sheet_name + '|' + String(r.is_archive);
-    if (!map[k]) map[k] = { sheet_name: r.sheet_name, is_archive: r.is_archive };
-    if (r.b === 'code') map[k].code = r.c;
-    if (r.b === 'title') map[k].title = r.c;
-    if (r.b === 'semester') map[k].semester = r.c;
-    if (r.b === 'year') map[k].year = r.c;
-    if (r.b === 'header_decoration') map[k].icon = r.c;
+    const isArch = r.is_archive === true || r.is_archive === 'true' || r.is_archive === 1 || r.is_archive === '1';
+    const k = r.sheet_name + '|' + String(isArch);
+    if (!map[k]) map[k] = { sheet_name: r.sheet_name, is_archive: isArch };
+    const bKey = String(r.b || '').trim().toLowerCase();
+    if (bKey === 'code') map[k].code = String(r.c || '').trim();
+    if (bKey === 'title') map[k].title = String(r.c || '').trim();
+    if (bKey === 'semester') map[k].semester = String(r.c || '').trim();
+    if (bKey === 'year') map[k].year = String(r.c || '').trim();
+    if (bKey === 'header_decoration') map[k].icon = String(r.c || '').trim();
   }
   const active = Object.values(map).filter(c => !c.is_archive).sort(courseOrder);
   const archive = Object.values(map).filter(c => c.is_archive).sort(courseOrder);
@@ -586,21 +588,62 @@ async function loadSidebar() {
 // offering first — academic year descending, and within a year Summer → Spring → Fall.
 const SEMESTER_ORDER = ['Summer', 'Spring', 'Fall'];
 
+// Strips academic and professional titles (Prof., Dr., Assoc., Acad., MSc., Mr., Ms., Mrs. and combinations)
+function stripTitles(str) {
+  let s = String(str || '').trim();
+  const titleToken = /\b(?:Prof(?:essor)?|Dr|Assoc(?:\.?\s*Prof(?:essor)?)?|Acad(?:emician)?|M\.?Sc|Mr|Ms|Mrs)\.?/i;
+  const titlePattern = new RegExp(`^(?:${titleToken.source}\\s*)+`, 'i');
+  const stripped = s.replace(titlePattern, '').trim();
+  return stripped || s;
+}
+
 // Extracts the course number (e.g. 211 from "CE 211") and prefix text (e.g. "CE").
 function parseCourseCode(str) {
   const s = String(str || '').trim();
-  const numMatch = s.match(/\d+/);
-  const num = numMatch ? parseInt(numMatch[0], 10) : Infinity;
-  const text = s.replace(/\d+/g, '').replace(/[_-\s]+/g, ' ').trim();
-  return { num, text, raw: s };
+  const cleanStr = stripTitles(s);
+  const match = cleanStr.match(/^(.*?)(?:[\s\-_]*)(\d+)(.*)$/);
+  if (match) {
+    const prefix = match[1].trim();
+    const num = parseInt(match[2], 10);
+    const suffix = match[3].trim();
+    const text = [prefix, suffix].filter(Boolean).join(' ').trim();
+    return {
+      hasNum: true,
+      num,
+      text: text || cleanStr,
+      raw: s,
+      clean: cleanStr,
+    };
+  }
+  return {
+    hasNum: false,
+    num: Infinity,
+    text: cleanStr,
+    raw: s,
+    clean: cleanStr,
+  };
 }
 
 function compareCourseCodes(aCode, bCode) {
   const a = parseCourseCode(aCode);
   const b = parseCourseCode(bCode);
-  if (a.num !== b.num) return a.num - b.num;
-  const textCmp = a.text.localeCompare(b.text, undefined, { sensitivity: 'base' });
-  if (textCmp !== 0) return textCmp;
+
+  // Both have numbers: sort first by number (e.g. 123 < 211 < 322), then by text
+  if (a.hasNum && b.hasNum) {
+    if (a.num !== b.num) return a.num - b.num;
+    const textCmp = a.text.localeCompare(b.text, undefined, { sensitivity: 'base' });
+    if (textCmp !== 0) return textCmp;
+    return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  // Items with numbers come before non-numbered items
+  if (a.hasNum && !b.hasNum) return -1;
+  if (!a.hasNum && b.hasNum) return 1;
+
+  // Non-numbered items: sort alphabetically
+  const cleanCmp = a.clean.localeCompare(b.clean, undefined, { numeric: true, sensitivity: 'base' });
+  if (cleanCmp !== 0) return cleanCmp;
+
   return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
 }
 
@@ -619,7 +662,9 @@ function yearStart(y) {
 }
 
 function courseOrder(a, b) {
-  return compareCourseCodes(a.code || a.sheet_name, b.code || b.sheet_name)
+  const codeA = a.code || a.sheet_name;
+  const codeB = b.code || b.sheet_name;
+  return compareCourseCodes(codeA, codeB)
     || (yearStart(b.year) - yearStart(a.year))
     || (semesterRank(a.semester) - semesterRank(b.semester));
 }
