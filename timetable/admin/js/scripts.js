@@ -42,9 +42,8 @@
   const FA_SEARCH_URL = 'https://fontawesome.com/search?ic=free-collection';
 
   const SECTIONS = [
-    { id: 'semester', label: 'Semester', icon: 'fa-solid fa-calendar-days' },
-    { id: 'header', label: 'Header', icon: 'fa-solid fa-heading' },
     { id: 'categories', label: 'Categories', icon: 'fa-solid fa-layer-group' },
+    { id: 'settings', label: 'Settings', icon: 'fa-solid fa-gear' },
   ];
 
   const SETTING_KEYS = ['semester_start', 'semester_end', 'holiday_start', 'holiday_weeks'];
@@ -53,7 +52,18 @@
   // step with every successful save, so a tab switch never needs a round trip.
   let ROWS = {};
 
-  const S = { admin: null, section: 'semester' };
+  const TAB_KEY = 'tt-admin-tab';
+  const VALID_SECTIONS = new Set(SECTIONS.map(s => s.id));
+
+  function cachedSection() {
+    try {
+      const saved = localStorage.getItem(TAB_KEY);
+      if (saved && VALID_SECTIONS.has(saved)) return saved;
+    } catch { }
+    return 'categories';
+  }
+
+  const S = { admin: null, section: cachedSection() };
 
   let _sessionHandled = false;
   let _confirmResolve = null;
@@ -468,15 +478,15 @@
 
   function selectSection(id) {
     S.section = id;
+    try { localStorage.setItem(TAB_KEY, id); } catch { }
     document.querySelectorAll('#section-tabs .section-tab')
       .forEach(b => b.classList.toggle('active', b.dataset.sec === id));
 
     const body = document.getElementById('section-body');
     body.classList.remove('loaded');
     body.innerHTML = ({
-      semester: renderSemester,
-      header: renderHeader,
       categories: renderCategories,
+      settings: renderSettings,
     })[id]();
 
     // Next frame so the entry animation actually plays on a fresh render.
@@ -487,19 +497,23 @@
   }
 
 
-  /* === TAB 1: SEMESTER ==================================================== */
+  /* === SETTINGS TAB (Semester + Header merged) ============================= */
 
   function settingValue(key) {
     return rowsOfType('setting').find(r => r.b === key)?.c || '';
   }
 
-  function renderSemester() {
+  function renderSettings() {
     const v = k => x(settingValue(k));
+    const info = rowsOfType('info_item');
+    const buttons = rowsOfType('action_button');
+
     return `
       <div class="section-topbar">
         <button class="btn-sm btn-save-section" id="section-save-btn"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
       </div>
       <div class="settings-panel">
+
         <div class="settings-group">
           <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-calendar-days"></i>Semester Dates</span></div>
           <div class="settings-body">
@@ -538,17 +552,38 @@
             <div class="form-hint" id="preview-note" style="margin-top:8px"></div>
           </div>
         </div>
+
+        <div class="settings-group" style="margin-top:6px">
+          <div class="settings-head">
+            <span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-circle-info"></i>Info Chips</span>
+            <button class="btn-sm btn-secondary" type="button" id="add-info-btn"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Chip</button>
+          </div>
+          <div class="settings-body" id="info-list">
+            ${info.map(r => infoCardHtml(r.b, r.c)).join('') ||
+      '<div class="form-hint" id="no-info-msg" style="padding:4px 0">No info chips yet.</div>'}
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="settings-head">
+            <span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-link"></i>Action Buttons</span>
+            <button class="btn-sm btn-secondary" type="button" id="add-action-btn"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Button</button>
+          </div>
+          <div class="settings-body" id="action-list">
+            ${buttons.map(r => actionCardHtml(r.b, r.c, r.d, r.e)).join('') ||
+      '<div class="form-hint" id="no-action-msg" style="padding:4px 0">No action buttons yet.</div>'}
+          </div>
+        </div>
+
       </div>`;
   }
 
-  // Recomputes the preview from the form as it's typed, using the very same
-  // functions the public page uses — so what's previewed can't drift from
-  // what visitors actually see.
   function updateSemesterPreview() {
-    const start = document.getElementById('set_semester_start').value;
-    const end = document.getElementById('set_semester_end').value;
-    const hStart = document.getElementById('set_holiday_start').value;
-    const hWeeks = document.getElementById('set_holiday_weeks').value;
+    const start = document.getElementById('set_semester_start')?.value;
+    const end = document.getElementById('set_semester_end')?.value;
+    const hStart = document.getElementById('set_holiday_start')?.value;
+    const hWeeks = document.getElementById('set_holiday_weeks')?.value;
+    if (!start && !end) return;
 
     const week = window.calculateSemesterWeek(start, end, hStart, hWeeks);
     const pct = window.semesterProgress(start, end);
@@ -562,84 +597,11 @@
     else note.textContent = `${Math.round(pct)}% of the semester elapsed.`;
   }
 
-  async function saveSemester(btn) {
-    const values = {
-      semester_start: document.getElementById('set_semester_start').value,
-      semester_end: document.getElementById('set_semester_end').value,
-      holiday_start: document.getElementById('set_holiday_start').value,
-      holiday_weeks: document.getElementById('set_holiday_weeks').value,
-    };
-
-    if (values.semester_start && values.semester_end &&
-      new Date(values.semester_end) <= new Date(values.semester_start)) {
-      toast('End date must be after the start date', 'err');
-      return;
-    }
-
-    // Blank values are stored as empty rows rather than deleted, so the keys
-    // stay visible in the table editor.
-    const rows = SETTING_KEYS.map((key, i) => ({
-      ...BLANK,
-      row_uid: uid('settings', key),
-      section: 'settings',
-      row_index: i,
-      type: 'setting',
-      b: key,
-      c: values[key] || '',
-    }));
-
-    await withSaveButton(btn, async () => {
-      try {
-        await replaceRows(r => r.type === 'setting', rows);
-        clearDirty();
-        toast('Semester saved', 'ok');
-      } catch (err) {
-        toast('Save failed: ' + err.message, 'err');
-      }
-    });
-  }
-
-
-  /* === TAB 2: HEADER (info chips + action buttons) ======================== */
-
-  function renderHeader() {
-    const info = rowsOfType('info_item');
-    const buttons = rowsOfType('action_button');
-
-    return `
-      <div class="section-topbar">
-        <button class="btn-sm btn-save-section" id="section-save-btn"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
-      </div>
-      <div class="settings-panel">
-        <div class="settings-group" style="margin-bottom:14px">
-          <div class="settings-head">
-            <span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-circle-info"></i>Info Chips</span>
-            <button class="btn-sm btn-secondary" type="button" id="add-info-btn"><i class="fa-solid fa-plus"></i></button>
-          </div>
-          <div class="settings-body" id="info-list">
-            ${info.map(r => infoCardHtml(r.b, r.c)).join('') ||
-      '<div class="form-hint" id="no-info-msg" style="padding:4px 0">No info chips yet.</div>'}
-          </div>
-        </div>
-
-        <div class="settings-group">
-          <div class="settings-head">
-            <span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-link"></i>Action Buttons</span>
-            <button class="btn-sm btn-secondary" type="button" id="add-action-btn"><i class="fa-solid fa-plus"></i></button>
-          </div>
-          <div class="settings-body" id="action-list">
-            ${buttons.map(r => actionCardHtml(r.b, r.c, r.d, r.e)).join('') ||
-      '<div class="form-hint" id="no-action-msg" style="padding:4px 0">No action buttons yet.</div>'}
-          </div>
-        </div>
-      </div>`;
-  }
-
   function infoCardHtml(icon = '', text = '') {
     return `<div class="dynamic-card" data-kind="info">
       <div class="dynamic-card-head">
         <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle" style="margin-right:8px;opacity:0.5;cursor:grab"></i><span class="dcl-text">${x(text || 'New Chip')}</span></span>
-        <button class="btn-red btn-sm" type="button" data-remove="1"><i class="fa-solid fa-trash"></i></button>
+        <button class="btn-action-del" type="button" data-remove="1" title="Delete chip"><i class="fa-solid fa-trash"></i></button>
       </div>
       <div class="dynamic-card-body sg-grid2">
         <div class="form-group">
@@ -658,7 +620,7 @@
     return `<div class="dynamic-card" data-kind="action">
       <div class="dynamic-card-head">
         <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle" style="margin-right:8px;opacity:0.5;cursor:grab"></i><span class="dcl-text">${x(label || 'New Button')}</span></span>
-        <button class="btn-red btn-sm" type="button" data-remove="1"><i class="fa-solid fa-trash"></i></button>
+        <button class="btn-action-del" type="button" data-remove="1" title="Delete button"><i class="fa-solid fa-trash"></i></button>
       </div>
       <div class="dynamic-card-body sg-grid2">
         <div class="form-group">
@@ -684,10 +646,32 @@
     </div>`;
   }
 
-  async function saveHeader(btn) {
-    // A card the user added but never filled in is dropped silently — that's
-    // just an abandoned "+" click. A *partly* filled one is a mistake worth
-    // reporting rather than quietly discarding.
+  async function saveSettings(btn) {
+    // — Semester validation —
+    const values = {
+      semester_start: document.getElementById('set_semester_start').value,
+      semester_end: document.getElementById('set_semester_end').value,
+      holiday_start: document.getElementById('set_holiday_start').value,
+      holiday_weeks: document.getElementById('set_holiday_weeks').value,
+    };
+
+    if (values.semester_start && values.semester_end &&
+      new Date(values.semester_end) <= new Date(values.semester_start)) {
+      toast('End date must be after the start date', 'err');
+      return;
+    }
+
+    const settingRows = SETTING_KEYS.map((key, i) => ({
+      ...BLANK,
+      row_uid: uid('settings', key),
+      section: 'settings',
+      row_index: i,
+      type: 'setting',
+      b: key,
+      c: values[key] || '',
+    }));
+
+    // — Header validation —
     const info = [...document.querySelectorAll('#info-list .dynamic-card')]
       .map(card => ({
         icon: fieldValue(card, 'info_icon'),
@@ -713,7 +697,7 @@
       return;
     }
 
-    const rows = [
+    const headerRows = [
       ...info.map((r, i) => ({
         ...BLANK, row_uid: uid('settings', 'info', String(i)), section: 'settings',
         row_index: i, type: 'info_item', b: r.icon, c: r.text,
@@ -726,9 +710,10 @@
 
     await withSaveButton(btn, async () => {
       try {
-        await replaceRows(r => r.type === 'info_item' || r.type === 'action_button', rows);
+        await replaceRows(r => r.type === 'setting', settingRows);
+        await replaceRows(r => r.type === 'info_item' || r.type === 'action_button', headerRows);
         clearDirty();
-        toast('Header saved', 'ok');
+        toast('Settings saved', 'ok');
       } catch (err) {
         toast('Save failed: ' + err.message, 'err');
       }
@@ -736,13 +721,7 @@
   }
 
 
-  /* === TAB 3: CATEGORIES (each with its own entries nested inside) ========
-     Categories and their entries used to be two separate tabs — reordering a
-     category and reordering its buttons meant switching back and forth for
-     no reason, since they're really one thing (a tab on the public page and
-     what's inside it). Now every category's entries render right inside its
-     own card, and one Save persists the whole tree in one pass.
-     ====================================================================== */
+  /* === TAB 1: CATEGORIES (clean cards with streamlined entry rows) ========= */
 
   function renderCategories() {
     const cats = rowsOfType('category');
@@ -754,15 +733,10 @@
         <button class="btn-sm btn-save-section" id="section-save-btn"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
       </div>
       <div class="settings-panel">
-        <div class="settings-group">
-          <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-layer-group"></i>Tabs on the public page</span></div>
-          <div class="settings-body">
-            <div class="form-hint" style="margin-bottom:10px">Drag a category by its handle to reorder the public tabs; drag an entry to reorder its buttons.</div>
-            <div id="category-list">
-              ${cats.map(r => categoryBlockHtml(r.b, r.c, r.d)).join('') ||
+        <div class="form-hint" style="margin-bottom:12px">Drag a category by its handle to reorder the public tabs; drag an entry to reorder its buttons.</div>
+        <div id="category-list">
+          ${cats.map(r => categoryBlockHtml(r.b, r.c, r.d)).join('') ||
       '<div class="form-hint" id="no-cat-msg" style="padding:4px 0">No categories yet.</div>'}
-            </div>
-          </div>
         </div>
       </div>`;
   }
@@ -770,86 +744,147 @@
   function categoryBlockHtml(name = '', icon = '', kind = 'timetable') {
     const isLecturer = kind === 'lecturer';
     const entries = name ? rowsInSection(name, isLecturer ? 'lecturer' : 'entry') : [];
-    return `<div class="dynamic-card category-block" data-original="${x(name)}">
-      <div class="dynamic-card-head">
-        <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle cat-drag-handle" style="margin-right:8px"></i><span class="dcl-text">${x(name || 'New Category')}</span></span>
-        <button class="btn-red btn-sm" type="button" data-remove="1"><i class="fa-solid fa-trash"></i></button>
-      </div>
-      <div class="dynamic-card-body sg-grid3">
-        <div class="form-group">
-          <label class="form-label">Name</label>
-          <input type="text" name="cat_name" value="${x(name)}" data-label-source="New Category">
+    const allHidden = entries.length > 0 && entries.every(r => r.e === '1');
+    return `<div class="category-card" data-original="${x(name)}">
+      <div class="category-card-head" data-collapse-toggle="1">
+        <div class="category-card-title-group">
+          <i class="fa-solid fa-grip-vertical cat-drag-handle" title="Drag to reorder category"></i>
+          <i class="category-head-icon ${x(icon || 'fa-solid fa-layer-group')}"></i>
+          <span class="category-head-title">${x(name || 'New Category')}</span>
+          <span class="badge category-count-badge">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</span>
+          <span class="badge category-kind-badge">${isLecturer ? 'Lecturers' : 'Class Timetables'}</span>
+          ${allHidden ? '<span class="badge category-hidden-badge"><i class="fa-solid fa-eye-slash" style="margin-right:4px"></i>Hidden</span>' : ''}
         </div>
-        <div class="form-group">
-          <label class="form-label">Icon</label>
-          ${iconInputHtml('cat_icon', icon)}
-        </div>
-        <div class="form-group">
-          <label class="form-label">Kind</label>
-          <select name="cat_kind">
-            <option value="timetable"${isLecturer ? '' : ' selected'}>Class timetables</option>
-            <option value="lecturer"${isLecturer ? ' selected' : ''}>Lecturers</option>
-          </select>
+        <div class="category-card-actions">
+          <button class="btn-action-vis" type="button" data-toggle-cat-vis="1" title="${allHidden ? 'Show all entries in this category' : 'Hide all entries in this category'}"><i class="fa-solid ${allHidden ? 'fa-eye-slash' : 'fa-eye'}"></i></button>
+          <button class="btn-action-del" type="button" data-remove="1" title="Delete category"><i class="fa-solid fa-trash"></i></button>
         </div>
       </div>
-      <div class="category-entries">
-        <div class="category-entries-head">
-          <span><i class="fa-solid fa-list-ul" style="margin-right:6px;opacity:0.7"></i>Entries</span>
-          <button class="btn-sm btn-secondary" type="button" data-add-entry="1"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Entry</button>
-        </div>
-        <div class="entry-list" data-kind="${isLecturer ? 'lecturer' : 'entry'}">
-          ${entries.map(r => entryCardHtml(isLecturer, r.b, r.c, r.d, r.e === '1')).join('') ||
-      '<div class="form-hint entry-list-empty" style="padding:4px 0">No entries yet.</div>'}
+      <div class="category-card-body-wrap">
+        <div class="category-card-body">
+          <div class="category-config-row">
+            <div class="form-group">
+              <label class="form-label">Category Name</label>
+              <input type="text" name="cat_name" value="${x(name)}" placeholder="e.g. Civil Engineering Year 1" data-label-source="New Category">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tab Icon</label>
+              ${iconInputHtml('cat_icon', icon)}
+            </div>
+            <div class="form-group">
+              <label class="form-label">Type</label>
+              <select name="cat_kind">
+                <option value="timetable"${isLecturer ? '' : ' selected'}>Class Timetables</option>
+                <option value="lecturer"${isLecturer ? ' selected' : ''}>Lecturers</option>
+              </select>
+            </div>
+          </div>
+          <div class="category-entries-section">
+            <div class="entries-section-header">
+              <div class="entries-section-title">
+                <i class="fa-solid fa-list-ul"></i>
+                <span>Entries</span>
+              </div>
+              <div class="entries-header-actions" style="display:flex;align-items:center;gap:6px">
+                <button class="btn-sm btn-secondary" type="button" data-toggle-cat-vis="1" title="${allHidden ? 'Show all entries' : 'Hide all entries'}">
+                  <i class="fa-solid ${allHidden ? 'fa-eye' : 'fa-eye-slash'}" style="margin-right:5px"></i><span>${allHidden ? 'Show All' : 'Hide All'}</span>
+                </button>
+                <button class="btn-sm btn-secondary" type="button" data-add-entry="1"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Entry</button>
+              </div>
+            </div>
+            <div class="entries-table-header ${isLecturer ? 'kind-lecturer' : 'kind-timetable'}">
+              <span class="col-handle"></span>
+              <span class="col-label">Label / Name</span>
+              ${isLecturer
+        ? '<span class="col-id">Lecturer ID</span>'
+        : '<span class="col-id">Timetable ID</span><span class="col-id">Class ID</span>'}
+              <span class="col-actions" style="text-align:right">Actions</span>
+            </div>
+            <div class="entry-list" data-kind="${isLecturer ? 'lecturer' : 'entry'}">
+              ${entries.map(r => entryRowHtml(isLecturer, r.b, r.c, r.d, r.e === '1')).join('') ||
+      '<div class="entry-list-empty"><i class="fa-regular fa-folder-open"></i><span>No entries yet. Click "Add Entry" to create one.</span></div>'}
+            </div>
+          </div>
         </div>
       </div>
     </div>`;
   }
 
-  function entryCardHtml(isLecturer, label = '', first = '', second = '', hidden = false) {
+  function entryRowHtml(isLecturer, label = '', first = '', second = '', hidden = false) {
     const fields = isLecturer
-      ? `<div class="form-group">
-           <label class="form-label">Lecturer ID</label>
-           <input type="text" name="entry_first" value="${x(first)}" inputmode="numeric" placeholder="e.g. 655">
+      ? `<div class="entry-cell entry-cell-id">
+           <input type="text" name="entry_first" value="${x(first)}" placeholder="e.g. b3M3VlBz…">
          </div>`
-      : `<div class="form-group">
-           <label class="form-label">Timetable ID</label>
+      : `<div class="entry-cell entry-cell-id">
            <input type="text" name="entry_first" value="${x(first)}" inputmode="numeric" placeholder="e.g. 42">
          </div>
-         <div class="form-group">
-           <label class="form-label">Class ID</label>
+         <div class="entry-cell entry-cell-id">
            <input type="text" name="entry_second" value="${x(second)}" inputmode="numeric" placeholder="e.g. 118">
          </div>`;
 
-    return `<div class="dynamic-card${hidden ? ' is-hidden' : ''}" data-hidden="${hidden ? 'true' : 'false'}">
-      <div class="dynamic-card-head">
-        <span class="dynamic-card-label"><i class="fa-solid fa-grip-vertical drag-handle" style="margin-right:8px;opacity:0.5;cursor:grab"></i><span class="dcl-text">${x(label || 'New Entry')}</span></span>
-        ${hideToggleHtml(hidden)}
-        ${isLecturer ? '' : '<button class="btn-secondary btn-sm" type="button" data-test="1"><i class="fa-solid fa-flask" style="margin-right:5px"></i>Test</button>'}
-        <button class="btn-red btn-sm" type="button" data-remove="1"><i class="fa-solid fa-trash"></i></button>
+    return `<div class="entry-row${hidden ? ' is-hidden' : ''}" data-hidden="${hidden ? 'true' : 'false'}">
+      <div class="entry-cell entry-cell-handle">
+        <i class="fa-solid fa-grip-vertical drag-handle" title="Drag to reorder entry"></i>
       </div>
-      <div class="dynamic-card-body ${isLecturer ? 'sg-grid2' : 'sg-grid3'}">
-        <div class="form-group">
-          <label class="form-label">Label</label>
-          <input type="text" name="entry_label" value="${x(label)}" data-label-source="New Entry">
-        </div>
-        ${fields}
+      <div class="entry-cell entry-cell-label">
+        <input type="text" name="entry_label" value="${x(label)}" placeholder="e.g. ${isLecturer ? 'Prof. Name' : 'Section / Group'}" data-label-source="New Entry">
+      </div>
+      ${fields}
+      <div class="entry-cell entry-cell-actions">
+        ${isLecturer ? '' : '<button class="btn-action-test" type="button" data-test="1" title="Test timetable preview in modal"><i class="fa-solid fa-flask"></i></button>'}
+        ${hideToggleHtml(hidden)}
+        <button class="btn-action-del" type="button" data-remove="1" title="Delete entry"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>`;
   }
 
-  // A hidden entry stays in the admin (so it can be found and re-shown) but
-  // is skipped by the public page's groupRows() — for a class that's
-  // temporarily off, or a lecturer view not ready to publish yet, without
-  // losing the IDs by deleting the row outright.
   function hideToggleHtml(hidden) {
-    return `<button class="btn-ghost btn-sm" type="button" data-toggle-hidden="1"
-              title="${hidden ? 'Hidden from the public page — click to show' : 'Visible on the public page — click to hide'}">
+    return `<button class="btn-action-vis" type="button" data-toggle-hidden="1"
+              title="${hidden ? 'Hidden from public page — click to show' : 'Visible on public page — click to hide'}">
               <i class="fa-solid ${hidden ? 'fa-eye-slash' : 'fa-eye'}"></i>
             </button>`;
   }
 
+  function updateCategoryHeaderState(catCard) {
+    if (!catCard) return;
+    const rows = [...catCard.querySelectorAll('.entry-list > .entry-row')];
+    const total = rows.length;
+    const allHidden = total > 0 && rows.every(r => r.dataset.hidden === 'true');
+
+    // Update count badge
+    const countBadge = catCard.querySelector('.category-count-badge');
+    if (countBadge) countBadge.textContent = `${total} ${total === 1 ? 'entry' : 'entries'}`;
+
+    // Update hidden badge in title group
+    let hiddenBadge = catCard.querySelector('.category-hidden-badge');
+    if (allHidden) {
+      if (!hiddenBadge) {
+        const titleGroup = catCard.querySelector('.category-card-title-group');
+        if (titleGroup) {
+          titleGroup.insertAdjacentHTML('beforeend', '<span class="badge category-hidden-badge"><i class="fa-solid fa-eye-slash" style="margin-right:4px"></i>Hidden</span>');
+        }
+      }
+    } else if (hiddenBadge) {
+      hiddenBadge.remove();
+    }
+
+    // Update the icon button in category card actions
+    const headVisBtn = catCard.querySelector('.category-card-actions [data-toggle-cat-vis]');
+    if (headVisBtn) {
+      headVisBtn.title = allHidden ? 'Show all entries in this category' : 'Hide all entries in this category';
+      headVisBtn.innerHTML = `<i class="fa-solid ${allHidden ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
+    }
+
+    // Update the button in entries section header
+    const entriesVisBtn = catCard.querySelector('.entries-header-actions [data-toggle-cat-vis]');
+    if (entriesVisBtn) {
+      entriesVisBtn.title = allHidden ? 'Show all entries' : 'Hide all entries';
+      entriesVisBtn.innerHTML = `<i class="fa-solid ${allHidden ? 'fa-eye' : 'fa-eye-slash'}" style="margin-right:5px"></i><span>${allHidden ? 'Show All' : 'Hide All'}</span>`;
+    }
+  }
+
   async function saveCategoriesTab(btn) {
-    const catCards = [...document.querySelectorAll('#category-list > .category-block')];
+    const catCards = [...document.querySelectorAll('#category-list > .category-card')];
     const cats = catCards.map(card => ({
       name: fieldValue(card, 'cat_name'),
       icon: fieldValue(card, 'cat_icon'),
@@ -862,37 +897,29 @@
       toast('Category names must be unique', 'err');
       return;
     }
-    // Entry row_uids are keyed by the category's slug, so two names that differ
-    // only in punctuation ("Year 1" / "Year-1") would collide in the database
-    // even though they look distinct here.
     if (new Set(names.map(slug)).size !== names.length) {
       toast('Category names must differ by more than punctuation', 'err');
       return;
     }
 
-    // Build every entry row up front, across ALL categories, keyed by each
-    // category's CURRENT (possibly just-renamed) name. A category removed via
-    // its own trash icon (already confirmed at that point — see the delegated
-    // click handler below) simply has no card here, so its entries are
-    // naturally left out of this set; replaceRows()'s diff below deletes
-    // whatever's no longer in it. Because the final set is keyed by the
-    // current name rather than the old one, a rename needs no separate "move
-    // the old rows" step either — this one combined write replaces both.
     const entryRows = [];
     for (const cat of cats) {
       const list = cat.card.querySelector('.entry-list');
       const isLecturer = cat.kind === 'lecturer';
-      const items = [...list.querySelectorAll(':scope > .dynamic-card')].map(card => ({
-        label: fieldValue(card, 'entry_label'),
-        first: fieldValue(card, 'entry_first'),
-        second: fieldValue(card, 'entry_second'),
-        hidden: card.dataset.hidden === 'true',
-      })).filter(e => e.label);
+      const items = [...list.querySelectorAll(':scope > .entry-row')].map(row => ({
+        label: fieldValue(row, 'entry_label'),
+        first: fieldValue(row, 'entry_first'),
+        second: fieldValue(row, 'entry_second'),
+        hidden: row.dataset.hidden === 'true',
+      })).filter(e => e.label || e.first || e.second);
 
-      const bad = items.find(e =>
-        !/^\d+$/.test(e.first) || (!isLecturer && !/^\d+$/.test(e.second)));
+      const bad = isLecturer
+        ? items.find(e => !e.first)
+        : items.find(e => !/^\d+$/.test(e.first) || !/^\d+$/.test(e.second));
       if (bad) {
-        toast(`"${bad.label}" in ${cat.name} needs numeric ID${isLecturer ? '' : 's'}`, 'err');
+        toast(isLecturer
+          ? `"${bad.label || 'Untitled'}" in ${cat.name} needs a Lecturer ID`
+          : `"${bad.label || 'Untitled'}" in ${cat.name} needs numeric IDs`, 'err');
         return;
       }
       const labels = items.map(e => e.label);
@@ -934,9 +961,7 @@
     });
   }
 
-  // Fetches and renders a class timetable in the modal, using the exact same
-  // Edge Function, sanitizer and renderer as the public page — so a table that
-  // looks right here looks right there.
+  // Fetches and renders a class timetable in the modal
   async function testEntry(card) {
     const label = fieldValue(card, 'entry_label') || 'Entry';
     const tId = fieldValue(card, 'entry_first');
@@ -964,7 +989,6 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const html = await res.text();
 
-      // The modal may already be closed and reopened on another card.
       if (!document.body.contains(inner)) return;
 
       if (!html.includes('<table')) {
@@ -980,23 +1004,60 @@
   }
 
 
-  /* === SECTION WIRING =====================================================
-     Listeners are attached in JS rather than inline in the markup, so nothing
-     extra has to be exposed on window and the card templates stay free of
-     handler strings.
-
-     The two delegated listeners below are bound ONCE, at module scope.
-     #section-body is a permanent element — only its innerHTML is replaced on
-     a tab switch — so binding them per render would stack a fresh copy every
-     time, and one delete click would raise a confirm dialog per past render.
+  /* === CATEGORY COLLAPSE STATE ============================================
+     Collapsed categories are tracked in localStorage so the state survives
+     page reloads. Keys are the category's data-original (name at last save).
+     Default is all expanded (empty set).
      ====================================================================== */
+
+  const COLLAPSE_KEY = 'tt-admin-collapsed';
+
+  function getCollapsedSet() {
+    try { return new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]')); }
+    catch { return new Set(); }
+  }
+
+  function saveCollapsedSet(set) {
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...set])); } catch { }
+  }
+
+  function toggleCategoryCollapse(catCard) {
+    if (!catCard) return;
+    const isCollapsed = catCard.classList.toggle('is-collapsed');
+    const key = catCard.dataset.original || fieldValue(catCard, 'cat_name');
+    if (key) {
+      const set = getCollapsedSet();
+      isCollapsed ? set.add(key) : set.delete(key);
+      saveCollapsedSet(set);
+    }
+  }
+
+  function restoreCollapseState() {
+    const collapsed = getCollapsedSet();
+    if (!collapsed.size) return;
+    document.querySelectorAll('#category-list > .category-card').forEach(card => {
+      const key = card.dataset.original;
+      if (key && collapsed.has(key)) card.classList.add('is-collapsed');
+    });
+  }
+
+
+  /* === SECTION WIRING ===================================================== */
 
   const sectionBody = document.getElementById('section-body');
 
   // Live card-title updates, icon previews, and the semester preview.
   sectionBody.addEventListener('input', e => {
     const t = e.target;
-    if (t.dataset?.labelSource) {
+    if (t.name === 'cat_name') {
+      const titleEl = t.closest('.category-card')?.querySelector('.category-head-title');
+      if (titleEl) titleEl.textContent = t.value.trim() || t.dataset?.labelSource || 'New Category';
+    }
+    if (t.name === 'cat_icon' || (t.classList?.contains('icon-field') && t.name === 'cat_icon')) {
+      const cardIcon = t.closest('.category-card')?.querySelector('.category-head-icon');
+      if (cardIcon) cardIcon.className = 'category-head-icon ' + (t.value.trim() || 'fa-solid fa-layer-group');
+    }
+    if (t.dataset?.labelSource && t.closest('.dynamic-card')) {
       const lbl = t.closest('.dynamic-card')?.querySelector('.dcl-text');
       if (lbl) lbl.textContent = t.value.trim() || t.dataset.labelSource;
     }
@@ -1004,72 +1065,171 @@
       const preview = t.parentElement.querySelector('.icon-preview-el');
       if (preview) preview.className = 'icon-preview-el ' + (t.value.trim() || 'fa-solid fa-question');
     }
-    if (S.section === 'semester') updateSemesterPreview();
+    if (S.section === 'settings') updateSemesterPreview();
   });
 
-  // Delete / hide-toggle / Test / per-category Add Entry — all delegated so
-  // newly added or nested cards work without rebinding.
+  // Kind switching
+  sectionBody.addEventListener('change', e => {
+    const t = e.target;
+    if (t.name === 'cat_kind') {
+      const catCard = t.closest('.category-card');
+      if (!catCard) return;
+      const isLecturer = t.value === 'lecturer';
+      const kindBadge = catCard.querySelector('.category-kind-badge');
+      if (kindBadge) kindBadge.textContent = isLecturer ? 'Lecturers' : 'Class Timetables';
+
+      const header = catCard.querySelector('.entries-table-header');
+      if (header) {
+        header.className = `entries-table-header ${isLecturer ? 'kind-lecturer' : 'kind-timetable'}`;
+        header.innerHTML = `
+          <span class="col-handle"></span>
+          <span class="col-label">Label / Name</span>
+          ${isLecturer
+            ? '<span class="col-id">Lecturer ID</span>'
+            : '<span class="col-id">Timetable ID</span><span class="col-id">Class ID</span>'}
+          <span class="col-actions" style="text-align:right">Actions</span>
+        `;
+      }
+
+      const list = catCard.querySelector('.entry-list');
+      if (list) {
+        list.dataset.kind = isLecturer ? 'lecturer' : 'entry';
+        const rows = [...list.querySelectorAll(':scope > .entry-row')];
+        rows.forEach(row => {
+          const label = fieldValue(row, 'entry_label');
+          const first = fieldValue(row, 'entry_first');
+          const second = fieldValue(row, 'entry_second');
+          const hidden = row.dataset.hidden === 'true';
+          row.outerHTML = entryRowHtml(isLecturer, label, first, second, hidden);
+        });
+        initSortable(list, '.drag-handle');
+      }
+      updateCategoryHeaderState(catCard);
+      markDirty();
+    }
+  });
+
+  // Delete / hide-toggle / Test / per-category Add Entry
   sectionBody.addEventListener('click', async e => {
     const removeBtn = e.target.closest('[data-remove]');
     if (removeBtn) {
-      const card = removeBtn.closest('.dynamic-card');
-      const name = card.querySelector('.dcl-text')?.textContent || 'this item';
-      // A category card carries its own entries nested inside it now, so
-      // removing one removes them too — worth naming in the confirm rather
-      // than only discovering it after Save.
-      const isCategory = card.classList.contains('category-block');
-      const entryCount = isCategory ? card.querySelectorAll('.entry-list > .dynamic-card').length : 0;
-      const message = entryCount
-        ? `Remove ${name}? Its ${entryCount} entr${entryCount === 1 ? 'y' : 'ies'} will be removed too when you save.`
-        : `Remove ${name}? It's deleted from the site when you save.`;
-      if (await confirmDialog(message, { title: 'Remove', okLabel: 'Remove', danger: true, okIcon: 'fa-trash' })) {
-        card.remove();
-        markDirty();
+      const catCard = removeBtn.closest('.category-card');
+      const entryRow = removeBtn.closest('.entry-row');
+      const dynamicCard = removeBtn.closest('.dynamic-card');
+
+      if (entryRow) {
+        const name = entryRow.querySelector('[name="entry_label"]')?.value || 'this entry';
+        if (await confirmDialog(`Remove "${name}"? It will be deleted from the site when you save.`, { title: 'Remove Entry', okLabel: 'Remove', danger: true, okIcon: 'fa-trash' })) {
+          const list = entryRow.closest('.entry-list');
+          entryRow.remove();
+          if (list && !list.querySelector('.entry-row')) {
+            list.innerHTML = '<div class="entry-list-empty"><i class="fa-regular fa-folder-open"></i><span>No entries yet. Click "Add Entry" to create one.</span></div>';
+          }
+          if (catCard) updateCategoryHeaderState(catCard);
+          markDirty();
+        }
+        return;
       }
+
+      if (catCard && !entryRow) {
+        const name = catCard.querySelector('.category-head-title')?.textContent || 'this category';
+        const entryCount = catCard.querySelectorAll('.entry-list > .entry-row').length;
+        const message = entryCount
+          ? `Remove ${name}? Its ${entryCount} entr${entryCount === 1 ? 'y' : 'ies'} will be removed too when you save.`
+          : `Remove ${name}? It will be deleted from the site when you save.`;
+        if (await confirmDialog(message, { title: 'Remove Category', okLabel: 'Remove', danger: true, okIcon: 'fa-trash' })) {
+          catCard.remove();
+          markDirty();
+        }
+        return;
+      }
+
+      if (dynamicCard) {
+        const name = dynamicCard.querySelector('.dcl-text')?.textContent || 'this item';
+        if (await confirmDialog(`Remove ${name}? It will be deleted from the site when you save.`, { title: 'Remove', okLabel: 'Remove', danger: true, okIcon: 'fa-trash' })) {
+          dynamicCard.remove();
+          markDirty();
+        }
+        return;
+      }
+    }
+
+    const toggleCatVisBtn = e.target.closest('[data-toggle-cat-vis]');
+    if (toggleCatVisBtn) {
+      const catCard = toggleCatVisBtn.closest('.category-card');
+      if (!catCard) return;
+      const rows = [...catCard.querySelectorAll('.entry-list > .entry-row')];
+      if (!rows.length) return;
+
+      const currentlyAllHidden = rows.every(r => r.dataset.hidden === 'true');
+      const setHidden = !currentlyAllHidden;
+
+      rows.forEach(r => {
+        r.dataset.hidden = String(setHidden);
+        r.classList.toggle('is-hidden', setHidden);
+        const visBtn = r.querySelector('[data-toggle-hidden]');
+        if (visBtn) visBtn.outerHTML = hideToggleHtml(setHidden);
+      });
+
+      updateCategoryHeaderState(catCard);
+      markDirty();
       return;
     }
 
     const toggleBtn = e.target.closest('[data-toggle-hidden]');
     if (toggleBtn) {
-      const card = toggleBtn.closest('.dynamic-card');
-      const hidden = card.dataset.hidden !== 'true';
-      card.dataset.hidden = String(hidden);
-      card.classList.toggle('is-hidden', hidden);
+      const row = toggleBtn.closest('.entry-row, .dynamic-card');
+      if (!row) return;
+      const hidden = row.dataset.hidden !== 'true';
+      row.dataset.hidden = String(hidden);
+      row.classList.toggle('is-hidden', hidden);
       toggleBtn.outerHTML = hideToggleHtml(hidden);
+      const catCard = row.closest('.category-card');
+      if (catCard) updateCategoryHeaderState(catCard);
       markDirty();
       return;
     }
 
     const addEntryBtn = e.target.closest('[data-add-entry]');
     if (addEntryBtn) {
-      const list = addEntryBtn.closest('.category-block')?.querySelector('.entry-list');
+      const catCard = addEntryBtn.closest('.category-card');
+      const list = catCard?.querySelector('.entry-list');
       if (!list) return;
       list.querySelector('.entry-list-empty')?.remove();
-      list.insertAdjacentHTML('beforeend', entryCardHtml(list.dataset.kind === 'lecturer'));
+      list.insertAdjacentHTML('beforeend', entryRowHtml(list.dataset.kind === 'lecturer'));
+      updateCategoryHeaderState(catCard);
       markDirty();
       initSortable(list, '.drag-handle');
       list.lastElementChild?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
       return;
     }
 
+    // Clicking the card header (but not the drag handle, delete button, or visibility toggle)
+    // toggles collapse.
+    const collapseHead = e.target.closest('[data-collapse-toggle]');
+    if (collapseHead && !e.target.closest('.cat-drag-handle') && !e.target.closest('[data-remove]') && !e.target.closest('[data-toggle-cat-vis]')) {
+      toggleCategoryCollapse(collapseHead.closest('.category-card'));
+      return;
+    }
+
     const testBtn = e.target.closest('[data-test]');
-    if (testBtn) testEntry(testBtn.closest('.dynamic-card'));
+    if (testBtn) {
+      testEntry(testBtn.closest('.entry-row, .dynamic-card'));
+    }
   });
 
-  // Per-render wiring only: every element touched here is freshly created by
-  // the render that just ran, so these bindings can't accumulate.
+  // Per-render wiring only
   function wireSection(id) {
     const saveBtn = document.getElementById('section-save-btn');
     if (saveBtn) {
       const savers = {
-        semester: saveSemester, header: saveHeader, categories: saveCategoriesTab,
+        settings: saveSettings, categories: saveCategoriesTab,
       };
       saveBtn.addEventListener('click', () => trackSave(savers[id](saveBtn)));
     }
 
-    if (id === 'semester') updateSemesterPreview();
-
-    if (id === 'header') {
+    if (id === 'settings') {
+      updateSemesterPreview();
       wireAdd('add-info-btn', 'info-list', 'no-info-msg', () => infoCardHtml());
       wireAdd('add-action-btn', 'action-list', 'no-action-msg', () => actionCardHtml());
       initDnD('info-list');
@@ -1077,17 +1237,14 @@
     }
 
     if (id === 'categories') {
-      wireAdd('add-category-btn', 'category-list', 'no-cat-msg', () => categoryBlockHtml());
-      // The outer list (categories) and every nested .entry-list are each
-      // their own independent Sortable, distinguished by handle class so a
-      // drag started on an entry's handle can never also register as a
-      // category-level drag on the block containing it.
+      wireAdd('add-category-btn', 'category-list', 'no-cat-msg', () => categoryBlockHtml(), '.cat-drag-handle');
       initDnD('category-list', '.cat-drag-handle');
       document.querySelectorAll('.entry-list').forEach(list => initSortable(list, '.drag-handle'));
+      restoreCollapseState();
     }
   }
 
-  function wireAdd(buttonId, listId, emptyMsgId, html) {
+  function wireAdd(buttonId, listId, emptyMsgId, html, handle = '.drag-handle') {
     const btn = document.getElementById(buttonId);
     const list = document.getElementById(listId);
     if (!btn || !list) return;
@@ -1097,7 +1254,7 @@
       // Bookkeeping before the cosmetic scroll: if scrolling ever throws, the
       // card must still be registered as an unsaved change and be draggable.
       markDirty();
-      initDnD(listId);
+      initDnD(listId, handle);
       // A freshly added category starts with its own (empty) entry list,
       // which needs its own Sortable instance too.
       document.querySelectorAll('.entry-list').forEach(l => initSortable(l, '.drag-handle'));

@@ -161,6 +161,11 @@ function groupRows(rows) {
         }
     });
 
+    // Only keep categories that have at least one visible (non-hidden) entry.
+    // If all entries in a category are hidden (or the category has no entries),
+    // the whole category module is hidden from the public timetable page.
+    grouped.categories = grouped.categories.filter(c => (grouped.entries[c.name] || []).length > 0);
+
     return grouped;
 }
 
@@ -196,7 +201,7 @@ function renderInfoItems() {
     config.infoItems.forEach(item => {
         const span = document.createElement('span');
         span.className = 'info-item dynamic-info-item';
-        span.innerHTML = `<i class="${escapeAttr(item.icon)}"></i> `;
+        span.innerHTML = `<i class="${escapeAttr(item.icon)}"></i>`;
         span.append(item.text);   // author text as a text node, never parsed as HTML
         container.appendChild(span);
     });
@@ -210,7 +215,7 @@ function renderActionButtons() {
     config.actionButtons.forEach(item => {
         const button = document.createElement('button');
         if (item.cssClass) button.className = item.cssClass;
-        button.innerHTML = `<i class="${escapeAttr(item.icon)}"></i> `;
+        button.innerHTML = `<i class="${escapeAttr(item.icon)}"></i>`;
         button.append(item.label);
         button.onclick = () => window.open(item.url, '_self', 'noopener,noreferrer');
         container.appendChild(button);
@@ -224,7 +229,12 @@ function renderActionButtons() {
 // switching tabs mid-refresh would snap back.
 function renderCategories() {
     const main = document.getElementById('main-container');
-    if (!main || !config.categories.length) return;
+    if (!main) return;
+    if (!config.categories.length) {
+        document.getElementById('category-tabs')?.remove();
+        document.getElementById('category-panes')?.remove();
+        return;
+    }
 
     const signature = config.categories.map(c => `${c.id}|${c.icon}|${c.kind}`).join(',');
     let tabs = document.getElementById('category-tabs');
@@ -253,7 +263,7 @@ function renderCategories() {
             const button = document.createElement('button');
             button.className = 'course-button';
             button.dataset.category = cat.id;
-            button.innerHTML = `<i class="${escapeAttr(cat.icon)}"></i> `;
+            button.innerHTML = `<i class="${escapeAttr(cat.icon)}"></i>`;
             button.append(cat.name);
             if (cat.id === activeId) button.classList.add('active');
             tabs.appendChild(button);
@@ -305,16 +315,15 @@ function renderEntries(cat) {
     items.forEach(item => {
         const button = document.createElement('button');
         button.className = 'course-button secondary-action';
+        button.textContent = item.label;
 
         if (cat.kind === 'lecturer') {
-            button.innerHTML = '<i class="fa-solid fa-chalkboard-user"></i> ';
             button.dataset.lecturerId = item.lecturerId;
             button.onclick = e => {
                 e.stopPropagation();
                 loadLecturer(item.lecturerId, button);
             };
         } else {
-            button.innerHTML = '<i class="fa-solid fa-calendar-alt"></i> ';
             button.dataset.tId = item.timetableId;
             button.dataset.cId = item.classId;
             button.onclick = e => {
@@ -323,7 +332,6 @@ function renderEntries(cat) {
             };
         }
 
-        button.append(item.label);
         container.appendChild(button);
     });
 
