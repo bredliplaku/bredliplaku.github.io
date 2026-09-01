@@ -393,6 +393,50 @@
      immune to drifting out of sync — deletes are computed by comparing UIDs.
      ====================================================================== */
 
+  function parseCourseLabel(label) {
+    const str = String(label || '').trim();
+    // Extract number from string, e.g. "PIR 123", "CE 211", "CE 322", "CE213", "BAFAL 309"
+    const match = str.match(/^(.*?)(?:[\s\-_]*)(\d+)(.*)$/);
+    if (match) {
+      const prefix = match[1].trim();
+      const num = parseInt(match[2], 10);
+      const suffix = match[3].trim();
+      const text = [prefix, suffix].filter(Boolean).join(' ').trim();
+      return {
+        hasNum: true,
+        num,
+        text,
+        raw: str,
+      };
+    }
+    return {
+      hasNum: false,
+      num: Infinity,
+      text: str,
+      raw: str,
+    };
+  }
+
+  function compareCourseLabels(aLabel, bLabel) {
+    const a = parseCourseLabel(aLabel);
+    const b = parseCourseLabel(bLabel);
+
+    // Both have numbers: sort first by number (e.g. 123 < 211 < 322), then by text
+    if (a.hasNum && b.hasNum) {
+      if (a.num !== b.num) {
+        return a.num - b.num;
+      }
+      return a.text.localeCompare(b.text, undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    // Items with course numbers come before non-numbered items
+    if (a.hasNum && !b.hasNum) return -1;
+    if (!a.hasNum && b.hasNum) return 1;
+
+    // Otherwise sort by natural alphabetical text
+    return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
   function rowsOfType(...types) {
     return Object.values(ROWS)
       .filter(r => types.includes(r.type))
@@ -402,7 +446,7 @@
   function rowsInSection(section, type) {
     return Object.values(ROWS)
       .filter(r => r.section === section && r.type === type)
-      .sort((a, b) => a.row_index - b.row_index);
+      .sort((a, b) => compareCourseLabels(a.b, b.b));
   }
 
   const BLANK = { b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: '' };
@@ -786,6 +830,9 @@
                 <span>Entries</span>
               </div>
               <div class="entries-header-actions" style="display:flex;align-items:center;gap:6px">
+                <button class="btn-sm btn-secondary" type="button" data-sort-cat-entries="1" title="Sort entries by code then text">
+                  <i class="fa-solid fa-arrow-down-a-z" style="margin-right:5px"></i><span>Sort</span>
+                </button>
                 <button class="btn-sm btn-secondary" type="button" data-toggle-cat-vis="1" title="${allHidden ? 'Show all entries' : 'Hide all entries'}">
                   <i class="fa-solid ${allHidden ? 'fa-eye' : 'fa-eye-slash'}" style="margin-right:5px"></i><span>${allHidden ? 'Show All' : 'Hide All'}</span>
                 </button>
@@ -1152,6 +1199,26 @@
         }
         return;
       }
+    }
+
+    const sortCatBtn = e.target.closest('[data-sort-cat-entries]');
+    if (sortCatBtn) {
+      const catCard = sortCatBtn.closest('.category-card');
+      const list = catCard?.querySelector('.entry-list');
+      if (!list) return;
+      const rows = [...list.querySelectorAll(':scope > .entry-row')];
+      if (rows.length <= 1) return;
+
+      rows.sort((a, b) => {
+        const aLabel = fieldValue(a, 'entry_label');
+        const bLabel = fieldValue(b, 'entry_label');
+        return compareCourseLabels(aLabel, bLabel);
+      });
+
+      rows.forEach(row => list.appendChild(row));
+      markDirty();
+      toast('Entries sorted', 'ok');
+      return;
     }
 
     const toggleCatVisBtn = e.target.closest('[data-toggle-cat-vis]');

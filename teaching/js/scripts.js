@@ -5,6 +5,8 @@ let isArchiveMode = false;
 let availableCourses = [];
 let currentCourse = '';
 let courseMap = {};
+let courseYearMap = {};
+let courseSemesterMap = {};
 let pendingNotifications = [];
 let isInitializing = true;
 let criticalErrorsOnly = true;
@@ -262,6 +264,8 @@ function resetForModeSwitch() {
     availableCourses = [];
     currentCourse = '';
     courseMap = {};
+    courseYearMap = {};
+    courseSemesterMap = {};
 
     // Aggressively flush all caching related to courses 
     for (let key in courseDataCache) {
@@ -1126,16 +1130,25 @@ async function tryPublicAccess() {
         const seen = new Set();
         availableCourses = [];
         const codes = {};
+        const years = {};
+        const semesters = {};
         rows.forEach(r => {
             if (!seen.has(r.sheet_name)) { seen.add(r.sheet_name); availableCourses.push(r.sheet_name); }
             if (r.b === 'code') codes[r.sheet_name] = r.c;
+            if (r.b === 'year') years[r.sheet_name] = r.c;
+            if (r.b === 'semester') semesters[r.sheet_name] = r.c;
         });
 
         if (availableCourses.length === 0) return false;
 
         Object.assign(courseMap, codes);
+        Object.assign(courseYearMap, years);
+        Object.assign(courseSemesterMap, semesters);
+        availableCourses.sort((a, b) => compareCourseCodes(courseMap[a] || a, courseMap[b] || b));
         try {
-            localStorage.setItem(getCachePrefix() + 'courseCodesCache', JSON.stringify({ data: codes, timestamp: Date.now() }));
+            localStorage.setItem(getCachePrefix() + 'courseCodesCache', JSON.stringify({
+                codes, years, semesters, timestamp: Date.now()
+            }));
         } catch (e) { }
 
         await populateCourseButtons();
@@ -1179,7 +1192,28 @@ async function fetchPublicSheetData(sheetName) {
     return rows.map(r => [r.type, r.b, r.c, r.d, r.e, r.f, r.g, r.h, r.i, r.j]);
 }
 
+function yearStart(y) {
+    const m = String(y || '').match(/(\d{4})/);
+    return m ? parseInt(m[1], 10) : -1;
+}
 
+// Extracts the course number (e.g. 211 from "CE 211") and prefix text (e.g. "CE").
+function parseCourseCode(str) {
+    const s = String(str || '').trim();
+    const numMatch = s.match(/\d+/);
+    const num = numMatch ? parseInt(numMatch[0], 10) : Infinity;
+    const text = s.replace(/\d+/g, '').replace(/[_-\s]+/g, ' ').trim();
+    return { num, text, raw: s };
+}
+
+function compareCourseCodes(aCode, bCode) {
+    const a = parseCourseCode(aCode);
+    const b = parseCourseCode(bCode);
+    if (a.num !== b.num) return a.num - b.num;
+    const textCmp = a.text.localeCompare(b.text, undefined, { sensitivity: 'base' });
+    if (textCmp !== 0) return textCmp;
+    return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
+}
 
 function formatCourseCode(code) {
     return code.replace(/_/g, ' ');
@@ -1203,82 +1237,154 @@ async function populateCourseButtons() {
 
     const createArchiveButton = () => {
         const button = document.createElement('div');
-        // Use the standard course-button classes but add an extra style target if needed
         button.setAttribute('class', 'course-button archive-course-btn');
 
-        // Style the button identically to courses so it lives right next to them
         if (isArchiveMode) {
-            button.innerHTML = `<i class="fa-solid fa-arrow-left"></i><span class="desktop-only">&nbsp; Back</span>`;
+            button.innerHTML = `<i class="fa-solid fa-arrow-left"></i><span>&nbsp; Back</span>`;
             button.title = 'Back to Active Courses';
+            button.style.backgroundColor = 'transparent';
+            button.style.border = '1.5px solid var(--primary-color)';
+            button.style.color = 'var(--primary-color)';
+            button.style.boxShadow = 'none';
         } else {
             button.innerHTML = `<i class="fa-solid fa-box-archive"></i><span class="desktop-only">&nbsp; Archives</span>`;
             button.title = 'View Past Courses';
-        }
-
-        button.onclick = handleArchiveToggle;
-
-        // Optional: apply a slight ghost appearance so it doesn't shout as loudly as your main courses
-        if (!isArchiveMode) {
             button.style.backgroundColor = 'transparent';
             button.style.border = '1px solid #e0e0e0';
             button.style.color = '#757575';
             button.style.boxShadow = 'none';
-        } else {
-            // For the back button, keep standard styling to clearly show it's clickable
-            button.style.backgroundColor = 'transparent';
-            button.style.border = '1px solid var(--primary-color)';
-            button.style.color = 'var(--primary-color)';
-            button.style.boxShadow = 'none';
         }
 
+        button.onclick = handleArchiveToggle;
         return button;
     };
 
     const updateFaderForButtons = () => {
-        const tabsWrapper = container.querySelector('.course-tabs-wrapper');
-        if (tabsWrapper) updateScrollFaders(tabsWrapper);
+        container.querySelectorAll('.course-tabs-wrapper').forEach(tabsWrapper => {
+            updateScrollFaders(tabsWrapper);
+        });
     };
 
     const renderButtons = (useCourseMap) => {
-        const archiveBtn = createArchiveButton();
-
-
-
-        // An inner wrapper keeps the course tabs isolated geographically from the Back button
-        // so that when rows wrap, they stay aligned to their own left edge.
-        const tabsWrapper = document.createElement('div');
-        tabsWrapper.setAttribute('class', 'course-tabs-wrapper');
-        tabsWrapper.addEventListener('scroll', () => updateScrollFaders(tabsWrapper), { passive: true });
-
-        availableCourses.forEach((sheetName, index) => {
-            const label = useCourseMap ? (courseMap[sheetName] || sheetName) : sheetName;
-            const btn = createCourseButton(sheetName, label);
-
-            if (availableCourses.length === 1) {
-                btn.style.borderRadius = '20px';
-            } else {
-                if (index === 0) btn.style.borderRadius = '20px 8px 8px 20px';
-                if (index === availableCourses.length - 1) btn.style.borderRadius = '8px 20px 20px 8px';
-            }
-
-            tabsWrapper.appendChild(btn);
-        });
-
-        if (archiveBtn) archiveBtn.style.marginLeft = '2px';
-
-        // Clear the container before re-adding everything
         container.innerHTML = '';
-        container.appendChild(tabsWrapper);
-        if (archiveBtn) container.appendChild(archiveBtn);
 
-        updateFaderForButtons();
+        if (!isArchiveMode) {
+            container.classList.remove('is-archive-mode');
+            const archiveBtn = createArchiveButton();
 
-        // Track wrapped rows specifically on the tabs wrapper so it ignores Back/Archive
-        if (!tabsWrapper._resizeObserver) {
-            tabsWrapper._resizeObserver = new ResizeObserver(() => updateButtonRows(tabsWrapper));
-            tabsWrapper._resizeObserver.observe(tabsWrapper);
+            // Ensure availableCourses is sorted by course number then text prefix
+            availableCourses.sort((a, b) => compareCourseCodes(
+                useCourseMap ? (courseMap[a] || a) : a,
+                useCourseMap ? (courseMap[b] || b) : b
+            ));
+
+            const tabsWrapper = document.createElement('div');
+            tabsWrapper.setAttribute('class', 'course-tabs-wrapper');
+            tabsWrapper.addEventListener('scroll', () => updateScrollFaders(tabsWrapper), { passive: true });
+
+            availableCourses.forEach((sheetName, index) => {
+                const label = useCourseMap ? (courseMap[sheetName] || sheetName) : sheetName;
+                const btn = createCourseButton(sheetName, label);
+
+                if (availableCourses.length === 1) {
+                    btn.style.borderRadius = '20px';
+                } else {
+                    if (index === 0) btn.style.borderRadius = '20px 8px 8px 20px';
+                    if (index === availableCourses.length - 1) btn.style.borderRadius = '8px 20px 20px 8px';
+                }
+
+                tabsWrapper.appendChild(btn);
+            });
+
+            if (archiveBtn) archiveBtn.style.marginLeft = '2px';
+            container.appendChild(tabsWrapper);
+            if (archiveBtn) container.appendChild(archiveBtn);
+
+            updateFaderForButtons();
+
+            if (!tabsWrapper._resizeObserver) {
+                tabsWrapper._resizeObserver = new ResizeObserver(() => updateButtonRows(tabsWrapper));
+                tabsWrapper._resizeObserver.observe(tabsWrapper);
+            } else {
+                updateButtonRows(tabsWrapper);
+            }
         } else {
-            updateButtonRows(tabsWrapper);
+            // ARCHIVE MODE: Group by Academic Year
+            container.classList.add('is-archive-mode');
+
+            // Top navigation bar with the Back button
+            const navBar = document.createElement('div');
+            navBar.className = 'archive-nav-bar';
+            const backBtn = createArchiveButton();
+            navBar.appendChild(backBtn);
+            container.appendChild(navBar);
+
+            // Group available courses by academic year
+            const yearGroups = {};
+            availableCourses.forEach(sheetName => {
+                const yr = (courseYearMap[sheetName] || '').trim() || 'Other';
+                if (!yearGroups[yr]) yearGroups[yr] = [];
+                yearGroups[yr].push(sheetName);
+            });
+
+            // Sort years descending (newest year first)
+            const sortedYears = Object.keys(yearGroups).sort((a, b) => {
+                const yA = yearStart(a);
+                const yB = yearStart(b);
+                if (yA !== yB) return yB - yA;
+                return a.localeCompare(b);
+            });
+
+            const yearsContainer = document.createElement('div');
+            yearsContainer.className = 'archive-years-container';
+
+            sortedYears.forEach(yr => {
+                const courses = yearGroups[yr];
+                courses.sort((a, b) => compareCourseCodes(
+                    useCourseMap ? (courseMap[a] || a) : a,
+                    useCourseMap ? (courseMap[b] || b) : b
+                ));
+
+                const yearGroup = document.createElement('div');
+                yearGroup.className = 'archive-year-group';
+
+                const yearLabel = document.createElement('div');
+                yearLabel.className = 'archive-year-label';
+                yearLabel.innerHTML = `<i class="fa-regular fa-calendar"></i> `;
+                yearLabel.append(document.createTextNode(yr));
+                yearGroup.appendChild(yearLabel);
+
+                const tabsWrapper = document.createElement('div');
+                tabsWrapper.className = 'course-tabs-wrapper';
+                tabsWrapper.addEventListener('scroll', () => updateScrollFaders(tabsWrapper), { passive: true });
+
+                courses.forEach((sheetName, index) => {
+                    const label = useCourseMap ? (courseMap[sheetName] || sheetName) : sheetName;
+                    const btn = createCourseButton(sheetName, label);
+
+                    if (courses.length === 1) {
+                        btn.style.borderRadius = '20px';
+                    } else {
+                        if (index === 0) btn.style.borderRadius = '20px 8px 8px 20px';
+                        if (index === courses.length - 1) btn.style.borderRadius = '8px 20px 20px 8px';
+                    }
+
+                    tabsWrapper.appendChild(btn);
+                });
+
+                yearGroup.appendChild(tabsWrapper);
+                yearsContainer.appendChild(yearGroup);
+
+                if (!tabsWrapper._resizeObserver) {
+                    tabsWrapper._resizeObserver = new ResizeObserver(() => updateButtonRows(tabsWrapper));
+                    tabsWrapper._resizeObserver.observe(tabsWrapper);
+                } else {
+                    updateButtonRows(tabsWrapper);
+                }
+            });
+
+            container.appendChild(yearsContainer);
+            updateFaderForButtons();
         }
     };
 
@@ -1382,21 +1488,41 @@ async function fetchCourseCodes() {
     try {
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
-            const { data, timestamp } = JSON.parse(cached);
-            if (Date.now() - timestamp < CACHE_EXPIRY) { Object.assign(courseMap, data); return courseMap; }
+            const parsed = JSON.parse(cached);
+            if (parsed.codes && Date.now() - parsed.timestamp < CACHE_EXPIRY) {
+                Object.assign(courseMap, parsed.codes);
+                if (parsed.years) Object.assign(courseYearMap, parsed.years);
+                if (parsed.semesters) Object.assign(courseSemesterMap, parsed.semesters);
+                return courseMap;
+            } else if (parsed.data && Date.now() - parsed.timestamp < CACHE_EXPIRY) {
+                Object.assign(courseMap, parsed.data);
+                return courseMap;
+            }
         }
     } catch (e) { }
 
     try {
         const response = await sbFetch(
-            `course_rows?type=eq.metadata&b=eq.code&is_archive=eq.${isArchiveMode}&select=sheet_name,c`
+            `course_rows?type=eq.metadata&is_archive=eq.${isArchiveMode}&select=sheet_name,b,c`
         );
         if (response.ok) {
             const rows = await response.json();
             const codes = {};
-            rows.forEach(r => { codes[r.sheet_name] = r.c; });
+            const years = {};
+            const semesters = {};
+            rows.forEach(r => {
+                if (r.b === 'code') codes[r.sheet_name] = r.c;
+                if (r.b === 'year') years[r.sheet_name] = r.c;
+                if (r.b === 'semester') semesters[r.sheet_name] = r.c;
+            });
             Object.assign(courseMap, codes);
-            try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: codes, timestamp: Date.now() })); } catch (e) { }
+            Object.assign(courseYearMap, years);
+            Object.assign(courseSemesterMap, semesters);
+            try {
+                localStorage.setItem(CACHE_KEY, JSON.stringify({
+                    codes, years, semesters, timestamp: Date.now()
+                }));
+            } catch (e) { }
             return courseMap;
         }
     } catch (error) {

@@ -582,9 +582,27 @@ async function loadSidebar() {
   renderSidebarGroup('sb-archive', archive, true);
 }
 
-// Sidebar order: course code A→Z, then newest offering first — academic year descending, and
-// within a year Summer → Spring → Fall, which is that year's terms in reverse order too.
+// Sidebar order: course number ascending (e.g. 123, 211, 322), then code text (A→Z), then newest
+// offering first — academic year descending, and within a year Summer → Spring → Fall.
 const SEMESTER_ORDER = ['Summer', 'Spring', 'Fall'];
+
+// Extracts the course number (e.g. 211 from "CE 211") and prefix text (e.g. "CE").
+function parseCourseCode(str) {
+  const s = String(str || '').trim();
+  const numMatch = s.match(/\d+/);
+  const num = numMatch ? parseInt(numMatch[0], 10) : Infinity;
+  const text = s.replace(/\d+/g, '').replace(/[_-\s]+/g, ' ').trim();
+  return { num, text, raw: s };
+}
+
+function compareCourseCodes(aCode, bCode) {
+  const a = parseCourseCode(aCode);
+  const b = parseCourseCode(bCode);
+  if (a.num !== b.num) return a.num - b.num;
+  const textCmp = a.text.localeCompare(b.text, undefined, { sensitivity: 'base' });
+  if (textCmp !== 0) return textCmp;
+  return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
+}
 
 // Courses with no semester/year set sort after those that have one, so a half-filled course
 // never wedges itself between two real offerings.
@@ -600,9 +618,8 @@ function yearStart(y) {
   return m ? parseInt(m[1], 10) : -1;
 }
 
-// numeric:true so CE 99 sorts before CE 132 instead of after it.
 function courseOrder(a, b) {
-  return (a.code || a.sheet_name).localeCompare(b.code || b.sheet_name, undefined, { numeric: true })
+  return compareCourseCodes(a.code || a.sheet_name, b.code || b.sheet_name)
     || (yearStart(b.year) - yearStart(a.year))
     || (semesterRank(a.semester) - semesterRank(b.semester));
 }

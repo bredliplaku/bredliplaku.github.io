@@ -161,12 +161,62 @@ function groupRows(rows) {
         }
     });
 
+    // Sort entries within each section: by code (numeric number) then by text.
+    // E.g. "PIR 123" -> "CE 211" -> "CE 322"
+    Object.keys(grouped.entries).forEach(sec => {
+        grouped.entries[sec].sort((a, b) => compareCourseLabels(a.label, b.label));
+    });
+
     // Only keep categories that have at least one visible (non-hidden) entry.
     // If all entries in a category are hidden (or the category has no entries),
     // the whole category module is hidden from the public timetable page.
     grouped.categories = grouped.categories.filter(c => (grouped.entries[c.name] || []).length > 0);
 
     return grouped;
+}
+
+function parseCourseLabel(label) {
+    const str = String(label || '').trim();
+    // Extract number from string, e.g. "PIR 123", "CE 211", "CE 322", "CE213", "BAFAL 309"
+    const match = str.match(/^(.*?)(?:[\s\-_]*)(\d+)(.*)$/);
+    if (match) {
+        const prefix = match[1].trim();
+        const num = parseInt(match[2], 10);
+        const suffix = match[3].trim();
+        const text = [prefix, suffix].filter(Boolean).join(' ').trim();
+        return {
+            hasNum: true,
+            num,
+            text,
+            raw: str,
+        };
+    }
+    return {
+        hasNum: false,
+        num: Infinity,
+        text: str,
+        raw: str,
+    };
+}
+
+function compareCourseLabels(aLabel, bLabel) {
+    const a = parseCourseLabel(aLabel);
+    const b = parseCourseLabel(bLabel);
+
+    // Both have numbers: sort first by number (e.g. 123 < 211 < 322), then by text
+    if (a.hasNum && b.hasNum) {
+        if (a.num !== b.num) {
+            return a.num - b.num;
+        }
+        return a.text.localeCompare(b.text, undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    // Items with course numbers come before non-numbered items
+    if (a.hasNum && !b.hasNum) return -1;
+    if (!a.hasNum && b.hasNum) return 1;
+
+    // Otherwise sort by natural alphabetical text
+    return a.raw.localeCompare(b.raw, undefined, { numeric: true, sensitivity: 'base' });
 }
 
 // Category names are author-supplied, so the DOM id is derived rather than
