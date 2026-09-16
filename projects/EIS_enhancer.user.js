@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      5.6
+// @version      5.9
 // @description  Automatically enhance EIS and log in with your preferred method.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
@@ -181,7 +181,7 @@
         body, p, .btn, button, .dropdown-menu, .table > tbody > tr > td {
             font-family: 'Google Sans Text', sans-serif !important;
         }
-        h1, h2, h3, h4, h5, h6, .page-title, .portlet-title .caption {
+        h1, h2, h3, h4, h5, h6, .page-title, .portlet-title .caption, .npa-panel-title {
             font-family: 'Google Sans', sans-serif !important;
         }
 
@@ -257,6 +257,21 @@
         .notification-badge {
             top: 6px !important;
             right: 2px !important;
+        }
+        .header .navbar-nav > li.followup-header-btn > a.btn,
+        #followup-open-btn {
+            box-shadow: none !important;
+            transform: none !important;
+            border-radius: 0 !important;
+        }
+        .header .navbar-nav > li.followup-header-btn > a.btn:hover,
+        .header .navbar-nav > li.followup-header-btn > a.btn:focus,
+        .header .navbar-nav > li.followup-header-btn > a.btn:active,
+        #followup-open-btn:hover,
+        #followup-open-btn:focus,
+        #followup-open-btn:active {
+            box-shadow: none !important;
+            transform: none !important;
         }
 
         .page-sidebar .page-sidebar-menu > li > a {
@@ -361,6 +376,133 @@
         .dashboard-stat .visual i {
             font-size: 85px !important;
             margin: 0 !important;
+        }
+
+        /* NextIntelligence Assistant Floating Launcher & Chat Panel */
+        #npa-launcher,
+        .npa-launcher {
+            border-radius: var(--grid-radius) !important;
+            box-shadow: var(--box-shadow) !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-radius 0.2s ease !important;
+        }
+        #npa-launcher:hover,
+        .npa-launcher:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+        }
+        #npa-launcher.is-open,
+        #npa-launcher.open,
+        #npa-launcher.active,
+        #npa-launcher[aria-expanded="true"],
+        body.npa-open #npa-launcher {
+            border-radius: var(--grid-radius) !important;
+            box-shadow: var(--box-shadow) !important;
+        }
+
+        #npa-panel,
+        .npa-panel {
+            border-radius: var(--grid-radius) !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+            overflow: hidden !important;
+        }
+        .npa-panel-header {
+            border-radius: var(--grid-radius) var(--grid-radius) 0 0 !important;
+            font-family: 'Google Sans', sans-serif !important;
+        }
+        .npa-panel-body {
+            border-radius: 0 0 var(--grid-radius) var(--grid-radius) !important;
+            overflow: hidden !important;
+        }
+        #npa-frame {
+            border-radius: 0 0 var(--grid-radius) var(--grid-radius) !important;
+        }
+        #npa-close,
+        .npa-close {
+            border-radius: var(--small-radius) !important;
+            transition: transform 0.2s ease, background-color 0.2s ease !important;
+        }
+        #npa-close:hover,
+        .npa-close:hover {
+            transform: scale(1.05);
+        }
+
+        /* Follow-Up Sidebar Widget & Cards */
+        #followup-widget,
+        .followup-widget {
+            border-top-left-radius: var(--grid-radius) !important;
+            border-bottom-left-radius: var(--grid-radius) !important;
+            overflow: hidden !important;
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15) !important;
+        }
+
+        .followup-widget-header {
+            border-top-left-radius: var(--grid-radius) !important;
+        }
+        .followup-widget-header h3 {
+            font-family: 'Google Sans', sans-serif !important;
+        }
+
+        #followup-close-btn,
+        .followup-widget-close {
+            border-radius: var(--small-radius) !important;
+            transition: transform 0.2s ease, background-color 0.2s ease !important;
+        }
+        #followup-close-btn:hover,
+        .followup-widget-close:hover {
+            transform: scale(1.05);
+        }
+
+        .followup-card {
+            border-radius: var(--small-radius) !important;
+            box-shadow: var(--box-shadow) !important;
+            overflow: hidden !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+        }
+        .followup-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1) !important;
+        }
+        .followup-card-header {
+            border-radius: var(--small-radius) var(--small-radius) 0 0 !important;
+        }
+        .followup-card-title {
+            font-family: 'Google Sans', sans-serif !important;
+        }
+
+        .followup-group {
+            border-radius: var(--small-radius) !important;
+            box-shadow: var(--box-shadow) !important;
+            overflow: hidden !important;
+        }
+        .followup-group-header {
+            border-radius: var(--small-radius) var(--small-radius) 0 0 !important;
+            font-family: 'Google Sans', sans-serif !important;
+        }
+        .followup-group-items {
+            border-radius: 0 0 var(--small-radius) var(--small-radius) !important;
+        }
+
+        .followup-status {
+            border-radius: var(--small-radius) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+
+        .followup-message-bubble,
+        .followup-new-message,
+        .followup-chat-textarea,
+        .followup-form-control,
+        .followup-chat-send,
+        .followup-chat-back,
+        .followup-chat-back-primary {
+            border-radius: var(--small-radius) !important;
+        }
+        .followup-message-avatar {
+            border-radius: 50% !important;
+        }
+        .followup-context-menu {
+            border-radius: var(--small-radius) !important;
+            box-shadow: var(--box-shadow) !important;
+            overflow: hidden !important;
         }
     `;
     document.head.appendChild(style);
