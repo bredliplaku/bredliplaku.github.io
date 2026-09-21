@@ -23,8 +23,8 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { flowType: 'implicit', detectSessionInUrl: true, persistSession: true }
 });
 
-const S = { course: null, isArchive: false, section: 'info', admin: null };
-const ROW_STORE = {};
+const S = { course: null, isArchive: false, section: 'info', admin: null, access: null };
+const ROW_STORE = Object.create(null);
 let _sessionHandled = false;
 let _overlayMD = false;
 
@@ -33,7 +33,7 @@ let _overlayMD = false;
 // typing in a field, adding/deleting a row, or reordering. Reset when a section (re)loads
 // (loadSection) or a save succeeds. Used to prompt before switching tab/course.
 let _sectionDirty = false;
-function markDirty() { _sectionDirty = true; }
+function markDirty() { if (canEditSection(S.section)) _sectionDirty = true; }
 // Typing in any field inside the section body counts as an edit. Delegated on document so it
 // keeps working after the section body is re-rendered. (Programmatic value/innerHTML changes
 // don't fire these events, so a fresh render never trips the flag on its own.)
@@ -56,8 +56,89 @@ function trackSave(promise) {
 // Leaving the whole page (refresh/close/navigate away) can only use the browser's own native
 // prompt — a custom dialog isn't allowed here. In-app course/tab switches use confirmLeaveIfDirty.
 window.addEventListener('beforeunload', e => {
-  if (_sectionDirty || (typeof inlinePanelDirty === 'function' && inlinePanelDirty())) { e.preventDefault(); e.returnValue = ''; }
+  if (_sectionDirty || (typeof accessSettingsDirty === 'function' && accessSettingsDirty()) || (typeof inlinePanelDirty === 'function' && inlinePanelDirty())) { e.preventDefault(); e.returnValue = ''; }
 });
+
+// These checks drive the UI only. Every write is checked again in Supabase; removing
+// disabled attributes or changing S in developer tools cannot grant database access.
+function isCourseAdmin() { return ['global_admin', 'admin'].includes(S.access?.role); }
+function hasCourseAccess(name = S.course, archive = S.isArchive) {
+  return isCourseAdmin() || !!S.access?.assignments?.some(a => a.sheet_name === name && a.is_archive === archive);
+}
+function canEditSection(id) {
+  return hasCourseAccess() && (isCourseAdmin() || S.access?.role === 'lecturer' ||
+    (S.access?.role === 'student' && ['modules', 'projects', 'announce'].includes(id)));
+}
+function canArchiveCourse(name = S.course, archive = S.isArchive) {
+  return isCourseAdmin() || (!archive && S.access?.role === 'lecturer' && hasCourseAccess(name, archive));
+}
+function ownsProfessor(key) {
+  return isCourseAdmin() || (S.access?.role === 'lecturer' && hasCourseAccess() &&
+    !!S.access?.professor_keys?.some(p => p.sheet_name === S.course && p.is_archive === S.isArchive && p.key === key));
+}
+const PROTECTED_META_KEYS = new Set(['code', 'title', 'year', 'semester', 'level', 'type', 'credits',
+  'startdate', 'enddate', 'holidayweeks', 'holiday_startdate', 'holiday_start_date', 'holidaystartdate', 'holiday_start']);
+function canEditMetadata(key) {
+  if (!canEditSection('info')) return false;
+  if (isCourseAdmin()) return true;
+  const k = String(key || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if (PROTECTED_META_KEYS.has(k)) return false;
+  if (k.startsWith('professor')) return /^professor[1-9]\d*(_link|_photo)?$/.test(k) && ownsProfessor(k.replace(/_(link|photo)$/, ''));
+  return true;
+}
+function requirePermission(allowed) {
+  if (!allowed) toast('You do not have permission to make this change.', 'err');
+  return allowed;
+}
+async function refreshTeachingAccess() {
+  const { data, error } = await sb.rpc('teaching_access');
+  if (error) throw error;
+  S.access = data;
+  S.admin = data;
+  renderAccessControls();
+  return data;
+}
+async function saveCourseRows(rows = [], deleteUids = []) {
+  try {
+    return await sb.rpc('teaching_save_rows', { p_upserts: Array.isArray(rows) ? rows : [rows], p_delete_uids: deleteUids });
+  } catch (error) { return { error }; }
+}
+function lockPermissionArea(el) {
+  if (!el) return;
+  el.classList.add('permission-locked');
+  el.setAttribute('aria-disabled', 'true');
+  el.querySelectorAll('input, select, textarea, button').forEach(control => { control.disabled = true; });
+  el.querySelectorAll('a, [draggable]').forEach(control => {
+    control.setAttribute('tabindex', '-1');
+    control.setAttribute('aria-disabled', 'true');
+    control.removeAttribute('href');
+    control.removeAttribute('onclick');
+    control.setAttribute('draggable', 'false');
+  });
+}
+function applySectionPermissions(body) {
+  // The same section container is reused when switching tabs.
+  body.classList.remove('permission-locked');
+  body.removeAttribute('aria-disabled');
+  if (!canEditSection(S.section)) {
+    lockPermissionArea(body);
+    body.insertAdjacentHTML('afterbegin', '<p class="permission-note"><i class="fa-solid fa-lock"></i> View only — your role cannot edit this tab.</p>');
+    return;
+  }
+  if (S.section !== 'info' || isCourseAdmin()) return;
+  body.querySelectorAll('.meta-field').forEach(inp => {
+    if (!canEditMetadata(inp.dataset.metakey)) lockPermissionArea(inp.closest('.settings-group') || inp.closest('.form-group'));
+  });
+  body.querySelectorAll('#professors-list .dynamic-card').forEach(card => {
+    if (!ownsProfessor(card.dataset.profkey)) lockPermissionArea(card);
+    else card.querySelector('.btn-action-del').disabled = true;
+  });
+  const add = body.querySelector('[onclick="addProfessorCard()"]');
+  if (add) add.disabled = true;
+  body.querySelectorAll('[data-custom-key]').forEach(card => {
+    if (!canEditMetadata(card.dataset.customKey)) lockPermissionArea(card);
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config
@@ -339,12 +420,18 @@ async function signIn() {
   if (error) { toast('Sign-in failed: ' + error.message, 'err'); btn.disabled = false; btn.innerHTML = origHTML; }
 }
 
-async function signOut() {
+async function signOut(force = false) {
+  if (!force && !(await confirmLeaveIfDirty())) return;
   _sessionHandled = false;
   // Stop One Tap from silently re-selecting the same Google account the moment the
   // login screen reappears — without this, signing out becomes an instant re-login loop.
   try { google.accounts.id.disableAutoSelect(); } catch { }
   await sb.auth.signOut();
+  S.admin = null; S.access = null; S.course = null;
+  _sectionDirty = false;
+  closeInlineEdit(true);
+  clearMain();
+  renderAccessControls();
   window.history.replaceState(null, '', window.location.pathname);
 }
 
@@ -432,7 +519,7 @@ function resetIdleTimer() {
   if (_idleTimer) clearTimeout(_idleTimer);
   _idleTimer = setTimeout(async () => {
     toast('Signed out due to inactivity', 'err');
-    await signOut();
+    await signOut(true);
   }, IDLE_TIMEOUT_MS);
 }
 
@@ -458,26 +545,33 @@ async function handleSession(session) {
     // in half instead of paying for both network round trips back to back.
     prefetchSidebar();
     const result = await Promise.race([
-      sb.from('admins').select('name,surname,email').single(),
+      sb.rpc('teaching_access'),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
     ]);
+    if (result.error) throw result.error;
     admin = result.data;
-  } catch {
+  } catch (error) {
     // Supabase cold-start or network issue — the auth session itself is still fine,
     // so don't delete it. Just fall back to the login screen; refreshing or signing
     // in again will retry this lookup against the (still valid) session.
     _sessionHandled = false;
     hideLoading();
-    showScreen('login');
+    document.getElementById('error-msg').textContent = ['PGRST202', '42883'].includes(error.code)
+      ? 'The teaching roles database upgrade is required. Run teaching/supabase/roles.sql in Supabase, then sign in again.'
+      : 'Could not load your course permissions. Please try signing in again.';
+    showScreen('error');
     return;
   }
   hideLoading();
   if (!admin) {
-    document.getElementById('error-msg').textContent = (session.user.email || 'Your account') + ' is not in the admin list.';
+    S.access = null;
+    document.getElementById('error-msg').textContent = (session.user.email || 'Your account') + ' has not been granted teaching access.';
     showScreen('error'); return;
   }
   S.admin = admin;
-  document.getElementById('top-user').textContent = admin.name + ' ' + admin.surname;
+  S.access = admin;
+  document.getElementById('top-user').textContent = admin.name || admin.email;
+  renderAccessControls();
   if (window.location.href.includes('#')) window.history.replaceState(null, '', window.location.pathname);
   showScreen('admin');
   await loadSidebar();
@@ -569,6 +663,7 @@ async function loadSidebar() {
   const map = {};
   for (const r of (data || [])) {
     const isArch = r.is_archive === true || r.is_archive === 'true' || r.is_archive === 1 || r.is_archive === '1';
+    if (!hasCourseAccess(r.sheet_name, isArch)) continue;
     const k = r.sheet_name + '|' + String(isArch);
     if (!map[k]) map[k] = { sheet_name: r.sheet_name, is_archive: isArch };
     const bKey = String(r.b || '').trim().toLowerCase();
@@ -679,7 +774,7 @@ function renderSidebarGroup(id, courses, isArchive) {
     const term = [c.semester, c.year].filter(Boolean).join(' ');
     const icon = c.icon || 'fa-solid fa-graduation-cap';
     return `<button class="course-btn${active ? ' active' : ''}"
-                onclick="selectCourse('${x(c.sheet_name)}',${isArchive},this)">
+                onclick="selectCourse('${xjs(c.sheet_name)}',${isArchive},this)">
       <i class="${x(icon)} cb-icon"></i>
       <div class="cb-text">
         <div class="cb-code">${x(code)}</div>
@@ -715,6 +810,7 @@ async function saveCurrentSection() {
 
 // Returns true if it's safe to leave the current tab/course.
 async function confirmLeaveIfDirty() {
+  if (document.getElementById('access-settings')) return confirmLeaveAccessSettings();
   // A save started by clicking Save directly (not through this function) may still be in
   // flight — let it finish and clear _sectionDirty on its own before judging the flag,
   // rather than interrupting it with a stale "unsaved changes" prompt.
@@ -733,6 +829,7 @@ async function confirmLeaveIfDirty() {
 }
 
 async function selectCourse(name, isArchive, el) {
+  if (!requirePermission(hasCourseAccess(name, isArchive))) return;
   if (name === S.course && isArchive === S.isArchive) return;
   if (!(await confirmLeaveIfDirty())) return;
   closeInlineEdit(true); // drop any open editor without re-prompting
@@ -756,10 +853,10 @@ function renderCourseShell(name, isArchive) {
       <div class="ch-actions">
         <span class="header-chip">${isArchive ? 'Archive' : 'Active'}</span>
         ${isArchive
-      ? `<button class="btn-ghost btn-sm" onclick="restoreCourse('${x(name)}')"><i class="fa-solid fa-rotate-left" style="margin-right:5px"></i>Restore</button>`
-      : `<button class="btn-ghost btn-sm" onclick="archiveCourse('${x(name)}')"><i class="fa-solid fa-box-archive" style="margin-right:5px"></i>Archive</button>`}
+      ? `<button class="btn-ghost btn-sm" ${isCourseAdmin() ? '' : 'disabled'} onclick="restoreCourse('${xjs(name)}')"><i class="fa-solid fa-rotate-left" style="margin-right:5px"></i>Restore</button>`
+      : `<button class="btn-ghost btn-sm" ${canArchiveCourse(name, isArchive) ? '' : 'disabled'} onclick="archiveCourse('${xjs(name)}')"><i class="fa-solid fa-box-archive" style="margin-right:5px"></i>Archive</button>`}
         <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,120,120,0.5)"
-                onclick="deleteCourse('${x(name)}',${isArchive})"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+                ${isCourseAdmin() ? '' : 'disabled'} onclick="deleteCourse('${xjs(name)}',${isArchive})"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
       </div>
     </div>
     <div class="section-tabs" id="section-tabs">
@@ -767,13 +864,14 @@ function renderCourseShell(name, isArchive) {
         const r = i === 0 ? 'border-radius:20px 8px 8px 20px'
           : i === arr.length - 1 ? 'border-radius:8px 20px 20px 8px' : '';
         return `<button class="section-tab${s.id === S.section ? ' active' : ''}" style="${r}" data-sec="${s.id}"
-                  onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon}" style="margin-right:5px;font-size:0.88em"></i>` : ''}${s.label}</button>`;
+                  onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon}" style="margin-right:5px;font-size:0.88em"></i>` : ''}${s.label}${canEditSection(s.id) ? '' : ' <i class="fa-solid fa-lock" title="View only"></i>'}</button>`;
       }).join('')}
     </div>
     <div class="section-body" id="section-body">${sectionSkeletonHtml()}</div>
   `;
   fillCourseHeader(name, isArchive);
   loadSection(S.section);
+  renderAccessControls();
 }
 
 // Darkens a hex colour toward black (matches teaching/index.html's darkenHex) — used to
@@ -835,6 +933,7 @@ function lockHeight(el) {
 }
 
 function finishSectionLoad(body) {
+  applySectionPermissions(body);
   body.style.minHeight = '';
   const main = document.getElementById('main-area');
   if (main) main.style.minHeight = '';
@@ -939,11 +1038,12 @@ async function loadLinksSection(sec) {
   initDnD(sec);
 }
 
-// Timetables (metadata rows): delete all old + insert fresh from current DOM order.
-// Returns an error message string on failure, or null on success.
+// Stage timetables alongside link buttons so the whole Links tab saves atomically.
+// Returns { upserts, deleteUids } or { error } without writing to the database.
 async function saveTimetablesWork() {
-  const { data: existing } = await sb.from('course_rows').select('row_uid,b,row_index')
+  const { data: existing, error: fetchError } = await sb.from('course_rows').select('row_uid,b,row_index')
     .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata');
+  if (fetchError) return { error: fetchError };
   const existMap = {};
   let maxIdx = 0;
   for (const r of (existing || [])) { existMap[r.b] = r; if (r.row_index > maxIdx) maxIdx = r.row_index; }
@@ -952,10 +1052,6 @@ async function saveTimetablesWork() {
   const oldTtUids = Object.entries(existMap)
     .filter(([k]) => /^timetable\d+_(name|id|height)$/.test(k) || /^class\d+_id$/.test(k))
     .map(([, r]) => r.row_uid);
-  if (oldTtUids.length) {
-    const { error } = await sb.from('course_rows').delete().in('row_uid', oldTtUids);
-    if (error) return error.message;
-  }
 
   const ttCards = document.getElementById('timetables-list') ? [...document.querySelectorAll('#timetables-list .dynamic-card')] : [];
   const newTtRows = [];
@@ -965,15 +1061,11 @@ async function saveTimetablesWork() {
     const tid = card.querySelector('[name=tt_id]')?.value?.trim() || '';
     const classId = card.querySelector('[name=tt_class]')?.value?.trim() || '';
     let ri = maxIdx + idx * 5;
-    if (name) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}n`, row_index: ri + 1, b: `timetable${i}_name`, c: name });
-    if (tid) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}i`, row_index: ri + 2, b: `timetable${i}_id`, c: tid });
-    if (classId) newTtRows.push({ ...base, row_uid: `${S.course}:adm_tt${i}c`, row_index: ri + 3, b: `class${i}_id`, c: classId });
+    if (name) newTtRows.push({ ...base, row_uid: newCourseRowUid(), row_index: ri + 1, b: `timetable${i}_name`, c: name });
+    if (tid) newTtRows.push({ ...base, row_uid: newCourseRowUid(), row_index: ri + 2, b: `timetable${i}_id`, c: tid });
+    if (classId) newTtRows.push({ ...base, row_uid: newCourseRowUid(), row_index: ri + 3, b: `class${i}_id`, c: classId });
   });
-  if (newTtRows.length) {
-    const { error } = await sb.from('course_rows').upsert(newTtRows, { onConflict: 'row_uid' });
-    if (error) return error.message;
-  }
-  return null;
+  return { upserts: newTtRows, deleteUids: oldTtUids };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1008,13 +1100,15 @@ async function loadGradingSettings() {
 }
 
 async function saveGradingSettings() {
+  if (!requirePermission(canEditSection('grading'))) return false;
   const btn = document.getElementById('section-save-btn');
   const origHtml = btn ? btn.innerHTML : '';
   const resetBtn = () => { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } };
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Saving…'; }
 
-  const { data: existing } = await sb.from('course_rows').select('row_uid,b,row_index')
+  const { data: existing, error: fetchError } = await sb.from('course_rows').select('row_uid,b,row_index')
     .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata');
+  if (fetchError) { toast('Save failed: ' + fetchError.message, 'err'); resetBtn(); return false; }
   const existMap = {};
   let maxIdx = 0;
   for (const r of (existing || [])) { existMap[r.b] = r; if (r.row_index > maxIdx) maxIdx = r.row_index; }
@@ -1029,15 +1123,12 @@ async function saveGradingSettings() {
     const val = inp.value.trim();
     const done = doneMap[key] || '';
     if (!val && !existMap[key]) continue;
-    const uid = existMap[key]?.row_uid || `${S.course}:adm_${key}`;
+    const uid = existMap[key]?.row_uid || newCourseRowUid();
     const idx = existMap[key]?.row_index || (maxIdx += 10, maxIdx);
     toUpsert.push({ ...base, row_uid: uid, row_index: idx, b: key, c: val, d: done });
   }
 
-  if (toUpsert.length) {
-    const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
-    if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-  }
+  const toDelete = [];
 
   // Multi-entry categories: delete all old + legacy keys for each category, then renumber
   // fresh from current DOM order — same pattern as professors/timetables.
@@ -1047,10 +1138,7 @@ async function saveGradingSettings() {
     const oldGradeUids = Object.entries(existMap)
       .filter(([k]) => re.test(k) || k === cat.legacyKey)
       .map(([, r]) => r.row_uid);
-    if (oldGradeUids.length) {
-      const { error } = await sb.from('course_rows').delete().in('row_uid', oldGradeUids);
-      if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-    }
+    toDelete.push(...oldGradeUids);
 
     const newGradeRows = [];
     document.querySelectorAll(`tr.grading-row[data-cat="${cat.id}"]`).forEach((tr, idx) => {
@@ -1059,13 +1147,13 @@ async function saveGradingSettings() {
       const done = tr.querySelector('.grade-done-multi')?.value || '';
       if (!val) return;
       const key = `${cat.id}${i}_percentage`;
-      newGradeRows.push({ ...base, row_uid: `${S.course}:adm_${key}`, row_index: ++gradeRowIdx, b: key, c: val, d: done });
+      newGradeRows.push({ ...base, row_uid: newCourseRowUid(), row_index: ++gradeRowIdx, b: key, c: val, d: done });
     });
-    if (newGradeRows.length) {
-      const { error } = await sb.from('course_rows').upsert(newGradeRows, { onConflict: 'row_uid' });
-      if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-    }
+    toUpsert.push(...newGradeRows);
   }
+
+  const { error } = await saveCourseRows(toUpsert, toDelete);
+  if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
 
   toast('Grading saved', 'ok');
   resetBtn();
@@ -1210,7 +1298,7 @@ async function loadMetadataSettings() {
         <label class="form-label">Theme Colours <span class="form-hint" style="display:inline;margin-left:6px">pick a swatch or type a hex value</span></label>
         <div class="color-picker-row">
           ${THEME_COLOR_NAMES.map((name, i) => {
-    const val = (themeParts[i] && themeParts[i].startsWith('#')) ? themeParts[i] : THEME_COLOR_DEFAULTS[i];
+    const val = /^#[0-9a-f]{6}$/i.test(themeParts[i] || '') ? themeParts[i] : THEME_COLOR_DEFAULTS[i];
     return `<div class="color-picker-item">
               <input type="color" id="tc_${i}" value="${val}" oninput="onThemeSwatchInput(${i})">
               <input type="text" class="tc-hex" id="tcx_${i}" value="${val}" maxlength="7" spellcheck="false" autocomplete="off"
@@ -1250,14 +1338,14 @@ async function loadMetadataSettings() {
   if (extras.length) {
     h += `<div style="margin-top:18px;margin-bottom:8px;font-size:0.72em;font-weight:700;color:#9e9e9e;text-transform:uppercase;letter-spacing:0.07em">Custom / Other Keys</div>`;
     for (const r of extras) {
-      h += `<div class="material-card">
+      h += `<div class="material-card" data-custom-key="${x(r.b)}">
         <div class="card-main">
           <div class="card-title">${x(r.b)}</div>
           ${r.c ? `<div class="card-detail">${x(r.c.substring(0, 100))}</div>` : ''}
         </div>
         <div class="card-actions">
-          <button class="btn-secondary btn-sm" onclick="openEditCustomMeta('${x(r.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-red btn-sm" onclick="deleteRow('${x(r.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+          <button class="btn-secondary btn-sm" onclick="openEditCustomMeta('${xjs(r.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+          <button class="btn-red btn-sm" onclick="deleteRow('${xjs(r.row_uid)}')"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
         </div>
       </div>`;
     }
@@ -1277,7 +1365,7 @@ function professorCardHtml(n, metaMap) {
   const name = metaMap[`professor${n}`]?.c || '';
   const link = metaMap[`professor${n}_link`]?.c || '';
   const photo = metaMap[`professor${n}_photo`]?.c || '';
-  return `<div class="dynamic-card">
+  return `<div class="dynamic-card" data-profkey="professor${n}">
     <div class="dynamic-card-head">
       <span class="dynamic-card-label"><i class="fa-solid fa-user-tie" style="margin-right:5px;opacity:0.7"></i><span class="dcl-text">${x(name || 'New Professor')}</span></span>
       <button class="btn-action-del" type="button" onclick="removeProfessorCard(this)" title="Delete professor"><i class="fa-solid fa-trash"></i></button>
@@ -1292,7 +1380,7 @@ function professorCardHtml(n, metaMap) {
         <div class="icon-input-wrap">
           <input type="text" name="prof_link" value="${x(link)}"
                  oninput="updateLinkPreview(this,this.nextElementSibling)">
-          <a href="${x(link || '#')}" target="_blank" rel="noopener"
+          <a href="${x(safeCourseUrl(link) || '#')}" target="_blank" rel="noopener noreferrer"
              style="flex-shrink:0;padding:6px 10px;background:var(--primary-color);color:white;border-radius:10px;text-decoration:none;display:${link ? 'flex' : 'none'};align-items:center;gap:4px;font-size:0.82em;border:1.5px solid rgba(0,0,0,0.18)">
             <i class="fa-solid fa-arrow-up-right-from-square"></i>
           </a>
@@ -1303,7 +1391,7 @@ function professorCardHtml(n, metaMap) {
         <div class="icon-input-wrap">
           <input type="text" name="prof_photo" value="${x(photo)}"
                  oninput="updatePhotoPreview(this,this.nextElementSibling)">
-          <img src="${x(photo || '')}" alt="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;display:${photo ? 'block' : 'none'};border:2px solid #e0e0e0"
+          <img src="${x(safeCourseUrl(photo) || '')}" alt="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;display:${photo ? 'block' : 'none'};border:2px solid #e0e0e0"
                onerror="this.style.display='none'">
         </div>
       </div>
@@ -1312,14 +1400,19 @@ function professorCardHtml(n, metaMap) {
 }
 
 function addProfessorCard() {
+  if (!requirePermission(isCourseAdmin())) return;
   const list = document.getElementById('professors-list');
   const noMsg = list.querySelector('#no-prof-msg');
   if (noMsg) noMsg.remove();
-  list.insertAdjacentHTML('beforeend', professorCardHtml(0, {}));
+  const nums = [...list.querySelectorAll('[data-profkey]')].map(card => Number(card.dataset.profkey.replace('professor', '')));
+  list.insertAdjacentHTML('beforeend', professorCardHtml(Math.max(0, ...nums) + 1, {}));
+  markDirty();
 }
 
 function removeProfessorCard(btn) {
+  if (!requirePermission(isCourseAdmin())) return;
   btn.closest('.dynamic-card').remove();
+  markDirty();
   const list = document.getElementById('professors-list');
   if (!list.querySelector('.dynamic-card')) {
     list.insertAdjacentHTML('beforeend', `<div id="no-prof-msg" class="form-hint" style="padding:4px 0">No professors yet.</div>`);
@@ -1386,13 +1479,13 @@ function updateLinkPreview(inp, btn) {
   if (typeof btn === 'string') btn = document.getElementById(btn);
   if (!btn) return;
   const url = inp.value.trim();
-  btn.href = url || '#';
+  btn.href = safeCourseUrl(url) || '#';
   btn.style.display = url ? 'flex' : 'none';
 }
 function updatePhotoPreview(inp, img) {
   if (!img) return;
   const url = inp.value.trim();
-  img.src = url || '';
+  img.src = safeCourseUrl(url) || '';
   img.style.display = url ? 'block' : 'none';
 }
 
@@ -1758,13 +1851,15 @@ function removeGradingRow(btn) {
 }
 
 async function saveSettings() {
+  if (!requirePermission(canEditSection('info'))) return false;
   const btn = document.getElementById('section-save-btn');
   const origHtml = btn ? btn.innerHTML : '';
   const resetBtn = () => { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } };
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Saving…'; }
 
-  const { data: existing } = await sb.from('course_rows').select('row_uid,b,row_index')
+  const { data: existing, error: fetchError } = await sb.from('course_rows').select('*')
     .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata');
+  if (fetchError) { toast('Save failed: ' + fetchError.message, 'err'); resetBtn(); return false; }
   const existMap = {};
   let maxIdx = 0;
   for (const r of (existing || [])) { existMap[r.b] = r; if (r.row_index > maxIdx) maxIdx = r.row_index; }
@@ -1774,46 +1869,36 @@ async function saveSettings() {
 
   const pushField = (key, val, extra = {}) => {
     if (!val && !existMap[key]) return;
-    const uid = existMap[key]?.row_uid || `${S.course}:adm_${key.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const uid = existMap[key]?.row_uid || newCourseRowUid();
     const idx = existMap[key]?.row_index || (maxIdx += 10, maxIdx);
     toUpsert.push({ ...base, row_uid: uid, row_index: idx, b: key, c: val, ...extra });
   };
 
   for (const inp of document.querySelectorAll('.meta-field')) {
     const key = inp.dataset.metakey;
-    if (!key) continue;
+    if (!key || !canEditMetadata(key)) continue;
     pushField(key, inp.value.trim());
   }
 
-  if (toUpsert.length) {
-    const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
-    if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-  }
-
-  const oldProfUids = Object.entries(existMap)
-    .filter(([k]) => /^professor\d+(_link|_photo)?$/.test(k))
-    .map(([, r]) => r.row_uid);
-  if (oldProfUids.length) {
-    const { error } = await sb.from('course_rows').delete().in('row_uid', oldProfUids);
-    if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-  }
-
+  // Keep professor keys and existing row IDs stable. In particular, saving one lecturer
+  // never deletes, renumbers or resubmits another professor's records.
   const profCards = [...document.querySelectorAll('#professors-list .dynamic-card')];
-  const newProfRows = [];
-  profCards.forEach((card, idx) => {
-    const i = idx + 1;
+  const presentProfKeys = new Set(profCards.map(card => card.dataset.profkey));
+  const toDelete = isCourseAdmin() ? (existing || []).filter(r => /^professor\d+(_link|_photo)?$/.test(r.b) &&
+    !presentProfKeys.has(r.b.replace(/_(link|photo)$/, ''))).map(r => r.row_uid) : [];
+  for (const card of profCards) {
+    const key = card.dataset.profkey;
+    if (!ownsProfessor(key)) continue;
     const name = card.querySelector('[name=prof_name]')?.value?.trim() || '';
     const link = card.querySelector('[name=prof_link]')?.value?.trim() || '';
     const photo = card.querySelector('[name=prof_photo]')?.value?.trim() || '';
-    let ri = maxIdx + idx * 5;
-    if (name) newProfRows.push({ ...base, row_uid: `${S.course}:adm_prof${i}n`, row_index: ri + 1, b: `professor${i}`, c: name });
-    if (link) newProfRows.push({ ...base, row_uid: `${S.course}:adm_prof${i}l`, row_index: ri + 2, b: `professor${i}_link`, c: link });
-    if (photo) newProfRows.push({ ...base, row_uid: `${S.course}:adm_prof${i}p`, row_index: ri + 3, b: `professor${i}_photo`, c: photo });
-  });
-  if (newProfRows.length) {
-    const { error } = await sb.from('course_rows').upsert(newProfRows, { onConflict: 'row_uid' });
-    if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
+    if (!name && !isCourseAdmin()) { toast('Your professor name is required.', 'err'); resetBtn(); return false; }
+    pushField(key, name);
+    pushField(key + '_link', link);
+    pushField(key + '_photo', photo);
   }
+  const { error } = await saveCourseRows(toUpsert, toDelete);
+  if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
 
   // Timetables and Grading save separately (saveTimetablesWork/saveGradingSettings), not here.
 
@@ -1826,6 +1911,7 @@ async function saveSettings() {
 }
 
 function openEditCustomMeta(uid) {
+  if (!requirePermission(canEditMetadata(ROW_STORE[uid]?.b))) return;
   const row = ROW_STORE[uid];
   if (!row) return;
   document.getElementById('modal-title').textContent = 'Edit: ' + row.b;
@@ -1835,7 +1921,7 @@ function openEditCustomMeta(uid) {
     <input type="hidden" id="m_archive" value="${row.is_archive}">
     <input type="hidden" id="m_index" value="${row.row_index}">
     <input type="hidden" id="m_type" value="_custom">
-    <div class="form-group"><label class="form-label">Key</label><input type="text" id="mf_b" value="${x(row.b)}"></div>
+    <div class="form-group"><label class="form-label">Key</label><input type="text" id="mf_b" value="${x(row.b)}" ${isCourseAdmin() ? '' : 'disabled'}></div>
     <div class="form-group"><label class="form-label">Value</label><input type="text" id="mf_c" value="${x(row.c || '')}"></div>
     <div class="form-group"><label class="form-label">Status (col D)</label><input type="text" id="mf_d" value="${x(row.d || '')}"></div>
   `;
@@ -1858,9 +1944,9 @@ function moduleHeaderHtml(p) {
           ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
         </div>
         <div class="card-actions">
-          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${x(p.row_uid)}','material')"><i class="fa-regular fa-file-powerpoint" style="margin-right:5px"></i>Add Material</button>
-          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${x(p.row_uid)}','funfact')"><i class="fa-solid fa-lightbulb" style="margin-right:5px"></i>Add Fun Fact</button>
+          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${xjs(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${xjs(p.row_uid)}','material')"><i class="fa-regular fa-file-powerpoint" style="margin-right:5px"></i>Add Material</button>
+          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${xjs(p.row_uid)}','funfact')"><i class="fa-solid fa-lightbulb" style="margin-right:5px"></i>Add Fun Fact</button>
           <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
         </div>
       </div>`;
@@ -1874,7 +1960,7 @@ function funfactCardHtml(c) {
       <div class="card-title">${x((c.b || '').substring(0, 100))}</div>
     </div>
     <div class="card-actions">
-      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
       <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
     </div>
   </div>`;
@@ -1954,7 +2040,7 @@ function projectRefCardHtml(p) {
         ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
       </div>
       <div class="card-actions">
-        <button class="btn-ghost btn-sm" onclick="editProjectFromModules('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+        <button class="btn-ghost btn-sm" onclick="editProjectFromModules('${xjs(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
       </div>
     </div>
   </div>`;
@@ -1983,10 +2069,10 @@ function projectHeaderHtml(p) {
           ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
         </div>
         <div class="card-actions">
-          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${x(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-ghost btn-sm" onclick="addProjectFile('${x(p.row_uid)}')"><i class="fa-solid fa-file" style="margin-right:5px"></i>Add File</button>
-          <button class="btn-ghost btn-sm" onclick="addProjectDescription('${x(p.row_uid)}')"><i class="fa-solid fa-align-left" style="margin-right:5px"></i>Add Description</button>
-          <button class="btn-ghost btn-sm" onclick="addProjectGroup('${x(p.row_uid)}')"><i class="fa-solid fa-users" style="margin-right:5px"></i>Add Group</button>
+          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${xjs(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+          <button class="btn-ghost btn-sm" onclick="addProjectFile('${xjs(p.row_uid)}')"><i class="fa-solid fa-file" style="margin-right:5px"></i>Add File</button>
+          <button class="btn-ghost btn-sm" onclick="addProjectDescription('${xjs(p.row_uid)}')"><i class="fa-solid fa-align-left" style="margin-right:5px"></i>Add Description</button>
+          <button class="btn-ghost btn-sm" onclick="addProjectGroup('${xjs(p.row_uid)}')"><i class="fa-solid fa-users" style="margin-right:5px"></i>Add Group</button>
           <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
         </div>
       </div>`;
@@ -2000,7 +2086,7 @@ function projectDescCardHtml(d) {
       <div class="card-detail">${x((d.b || '').substring(0, 80))}</div>
     </div>
     <div class="card-actions">
-      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(d.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(d.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
       <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
     </div>
   </div>`;
@@ -2016,8 +2102,8 @@ function pgbHeadHtml(g) {
         ${g.d ? `<span class="pgb-chip"><i class="fa-solid fa-star" style="margin-right:4px;opacity:0.6"></i>${x(g.d)}</span>` : ''}
       </div>
       <div class="card-actions">
-        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(g.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-        <button class="btn-secondary btn-sm" onclick="addGroupFile('${x(g.row_uid)}')"><i class="fa-solid fa-file-circle-plus" style="margin-right:5px"></i>Add File</button>
+        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(g.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+        <button class="btn-secondary btn-sm" onclick="addGroupFile('${xjs(g.row_uid)}')"><i class="fa-solid fa-file-circle-plus" style="margin-right:5px"></i>Add File</button>
         <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
       </div>
     </div>
@@ -2094,7 +2180,7 @@ function flatCardHtml(row) {
         ${t2 ? `<div class="card-detail">${x((t2 || '').substring(0, 80))}</div>` : ''}
       </div>
       <div class="card-actions">
-        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(row.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(row.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
         <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
       </div>
     </div>`;
@@ -2124,7 +2210,7 @@ function materialCardHtml(c) {
       ${c.d ? `<div class="card-detail">${x(c.d.substring(0, 80))}</div>` : ''}
     </div>
     <div class="card-actions">
-      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${x(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
       <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
     </div>
   </div>`;
@@ -2145,7 +2231,7 @@ let _newRowSeq = 0;
 function attrSel(uid) { return `[data-uid="${String(uid).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`; }
 
 function addNewRow(type, defaults = {}) {
-  const uid = `${S.course}:new_${Date.now()}_${_newRowSeq++}`;
+  const uid = newCourseRowUid();
   const row = { row_uid: uid, sheet_name: S.course, is_archive: S.isArchive, row_index: 0, type, b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: '', ...defaults };
   ROW_STORE[uid] = row;
   markDirty(); // a new (unsaved) row now exists
@@ -2329,7 +2415,7 @@ function buildInlineFieldsHtml(row, schema) {
       h += `<div class="icon-input-wrap">
         <input type="text" id="mf_${f.col}" value="${x(v)}"
                oninput="updateLinkPreview(this,'lp_${f.col}')">
-        <a id="lp_${f.col}" href="${x(v || '#')}" target="_blank" rel="noopener"
+        <a id="lp_${f.col}" href="${x(safeCourseUrl(v) || '#')}" target="_blank" rel="noopener noreferrer"
            class="btn btn-sm" style="flex-shrink:0;padding:6px 10px;background:var(--primary-color);color:white;border-radius:10px;text-decoration:none;display:${v ? 'flex' : 'none'};align-items:center;gap:4px;border:none">
           <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:0.85em"></i>
         </a>
@@ -2633,6 +2719,7 @@ function collectSectionUids(sec) {
 }
 
 async function saveSectionChanges(sectionId) {
+  if (!requirePermission(canEditSection(sectionId))) return false;
   const sec = SECTIONS.find(s => s.id === sectionId);
   if (!sec) return;
   closeInlineEdit();
@@ -2642,10 +2729,8 @@ async function saveSectionChanges(sectionId) {
   const resetBtn = () => { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } };
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Saving…'; }
 
-  if (sectionId === 'links') {
-    const ttErr = await saveTimetablesWork();
-    if (ttErr) { toast('Save failed: ' + ttErr, 'err'); resetBtn(); return false; }
-  }
+  const timetableChanges = sectionId === 'links' ? await saveTimetablesWork() : { upserts: [], deleteUids: [] };
+  if (timetableChanges.error) { toast('Save failed: ' + timetableChanges.error.message, 'err'); resetBtn(); return false; }
 
   const { allUids, topUids } = collectSectionUids(sec);
 
@@ -2679,24 +2764,18 @@ async function saveSectionChanges(sectionId) {
     return row ? { ...row, row_index: base + (i + 1) * 10 } : null;
   }).filter(Boolean);
 
-  if (toDelete.length) {
-    const { error } = await sb.from('course_rows').delete().in('row_uid', toDelete);
-    if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-  }
-  if (toUpsert.length) {
-    const { error } = await sb.from('course_rows').upsert(toUpsert, { onConflict: 'row_uid' });
-    if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-  }
+  toUpsert.push(...timetableChanges.upserts);
+  toDelete.push(...timetableChanges.deleteUids);
 
   // Modules view also owns project ordering: persist the reordered project refs' Order only,
   // leaving their content and row_index (their own band) untouched.
   if (sec.hier) {
     const projRows = topUids.map(uid => ROW_STORE[uid]).filter(r => r && r.type === 'project');
-    if (projRows.length) {
-      const { error } = await sb.from('course_rows').upsert(projRows.map(r => ({ ...r })), { onConflict: 'row_uid' });
-      if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
-    }
+    toUpsert.push(...projRows.map(r => ({ ...r })));
   }
+
+  const { error } = await saveCourseRows(toUpsert, toDelete);
+  if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
 
   toast('Saved', 'ok');
   await loadSection(sectionId);
@@ -2704,6 +2783,7 @@ async function saveSectionChanges(sectionId) {
 }
 
 async function modalSave() {
+  if (!requirePermission(canEditSection(S.section))) return;
   const btn = document.getElementById('modal-save');
   btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px"></i>Saving…';
   const type = document.getElementById('m_type').value;
@@ -2720,7 +2800,7 @@ async function modalSave() {
     if (!el) continue;
     row[f.col] = f.dt && el.value ? fromIsoDatetime(el.value) : (el.value || '');
   }
-  const { error } = await sb.from('course_rows').upsert(row, { onConflict: 'row_uid' });
+  const { error } = await saveCourseRows(row);
   btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:5px"></i>Save';
   if (error) { toast('Save failed: ' + error.message, 'err'); return; }
   ROW_STORE[row.row_uid] = row;
@@ -2730,8 +2810,9 @@ async function modalSave() {
 }
 
 async function deleteRow(uid) {
+  if (!requirePermission(canEditSection(S.section) && (ROW_STORE[uid]?.type !== 'metadata' || canEditMetadata(ROW_STORE[uid]?.b)))) return;
   if (!await confirmDialog('This row will be permanently deleted.', { title: 'Delete this row?', okLabel: 'Delete', danger: true })) return;
-  const { error } = await sb.from('course_rows').delete().eq('row_uid', uid);
+  const { error } = await saveCourseRows([], [uid]);
   if (error) { toast('Delete failed: ' + error.message, 'err'); return; }
   delete ROW_STORE[uid]; toast('Deleted', 'ok');
   if (S.section === 'info') await loadMetadataSettings();
@@ -2743,6 +2824,7 @@ async function deleteRow(uid) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function openNewCourseModal() {
+  if (!requirePermission(isCourseAdmin())) return;
   document.getElementById('modal-title').textContent = 'New Course';
   document.getElementById('modal-save').innerHTML = '<i class="fa-solid fa-plus" style="margin-right:5px"></i>Create';
   document.getElementById('modal-save').onclick = createCourse;
@@ -2772,6 +2854,7 @@ function openNewCourseModal() {
 }
 
 async function createCourse() {
+  if (!requirePermission(isCourseAdmin())) return;
   const sheet = document.getElementById('nc_sheet').value.trim();
   const code = document.getElementById('nc_code').value.trim();
   const title = document.getElementById('nc_title').value.trim();
@@ -2782,12 +2865,12 @@ async function createCourse() {
   const btn = document.getElementById('modal-save'); btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px"></i>Creating…';
   const base = { sheet_name: sheet, is_archive: archive, type: 'metadata', b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: '' };
   const rows = [];
-  if (code) rows.push({ ...base, row_uid: sheet + ':10', row_index: 10, b: 'code', c: code });
-  if (title) rows.push({ ...base, row_uid: sheet + ':20', row_index: 20, b: 'title', c: title });
-  if (year) rows.push({ ...base, row_uid: sheet + ':25', row_index: 25, b: 'year', c: year });
-  if (sem) rows.push({ ...base, row_uid: sheet + ':30', row_index: 30, b: 'semester', c: sem });
-  if (!rows.length) rows.push({ ...base, row_uid: sheet + ':10', row_index: 10, b: 'code', c: sheet });
-  const { error } = await sb.from('course_rows').insert(rows);
+  if (code) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 10, b: 'code', c: code });
+  if (title) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 20, b: 'title', c: title });
+  if (year) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 25, b: 'year', c: year });
+  if (sem) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 30, b: 'semester', c: sem });
+  if (!rows.length) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 10, b: 'code', c: sheet });
+  const { error } = await sb.rpc('teaching_create_course', { p_rows: rows });
   btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-plus" style="margin-right:5px"></i>Create';
   if (error) { toast('Create failed: ' + error.message, 'err'); return; }
   document.getElementById('modal-save').onclick = modalSave;
@@ -2845,41 +2928,17 @@ async function takenCourseNames(isArchive) {
   return new Set((data || []).map(r => r.sheet_name));
 }
 
-// Moves a course between the active/archived groups, optionally under a new sheet_name. The
-// sheet_name-derived row_uids ("CE_132:adm_code") must be rewritten alongside it — a later
-// course reusing the bare code mints those same uids, and would silently overwrite this
-// course's rows on its first upsert. Rows are inserted under the new key before the old ones
-// are deleted, so a failure part-way leaves the original course untouched.
+// Move content, assignments and professor ownership in one database transaction.
 async function moveCourse(oldName, newName, fromArchive) {
-  const toArchive = !fromArchive;
-  if (newName === oldName) {
-    const { error } = await sb.from('course_rows').update({ is_archive: toArchive })
-      .eq('sheet_name', oldName).eq('is_archive', fromArchive);
-    return error;
-  }
-  const { data, error } = await sb.from('course_rows').select('*')
-    .eq('sheet_name', oldName).eq('is_archive', fromArchive);
-  if (error) return error;
-  const rows = data || [];
-  if (!rows.length) return { message: `no rows found for "${oldName}"` };
-  const prefix = oldName + ':';
-  const moved = rows.map(r => {
-    const uid = String(r.row_uid);
-    return {
-      ...r,
-      sheet_name: newName,
-      is_archive: toArchive,
-      row_uid: newName + ':' + (uid.startsWith(prefix) ? uid.slice(prefix.length) : uid),
-    };
+  const { error } = await sb.rpc('teaching_move_course', {
+    p_name: oldName, p_new_name: newName, p_from_archive: fromArchive
   });
-  const { error: insErr } = await sb.from('course_rows').insert(moved);
-  if (insErr) return insErr;
-  const { error: delErr } = await sb.from('course_rows').delete()
-    .in('row_uid', rows.map(r => r.row_uid));
-  return delErr || null;
+  if (!error) await refreshTeachingAccess();
+  return error || null;
 }
 
 async function archiveCourse(n) {
+  if (!requirePermission(canArchiveCourse(n, false)) || !(await confirmLeaveIfDirty())) return;
   const meta = await courseMetaValues(n, false, ['semester', 'year', 'code', 'title']);
   if (!meta) { toast('Could not read the course metadata', 'err'); return; }
   // Strip any existing stamp before re-adding one, so archiving a restored course (which kept
@@ -2908,6 +2967,7 @@ async function archiveCourse(n) {
 }
 
 async function restoreCourse(n) {
+  if (!requirePermission(isCourseAdmin()) || !(await confirmLeaveIfDirty())) return;
   const meta = await courseMetaValues(n, true, ['code', 'title']);
   if (!meta) { toast('Could not read the course metadata', 'err'); return; }
   const base = courseNameBase(n);
@@ -2927,15 +2987,17 @@ async function restoreCourse(n) {
   S.course = null; clearMain(); await loadSidebar();
 }
 async function deleteCourse(n, a) {
+  if (!requirePermission(isCourseAdmin()) || !(await confirmLeaveIfDirty())) return;
   if (!await confirmDialog('This CANNOT be undone.', { title: `Permanently delete ALL data for "${n}"?`, okLabel: 'Delete Everything', danger: true })) return;
-  const { error } = await sb.from('course_rows').delete().eq('sheet_name', n).eq('is_archive', a);
+  const { error } = await sb.rpc('teaching_delete_course', { p_name: n, p_archive: a });
   if (error) { toast('Failed: ' + error.message, 'err'); return; }
   toast(`"${n}" deleted`, 'ok'); S.course = null; clearMain(); await loadSidebar();
 }
 
 function clearMain() {
   document.getElementById('main-area').innerHTML =
-    `<div class="no-course"><div><h3>No course selected</h3><p>Choose from the sidebar or create a new one.</p></div></div>`;
+    `<div class="no-course"><div><h3>No course selected</h3><p>Choose a course from the sidebar.${isCourseAdmin() ? ' You can also create a new course.' : ''}</p></div></div>`;
+  renderAccessControls();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3054,6 +3116,7 @@ function ensureSortable(el, opts) {
 }
 
 function initDnD(sec) {
+  if (!canEditSection(sec.id)) return;
   if (!sec || !window.Sortable) return;
   const body = document.getElementById('section-body');
   if (!body) return;
@@ -3138,6 +3201,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
+    if (document.getElementById('access-settings')) { e.preventDefault(); saveAccessAccount(); return; }
     if (document.getElementById('admin-app').style.display !== 'flex' || !S.course) return;
     e.preventDefault(); // never fall through to the browser's Save Page dialog
     if (document.getElementById('confirm-overlay').classList.contains('open') ||
@@ -3170,6 +3234,15 @@ function normalizeYearField(el) {
 }
 
 function x(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+// HTML escaping alone is insufficient for strings inside inline JavaScript attributes.
+function xjs(s) { return x(String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')); }
+function safeCourseUrl(value) {
+  const url = String(value || '').trim();
+  if (!url) return '';
+  try { return ['https:', 'http:'].includes(new URL(url, window.location.href).protocol) ? url : ''; }
+  catch { return ''; }
+}
+function newCourseRowUid() { return 'course:' + crypto.randomUUID(); }
 function xh(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 let _tt;

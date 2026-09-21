@@ -14,6 +14,80 @@ const courseData = { metadata: {}, modules: [] };
 const courseDataCache = {}; // Cache for fetched course data
 let isProgrammaticScroll = false;
 
+// Course content is authored by people with different access levels. It must never
+// execute script on this origin, which also hosts the signed-in control panel.
+function courseHtmlText(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function safeCourseUrl(value, imageOnly = false) {
+    const raw = String(value || '').trim();
+    if (!raw || /[\u0000-\u001f\u007f]/.test(raw)) return '';
+    try {
+        const url = new URL(raw, document.baseURI);
+        const protocols = imageOnly ? ['http:', 'https:'] : ['http:', 'https:', 'mailto:', 'tel:'];
+        return protocols.includes(url.protocol) ? url.href : '';
+    } catch { return ''; }
+}
+
+function courseActionButton(url, action, iconOnly = false) {
+    const safeUrl = safeCourseUrl(url);
+    if (!safeUrl) return '';
+    const actions = {
+        view: ['btn-blue', 'fa-regular fa-eye', 'View'],
+        download: ['btn-green', 'fa-regular fa-save', 'Download'],
+        open: ['btn-orange', 'fa-solid fa-external-link-alt', 'Open']
+    };
+    const [color, icon, label] = actions[action];
+    return `<button data-course-action="${courseHtmlText(safeUrl)}" class="${color}" aria-label="${label}"><span><i class="${icon}"></i>${iconOnly ? '' : ` ${label}`}</span></button>`;
+}
+
+function courseRichHtml(value) {
+    // Fail closed if the sanitizer cannot load; the original content stays readable.
+    if (!window.DOMPurify) return courseHtmlText(value);
+    const fragment = window.DOMPurify.sanitize(String(value || ''), {
+        RETURN_DOM_FRAGMENT: true,
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li',
+            'a', 'img', 'span', 'div', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody',
+            'tfoot', 'tr', 'th', 'td', 'hr', 'sub', 'sup', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'details', 'summary'],
+        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'target', 'rel', 'colspan', 'rowspan'],
+        ALLOW_DATA_ATTR: false,
+        ALLOW_ARIA_ATTR: false
+    });
+    fragment.querySelectorAll('a').forEach(link => {
+        const url = safeCourseUrl(link.getAttribute('href'));
+        if (url) link.setAttribute('href', url); else link.removeAttribute('href');
+        link.setAttribute('rel', 'noopener noreferrer');
+    });
+    fragment.querySelectorAll('img').forEach(image => {
+        const url = safeCourseUrl(image.getAttribute('src'), true);
+        if (url) image.setAttribute('src', url); else image.removeAttribute('src');
+    });
+    const container = document.createElement('div');
+    container.appendChild(fragment);
+    return container.innerHTML;
+}
+
+function safeCourseColor(value) {
+    const raw = String(value || '').trim();
+    const names = ['primary', 'secondary', 'tertiary', 'accent', 'success', 'warning', 'info', 'danger'];
+    if (names.includes(raw)) return `var(--${raw}-color)`;
+    if (/^--[a-z][a-z0-9_-]*$/i.test(raw)) return `var(${raw})`;
+    if (/^var\(--[a-z][a-z0-9_-]*\)$/i.test(raw)) return raw;
+    // Reject declaration/attribute escapes and resource URLs before asking CSS to parse.
+    if (/^(?:#[0-9a-f]{3,8}|[a-z]+|(?:rgb|hsl)a?\([0-9.,%+\-\s/degturnrad]+\))$/i.test(raw)
+        && window.CSS?.supports('color', raw)) return raw;
+    return 'var(--primary-color)';
+}
+
+// URLs are data, never JavaScript fragments. Rich text cannot add this attribute.
+document.addEventListener('click', event => {
+    const button = event.target.closest?.('button[data-course-action]');
+    if (button) handleActionClick(button, button.dataset.courseAction);
+});
+
 /* SWIPE DISABLED — start (globals) */
 // const swipeArea = document.body;
 // let touchstartX = 0, touchendX = 0, touchstartY = 0, touchendY = 0;
@@ -49,6 +123,8 @@ function applyClickFeedback(selector, duration = 1500) {
 }
 
 function handleActionClick(button, url) {
+    const safeUrl = safeCourseUrl(url);
+    if (!safeUrl) return;
     // 1. Immediately apply the "pushed in" style
     button.classList.add('is-stuck');
 
@@ -58,7 +134,7 @@ function handleActionClick(button, url) {
     void button.offsetHeight;
 
     // 3. With the animation now visibly running, open the new link.
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(safeUrl, '_blank', 'noopener,noreferrer');
 
     // 4. Set a timer to remove the "stuck" class for when the user
     //    eventually returns to this tab.
@@ -887,7 +963,7 @@ function applyColorTheme(metadata, isBackgroundRefresh = false) {
     // This function will change the icon and trigger the "pop-in" animation
     const animateIn = () => {
         decorationContainer.dataset.currentIcon = newIconClass;
-        decorationContainer.innerHTML = `<i class="fa-solid ${newIconClass}"></i>`;
+        decorationContainer.innerHTML = `<i class="fa-solid ${courseHtmlText(newIconClass)}"></i>`;
         decorationContainer.style.animation = 'decor-pop-in 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards';
     };
 
@@ -995,7 +1071,7 @@ async function toggleTimetable(index, btnName) {
         saveTimetableState(false);
         hideTtPopover();
         container.classList.remove('visible'); // animates the collapse
-        clickedButton.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btnName}`;
+        clickedButton.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${courseHtmlText(btnName)}`;
         clickedButton.classList.remove('active');
 
         // Wait for the actual collapse transition to finish (rather than a
@@ -1024,9 +1100,9 @@ async function toggleTimetable(index, btnName) {
     // --- SHOWING OR SWITCHING ---
     allTimetableBtns.forEach(btn => {
         btn.classList.remove('active');
-        btn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btn.dataset.btnName || 'Timetable'}`;
+        btn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${courseHtmlText(btn.dataset.btnName || 'Timetable')}`;
     });
-    clickedButton.innerHTML = `<i class="fa-solid fa-calendar-xmark"></i> ${btnName}`;
+    clickedButton.innerHTML = `<i class="fa-solid fa-calendar-xmark"></i> ${courseHtmlText(btnName)}`;
     clickedButton.classList.add('active');
 
     const requestKey = `${targetTimetableId || ''}::${targetClassId || ''}`;
@@ -1271,7 +1347,7 @@ async function populateCourseButtons() {
     const createCourseButton = (sheetName, label) => {
         const button = document.createElement('div');
         button.setAttribute('class', 'course-button' + (currentCourse === sheetName ? ' active' : ''));
-        button.innerHTML = `<i class="fa-solid fa-th-list"></i>&nbsp; ${formatCourseCode(label)}`;
+        button.innerHTML = `<i class="fa-solid fa-th-list"></i>&nbsp; ${courseHtmlText(formatCourseCode(label))}`;
         button.dataset.sheet = sheetName;
         button.onclick = () => selectCourse(sheetName);
         return button;
@@ -1969,7 +2045,7 @@ function populateActionButtons(buttons, metadata) {
             const timetableBtn = document.createElement('button');
             timetableBtn.id = `timetable-btn-${i}`;
             timetableBtn.setAttribute('class', `timetable-btn ${btnColor}`);
-            timetableBtn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btnName}`;
+            timetableBtn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${courseHtmlText(btnName)}`;
             timetableBtn.dataset.timetableId = tId;
             timetableBtn.dataset.classId = cId !== undefined ? cId : '';
             timetableBtn.dataset.btnName = btnName;
@@ -1982,7 +2058,7 @@ function populateActionButtons(buttons, metadata) {
     buttons.forEach(buttonData => {
         const button = document.createElement('button');
         button.setAttribute('class', buttonData.colorClass);
-        button.innerHTML = `<i class="${buttonData.icon}"></i> ${buttonData.name}`;
+        button.innerHTML = `<i class="${courseHtmlText(buttonData.icon)}"></i> ${courseHtmlText(buttonData.name)}`;
         button.onclick = () => handleActionClick(button, buttonData.link);
         container.appendChild(button);
     });
@@ -2010,22 +2086,22 @@ function generateProjectModuleHtml(module) {
         module.materials.forEach(material => {
             if (material.isDescription) {
                 if (inGrid) { filesHtml += `</div>`; inGrid = false; }
-                filesHtml += `<div class="project-module-description">${material.text}</div>`;
+                filesHtml += `<div class="project-module-description">${courseRichHtml(material.text)}</div>`;
             } else {
                 if (!inGrid) { filesHtml += `<div class="${gridClass}">`; inGrid = true; }
                 filesHtml += `
-            <div class="material-card ${material.fileTypeClass || ''}">
+            <div class="material-card ${courseHtmlText(material.fileTypeClass || '')}">
                 <div class="material-card-header">
-                    <i class="${material.icon || 'fa-regular fa-file-alt'} material-icon"></i>
+                    <i class="${courseHtmlText(material.icon || 'fa-regular fa-file-alt')} material-icon"></i>
                     <div class="material-info">
-                        <div class="material-title">${material.title}</div>
-                        <div class="material-description">${material.description}</div>
+                        <div class="material-title">${courseHtmlText(material.title)}</div>
+                        <div class="material-description">${courseRichHtml(material.description)}</div>
                     </div>
                 </div>
 <div class="material-card-actions">
-    ${material.viewLink ? `<button onclick="handleActionClick(this, '${material.viewLink}')" class="btn-blue"><span><i class="fa-regular fa-eye"></i> View</span></button>` : ''}
-    ${material.downloadLink ? `<button onclick="handleActionClick(this, '${material.downloadLink}')" class="btn-green"><span><i class="fa-regular fa-save"></i> Download</span></button>` : ''}
-    ${material.openLink ? `<button onclick="handleActionClick(this, '${material.openLink}')" class="btn-orange"><span><i class="fa-solid fa-external-link-alt"></i> Open</span></button>` : ''}
+    ${courseActionButton(material.viewLink, 'view')}
+    ${courseActionButton(material.downloadLink, 'download')}
+    ${courseActionButton(material.openLink, 'open')}
 </div>
             </div>`;
             }
@@ -2046,10 +2122,10 @@ function generateProjectModuleHtml(module) {
 
                 const className = index === 0 ? 'class="leader"' : '';
 
-                let displayName = student;
+                let displayName = courseHtmlText(student);
                 const match = student.match(/^(.*?)\s+(R|R\s+EX)$/i);
                 if (match) {
-                    displayName = `${match[1]} <span class="student-status-warning">${match[2].toUpperCase()}</span>`;
+                    displayName = `${courseHtmlText(match[1])} <span class="student-status-warning">${courseHtmlText(match[2].toUpperCase())}</span>`;
                 }
 
                 studentsList += `<li ${className}>${displayName}</li>`;
@@ -2061,15 +2137,15 @@ function generateProjectModuleHtml(module) {
                 groupFilesHtml += '<div class="group-files-container">';
                 group.files.forEach(file => {
                     groupFilesHtml += `
-                    <div class="group-material-card ${file.fileTypeClass || ''}">
-                        <i class="${file.icon || 'fa-regular fa-file-alt'} material-icon"></i>
+                    <div class="group-material-card ${courseHtmlText(file.fileTypeClass || '')}">
+                        <i class="${courseHtmlText(file.icon || 'fa-regular fa-file-alt')} material-icon"></i>
                         <div class="material-info">
-                            <div class="material-title">${file.title}</div>
-                            <div class="material-description">${file.description}</div>
+                            <div class="material-title">${courseHtmlText(file.title)}</div>
+                            <div class="material-description">${courseRichHtml(file.description)}</div>
                         </div>
                         <div class="material-card-actions">
-                             ${file.viewLink ? `<button onclick="handleActionClick(this, '${file.viewLink}')" class="btn-blue"><span><i class="fa-regular fa-eye"></i></span></button>` : ''}
- ${file.downloadLink ? `<button onclick="handleActionClick(this, '${file.downloadLink}')" class="btn-green"><span><i class="fa-regular fa-save"></i></span></button>` : ''}
+                             ${courseActionButton(file.viewLink, 'view', true)}
+ ${courseActionButton(file.downloadLink, 'download', true)}
                         </div>
                     </div>`;
                 });
@@ -2078,8 +2154,8 @@ function generateProjectModuleHtml(module) {
 
             groupsHtml += `
             <div class="project-group-card">
-                <div class="project-group-title">${group.topic}</div>
-                ${group.description ? `<div class="project-group-description">${group.description}</div>` : ''}
+                <div class="project-group-title">${courseHtmlText(group.topic)}</div>
+                ${group.description ? `<div class="project-group-description">${courseRichHtml(group.description)}</div>` : ''}
                 ${studentsList}
                 ${groupFilesHtml}
             </div>`;
@@ -2089,14 +2165,14 @@ function generateProjectModuleHtml(module) {
 
     let funFactsHtml = '';
     module.funFacts.forEach(funFact => {
-        funFactsHtml += `<div class="fun-fact"><i class="fa-solid fa-lightbulb fun-fact-icon"></i><span class="fun-fact-text">${funFact.text}</span></div>`;
+        funFactsHtml += `<div class="fun-fact"><i class="fa-solid fa-lightbulb fun-fact-icon"></i><span class="fun-fact-text">${courseRichHtml(funFact.text)}</span></div>`;
     });
 
     return `
-    <div class="module module-project" id="${moduleId}" data-initially-collapsed="${module.isInitiallyCollapsed === true}">
+    <div class="module module-project" id="${courseHtmlText(moduleId)}" data-initially-collapsed="${module.isInitiallyCollapsed === true}">
         <div class="module-header">
-            ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
-            <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
+            ${module.moduleNumber ? `<span class="module-background-number">${courseHtmlText(module.moduleNumber)}</span>` : ''}
+            <span class="module-title"><i class="${courseHtmlText(module.icon)}"></i> ${courseHtmlText(module.title)}</span>
             <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
         </div>
         <div class="module-content">
@@ -2111,7 +2187,7 @@ function resetUIElements() {
     const timetableBtns = document.querySelectorAll('.timetable-btn');
     timetableBtns.forEach(btn => {
         const btnName = btn.dataset.btnName || 'Timetable';
-        btn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${btnName}`;
+        btn.innerHTML = `<i class="fa-solid fa-calendar-week"></i> ${courseHtmlText(btnName)}`;
         btn.classList.remove('active');
     });
 
@@ -2256,28 +2332,17 @@ function renderAnnouncements(announcements) {
     let html = '';
 
     const renderCardHtml = (ann) => {
-        let rawColor = (ann.color || '').trim();
-        let cssColorVar = 'var(--primary-color)';
-
-        if (rawColor) {
-            if (['primary', 'secondary', 'tertiary', 'accent', 'success', 'warning', 'info', 'danger'].includes(rawColor)) {
-                cssColorVar = `var(--${rawColor}-color)`;
-            } else if (rawColor.startsWith('--')) {
-                cssColorVar = `var(${rawColor})`;
-            } else {
-                cssColorVar = rawColor;
-            }
-        }
+        const cssColorVar = safeCourseColor(ann.color);
 
         let infoHtml = '';
         if (ann.icon) {
             const profMatch = ann.icon.match(/^professor(\d+)$/i);
             if (profMatch && window.currentCourseData && window.currentCourseData.metadata) {
                 const profNum = profMatch[1];
-                const photoUrl = window.currentCourseData.metadata[`professor${profNum}_photo`];
+                const photoUrl = safeCourseUrl(window.currentCourseData.metadata[`professor${profNum}_photo`], true);
                 const profName = window.currentCourseData.metadata[`professor${profNum}`];
                 if (photoUrl) {
-                    infoHtml += `<img src="${photoUrl}" alt="Professor" class="announcement-avatar" style="border-color: ${cssColorVar};">`;
+                    infoHtml += `<img src="${courseHtmlText(photoUrl)}" alt="Professor" class="announcement-avatar" style="border-color: ${cssColorVar};">`;
                 } else {
                     // Fallback if professor specified but no photo provided
                     infoHtml += `<i class="fa-solid fa-user-circle announcement-icon" style="color: ${cssColorVar};"></i>`;
@@ -2287,16 +2352,16 @@ function renderAnnouncements(announcements) {
                     const titleRegex = /^(?:assoc\.|prof\.|dr\.|mr\.|ms\.|mrs\.|ing\.|eng\.|prof|dr|mr|ms|mrs|ing|eng)\s+/gi;
                     const cleanName = profName.replace(titleRegex, '').replace(titleRegex, '').trim();
                     const firstName = cleanName.split(' ')[0];
-                    infoHtml += `<div class="announcement-prof-name" style="color: ${cssColorVar};">${firstName}</div>`;
+                    infoHtml += `<div class="announcement-prof-name" style="color: ${cssColorVar};">${courseHtmlText(firstName)}</div>`;
                 }
             } else {
-                infoHtml += `<i class="${ann.icon} announcement-icon" style="color: ${cssColorVar};"></i>`;
+                infoHtml += `<i class="${courseHtmlText(ann.icon)} announcement-icon" style="color: ${cssColorVar};"></i>`;
             }
         }
 
         let timeHtml = '';
         if (ann.time) {
-            timeHtml = `<span class="announcement-date" style="color: ${cssColorVar};">${ann.time}</span>`;
+            timeHtml = `<span class="announcement-date" style="color: ${cssColorVar};">${courseHtmlText(ann.time)}</span>`;
         }
 
         let actionHtml = '';
@@ -2306,6 +2371,8 @@ function renderAnnouncements(announcements) {
             if (links.length > 0) {
                 actionHtml = '<div class="material-card-actions">';
                 links.forEach((link, i) => {
+                    const safeUrl = safeCourseUrl(link);
+                    if (!safeUrl) return;
                     const btnBgStyle = ann.color ? `background-color: ${cssColorVar}; border-color: rgba(0,0,0,0.15);` : '';
                     const defaultClass = ann.color ? '' : 'btn-primary';
 
@@ -2319,8 +2386,8 @@ function renderAnnouncements(announcements) {
                     const iconClass = icons[i] || 'fa-solid fa-up-right-from-square';
 
                     actionHtml += `
-                                <button onclick="handleActionClick(this, '${link}')" class="${defaultClass} ${posClass}" style="${btnBgStyle}" title="Open Link">
-                                    <i class="${iconClass}" style="margin-right: 0;"></i>
+                                <button data-course-action="${courseHtmlText(safeUrl)}" class="${defaultClass} ${posClass}" style="${btnBgStyle}" title="Open Link">
+                                    <i class="${courseHtmlText(iconClass)}" style="margin-right: 0;"></i>
                                 </button>`;
                 });
                 actionHtml += '</div>';
@@ -2335,11 +2402,11 @@ function renderAnnouncements(announcements) {
                             <div class="announcement-content-wrapper">
                                 <div class="announcement-header-row">
                                     <div class="announcement-header-info">
-                                        ${ann.title ? `<span class="announcement-title" style="color: ${cssColorVar};">${ann.title}</span>` : ''}
+                                        ${ann.title ? `<span class="announcement-title" style="color: ${cssColorVar};">${courseHtmlText(ann.title)}</span>` : ''}
                                     </div>
                                     ${timeHtml}
                                 </div>
-                                <div class="announcement-text">${ann.text}</div>
+                                <div class="announcement-text">${courseRichHtml(ann.text)}</div>
                             </div>
                         </div>
                         ${actionHtml}
@@ -2566,11 +2633,6 @@ function renderAnnouncements(announcements) {
     });
 }
 
-function handleActionClick(btn, link) {
-    // Prevent event from bubbling up to the card if needed, though they are siblings here
-    window.open(link, '_blank', 'noopener,noreferrer');
-}
-
 function updateCourseMetadata(metadata) {
     document.getElementById('course-code').textContent = metadata.code ? formatCourseCode(metadata.code) : 'Course Code';
 
@@ -2579,12 +2641,14 @@ function updateCourseMetadata(metadata) {
         profContainer.innerHTML = '';
         let professors = [];
 
-        for (let i = 1; i <= 5; i++) {
-            if (metadata[`professor${i}`]) {
+        const professorKeys = Object.keys(metadata).filter(key => /^professor\d+$/.test(key))
+            .sort((a, b) => Number(a.slice(9)) - Number(b.slice(9)));
+        for (const key of professorKeys) {
+            if (metadata[key]) {
                 professors.push({
-                    name: metadata[`professor${i}`],
-                    photo: metadata[`professor${i}_photo`] || null,
-                    link: metadata[`professor${i}_link`] || null
+                    name: metadata[key],
+                    photo: safeCourseUrl(metadata[`${key}_photo`], true),
+                    link: safeCourseUrl(metadata[`${key}_link`])
                 });
             }
         }
@@ -2596,19 +2660,24 @@ function updateCourseMetadata(metadata) {
 
                 let content = '';
                 if (prof.photo) {
-                    content = `<img src="${prof.photo}" alt="${prof.name}" class="professor-photo" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block';">`;
+                    content = `<img src="${courseHtmlText(prof.photo)}" alt="${courseHtmlText(prof.name)}" class="professor-photo">`;
                     content += `<i class="fa-solid fa-user-circle" style="display:none;"></i>`;
                 } else {
                     content = '<i class="fa-solid fa-user-circle"></i>';
                 }
-                content += ` ${prof.name}`;
+                content += ` ${courseHtmlText(prof.name)}`;
 
                 if (prof.link) {
-                    item.innerHTML = `<a href="${prof.link}" target="_blank" rel="noopener noreferrer" class="professor-link">${content}</a>`;
+                    item.innerHTML = `<a href="${courseHtmlText(prof.link)}" target="_blank" rel="noopener noreferrer" class="professor-link">${content}</a>`;
                 } else {
                     item.innerHTML = content;
                 }
 
+                const photo = item.querySelector('img');
+                photo?.addEventListener('error', () => {
+                    photo.style.display = 'none';
+                    photo.nextElementSibling.style.display = 'inline-block';
+                });
                 profContainer.appendChild(item);
             });
         } else {
@@ -2733,7 +2802,7 @@ function generateCourseContentHtml(modules) {
         e.currentTarget.classList.add('active');
 
         const targetId = e.currentTarget.getAttribute('href');
-        const targetElement = document.querySelector(targetId);
+        const targetElement = document.getElementById(targetId.slice(1));
 
         if (targetElement) {
             targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2751,7 +2820,7 @@ function generateCourseContentHtml(modules) {
         const navItem = document.createElement('a');
         navItem.setAttribute('class', 'side-nav-item');
         navItem.href = moduleId;
-        navItem.innerHTML = `<i class="${module.icon}"></i> <span>${module.title}</span>`;
+        navItem.innerHTML = `<i class="${courseHtmlText(module.icon)}"></i> <span>${courseHtmlText(module.title)}</span>`;
         navItem.addEventListener('click', handleNavClick);
         sideNav.appendChild(navItem);
 
@@ -2759,7 +2828,7 @@ function generateCourseContentHtml(modules) {
             const mobileNavItem = document.createElement('a');
             mobileNavItem.setAttribute('class', 'mobile-fab-menu-item');
             mobileNavItem.href = moduleId;
-            mobileNavItem.innerHTML = `${module.title} <i class="${module.icon}"></i>`;
+            mobileNavItem.innerHTML = `${courseHtmlText(module.title)} <i class="${courseHtmlText(module.icon)}"></i>`;
             mobileNavItem.addEventListener('click', (e) => {
                 handleNavClick(e);
                 document.getElementById('mobile-fab')?.click();
@@ -2776,10 +2845,10 @@ function generateCourseContentHtml(modules) {
             else if (materialCount === 2) gridClass += ' materials-2';
 
             html += `
-            <div class="module" id="module-${module.id}" data-initially-collapsed="${module.isInitiallyCollapsed === true}">
+            <div class="module" id="module-${courseHtmlText(module.id)}" data-initially-collapsed="${module.isInitiallyCollapsed === true}">
                 <div class="module-header">
-                    ${module.moduleNumber ? `<span class="module-background-number">${module.moduleNumber}</span>` : ''}
-                    <span class="module-title"><i class="${module.icon}"></i> ${module.title}</span>
+                    ${module.moduleNumber ? `<span class="module-background-number">${courseHtmlText(module.moduleNumber)}</span>` : ''}
+                    <span class="module-title"><i class="${courseHtmlText(module.icon)}"></i> ${courseHtmlText(module.title)}</span>
                     <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
                 </div>
                 <div class="module-content">`;
@@ -2788,29 +2857,29 @@ function generateCourseContentHtml(modules) {
             module.materials.forEach(material => {
                 if (material.isDescription) {
                     if (inGrid) { html += `</div>`; inGrid = false; }
-                    html += `<div class="project-module-description">${material.text}</div>`;
+                    html += `<div class="project-module-description">${courseRichHtml(material.text)}</div>`;
                 } else {
                     if (!inGrid) { html += `<div class="${gridClass}">`; inGrid = true; }
                     html += `
-                    <div class="material-card ${material.fileTypeClass || ''}">
+                    <div class="material-card ${courseHtmlText(material.fileTypeClass || '')}">
                         <div class="material-card-header">
-                            <i class="${material.icon} material-icon"></i>
+                            <i class="${courseHtmlText(material.icon)} material-icon"></i>
                             <div class="material-info">
-                                <div class="material-title">${material.title}</div>
-                                <div class="material-description">${material.description}</div>
+                                <div class="material-title">${courseHtmlText(material.title)}</div>
+                                <div class="material-description">${courseRichHtml(material.description)}</div>
                             </div>
                         </div>
                         <div class="material-card-actions">
-                            ${material.viewLink ? `<button onclick="handleActionClick(this, '${material.viewLink}')" class="btn-blue"><span><i class="fa-regular fa-eye"></i> View</span></button>` : ''}
-${material.downloadLink ? `<button onclick="handleActionClick(this, '${material.downloadLink}')" class="btn-green"><span><i class="fa-regular fa-save"></i> Download</span></button>` : ''}
-${material.openLink ? `<button onclick="handleActionClick(this, '${material.openLink}')" class="btn-orange"><span><i class="fa-solid fa-external-link-alt"></i> Open</span></button>` : ''}
+                            ${courseActionButton(material.viewLink, 'view')}
+${courseActionButton(material.downloadLink, 'download')}
+${courseActionButton(material.openLink, 'open')}
                         </div>
                     </div>`;
                 }
             });
             if (inGrid) { html += `</div>`; }
             module.funFacts.forEach(funFact => {
-                html += `<div class="fun-fact"><i class="fa-solid fa-lightbulb fun-fact-icon"></i><span class="fun-fact-text">${funFact.text}</span></div>`;
+                html += `<div class="fun-fact"><i class="fa-solid fa-lightbulb fun-fact-icon"></i><span class="fun-fact-text">${courseRichHtml(funFact.text)}</span></div>`;
             });
             html += `</div></div>`;
         }
@@ -3048,7 +3117,7 @@ function showImprovedNotification(type, title, message, duration) {
     if (type === 'success') icon = 'check-circle';
     if (type === 'error') icon = 'times-circle';
     if (type === 'warning') icon = 'exclamation-circle';
-    notification.innerHTML = `<i class="fa-solid fa-${icon}"></i><div style="flex-grow:1;"><strong>${title}</strong><br>${message}</div><button class="notification-close">&times;</button>`;
+    notification.innerHTML = `<i class="fa-solid fa-${icon}"></i><div style="flex-grow:1;"><strong>${courseHtmlText(title)}</strong><br>${courseHtmlText(message)}</div><button class="notification-close">&times;</button>`;
     area.appendChild(notification);
     notification.querySelector('.notification-close').onclick = (e) => {
         e.preventDefault();

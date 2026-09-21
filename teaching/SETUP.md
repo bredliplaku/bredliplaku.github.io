@@ -1,10 +1,15 @@
 # Teaching pages — setup & sharing guide
 
-This folder is a self-contained "course website + admin panel". Everything that is
-specific to *you* (Supabase keys, Google sign-in, name, links, colours) lives in a
-single file — **`teaching/js/config.js`**. Every other file is identical across
-deployments, so once it's set up you can pull the original author's updates without
-redoing your configuration.
+**Upgrading an existing installation for Admin/Lecturer/Student permissions?**
+Follow the [teaching roles upgrade](supabase/ROLES.md). Run `supabase/roles.sql`
+in your existing project before publishing the updated editor; your current
+course data and Google sign-in stay in place.
+
+This folder is a self-contained "course website + admin panel". Your site settings
+(Supabase keys, Google sign-in, name, links, colours) live in
+**`teaching/js/config.js`**. Database setup also requires your administrator email
+in the SQL files, and the timetable proxy requires your site's origins, as described
+below. Keep those deployment settings when pulling the original author's updates.
 
 There are two audiences below:
 
@@ -44,10 +49,16 @@ In the Supabase dashboard: **SQL Editor → New query**, paste the contents of
 `course_rows` and `admins` tables plus the Row-Level Security policies (public read,
 admin-only write).
 
-> Before running it, open `supabase/schema.sql` and set the **bootstrap email** at the
+> Before running `schema.sql`, set the **bootstrap email** at the
 > bottom to your own Google account — that's the row that lets you into the admin panel.
 > The file's header notes a couple of things to double-check (e.g. whether admins are
 > keyed by email vs. user id).
+
+Next open [`supabase/roles.sql`](supabase/roles.sql) and set
+`teaching.global_admin_email` at the top to the same administrator email you chose
+in `schema.sql`. Run the file in full to install teaching roles, course assignments,
+and the checked save functions used by the editor.
+See the [roles guide](supabase/ROLES.md) for the permission matrix and Settings.
 
 ### 4. Deploy the timetable proxy (Edge Function)
 
@@ -77,7 +88,7 @@ The admin panel authenticates you with Google. The public course page needs none
 2. In [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services →
    Credentials → Create credentials → OAuth client ID → Web application**:
    - **Authorized JavaScript origins**: add your site origin (e.g.
-     `https://<your-username>.github.io`) and `http://localhost:...` if you test locally.
+     `https://<your-username>.github.io`) and `http://localhost:...` if you run locally.
    - **Authorized redirect URIs**: add the callback Supabase shows you on the Google
      provider screen (`https://<your-project-ref>.supabase.co/auth/v1/callback`).
 3. Copy the **Client ID** → goes into `googleClientId`. Paste the Client ID **and**
@@ -92,7 +103,7 @@ The admin panel authenticates you with Google. The public course page needs none
      ```
      https://<your-username>.github.io/teaching/admin/
      https://<your-domain>/teaching/admin/       ← only if you use a custom domain
-     http://localhost:5500/teaching/admin/       ← only if you test locally (5500 = VS Code Live Server)
+     http://localhost:5500/teaching/admin/       ← only if you run locally (5500 = VS Code Live Server)
      ```
 
      On a *project* site the path is `/<repo>/teaching/admin/`. These are matched
@@ -106,9 +117,9 @@ The admin panel authenticates you with Google. The public course page needs none
    on a fresh project defaults to `http://localhost:3000`. Getting dumped on
    `localhost:3000` after clicking "Sign in" always means this list is missing the URL
    you started from.
-5. (First sign-in only) The admin gate is owner-only. After you sign in once, make your
-   account the owner per the note in `supabase/schema.sql` (or however the RLS policy is
-   keyed) so only you can edit.
+5. The owner bootstrapped in `supabase/roles.sql` can open **Settings** in the teaching
+   editor to grant Admin, Lecturer, or Student access and assign courses. Other
+   accounts have no teaching access until the global admin adds them.
 
 ### 6. Fill in `config.js`
 
@@ -171,7 +182,7 @@ What they add on top of the steps above:
    ```
    https://<your-username>.github.io/timetable/admin/
    https://<your-domain>/timetable/admin/          ← only with a custom domain
-   http://localhost:5500/timetable/admin/          ← only if you test locally
+   http://localhost:5500/timetable/admin/          ← only if you run locally
    ```
 
    Missing this produces exactly the failure described in step 5.4 — sign-in silently
@@ -207,7 +218,7 @@ Each tab saves independently and warns before you leave with unsaved changes.
 
 ## Getting the author's updates later
 
-Because **only `config.js` differs** from the original, you can pull improvements cleanly:
+Pull improvements from the original repository:
 
 ```sh
 git remote add upstream https://github.com/<original-author>/<repo>.git   # one time
@@ -215,9 +226,9 @@ git fetch upstream
 git merge upstream/main            # or use GitHub's "Sync fork" button
 ```
 
-The only file that can ever conflict is `config.js` (you edited it, they might have too).
-If it conflicts, keep yours: `git checkout --ours teaching/js/config.js`. Everything
-else — scripts, styles, markup — updates automatically.
+If an update conflicts with your deployment settings, retain your Supabase keys,
+Google client ID, site details, administrator email, and allowed origins while
+merging the changes. Review the affected files before publishing.
 
 ---
 

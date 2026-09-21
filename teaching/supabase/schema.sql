@@ -181,7 +181,7 @@ begin
 end;
 $$;
 
-drop event trigger if exists rls_auto_enable_trg on ddl_command_end;
+drop event trigger if exists rls_auto_enable_trg;
 create event trigger rls_auto_enable_trg
     on ddl_command_end
     when tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
