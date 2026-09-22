@@ -1,9 +1,8 @@
 /* ==========================================================================
    config.js — per-deployment configuration for the Teaching pages.
 
-   This is the ONE file that differs between you and a colleague running their
-   own copy. Everything else (index.html, admin/, scripts, CSS) is identical
-   across deployments, so pulling upstream updates never touches your settings.
+   Shared lecturer websites load this central configuration automatically.
+   Only independent deployments need their own Supabase and branding settings.
 
    Loaded by both js/scripts.js (public page) and admin/js/scripts.js.
 
@@ -17,6 +16,8 @@
    committed files, so a gitignored config would 404 and break the site.
    ========================================================================== */
 window.TEACHING_CONFIG = {
+    // Derived from this script, including when loaded on a lecturer's domain.
+    appBaseUrl: new URL('../', document.currentScript.src).href,
     // --- Supabase (public course page + admin) ---
     supabaseUrl: 'https://sreqxyznaymvksygradu.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyZXF4eXpuYXltdmtzeWdyYWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMDQ5NzksImV4cCI6MjA5NTc4MDk3OX0.-B-vzU8ZRkUnEp697N0nclLvomdP2k-dt9fPcJNV-gY',

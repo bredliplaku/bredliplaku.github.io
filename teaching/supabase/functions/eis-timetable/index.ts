@@ -26,11 +26,8 @@
 const EIS_BASE = "https://eis.epoka.edu.al/publictimetable";
 const CACHE_SECONDS = 1800; // 30 min — timetables change rarely mid-semester
 
-// Only the site's own origins get a browser-readable response. This doesn't
-// stop direct/non-browser callers (curl, scripts) — CORS can't, since it's a
-// browser-enforced check, not server-side auth — but it does stop some other
-// website's frontend JS from quietly embedding calls to this endpoint and
-// spending your invocation quota / EIS's bandwidth under your name.
+// Keep the central origins. Portable lecturer pages also work on other origins
+// by supplying an active public lecturer ID; this is public content, not sign-in.
 const ALLOWED_ORIGINS = new Set([
   "https://bredliplaku.com",
   "https://www.bredliplaku.com",
@@ -43,9 +40,42 @@ const ALLOWED_ORIGINS = new Set([
 // response has nothing sensitive in it either way.
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
-function corsHeaders(req: Request): Record<string, string> {
+const registeredOrigins = new Map<string, { allowed: boolean; expires: number }>();
+
+async function lecturerPageAllowed(origin: string, lecturerId: string | null): Promise<boolean> {
+  try {
+    const url = new URL(origin);
+    if (!["https:", "http:"].includes(url.protocol) || url.origin !== origin) return false;
+    if (lecturerId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lecturerId)) return false;
+    const cacheKey = lecturerId ? `lecturer:${lecturerId}` : `host:${url.hostname}`;
+    const cached = registeredOrigins.get(cacheKey);
+    if (cached && cached.expires > Date.now()) return cached.allowed;
+    const apiUrl = Deno.env.get("SUPABASE_URL");
+    const legacyAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const apiKey = legacyAnonKey || JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") || "{}").default;
+    if (!apiUrl || !apiKey) return false;
+    const endpoint = lecturerId ? "teaching_resolve_lecturer" : "teaching_site_origin_allowed";
+    const response = await fetch(`${apiUrl}/rest/v1/rpc/${endpoint}`, {
+      method: "POST",
+      headers: { apikey: apiKey, "Content-Type": "application/json",
+        ...(legacyAnonKey ? { Authorization: `Bearer ${legacyAnonKey}` } : {}) },
+      body: JSON.stringify(lecturerId ? { p_id: lecturerId } : { p_hostname: url.hostname }),
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return false;
+    const result = await response.json();
+    const allowed = lecturerId ? result?.id === lecturerId.toLowerCase() : result === true;
+    if (registeredOrigins.size >= 500) registeredOrigins.clear();
+    registeredOrigins.set(cacheKey, { allowed, expires: Date.now() + (allowed ? 300000 : 30000) });
+    return allowed;
+  } catch { return false; }
+}
+
+async function corsHeaders(req: Request): Promise<Record<string, string>> {
   const origin = req.headers.get("origin");
-  const allowed = !!origin && (ALLOWED_ORIGINS.has(origin) || LOCALHOST_ORIGIN.test(origin));
+  const lecturerId = new URL(req.url).searchParams.get("lecturer");
+  const allowed = !!origin && (ALLOWED_ORIGINS.has(origin) || LOCALHOST_ORIGIN.test(origin)
+    || await lecturerPageAllowed(origin, lecturerId));
   return {
     // Omitted (rather than "*") for a disallowed/absent origin — the browser
     // then has no matching header to accept, exactly as if CORS were denied.
@@ -76,10 +106,15 @@ function extractFragment(body: string): string {
 }
 
 Deno.serve(async (req: Request) => {
-  const cors = corsHeaders(req);
+  const cors = await corsHeaders(req);
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: cors });
+  }
+
+  if (req.method !== "GET") return new Response("Method not allowed", { status: 405, headers: cors });
+  if (req.headers.has("origin") && !cors["Access-Control-Allow-Origin"]) {
+    return new Response("Origin not allowed", { status: 403, headers: cors });
   }
 
   const htmlHeaders = { ...cors, "Content-Type": "text/html; charset=utf-8" };

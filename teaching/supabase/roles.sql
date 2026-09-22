@@ -3,8 +3,8 @@
 begin;
 
 -- CONFIGURATION: change only this email for your deployment.
--- Use an existing public.admins email. An existing global admin is kept on reruns.
-set local teaching.global_admin_email = 'bplaku@epoka.edu.al';
+-- Use an existing public.admins email. Existing accounts are kept on reruns.
+set local teaching.admin_email = 'bplaku@epoka.edu.al';
 
 -- No edits needed below. Existing course data, public reads, Google sign-in and
 -- timetable policies stay intact. The setting above lasts only for this transaction.
@@ -20,6 +20,28 @@ create table if not exists public.teaching_accounts (
 );
 -- Keep the first verified Google name for professor matching; display names may change.
 alter table public.teaching_accounts add column if not exists google_name_anchor text not null default '';
+-- Keep legacy columns for compatibility. Names now come only from Google sign-in.
+alter table public.teaching_accounts add column if not exists first_name text;
+alter table public.teaching_accounts add column if not exists surname text;
+alter table public.teaching_accounts add column if not exists display_name text;
+create table if not exists public.teaching_sites (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique references public.teaching_accounts(email) on delete cascade,
+  hostname text,
+  base_path text,
+  include_www boolean not null default true,
+  unique (hostname, base_path)
+);
+-- New connections accept both spellings; preserve existing explicit choices.
+alter table public.teaching_sites alter column include_www set default true;
+-- The stable public ID identifies the lecturer. Address mappings are optional.
+alter table public.teaching_sites alter column hostname drop not null;
+alter table public.teaching_sites alter column base_path drop not null;
+insert into public.teaching_sites(email)
+  select email from public.teaching_accounts where role = 'lecturer'
+  on conflict (email) do nothing;
+alter table public.teaching_sites enable row level security;
+revoke all on public.teaching_sites from public, anon, authenticated;
 create table if not exists public.teaching_assignments (
   email text not null references public.teaching_accounts(email) on delete cascade,
   sheet_name text not null,
@@ -47,21 +69,24 @@ revoke insert, update, delete, truncate on public.admins from public, anon, auth
 insert into public.teaching_accounts(email, name, role)
 select lower(btrim(email)), '', 'admin' from public.admins
 on conflict (email) do nothing;
+-- Merge the former Global admin role into Admin without changing account IDs.
+update public.teaching_accounts set role = 'admin' where role = 'global_admin';
 -- Only bootstrap an EXISTING administrator; never give a visitor a claim-owner endpoint.
-update public.teaching_accounts set role = 'global_admin'
-where email = lower(btrim(current_setting('teaching.global_admin_email')))
+update public.teaching_accounts set role = 'admin'
+where email = lower(btrim(current_setting('teaching.admin_email')))
+  and role <> 'disabled'
   and exists (select 1 from public.admins
-    where lower(btrim(email)) = lower(btrim(current_setting('teaching.global_admin_email'))))
-  and not exists (select 1 from public.teaching_accounts where role = 'global_admin');
+    where lower(btrim(email)) = lower(btrim(current_setting('teaching.admin_email'))))
+  and not exists (select 1 from public.teaching_accounts where role = 'admin');
 do $$ begin
-  if not exists (select 1 from public.teaching_accounts where role = 'global_admin') then
-    raise exception 'Set teaching.global_admin_email at the top of roles.sql to an existing public.admins email before running this upgrade';
+  if not exists (select 1 from public.teaching_accounts where role = 'admin') then
+    raise exception 'Set teaching.admin_email at the top of roles.sql to an existing public.admins email before running this upgrade';
   end if;
 end $$;
 
 create or replace function public.teaching_role() returns text
 language sql stable security definer set search_path = '' as $$
-  select a.role from public.teaching_accounts a
+  select case when a.role = 'global_admin' then 'admin' else a.role end from public.teaching_accounts a
   join auth.users u on lower(u.email) = a.email
   where u.id = auth.uid() and u.email_confirmed_at is not null
 $$;
@@ -82,24 +107,29 @@ language sql immutable set search_path = '' as $$
 $$;
 -- Only trust the provider record attached to the same verified sign-in email.
 -- raw_user_meta_data and names submitted by a browser are not identity evidence.
-create or replace function teaching_private.google_name(p_email text) returns text
+create or replace function teaching_private.google_profile(p_email text) returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select coalesce(nullif(btrim(i.identity_data->>'full_name'), ''),
-    nullif(btrim(i.identity_data->>'name'), ''), '')
+  select i.identity_data
   from auth.users u join auth.identities i on i.user_id = u.id
   where lower(btrim(u.email)) = lower(btrim(p_email)) and u.email_confirmed_at is not null
     and i.provider = 'google' and lower(btrim(i.identity_data->>'email')) = lower(btrim(u.email))
   order by i.created_at, i.id limit 1
 $$;
 
+create or replace function teaching_private.google_name(p_email text) returns text
+language sql stable security definer set search_path = '' as $$
+  select coalesce(nullif(btrim(profile->>'full_name'), ''), nullif(btrim(profile->>'name'), ''), '')
+  from (select teaching_private.google_profile(p_email) as profile) g
+$$;
+
 create or replace function teaching_private.sync_google_names(p_email text default null) returns void
 language sql security definer set search_path = '' as $$
   update public.teaching_accounts a set name = names.google_name,
-    google_name_anchor = case when a.google_name_anchor = '' then names.google_name else a.google_name_anchor end
+    google_name_anchor = case when a.google_name_anchor = '' then names.google_name else a.google_name_anchor end,
+    display_name = nullif(names.google_name, '')
   from (select email, coalesce(teaching_private.google_name(email), '') as google_name
     from public.teaching_accounts where p_email is null or email = p_email) names
-  where a.email = names.email and (a.name is distinct from names.google_name
-    or (a.google_name_anchor = '' and names.google_name <> ''))
+  where a.email = names.email
 $$;
 
 -- Replace old manually entered names without resetting existing professor bindings.
@@ -357,37 +387,72 @@ begin
   delete from public.teaching_assignments where sheet_name = p_name and is_archive = p_archive;
 end $$;
 
+-- Lecturers see themselves and all active Students; assignments stay course-scoped.
+create or replace function teaching_private.account_visible(p_email text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select public.teaching_role() = 'admin' or
+    (public.teaching_role() = 'lecturer' and (p_email = teaching_private.email() or exists (
+      select 1 from public.teaching_accounts a
+      where a.email = p_email and a.role = 'student'
+    )))
+$$;
+
 create or replace function public.teaching_list_accounts() returns jsonb
 language plpgsql security definer set search_path = '' as $$
+declare actor_role text; actor_email text;
 begin
   lock table public.teaching_accounts in share row exclusive mode;
-  if public.teaching_role() is distinct from 'global_admin' then
-    raise exception 'Only the global admin can manage access' using errcode = '42501'; end if;
-  perform teaching_private.sync_google_names();
+  actor_role := public.teaching_role(); actor_email := teaching_private.email();
+  if coalesce(actor_role, '') not in ('admin', 'lecturer') then
+    raise exception 'Only Admins and Lecturers can open Settings' using errcode = '42501'; end if;
+  perform teaching_private.sync_google_names(a.email) from public.teaching_accounts a
+    where a.role <> 'disabled' and teaching_private.account_visible(a.email);
   return coalesce((select jsonb_agg(jsonb_build_object('email', a.email, 'name', a.name, 'role', a.role,
+    'site', (select jsonb_build_object('id', w.id, 'hostname', w.hostname,
+      'base_path', w.base_path, 'include_www', w.include_www) from public.teaching_sites w where w.email = a.email),
     'assignments', coalesce((select jsonb_agg(jsonb_build_object('sheet_name', s.sheet_name, 'is_archive', s.is_archive))
-      from public.teaching_assignments s where s.email = a.email), '[]'::jsonb)) order by
+      from public.teaching_assignments s where s.email = a.email and (actor_role = 'admin' or exists (
+        select 1 from public.teaching_assignments own where own.email = actor_email
+          and own.sheet_name = s.sheet_name and own.is_archive = s.is_archive))), '[]'::jsonb)) order by
       case a.role when 'global_admin' then 0 when 'admin' then 0 when 'lecturer' then 1 when 'student' then 2 else 3 end,
       lower(coalesce(nullif(a.name, ''), a.email)), a.email)
-    from public.teaching_accounts a where a.role <> 'disabled'), '[]'::jsonb);
+    from public.teaching_accounts a where a.role <> 'disabled'
+      and teaching_private.account_visible(a.email)), '[]'::jsonb);
 end $$;
 
 create or replace function public.teaching_set_account(p_email text, p_name text, p_role text, p_assignments jsonb default '[]')
 returns void language plpgsql security definer set search_path = '' as $$
 declare target_email text := lower(btrim(p_email)); account_name text; assignment jsonb;
+  actor_role text; actor_email text; target_role text;
 begin
   lock table public.teaching_accounts in share row exclusive mode;
-  if public.teaching_role() is distinct from 'global_admin' then
-    raise exception 'Only the global admin can manage access' using errcode = '42501'; end if;
+  actor_role := public.teaching_role(); actor_email := teaching_private.email();
+  if coalesce(actor_role, '') not in ('admin', 'lecturer') then
+    raise exception 'Only Admins and Lecturers can manage accounts' using errcode = '42501'; end if;
   if target_email is null or target_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
     or p_role is null or p_role not in ('admin','lecturer','student')
     or p_assignments is null or jsonb_typeof(p_assignments) <> 'array' then raise exception 'Invalid account details'; end if;
-  if exists (select 1 from public.teaching_accounts where email = target_email and role = 'global_admin') then
-    raise exception 'The global administrator cannot be changed here'; end if;
+  select role into target_role from public.teaching_accounts where email = target_email;
+  if actor_role = 'lecturer' then
+    if p_role <> 'student' or target_email = actor_email or
+      (target_role is not null and target_role <> 'student') then
+      raise exception 'Lecturers can manage Student course access only' using errcode = '42501'; end if;
+    -- Existing Students can have no assignments in this Lecturer's courses.
+    if jsonb_array_length(p_assignments) = 0 and target_role is null then
+      raise exception 'Select at least one of your courses'; end if;
+  elsif target_role in ('admin', 'global_admin') and p_role <> 'admin' and not exists (
+    select 1 from public.teaching_accounts where role in ('admin', 'global_admin') and email <> target_email
+  ) then
+    raise exception 'Keep at least one Admin';
+  end if;
   for assignment in select * from jsonb_array_elements(p_assignments) loop
     if not exists (select 1 from public.course_rows c where c.sheet_name = assignment->>'sheet_name'
       and c.is_archive = (assignment->>'is_archive')::boolean and c.type = 'metadata') then
       raise exception 'An assigned course no longer exists'; end if;
+    if actor_role = 'lecturer' and not exists (select 1 from public.teaching_assignments own
+      where own.email = actor_email and own.sheet_name = assignment->>'sheet_name'
+        and own.is_archive = (assignment->>'is_archive')::boolean) then
+      raise exception 'You can assign only your own courses' using errcode = '42501'; end if;
   end loop;
   -- Retain ownership for unchanged lecturer assignments; reset on role changes.
   if exists (select 1 from public.teaching_accounts where email = target_email and role <> p_role) then
@@ -401,26 +466,172 @@ begin
     on conflict (email) do update set name = excluded.name, role = excluded.role,
       google_name_anchor = case when teaching_accounts.google_name_anchor = ''
         then excluded.google_name_anchor else teaching_accounts.google_name_anchor end;
-  delete from public.teaching_assignments a where a.email = target_email and not exists (
+  -- A Lecturer replaces only the part of the student's assignments they can manage.
+  delete from public.teaching_assignments a where a.email = target_email
+    and (actor_role = 'admin' or exists (select 1 from public.teaching_assignments own
+      where own.email = actor_email and own.sheet_name = a.sheet_name and own.is_archive = a.is_archive))
+    and not exists (
     select 1 from jsonb_array_elements(p_assignments) v where v->>'sheet_name' = a.sheet_name
       and (v->>'is_archive')::boolean = a.is_archive);
   insert into public.teaching_assignments(email, sheet_name, is_archive)
     select target_email, v->>'sheet_name', (v->>'is_archive')::boolean from jsonb_array_elements(p_assignments) v
     on conflict do nothing;
+  if p_role = 'lecturer' then
+    insert into public.teaching_sites(email) values (target_email) on conflict (email) do nothing;
+  else
+    update public.teaching_sites set hostname = null, base_path = null where email = target_email;
+  end if;
+  perform teaching_private.sync_google_names(target_email);
 end $$;
 
 create or replace function public.teaching_remove_account(p_email text) returns void
 language plpgsql security definer set search_path = '' as $$
+declare actor_role text; actor_email text; target_email text := lower(btrim(p_email));
 begin
   lock table public.teaching_accounts in share row exclusive mode;
-  if public.teaching_role() is distinct from 'global_admin' then
-    raise exception 'Only the global admin can manage access' using errcode = '42501'; end if;
-  if exists (select 1 from public.teaching_accounts where email = lower(btrim(p_email)) and role = 'global_admin') then
-    raise exception 'The global administrator cannot be removed'; end if;
+  actor_role := public.teaching_role(); actor_email := teaching_private.email();
+  if actor_role = 'lecturer' then
+    if not exists (select 1 from public.teaching_accounts where email = target_email and role = 'student')
+      or not teaching_private.account_visible(target_email) then
+      raise exception 'You can remove only Student access to your courses' using errcode = '42501'; end if;
+    delete from public.teaching_assignments student where student.email = target_email
+      and exists (select 1 from public.teaching_assignments own where own.email = actor_email
+        and own.sheet_name = student.sheet_name and own.is_archive = student.is_archive);
+    return;
+  end if;
+  if actor_role is distinct from 'admin' then
+    raise exception 'Only Admins can remove accounts' using errcode = '42501'; end if;
+  if exists (select 1 from public.teaching_accounts where email = target_email and role in ('admin', 'global_admin'))
+    and not exists (select 1 from public.teaching_accounts where email <> target_email and role in ('admin', 'global_admin')) then
+    raise exception 'Keep at least one Admin'; end if;
   -- Tombstone prevents a rerun of the migration from resurrecting legacy admin access.
-  update public.teaching_accounts set role = 'disabled' where email = lower(btrim(p_email));
-  delete from public.teaching_assignments where email = lower(btrim(p_email));
+  update public.teaching_accounts set role = 'disabled' where email = target_email;
+  delete from public.teaching_assignments where email = target_email;
+  -- Preserve the public ID if access is later restored, but release any URL mapping.
+  update public.teaching_sites set hostname = null, base_path = null where email = target_email;
 end $$;
+
+-- An explicit www alias avoids merging unrelated subdomains by assumption.
+create or replace function teaching_private.site_hosts(p_host text, p_www boolean) returns text[]
+language sql immutable set search_path = '' as $$
+  select case when p_www then array[p_host, case when left(p_host, 4) = 'www.'
+    then substr(p_host, 5) else 'www.' || p_host end] else array[p_host] end
+$$;
+
+-- Legacy save endpoint: course access and website mappings still share one transaction.
+-- The older four-argument teaching_set_account remains compatible with cached editors.
+create or replace function public.teaching_save_account(
+  p_email text, p_role text, p_assignments jsonb, p_profile jsonb, p_site jsonb
+) returns void language plpgsql security definer set search_path = '' as $$
+declare target_email text := lower(btrim(p_email)); host text; path text; aliases boolean;
+  actor_role text;
+begin
+  lock table public.teaching_accounts in share row exclusive mode;
+  actor_role := public.teaching_role();
+  if actor_role = 'lecturer' and p_site is not null and p_site <> 'null'::jsonb then
+    raise exception 'Lecturers can manage Student course access only' using errcode = '42501'; end if;
+  perform public.teaching_set_account(p_email, '', p_role, p_assignments);
+  -- p_profile remains in the signature for cached editors; Google owns the name.
+  if actor_role = 'lecturer' then return; end if;
+  -- All registry writers first hold the accounts lock acquired above.
+  lock table public.teaching_sites in share row exclusive mode;
+  if p_site is null or p_site = 'null'::jsonb then
+    update public.teaching_sites set hostname = null, base_path = null where email = target_email;
+    return;
+  end if;
+  if p_role <> 'lecturer' or jsonb_typeof(p_site) <> 'object' then
+    raise exception 'Only lecturers can have a teaching website'; end if;
+  host := lower(rtrim(btrim(p_site->>'hostname'), '.'));
+  path := '/' || btrim(regexp_replace(btrim(p_site->>'base_path'), '/+', '/', 'g'), '/') || '/';
+  if path = '//' then path := '/'; end if;
+  aliases := coalesce((p_site->>'include_www')::boolean, true);
+  -- ASCII hostnames include URL-normalised IDNs (punycode). No ports or credentials.
+  if host is null or length(host) > 253 or host !~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$'
+    or path is null or length(path) > 500 or path !~ '^/([A-Za-z0-9._~-]+/)*$'
+    or path ~ '/\.{1,2}/' then
+    raise exception 'Use a public hostname and a directory path, without query, fragment or port'; end if;
+  if exists (select 1 from public.teaching_sites s where s.email <> target_email and s.hostname is not null
+    and teaching_private.site_hosts(s.hostname, s.include_www) && teaching_private.site_hosts(host, aliases)
+    and (left(path, length(s.base_path)) = s.base_path or left(s.base_path, length(path)) = path)) then
+    raise exception 'This address overlaps another lecturer''s website'; end if;
+  insert into public.teaching_sites(email, hostname, base_path, include_www)
+    values (target_email, host, path, aliases)
+    on conflict (email) do update set hostname = excluded.hostname,
+      base_path = excluded.base_path, include_www = excluded.include_www;
+end $$;
+
+-- Prepare downloads without requiring a URL or relying on cached account-list data.
+create or replace function public.teaching_prepare_website(p_email text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare target_email text := lower(btrim(p_email)); website_id uuid; actor_role text;
+begin
+  lock table public.teaching_accounts in share row exclusive mode;
+  actor_role := public.teaching_role();
+  if coalesce(actor_role, '') not in ('admin', 'lecturer') or
+    (actor_role = 'lecturer' and target_email is distinct from teaching_private.email()) then
+    raise exception 'You can download only your own website file' using errcode = '42501'; end if;
+  if not exists (select 1 from public.teaching_accounts where email = target_email and role = 'lecturer') then
+    raise exception 'Save this account as a lecturer before downloading its website file'; end if;
+  insert into public.teaching_sites(email) values (target_email) on conflict (email) do nothing;
+  select id into website_id from public.teaching_sites where email = target_email;
+  return jsonb_build_object('id', website_id);
+end $$;
+
+-- Only public presentation data leaves these endpoints; never account emails or roles.
+create or replace function public.teaching_resolve_lecturer(p_id uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', s.id,
+    'display_name', coalesce(nullif(a.name, ''), 'Lecturer'))
+  from public.teaching_sites s join public.teaching_accounts a on a.email = s.email
+  where s.id = p_id and a.role = 'lecturer'
+$$;
+
+-- Compatibility for generic loaders and optional clean nested links.
+create or replace function public.teaching_resolve_site(p_hostname text, p_path text) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', s.id, 'hostname', s.hostname, 'base_path', s.base_path,
+    'display_name', coalesce(nullif(a.name, ''), 'Lecturer'))
+  from public.teaching_sites s join public.teaching_accounts a on a.email = s.email
+  where a.role = 'lecturer'
+    and lower(rtrim(btrim(p_hostname), '.')) = any(teaching_private.site_hosts(s.hostname, s.include_www))
+    and (left(p_path, length(s.base_path)) = s.base_path or p_path = rtrim(s.base_path, '/'))
+  order by length(s.base_path) desc limit 1
+$$;
+
+-- NULL sheet = catalog metadata; a sheet name = that assigned course's rows.
+-- Pagination avoids Supabase's default response limit truncating large catalogs/courses.
+create or replace function public.teaching_site_rows(
+  p_site_id uuid, p_archive boolean, p_sheet_name text default null, p_offset integer default 0
+) returns jsonb language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not exists (select 1 from public.teaching_sites s join public.teaching_accounts a on a.email = s.email
+    where s.id = p_site_id and a.role = 'lecturer') then
+    raise exception 'This teaching website is unavailable'; end if;
+  if p_offset is null or p_offset < 0 then raise exception 'Invalid offset'; end if;
+  return coalesce((select jsonb_agg(to_jsonb(rows) order by rows.sheet_name, rows.row_index, rows.row_uid) from (
+    select r.* from public.teaching_sites s
+      join public.teaching_assignments a on a.email = s.email
+      join public.course_rows r on r.sheet_name = a.sheet_name and r.is_archive = a.is_archive
+    where s.id = p_site_id and r.is_archive = p_archive
+      and ((p_sheet_name is null and r.type = 'metadata') or r.sheet_name = p_sheet_name)
+    order by r.sheet_name, r.row_index, r.row_uid limit 1000 offset p_offset
+  ) rows), '[]'::jsonb);
+end $$;
+
+-- Used by the existing read-only timetable proxy for browser CORS.
+create or replace function public.teaching_site_origin_allowed(p_hostname text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.teaching_sites s join public.teaching_accounts a on a.email = s.email
+    where a.role = 'lecturer'
+      and lower(rtrim(btrim(p_hostname), '.')) = any(teaching_private.site_hosts(s.hostname, s.include_www)))
+$$;
+
+revoke all on function public.teaching_save_account(text,text,jsonb,jsonb,jsonb), public.teaching_prepare_website(text) from public, anon;
+grant execute on function public.teaching_save_account(text,text,jsonb,jsonb,jsonb), public.teaching_prepare_website(text) to authenticated;
+revoke all on function public.teaching_resolve_lecturer(uuid), public.teaching_resolve_site(text,text), public.teaching_site_rows(uuid,boolean,text,integer),
+  public.teaching_site_origin_allowed(text) from public;
+grant execute on function public.teaching_resolve_lecturer(uuid), public.teaching_resolve_site(text,text), public.teaching_site_rows(uuid,boolean,text,integer),
+  public.teaching_site_origin_allowed(text) to anon, authenticated;
 
 revoke all on all functions in schema teaching_private from public, anon, authenticated;
 revoke all on function public.teaching_access(), public.teaching_save_rows(jsonb,text[]), public.teaching_create_course(jsonb),

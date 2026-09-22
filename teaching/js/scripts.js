@@ -1,5 +1,35 @@
 // Configuration
 let isArchiveMode = false;
+const lecturerSite = window.TEACHING_SITE || null;
+let catalogSequence = 0;
+
+// Isolate course preferences on websites sharing a hostname. Keep the central
+// page's existing keys, and tolerate disabled browser storage.
+function teachingStorage(kind) {
+    const keyFor = key => lecturerSite && key !== 'theme-preference' ? `teaching_${lecturerSite.id}_${key}` : key;
+    return {
+        getItem(key) { try { return window[kind].getItem(keyFor(key)); } catch { return null; } },
+        setItem(key, value) { try { window[kind].setItem(keyFor(key), value); } catch { } },
+        removeItem(key) { try { window[kind].removeItem(keyFor(key)); } catch { } }
+    };
+}
+const courseStorage = teachingStorage('localStorage');
+const courseSessionStorage = teachingStorage('sessionStorage');
+
+function requestedCourse() {
+    let hash = '';
+    try { hash = decodeURIComponent(window.location.hash.slice(1)); } catch { return '\u0000'; }
+    if (hash && !hash.startsWith('module-')) return hash;
+    return lecturerSite ? TeachingSites.routeCourse(lecturerSite) : '';
+}
+
+function matchSiteCourse(requested, names = availableCourses, codes = courseMap) {
+    if (!requested) return '';
+    if (names.includes(requested)) return requested;
+    const compact = value => String(value).replace(/[\s_-]/g, '').toLowerCase();
+    const matches = names.filter(name => compact(name) === compact(requested) || compact(codes[name] || '') === compact(requested));
+    return matches.length === 1 ? matches[0] : '';
+}
 
 // Global variables
 let availableCourses = [];
@@ -27,7 +57,8 @@ function safeCourseUrl(value, imageOnly = false) {
     const raw = String(value || '').trim();
     if (!raw || /[\u0000-\u001f\u007f]/.test(raw)) return '';
     try {
-        const url = new URL(raw, document.baseURI);
+        const base = lecturerSite && !/^[#?]/.test(raw) ? window.TEACHING_CONFIG.appBaseUrl : document.baseURI;
+        const url = new URL(raw, base);
         const protocols = imageOnly ? ['http:', 'https:'] : ['http:', 'https:', 'mailto:', 'tel:'];
         return protocols.includes(url.protocol) ? url.href : '';
     } catch { return ''; }
@@ -221,8 +252,8 @@ function init() {
 
     // Catch when the user manually changes the hash in the URL bar
     window.addEventListener('hashchange', () => {
-        const hash = window.location.hash.substring(1);
-        if (hash && hash !== 'module-' && availableCourses.length > 0) {
+        const hash = requestedCourse();
+        if (hash && availableCourses.length > 0) {
             if (availableCourses.includes(hash)) {
                 if (hash !== currentCourse) selectCourse(hash);
             } else {
@@ -293,6 +324,7 @@ function handleArchiveToggle(e) {
 
     // Update the URL visibly so users can share links to Archive states
     const url = new URL(window.location);
+    if (lecturerSite) url.pathname = lecturerSite.base_path;
     if (isArchiveMode) {
         url.searchParams.set('archive', '');
     } else {
@@ -318,6 +350,14 @@ function handleArchiveToggle(e) {
 
 // Catch the browser back/forward buttons to elegantly flip archive state
 window.addEventListener('popstate', (e) => {
+    if (lecturerSite) {
+        const archive = new URLSearchParams(location.search).has('archive');
+        if (archive !== isArchiveMode) { isArchiveMode = archive; resetForModeSwitch(); return; }
+        const course = matchSiteCourse(requestedCourse());
+        if (course && course !== currentCourse) selectCourse(course);
+        else if (!course && !location.hash.startsWith('#module-')) tryPublicAccess();
+        return;
+    }
     if (e.state && e.state.archive !== undefined) {
         if (isArchiveMode !== e.state.archive) {
             isArchiveMode = e.state.archive;
@@ -350,8 +390,8 @@ function resetForModeSwitch() {
         delete courseDataCache[key];
     }
 
-    localStorage.removeItem('active_courseCodesCache');
-    localStorage.removeItem('archive_courseCodesCache');
+    courseStorage.removeItem('active_courseCodesCache');
+    courseStorage.removeItem('archive_courseCodesCache');
 
     document.getElementById('course-buttons-container').innerHTML = '';
     const contentEl = document.getElementById('course-content');
@@ -382,14 +422,14 @@ function setupSideNavToggle() {
         toggleBtn.classList.toggle('toggled'); // This line was missing
 
         const isCollapsed = sideNav.classList.contains('collapsed');
-        localStorage.setItem('sideNavState', isCollapsed ? 'collapsed' : 'expanded');
+        courseStorage.setItem('sideNavState', isCollapsed ? 'collapsed' : 'expanded');
     });
 }
 
 function applySideNavState() {
     const sideNav = document.getElementById('side-nav-container');
     const toggleBtn = document.getElementById('side-nav-toggle');
-    const savedState = localStorage.getItem('sideNavState');
+    const savedState = courseStorage.getItem('sideNavState');
 
     if (sideNav && toggleBtn && savedState === 'collapsed') {
         sideNav.classList.add('collapsed');
@@ -586,7 +626,7 @@ function setupThemeToggle() {
     const BTN = document.getElementById('theme-toggle');
     const icons = { auto: 'fa-solid fa-adjust', light: 'fa-regular fa-sun', dark: 'fa-regular fa-moon' };
 
-    const getSaved = () => localStorage.getItem(KEY) || 'auto';
+    const getSaved = () => courseStorage.getItem(KEY) || 'auto';
 
     const applyTheme = (pref) => {
         const html = document.documentElement;
@@ -595,7 +635,7 @@ function setupThemeToggle() {
         } else {
             html.setAttribute('data-theme', pref);
         }
-        localStorage.setItem(KEY, pref);
+        courseStorage.setItem(KEY, pref);
         updateUI(pref);
         updateThemeColorMeta();
     };
@@ -751,7 +791,7 @@ function saveModuleState(moduleId, isExpanded, wasUserInteraction = false) {
     const cacheKey = `moduleStates_${currentCourse}`;
     let states = {};
     try {
-        const saved = localStorage.getItem(cacheKey);
+        const saved = courseStorage.getItem(cacheKey);
         if (saved) states = JSON.parse(saved);
     } catch (e) { /* ignore parse errors */ }
 
@@ -764,7 +804,7 @@ function saveModuleState(moduleId, isExpanded, wasUserInteraction = false) {
         sheetDefault: sheetDefault
     };
 
-    localStorage.setItem(cacheKey, JSON.stringify(states));
+    courseStorage.setItem(cacheKey, JSON.stringify(states));
 }
 
 function loadModuleStates() {
@@ -775,7 +815,7 @@ function applyModuleStates() {
     const cacheKey = `moduleStates_${currentCourse}`;
     let savedStates = null;
     try {
-        const saved = localStorage.getItem(cacheKey);
+        const saved = courseStorage.getItem(cacheKey);
         if (saved) savedStates = JSON.parse(saved);
     } catch (e) { /* ignore parse errors */ }
 
@@ -886,7 +926,7 @@ function toggleModule(moduleEl) {
 function checkUrlForCourse() {
     const hash = window.location.hash.substring(1);
     if (hash && hash !== 'module-') {
-        localStorage.setItem('urlSelectedCourse', hash);
+        courseStorage.setItem('urlSelectedCourse', hash);
     }
 }
 
@@ -1015,14 +1055,14 @@ let activeTimetableKey = null;
 function saveTimetableState(open, index) {
     const cacheKey = `timetableState_${currentCourse}`;
     try {
-        if (open) localStorage.setItem(cacheKey, JSON.stringify({ open: true, index }));
-        else localStorage.removeItem(cacheKey);
+        if (open) courseStorage.setItem(cacheKey, JSON.stringify({ open: true, index }));
+        else courseStorage.removeItem(cacheKey);
     } catch (e) { /* ignore */ }
 }
 
 function restoreTimetableState() {
     let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(`timetableState_${currentCourse}`)); } catch (e) { /* ignore */ }
+    try { saved = JSON.parse(courseStorage.getItem(`timetableState_${currentCourse}`)); } catch (e) { /* ignore */ }
     if (!saved || !saved.open) return;
     const btn = document.getElementById(`timetable-btn-${saved.index}`);
     if (btn) toggleTimetable(saved.index, btn.dataset.btnName || 'Timetable');
@@ -1102,7 +1142,7 @@ async function toggleTimetable(index, btnName) {
         // consistency with the rest of the page's Supabase calls, though
         // the function itself doesn't require them.
         const response = await fetch(
-            `${SUPABASE_URL}/functions/v1/eis-timetable?tId=${encodeURIComponent(targetTimetableId || '')}&cId=${encodeURIComponent(targetClassId || '')}`,
+            `${SUPABASE_URL}/functions/v1/eis-timetable?tId=${encodeURIComponent(targetTimetableId || '')}&cId=${encodeURIComponent(targetClassId || '')}${lecturerSite ? '&lecturer=' + encodeURIComponent(lecturerSite.id) : ''}`,
             { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
         );
         if (!response.ok) throw new Error(`HTTP error ${response.status}`);
@@ -1139,10 +1179,12 @@ function initBackend() {
         if (success) {
             showMainContent();
         } else {
+            if (lecturerSite) showSiteMessage('Courses unavailable', 'Please try again shortly.', true);
             showImprovedNotification('error', 'Connection Error', 'Failed to connect to backend.');
             showMainContent();
         }
     }).catch(() => {
+        if (lecturerSite) showSiteMessage('Courses unavailable', 'Please try again shortly.', true);
         showImprovedNotification('error', 'Connection Error', 'Failed to connect to backend.');
         showMainContent();
     });
@@ -1151,12 +1193,12 @@ function initBackend() {
 // Shared helper: select the best initial course based on URL hash and localStorage
 function selectInitialCourse() {
     if (availableCourses.length === 0) return;
-    const urlCourse = localStorage.getItem('urlSelectedCourse');
+    const urlCourse = courseStorage.getItem('urlSelectedCourse');
     const prefix = isArchiveMode ? 'archive_' : 'active_';
-    const lastCourse = localStorage.getItem(prefix + 'lastSelectedCourse');
+    const lastCourse = courseStorage.getItem(prefix + 'lastSelectedCourse');
 
-    // Try to match the hash first natively, then fallback to LocalStorage url caching, then the last remembered course for this specific mode
-    const hash = window.location.hash.substring(1);
+    // Prefer the requested course, then the last course in this mode.
+    const hash = lecturerSite ? matchSiteCourse(requestedCourse()) : requestedCourse();
 
     selectCourse(
         // HIGHEST PRIORITY: The literal URL hash we are currently visiting (if valid for this context)
@@ -1166,17 +1208,16 @@ function selectInitialCourse() {
                 // THIRD: The last course the user looked at in this context (Active vs Archive)
                 (lastCourse && availableCourses.includes(lastCourse) ? lastCourse : availableCourses[0]))
     );
-    localStorage.removeItem('urlSelectedCourse');
+    courseStorage.removeItem('urlSelectedCourse');
 }
 
 async function tryPublicAccess() {
+    const sequence = ++catalogSequence;
+    const archive = isArchiveMode;
     try {
-        const response = await sbFetch(
-            `course_rows?type=eq.metadata&is_archive=eq.${isArchiveMode}&select=sheet_name,b,c&order=sheet_name`
-        );
-        if (!response.ok) return false;
-        const rows = await response.json();
-        if (!rows.length) return false;
+        const rows = await fetchPublicCatalog();
+        if (sequence !== catalogSequence || archive !== isArchiveMode) return true;
+        if (!rows.length && !lecturerSite) return false;
 
         const seen = new Set();
         availableCourses = [];
@@ -1191,22 +1232,49 @@ async function tryPublicAccess() {
             if (bKey === 'semester') semesters[r.sheet_name] = String(r.c || '').trim();
         });
 
-        if (availableCourses.length === 0) return false;
+        if (availableCourses.length === 0 && !lecturerSite) return false;
 
         Object.assign(courseMap, codes);
         Object.assign(courseYearMap, years);
         Object.assign(courseSemesterMap, semesters);
         availableCourses.sort((a, b) => compareCourseCodes(courseMap[a] || a, courseMap[b] || b));
         try {
-            localStorage.setItem(getCachePrefix() + 'courseCodesCache', JSON.stringify({
+            courseStorage.setItem(getCachePrefix() + 'courseCodesCache', JSON.stringify({
                 codes, years, semesters, timestamp: Date.now()
             }));
         } catch (e) { }
 
         await populateCourseButtons();
+        if (sequence !== catalogSequence || archive !== isArchiveMode) return true;
 
-        const hash = window.location.hash.substring(1);
-        if (hash && hash !== 'module-' && !availableCourses.includes(hash)) {
+        if (lecturerSite) {
+            const requested = requestedCourse();
+            if (requested && !matchSiteCourse(requested)) {
+                if (!isArchiveMode && !new URLSearchParams(location.search).has('archive')) {
+                    const archived = await TeachingSites.rows(lecturerSite, true);
+                    if (sequence !== catalogSequence || archive !== isArchiveMode) return true;
+                    const codes = {};
+                    for (const row of archived) {
+                        if (String(row.b).trim().toLowerCase() === 'code') codes[row.sheet_name] = row.c;
+                    }
+                    if (matchSiteCourse(requested, [...new Set(archived.map(row => row.sheet_name))], codes)) {
+                        isArchiveMode = true;
+                        const url = new URL(location.href); url.searchParams.set('archive', '');
+                        history.replaceState({ archive: true }, '', url);
+                        resetForModeSwitch(); return true;
+                    }
+                }
+                showSiteMessage('Course not available', 'Choose a course above or return to the course list.');
+                return true;
+            }
+            if (!availableCourses.length) {
+                showSiteMessage(isArchiveMode ? 'No archived courses' : 'No active courses', 'Courses will appear here when assigned.');
+                return true;
+            }
+        }
+
+        const hash = requestedCourse();
+        if (!lecturerSite && hash && !availableCourses.includes(hash)) {
             if (!isArchiveMode && !new URLSearchParams(window.location.search).has('archive')) {
                 isArchiveMode = true;
                 const url = new URL(window.location);
@@ -1222,12 +1290,36 @@ async function tryPublicAccess() {
         return true;
     } catch (error) {
         console.error('Error during Supabase access:', error);
-        return false;
+        return sequence !== catalogSequence || archive !== isArchiveMode;
     }
 }
 
 const SUPABASE_URL = window.TEACHING_CONFIG.supabaseUrl;
 const SUPABASE_ANON_KEY = window.TEACHING_CONFIG.supabaseAnonKey;
+
+function showSiteMessage(title, message, retry = false) {
+    ++courseViewSequence;
+    currentCourse = '';
+    document.body.classList.add('teaching-empty', 'theme-ready');
+    document.body.classList.remove('is-loading', 'is-switching');
+    document.getElementById('course-code').textContent = lecturerSite.display_name;
+    document.getElementById('course-title').textContent = title;
+    const decoration = document.getElementById('header-decoration');
+    decoration.replaceChildren();
+    delete decoration.dataset.currentIcon;
+    const content = document.getElementById('course-content');
+    const cat = document.getElementById('cat-companion');
+    if (cat && content.contains(cat)) document.body.appendChild(cat);
+    const detail = document.createElement('p'); detail.className = 'teaching-site-message'; detail.textContent = message;
+    const button = document.createElement('button'); button.textContent = retry ? 'Try again' : 'Course list';
+    button.onclick = () => {
+        history.replaceState({ archive: isArchiveMode }, '', lecturerSite.base_path + location.search);
+        resetForModeSwitch();
+    };
+    content.replaceChildren(detail, button);
+    document.title = title;
+    showMainContent();
+}
 
 function sbFetch(endpoint) {
     return fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
@@ -1235,7 +1327,18 @@ function sbFetch(endpoint) {
     });
 }
 
+async function fetchPublicCatalog() {
+    if (lecturerSite) return TeachingSites.rows(lecturerSite, isArchiveMode);
+    const response = await sbFetch(`course_rows?type=eq.metadata&is_archive=eq.${isArchiveMode}&select=sheet_name,b,c&order=sheet_name`);
+    if (!response.ok) throw new Error(`Supabase error ${response.status}`);
+    return response.json();
+}
+
 async function fetchPublicSheetData(sheetName) {
+    if (lecturerSite) {
+        const rows = await TeachingSites.rows(lecturerSite, isArchiveMode, sheetName);
+        return rows.map(r => [r.type, r.b, r.c, r.d, r.e, r.f, r.g, r.h, r.i, r.j]);
+    }
     const response = await sbFetch(
         `course_rows?sheet_name=eq.${encodeURIComponent(sheetName)}&is_archive=eq.${isArchiveMode}&order=row_index&select=type,b,c,d,e,f,g,h,i,j`
     );
@@ -1313,6 +1416,8 @@ function formatCourseCode(code) {
 }
 
 async function populateCourseButtons() {
+    const sequence = catalogSequence;
+    const archive = isArchiveMode;
     // setupCourseSwipe(); /* SWIPE DISABLED */
     const container = document.getElementById('course-buttons-container');
     if (!container) return;
@@ -1483,6 +1588,7 @@ async function populateCourseButtons() {
 
     try {
         await fetchCourseCodes();
+        if (sequence !== catalogSequence || archive !== isArchiveMode) return;
         renderButtons(true);
     } catch (err) {
         renderButtons(false);
@@ -1574,12 +1680,14 @@ function updateButtonRows(container) {
 }
 
 async function fetchCourseCodes() {
+    const sequence = catalogSequence;
+    const archive = isArchiveMode;
     const prefix = getCachePrefix();
     const CACHE_KEY = prefix + 'courseCodesCache';
     const CACHE_EXPIRY = 5 * 60 * 1000;
 
     try {
-        const cached = localStorage.getItem(CACHE_KEY);
+        const cached = courseStorage.getItem(CACHE_KEY);
         if (cached) {
             const parsed = JSON.parse(cached);
             if (parsed.codes && Date.now() - parsed.timestamp < CACHE_EXPIRY) {
@@ -1595,30 +1703,26 @@ async function fetchCourseCodes() {
     } catch (e) { }
 
     try {
-        const response = await sbFetch(
-            `course_rows?type=eq.metadata&is_archive=eq.${isArchiveMode}&select=sheet_name,b,c`
-        );
-        if (response.ok) {
-            const rows = await response.json();
-            const codes = {};
-            const years = {};
-            const semesters = {};
-            rows.forEach(r => {
-                const bKey = String(r.b || '').trim().toLowerCase();
-                if (bKey === 'code') codes[r.sheet_name] = String(r.c || '').trim();
-                if (bKey === 'year') years[r.sheet_name] = String(r.c || '').trim();
-                if (bKey === 'semester') semesters[r.sheet_name] = String(r.c || '').trim();
-            });
-            Object.assign(courseMap, codes);
-            Object.assign(courseYearMap, years);
-            Object.assign(courseSemesterMap, semesters);
-            try {
-                localStorage.setItem(CACHE_KEY, JSON.stringify({
-                    codes, years, semesters, timestamp: Date.now()
-                }));
-            } catch (e) { }
-            return courseMap;
-        }
+        const rows = await fetchPublicCatalog();
+        if (sequence !== catalogSequence || archive !== isArchiveMode) return courseMap;
+        const codes = {};
+        const years = {};
+        const semesters = {};
+        rows.forEach(r => {
+            const bKey = String(r.b || '').trim().toLowerCase();
+            if (bKey === 'code') codes[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'year') years[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'semester') semesters[r.sheet_name] = String(r.c || '').trim();
+        });
+        Object.assign(courseMap, codes);
+        Object.assign(courseYearMap, years);
+        Object.assign(courseSemesterMap, semesters);
+        try {
+            courseStorage.setItem(CACHE_KEY, JSON.stringify({
+                codes, years, semesters, timestamp: Date.now()
+            }));
+        } catch (e) { }
+        return courseMap;
     } catch (error) {
         console.error('Course codes fetch failed:', error);
     }
@@ -1682,6 +1786,9 @@ function setupSearchFilter() {
 }
 
 function selectCourse(sheetName) {
+    if (lecturerSite && !availableCourses.includes(sheetName)) return;
+    if (lecturerSite && !currentCourse) document.body.classList.add('is-loading');
+    document.body.classList.remove('teaching-empty');
     const sequence = ++courseViewSequence;
     const archive = isArchiveMode;
     courseHeaderAnimation?.cancel();
@@ -1692,9 +1799,13 @@ function selectCourse(sheetName) {
     document.body.classList.remove('theme-ready'); // Hide themed elements to prevent flash
 
     const prefix = isArchiveMode ? 'archive_' : 'active_';
-    localStorage.setItem(prefix + 'lastSelectedCourse', sheetName);
+    courseStorage.setItem(prefix + 'lastSelectedCourse', sheetName);
     currentCourse = sheetName;
-    window.location.hash = sheetName;
+    if (lecturerSite) {
+        const path = lecturerSite.base_path + window.location.search + '#' + encodeURIComponent(sheetName);
+        if (location.pathname !== lecturerSite.base_path) history.replaceState({ archive: isArchiveMode }, '', path);
+        else if (location.hash !== '#' + encodeURIComponent(sheetName)) history.pushState({ archive: isArchiveMode }, '', path);
+    } else window.location.hash = sheetName;
 
     // Remove fab-visible so it re-animates on new course load
     const fabEl = document.getElementById('mobile-fab');
@@ -1756,10 +1867,12 @@ function selectCourse(sheetName) {
             }, 1000);
         } else {
             document.body.classList.remove('is-switching');
+            if (lecturerSite) showSiteMessage('Course not available', 'This course may have been moved or unassigned.', true);
         }
     }).catch(() => {
         if (sequence !== courseViewSequence || archive !== isArchiveMode) return;
         document.body.classList.remove('is-switching');
+        if (lecturerSite) showSiteMessage('Course unavailable', 'Please try again shortly.', true);
     });
 }
 
@@ -1821,7 +1934,7 @@ function setupSortAndRender() {
         sortButton.dataset.order = order;
     };
 
-    let sortOrders = JSON.parse(localStorage.getItem('courseSortOrders')) || {};
+    let sortOrders = JSON.parse(courseStorage.getItem('courseSortOrders')) || {};
     let currentOrder = sortOrders[currentCourse] || 'desc';
 
     sortModules(currentOrder);
@@ -1835,7 +1948,7 @@ function setupSortAndRender() {
 
         const newOrder = sortButton.dataset.order === 'asc' ? 'desc' : 'asc';
         sortOrders[currentCourse] = newOrder;
-        localStorage.setItem('courseSortOrders', JSON.stringify(sortOrders));
+        courseStorage.setItem('courseSortOrders', JSON.stringify(sortOrders));
 
         sortModules(newOrder);
         updateButtonState(newOrder);
@@ -1855,7 +1968,7 @@ async function fetchCourseData(sheetName, forceRefresh = false) {
     // On page reload the in-memory cache is empty, so check sessionStorage
     if (!forceRefresh) {
         try {
-            const cached = sessionStorage.getItem('courseData_' + cacheKeyString);
+            const cached = courseSessionStorage.getItem('courseData_' + cacheKeyString);
             if (cached) {
                 const { data } = JSON.parse(cached);
                 courseDataCache[cacheKeyString] = data;
@@ -1872,7 +1985,7 @@ async function fetchCourseData(sheetName, forceRefresh = false) {
         const data = rows.length === 0 ? null : processCourseData(rows);
         if (data) {
             courseDataCache[cacheKeyString] = data;
-            try { sessionStorage.setItem('courseData_' + cacheKeyString, JSON.stringify({ data })); } catch (e) { }
+            try { courseSessionStorage.setItem('courseData_' + cacheKeyString, JSON.stringify({ data })); } catch (e) { }
         }
         return data;
     } catch (error) {
@@ -1889,7 +2002,7 @@ function revalidateCourseInBackground(sheetName, cacheKeyString) {
 
         // Update caches
         courseDataCache[cacheKeyString] = freshData;
-        try { sessionStorage.setItem('courseData_' + cacheKeyString, JSON.stringify({ data: freshData })); } catch (e) { }
+        try { courseSessionStorage.setItem('courseData_' + cacheKeyString, JSON.stringify({ data: freshData })); } catch (e) { }
 
         // If this is the currently displayed course and data actually changed,
         // silently re-render the UI
@@ -2207,7 +2320,7 @@ function resetUIElements() {
 
 function getDismissedAnnouncements() {
     try {
-        return JSON.parse(localStorage.getItem('dismissedAnnouncements') || '[]');
+        return JSON.parse(courseStorage.getItem('dismissedAnnouncements') || '[]');
     } catch (e) {
         return [];
     }
@@ -2237,7 +2350,7 @@ function dismissAnnouncement(id, cardElement) {
     const dismissed = getDismissedAnnouncements();
     if (!dismissed.includes(id)) {
         dismissed.push(id);
-        localStorage.setItem('dismissedAnnouncements', JSON.stringify(dismissed));
+        courseStorage.setItem('dismissedAnnouncements', JSON.stringify(dismissed));
     }
 
     if (cardElement) {
@@ -2268,7 +2381,7 @@ function clearAllAnnouncements() {
             }
         });
 
-        localStorage.setItem('dismissedAnnouncements', JSON.stringify(dismissed));
+        courseStorage.setItem('dismissedAnnouncements', JSON.stringify(dismissed));
         renderAnnouncements(window.currentCourseData.announcements);
     }
 }
@@ -3054,8 +3167,10 @@ function applyOwnerBranding() {
     const owner = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.owner) || {};
     const cv = document.getElementById('footer-cv');
     if (cv && owner.cvUrl) cv.href = owner.cvUrl;
+    if (cv && lecturerSite) cv.hidden = !owner.cvUrl;
     const email = document.getElementById('footer-email');
     if (email && owner.email) email.href = `mailto:${owner.email}`;
+    if (email && lecturerSite) email.hidden = !owner.email;
     const name = document.getElementById('footer-owner');
     if (name && owner.name) name.textContent = owner.name;
     const startYear = document.getElementById('footer-start-year');
@@ -3064,6 +3179,8 @@ function applyOwnerBranding() {
     if (home && owner.homeUrl) home.href = owner.homeUrl;
     const favicon = document.querySelector('link[rel="icon"]');
     if (favicon && owner.faviconUrl) favicon.href = owner.faviconUrl;
+    const admin = document.getElementById('footer-admin');
+    if (admin && lecturerSite) admin.href = new URL('admin/', window.TEACHING_CONFIG.appBaseUrl).href;
 }
 
 // Applies the default colour palette from config.js as CSS custom properties.
@@ -3138,4 +3255,5 @@ function processPendingNotifications() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', init);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+else init();

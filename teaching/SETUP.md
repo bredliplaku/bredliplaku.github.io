@@ -1,5 +1,13 @@
 # Teaching pages — setup & sharing guide
 
+**Showing a lecturer's courses on their existing website?** In Settings, save
+their Lecturer account and courses, then download their website file from the
+public admin page. Upload that `index.html` to the desired website folder once.
+It shares this application and database; no website address, fork, DNS change,
+or separate Supabase setup is required. Lecturers can download their own file.
+The independent deployment instructions below are for people who want to operate
+their own unrelated teaching system.
+
 **Upgrading an existing installation for Admin/Lecturer/Student permissions?**
 Follow the [teaching roles upgrade](supabase/ROLES.md). Run `supabase/roles.sql`
 in your existing project before publishing the updated editor; your current
@@ -55,7 +63,7 @@ admin-only write).
 > keyed by email vs. user id).
 
 Next open [`supabase/roles.sql`](supabase/roles.sql) and set
-`teaching.global_admin_email` at the top to the same administrator email you chose
+`teaching.admin_email` at the top to the same administrator email you chose
 in `schema.sql`. Run the file in full to install teaching roles, course assignments,
 and the checked save functions used by the editor.
 See the [roles guide](supabase/ROLES.md) for the permission matrix and Settings.
@@ -119,7 +127,8 @@ The admin panel authenticates you with Google. The public course page needs none
    you started from.
 5. The owner bootstrapped in `supabase/roles.sql` can open **Settings** in the teaching
    editor to grant Admin, Lecturer, or Student access and assign courses. Other
-   accounts have no teaching access until the global admin adds them.
+   accounts have no teaching access until an Admin adds them, or a Lecturer adds
+   them as Students to their own courses.
 
 ### 6. Fill in `config.js`
 

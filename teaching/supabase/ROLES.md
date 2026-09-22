@@ -3,39 +3,39 @@
 ## Apply to the existing project
 
 1. Open the **existing** Supabase project → **SQL Editor**.
-2. Open [`roles.sql`](roles.sql) and set `teaching.global_admin_email` at the top
-   to your Google sign-in email. This is the only owner email setting in the file.
+2. Open [`roles.sql`](roles.sql) and set `teaching.admin_email` at the top
+   to your Google sign-in email.
 3. Run `roles.sql` in full. Do **not** recreate the project or re-run
    the original schema to upgrade an existing installation.
 4. Publish the updated teaching files together, then reload `/teaching/admin/`.
 5. Sign in with the email you configured and open **Settings** next to your name.
    Add each person's Google sign-in email and role, select their courses, and
-   save. Names come from Google automatically. You can add people before their
-   first sign-in; their email is shown until their Google name is available.
+   save. Names come from Google sign-in; there is no editable name field. You
+   can add people before their first sign-in; their email is shown until then.
 
 If roles are already installed, rerun the updated `roles.sql` only. It keeps
-existing accounts, assignments, and professor bindings, and replaces manually
-entered names with Google names. No invitation email is sent.
+existing accounts, assignments, professor bindings, website mappings, and public
+website IDs. The former Global admin role becomes Admin. Previous custom display
+names are replaced by Google names. No invitation email is sent.
 
 For the first upgrade, the configured email must already exist in `public.admins`.
 When moving to another deployment, change the setting at the top of `roles.sql`
-to that deployment's administrator email. Rerunning the upgrade preserves an
-existing global admin; changing the setting does not transfer ownership.
-The upgrade stops without making changes if it cannot establish a global admin.
+to that deployment's administrator email. Existing Admins keep their access;
+manage subsequent role changes in Settings. At least one Admin must remain.
 
 Apply the migration **before** publishing the new editor. The new editor reports
 a missing upgrade and refuses to operate without its database permissions.
-No service key, new OAuth client, Edge Function, or public configuration change
-is required. Apply the SQL to your hosted project as part of deployment.
+The role upgrade needs no service key or new OAuth client. Apply the SQL to your
+hosted project as part of deployment. For the first lecturer website setup, also
+publish `teaching/embed.js`, `teaching/js/sites.js`, and the updated timetable proxy.
 
 ## Permissions
 
 | Account | Course access | Editable content | Course actions | Account settings |
 |---|---|---|---|---|
-| Global admin | All | Everything | Create, archive, restore, delete | Manage roles and assignments |
-| Admin | All | Everything | Create, archive, restore, delete | None |
-| Lecturer | Assigned courses | Everything except Course Identity, Dates, and other professors | Archive | None |
-| Student / TA | Assigned courses | Modules, Projects, Announcements | None | None |
+| Admin | All | Everything | Create, archive, restore, delete | Add, edit and remove all accounts |
+| Lecturer | Assigned courses | Everything except Course Identity, Dates, and other professors | Archive | View self; manage Student access to own courses |
+| Student | Assigned courses | Modules, Projects, Announcements | None | None |
 
 Restricted fields remain visible, grey, and disabled. Students can open the
 other tabs to read them. A course's active and archived offerings have separate
@@ -44,8 +44,24 @@ Removing access or changing a role takes effect on the next database write,
 including in an already open session; reload the page to refresh its controls.
 
 Administrators have automatic access to all courses, including future courses,
-so they do not need course checkboxes. The Settings screen cannot remove or
-demote the global administrator, or create another global administrator.
+so they do not need course checkboxes. Admins can manage other Admins, but the
+database prevents removing or demoting the last Admin.
+
+Lecturers see their own read-only account and all active Students, including those
+with no shared courses. They can search the list and select an existing Student.
+They can add a Student by Google email and select only their own assigned courses,
+including archived offerings. Adding an existing Student preserves assignments
+outside the Lecturer's courses. Saving or removing Student access changes only
+the Lecturer's part of the assignments; it never deletes the Student's account or
+their other course access. Students stay listed after their last shared assignment
+is removed. Only Admins can change account roles, remove accounts from the directory,
+or restore a disabled account.
+
+Lecturers can download their own website file. Admins can download one for any
+Lecturer. A file uploaded as `/academic/index.html` creates the public course page,
+not an `/academic/admin` page. Its Sign In link goes to the central admin portal.
+Permissions always belong to the signed-in account, regardless of the referring
+website. Downloaded files and public IDs remain valid through this upgrade.
 
 ## Professor matching
 
@@ -59,9 +75,10 @@ course grant no ownership until an admin resolves the ambiguity.
 When the lecturer signs in, the database binds the matching professor record
 to their course assignment. They may edit that record's name, profile URL,
 and photo URL; they cannot add, remove, or renumber the professor roster.
-The binding survives their own name edits and course archiving. Display names
-refresh from Google, but the first verified name remains fixed for ownership
-matching, so renaming a Google profile cannot claim another professor record.
+The binding survives their own name edits and course archiving. Verified names
+refresh from Google. The first verified name remains fixed for ownership matching,
+so renaming a Google profile cannot
+claim another professor record.
 Changing that professor's name as an administrator, changing the account's role,
 or removing its assignment clears the binding. To establish a fresh match,
 the professor name must match that first recorded Google name; then reload.
@@ -71,12 +88,12 @@ the professor name must match that first recorded Google name; then reload.
 - `course_rows` keeps its existing columns and public read behavior. Content
   saves use one database transaction, which validates every original and new
   row before any write. Course moves and deletions are also atomic.
-- Existing `admins` entries become teaching Admins, with the configured owner
-  becoming Global admin. The old `admins` table and timetable policies stay in
+- Existing `admins` entries and the former Global admin become teaching Admins.
+  The old `admins` table and timetable policies stay in
   place. **These Settings manage teaching access only:** they do not grant or
   revoke access to the separate timetable admin panel.
-- Role and assignment tables are inaccessible to direct browser writes. Only
-  the global-admin RPCs can change them. Direct `course_rows` writes remain
+- Role and assignment tables are inaccessible to direct browser writes. Checked
+  RPCs enforce Admin access and Lecturer course scopes. Direct `course_rows` writes remain
   available to full admins; restrictive RLS blocks limited accounts even if an
   older permissive write policy exists. Checked RPCs are the only write path
   for lecturers and students.
