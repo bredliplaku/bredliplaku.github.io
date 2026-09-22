@@ -904,6 +904,7 @@ async function fillCourseHeader(name, isArchive) {
   const { data } = await sb.from('course_rows').select('b,c')
     .eq('sheet_name', name).eq('is_archive', isArchive).eq('type', 'metadata')
     .in('b', ['code', 'title', 'semester', 'credits', 'year', 'theme_colours']);
+  if (S.course !== name || S.isArchive !== isArchive) return;
   const m = {};
   for (const r of (data || [])) m[r.b] = r.c;
   applyCourseTheme(m.theme_colours);
@@ -962,14 +963,16 @@ async function loadSection(id) {
   if (id === 'info') { await loadMetadataSettings(); return; }
   if (id === 'grading') { await loadGradingSettings(); return; }
   if (id === 'links') { await loadLinksSection(sec); return; }
+  const course = S.course, isArchive = S.isArchive;
   // The Modules view is the single place where module & project ORDER is set, so it also
   // loads project header rows (type 'project') to show them as draggable refs alongside
   // modules. Their content stays in the Projects tab.
   const fetchTypes = sec.hier ? [...sec.types, 'project'] : sec.types;
   const { data, error } = await sb.from('course_rows').select('*')
-    .eq('sheet_name', S.course).eq('is_archive', S.isArchive)
+    .eq('sheet_name', course).eq('is_archive', isArchive)
     .in('type', fetchTypes).order('row_index');
   const body = document.getElementById('section-body');
+  if (!body || S.course !== course || S.isArchive !== isArchive || S.section !== id) return;
   if (error) { body.innerHTML = `<div class="empty-content">Error: ${x(error.message)}</div>`; return; }
   for (const r of (data || [])) ROW_STORE[r.row_uid] = r;
   if (sec.hier) body.innerHTML = renderHier(data || []);
@@ -989,11 +992,13 @@ let _openProjectAfterLoad = null;
 // Links tab shows the Timetables editor above the Link Button cards; both save together
 // via the one Save button (saveSectionChanges('links') also calls saveTimetablesWork()).
 async function loadLinksSection(sec) {
+  const course = S.course, isArchive = S.isArchive;
   const body = document.getElementById('section-body');
   const [metaRes, btnRes] = await Promise.all([
     sb.from('course_rows').select('*').eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata').order('row_index'),
     sb.from('course_rows').select('*').eq('sheet_name', S.course).eq('is_archive', S.isArchive).in('type', sec.types).order('row_index'),
   ]);
+  if (!body?.isConnected || S.course !== course || S.isArchive !== isArchive || S.section !== sec.id) return;
   if (metaRes.error) { body.innerHTML = `<div class="empty-content">Error: ${x(metaRes.error.message)}</div>`; return; }
   if (btnRes.error) { body.innerHTML = `<div class="empty-content">Error: ${x(btnRes.error.message)}</div>`; return; }
 
@@ -1073,10 +1078,12 @@ async function saveTimetablesWork() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function loadGradingSettings() {
+  const course = S.course, isArchive = S.isArchive;
   const { data, error } = await sb.from('course_rows').select('*')
     .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata')
     .order('row_index');
   const body = document.getElementById('section-body');
+  if (!body || S.course !== course || S.isArchive !== isArchive || S.section !== 'grading') return;
   if (error) { body.innerHTML = `<div class="empty-content">Error: ${x(error.message)}</div>`; return; }
 
   const metaMap = {};
@@ -1162,10 +1169,12 @@ async function saveGradingSettings() {
 }
 
 async function loadMetadataSettings() {
+  const course = S.course, isArchive = S.isArchive;
   const { data, error } = await sb.from('course_rows').select('*')
     .eq('sheet_name', S.course).eq('is_archive', S.isArchive).eq('type', 'metadata')
     .order('row_index');
   const body = document.getElementById('section-body');
+  if (!body || S.course !== course || S.isArchive !== isArchive || S.section !== 'info') return;
   if (error) { body.innerHTML = `<div class="empty-content">Error: ${x(error.message)}</div>`; return; }
 
   const metaMap = {}, extras = [];
@@ -2823,8 +2832,9 @@ async function deleteRow(uid) {
 // Course management
 // ─────────────────────────────────────────────────────────────────────────────
 
-function openNewCourseModal() {
+async function openNewCourseModal() {
   if (!requirePermission(isCourseAdmin())) return;
+  if (!(await confirmLeaveIfDirty())) return;
   document.getElementById('modal-title').textContent = 'New Course';
   document.getElementById('modal-save').innerHTML = '<i class="fa-solid fa-plus" style="margin-right:5px"></i>Create';
   document.getElementById('modal-save').onclick = createCourse;
@@ -3201,11 +3211,12 @@ document.addEventListener('keydown', e => {
     return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
-    if (document.getElementById('access-settings')) { e.preventDefault(); saveAccessAccount(); return; }
-    if (document.getElementById('admin-app').style.display !== 'flex' || !S.course) return;
+    if (document.getElementById('admin-app').style.display !== 'flex') return;
     e.preventDefault(); // never fall through to the browser's Save Page dialog
     if (document.getElementById('confirm-overlay').classList.contains('open') ||
       document.getElementById('modal-overlay').classList.contains('open')) return;
+    if (document.getElementById('access-settings')) { saveAccessAccount(); return; }
+    if (!S.course) return;
     const saveBtn = document.getElementById('section-save-btn');
     if (saveBtn && saveBtn.disabled) return; // a save is already running
     saveCurrentSection();

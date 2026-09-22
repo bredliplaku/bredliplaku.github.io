@@ -8,9 +8,14 @@
 3. Run `roles.sql` in full. Do **not** recreate the project or re-run
    the original schema to upgrade an existing installation.
 4. Publish the updated teaching files together, then reload `/teaching/admin/`.
-5. Sign in with the email you configured and open **Settings** in the sidebar.
-   Add each person's sign-in email, account name and role, select their courses,
-   and save. They use the existing Google sign-in; no invitation email is sent.
+5. Sign in with the email you configured and open **Settings** next to your name.
+   Add each person's Google sign-in email and role, select their courses, and
+   save. Names come from Google automatically. You can add people before their
+   first sign-in; their email is shown until their Google name is available.
+
+If roles are already installed, rerun the updated `roles.sql` only. It keeps
+existing accounts, assignments, and professor bindings, and replaces manually
+entered names with Google names. No invitation email is sent.
 
 For the first upgrade, the configured email must already exist in `public.admins`.
 When moving to another deployment, change the setting at the top of `roles.sql`
@@ -44,9 +49,9 @@ demote the global administrator, or create another global administrator.
 
 ## Professor matching
 
-For a lecturer, the account name entered by the global admin and the professor
-name must match the lecturer's Google account name. Matching ignores case,
-common academic titles such as `Prof.` and `Dr.`, and repeated whitespace.
+For a lecturer, the professor name must match their first recorded Google
+account name. Matching ignores case, common academic titles such as `Prof.`
+and `Dr.`, and repeated whitespace.
 Names come from Google's server-held identity record, not editable browser
 state or Supabase user metadata. Duplicate matching professor names in one
 course grant no ownership until an admin resolves the ambiguity.
@@ -54,10 +59,12 @@ course grant no ownership until an admin resolves the ambiguity.
 When the lecturer signs in, the database binds the matching professor record
 to their course assignment. They may edit that record's name, profile URL,
 and photo URL; they cannot add, remove, or renumber the professor roster.
-The binding survives their own name edits and course archiving. Changing that
-professor's name as an administrator, changing the account's name or role, or
-removing its assignment clears the binding. Sign in again after the admin
-corrects a name to establish a fresh match.
+The binding survives their own name edits and course archiving. Display names
+refresh from Google, but the first verified name remains fixed for ownership
+matching, so renaming a Google profile cannot claim another professor record.
+Changing that professor's name as an administrator, changing the account's role,
+or removing its assignment clears the binding. To establish a fresh match,
+the professor name must match that first recorded Google name; then reload.
 
 ## Compatibility and enforcement
 

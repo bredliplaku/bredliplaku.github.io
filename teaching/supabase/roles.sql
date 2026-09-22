@@ -1,4 +1,5 @@
--- Teaching roles upgrade. Run AFTER schema.sql in Supabase SQL Editor.
+-- Teaching roles upgrade. Existing project: run this file only in Supabase SQL Editor.
+-- Fresh project: run schema.sql first.
 begin;
 
 -- CONFIGURATION: change only this email for your deployment.
@@ -14,8 +15,11 @@ revoke all on schema teaching_private from public, anon, authenticated;
 create table if not exists public.teaching_accounts (
   email text primary key check (email = lower(btrim(email))),
   name text not null default '',
+  google_name_anchor text not null default '',
   role text not null check (role in ('global_admin','admin','lecturer','student','disabled'))
 );
+-- Keep the first verified Google name for professor matching; display names may change.
+alter table public.teaching_accounts add column if not exists google_name_anchor text not null default '';
 create table if not exists public.teaching_assignments (
   email text not null references public.teaching_accounts(email) on delete cascade,
   sheet_name text not null,
@@ -41,7 +45,7 @@ revoke all on all tables in schema teaching_private from public, anon, authentic
 revoke insert, update, delete, truncate on public.admins from public, anon, authenticated;
 
 insert into public.teaching_accounts(email, name, role)
-select lower(btrim(email)), concat_ws(' ', name, surname), 'admin' from public.admins
+select lower(btrim(email)), '', 'admin' from public.admins
 on conflict (email) do nothing;
 -- Only bootstrap an EXISTING administrator; never give a visitor a claim-owner endpoint.
 update public.teaching_accounts set role = 'global_admin'
@@ -76,6 +80,31 @@ language sql immutable set search_path = '' as $$
       '^((professor|prof|dr|assoc|asst|assist|assistant|associate|acad|msc|m\.sc|phd|ph\.d|mr|mrs|ms)[.[:space:]]+)+', '', 'i'),
     '[[:space:]]+', ' ', 'g'))
 $$;
+-- Only trust the provider record attached to the same verified sign-in email.
+-- raw_user_meta_data and names submitted by a browser are not identity evidence.
+create or replace function teaching_private.google_name(p_email text) returns text
+language sql stable security definer set search_path = '' as $$
+  select coalesce(nullif(btrim(i.identity_data->>'full_name'), ''),
+    nullif(btrim(i.identity_data->>'name'), ''), '')
+  from auth.users u join auth.identities i on i.user_id = u.id
+  where lower(btrim(u.email)) = lower(btrim(p_email)) and u.email_confirmed_at is not null
+    and i.provider = 'google' and lower(btrim(i.identity_data->>'email')) = lower(btrim(u.email))
+  order by i.created_at, i.id limit 1
+$$;
+
+create or replace function teaching_private.sync_google_names(p_email text default null) returns void
+language sql security definer set search_path = '' as $$
+  update public.teaching_accounts a set name = names.google_name,
+    google_name_anchor = case when a.google_name_anchor = '' then names.google_name else a.google_name_anchor end
+  from (select email, coalesce(teaching_private.google_name(email), '') as google_name
+    from public.teaching_accounts where p_email is null or email = p_email) names
+  where a.email = names.email and (a.name is distinct from names.google_name
+    or (a.google_name_anchor = '' and names.google_name <> ''))
+$$;
+
+-- Replace old manually entered names without resetting existing professor bindings.
+select teaching_private.sync_google_names();
+
 -- The public parser replaces JavaScript whitespace with underscores in metadata keys.
 -- Include its Unicode whitespace set so e.g. "holiday startdate" cannot bypass Dates.
 create or replace function teaching_private.meta_key(p_key text) returns text
@@ -84,22 +113,15 @@ language sql immutable set search_path = '' as $$
     U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF',
     repeat(' ', 25))), ' +', '_', 'g'))
 $$;
--- A server-held Google identity, not editable user_metadata or a browser-provided name.
+-- Match the first verified Google name, not a later profile rename.
 create or replace function teaching_private.bind_professors() returns void
 language plpgsql security definer set search_path = '' as $$
 declare account_name text;
 begin
   if public.teaching_role() is distinct from 'lecturer' then return; end if;
-  select teaching_private.normal_name(coalesce(i.identity_data->>'full_name', i.identity_data->>'name'))
-    into account_name from auth.identities i
-    where i.user_id = auth.uid() and i.provider = 'google'
-      and lower(i.identity_data->>'email') = teaching_private.email()
-    limit 1;
+  select teaching_private.normal_name(a.google_name_anchor) into account_name
+    from public.teaching_accounts a where a.email = teaching_private.email() and a.name <> '';
   if coalesce(account_name, '') = '' then return; end if;
-  -- Anchor matching to the global admin's account entry as well: changing one's
-  -- Google display name must not let a lecturer claim somebody else's professor card.
-  if not exists (select 1 from public.teaching_accounts a where a.email = teaching_private.email()
-    and teaching_private.normal_name(a.name) = account_name) then return; end if;
   insert into teaching_private.professor_bindings(email, sheet_name, is_archive, professor_key, name_row_uid)
   select a.email, r.sheet_name, r.is_archive, r.b, r.row_uid
     from public.teaching_assignments a join public.course_rows r
@@ -123,6 +145,9 @@ declare result jsonb;
 begin
   -- Serialize permission changes, saves and automatic professor binding.
   lock table public.teaching_accounts in share row exclusive mode;
+  if teaching_private.email() is not null then
+    perform teaching_private.sync_google_names(teaching_private.email());
+  end if;
   perform teaching_private.bind_professors();
   select jsonb_build_object('email', a.email, 'name', a.name, 'role', a.role,
     'assignments', coalesce((select jsonb_agg(jsonb_build_object('sheet_name', s.sheet_name, 'is_archive', s.is_archive))
@@ -335,23 +360,27 @@ end $$;
 create or replace function public.teaching_list_accounts() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 begin
+  lock table public.teaching_accounts in share row exclusive mode;
   if public.teaching_role() is distinct from 'global_admin' then
     raise exception 'Only the global admin can manage access' using errcode = '42501'; end if;
+  perform teaching_private.sync_google_names();
   return coalesce((select jsonb_agg(jsonb_build_object('email', a.email, 'name', a.name, 'role', a.role,
     'assignments', coalesce((select jsonb_agg(jsonb_build_object('sheet_name', s.sheet_name, 'is_archive', s.is_archive))
-      from public.teaching_assignments s where s.email = a.email), '[]'::jsonb)) order by a.name, a.email)
+      from public.teaching_assignments s where s.email = a.email), '[]'::jsonb)) order by
+      case a.role when 'global_admin' then 0 when 'admin' then 0 when 'lecturer' then 1 when 'student' then 2 else 3 end,
+      lower(coalesce(nullif(a.name, ''), a.email)), a.email)
     from public.teaching_accounts a where a.role <> 'disabled'), '[]'::jsonb);
 end $$;
 
 create or replace function public.teaching_set_account(p_email text, p_name text, p_role text, p_assignments jsonb default '[]')
 returns void language plpgsql security definer set search_path = '' as $$
-declare target_email text := lower(btrim(p_email)); assignment jsonb;
+declare target_email text := lower(btrim(p_email)); account_name text; assignment jsonb;
 begin
   lock table public.teaching_accounts in share row exclusive mode;
   if public.teaching_role() is distinct from 'global_admin' then
     raise exception 'Only the global admin can manage access' using errcode = '42501'; end if;
   if target_email is null or target_email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
-    or coalesce(btrim(p_name), '') = '' or p_role is null or p_role not in ('admin','lecturer','student')
+    or p_role is null or p_role not in ('admin','lecturer','student')
     or p_assignments is null or jsonb_typeof(p_assignments) <> 'array' then raise exception 'Invalid account details'; end if;
   if exists (select 1 from public.teaching_accounts where email = target_email and role = 'global_admin') then
     raise exception 'The global administrator cannot be changed here'; end if;
@@ -361,12 +390,17 @@ begin
       raise exception 'An assigned course no longer exists'; end if;
   end loop;
   -- Retain ownership for unchanged lecturer assignments; reset on role changes.
-  if exists (select 1 from public.teaching_accounts where email = target_email and
-    (role <> p_role or teaching_private.normal_name(name) <> teaching_private.normal_name(p_name))) then
+  if exists (select 1 from public.teaching_accounts where email = target_email and role <> p_role) then
     delete from teaching_private.professor_bindings where email = target_email;
   end if;
-  insert into public.teaching_accounts(email, name, role) values (target_email, btrim(p_name), p_role)
-    on conflict (email) do update set name = excluded.name, role = excluded.role;
+  -- p_name is kept for compatibility with existing callers, but never trusted.
+  -- Accounts can be assigned before their first Google sign-in.
+  account_name := coalesce(teaching_private.google_name(target_email), '');
+  insert into public.teaching_accounts(email, name, google_name_anchor, role)
+    values (target_email, account_name, account_name, p_role)
+    on conflict (email) do update set name = excluded.name, role = excluded.role,
+      google_name_anchor = case when teaching_accounts.google_name_anchor = ''
+        then excluded.google_name_anchor else teaching_accounts.google_name_anchor end;
   delete from public.teaching_assignments a where a.email = target_email and not exists (
     select 1 from jsonb_array_elements(p_assignments) v where v->>'sheet_name' = a.sheet_name
       and (v->>'is_archive')::boolean = a.is_archive);
