@@ -25,6 +25,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 const S = { course: null, isArchive: false, section: 'info', admin: null, access: null };
 const ROW_STORE = Object.create(null);
+const COURSE_HEADERS = new Map();
 let _sessionHandled = false;
 let _overlayMD = false;
 
@@ -33,6 +34,7 @@ let _overlayMD = false;
 // typing in a field, adding/deleting a row, or reordering. Reset when a section (re)loads
 // (loadSection) or a save succeeds. Used to prompt before switching tab/course.
 let _sectionDirty = false;
+let _sectionBaseline = null;
 function markDirty() { if (canEditSection(S.section)) _sectionDirty = true; }
 // Typing in any field inside the section body counts as an edit. Delegated on document so it
 // keeps working after the section body is re-rendered. (Programmatic value/innerHTML changes
@@ -40,23 +42,63 @@ function markDirty() { if (canEditSection(S.section)) _sectionDirty = true; }
 document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#section-body')) markDirty(); });
 document.addEventListener('change', e => { if (e.target.closest && e.target.closest('#section-body')) markDirty(); });
 
-// The save functions are genuinely async (one or more Supabase round trips) and every one of
-// them clears _sectionDirty only once it resolves. Without this, clicking Save and immediately
-// clicking a different tab/course races the network: the click lands while _sectionDirty is
-// still true (the save hasn't finished yet), so confirmLeaveIfDirty() shows "unsaved changes"
-// for a save that IS in flight and about to succeed — reads as "I have to save twice." Wrap
-// every save call with trackSave() so confirmLeaveIfDirty() can await the in-flight save
-// first and then see the flag it actually left behind, instead of a stale mid-flight one.
+// Compare values and staged row order, not event timing: a field can fire change on blur
+// after Ctrl/Cmd+S has already saved its value. Inline drafts have their own snapshot.
+function sectionSnapshot() {
+  const body = document.getElementById('section-body');
+  if (!body || !S.course) return null;
+  const fields = [...body.querySelectorAll('input, select, textarea')]
+    .filter(el => !el.closest('.inline-edit-panel'))
+    .map(el => [el.id, el.name, el.dataset.metakey || el.dataset.key || el.dataset.donekey || '',
+      el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value]);
+  const rows = [...body.querySelectorAll('[data-uid]')]
+    .map(el => [el.dataset.uid, ROW_STORE[el.dataset.uid]]);
+  return JSON.stringify([S.course, S.isArchive, S.section, fields, rows]);
+}
+
+function rememberSavedSection() {
+  _sectionBaseline = sectionSnapshot();
+  _sectionDirty = false;
+}
+
+function hasSectionChanges() {
+  if (!S.course || !canEditSection(S.section)) return false;
+  return _sectionBaseline === null ? _sectionDirty : sectionSnapshot() !== _sectionBaseline;
+}
+
+// Start the save here so repeated clicks/shortcuts share one operation. Navigation waits
+// for it, and the section cannot acquire another draft while its saved content reloads.
 let _savePromise = null;
-function trackSave(promise) {
+function trackSave(save) {
+  if (_savePromise) return _savePromise;
+  const body = document.getElementById('section-body');
+  const wasInert = body?.inert;
+  const busy = body?.getAttribute('aria-busy');
+  const button = document.getElementById('section-save-btn');
+  const buttonHtml = button?.innerHTML, buttonDisabled = button?.disabled;
+  if (body) {
+    if (body.contains(document.activeElement)) document.activeElement.blur();
+    body.inert = true;
+    body.setAttribute('aria-busy', 'true');
+  }
+  const promise = Promise.resolve().then(save).catch(error => {
+    toast('Save failed: ' + (error.message || 'Try again.'), 'err');
+    return false;
+  }).finally(() => {
+    if (body?.isConnected) {
+      body.inert = wasInert;
+      if (busy === null) body.removeAttribute('aria-busy'); else body.setAttribute('aria-busy', busy);
+    }
+    if (button?.isConnected) { button.innerHTML = buttonHtml; button.disabled = buttonDisabled; }
+    if (_savePromise === promise) _savePromise = null;
+  });
   _savePromise = promise;
-  promise.finally(() => { if (_savePromise === promise) _savePromise = null; });
   return promise;
 }
 // Leaving the whole page (refresh/close/navigate away) can only use the browser's own native
 // prompt — a custom dialog isn't allowed here. In-app course/tab switches use confirmLeaveIfDirty.
 window.addEventListener('beforeunload', e => {
-  if (_sectionDirty || (typeof accessSettingsDirty === 'function' && accessSettingsDirty()) || (typeof inlinePanelDirty === 'function' && inlinePanelDirty())) { e.preventDefault(); e.returnValue = ''; }
+  if (hasSectionChanges() || (typeof accessSettingsDirty === 'function' && accessSettingsDirty()) || (typeof inlinePanelDirty === 'function' && inlinePanelDirty())) { e.preventDefault(); e.returnValue = ''; }
 });
 
 // These checks drive the UI only. Every write is checked again in Supabase; removing
@@ -671,7 +713,13 @@ async function loadSidebar() {
     if (bKey === 'title') map[k].title = String(r.c || '').trim();
     if (bKey === 'semester') map[k].semester = String(r.c || '').trim();
     if (bKey === 'year') map[k].year = String(r.c || '').trim();
+    if (bKey === 'credits') map[k].credits = String(r.c || '').trim();
+    if (bKey === 'theme_colours') map[k].theme_colours = String(r.c || '').trim();
     if (bKey === 'header_decoration') map[k].icon = String(r.c || '').trim();
+  }
+  COURSE_HEADERS.clear();
+  for (const course of Object.values(map)) {
+    COURSE_HEADERS.set(JSON.stringify([course.sheet_name, course.is_archive]), course);
   }
   const active = Object.values(map).filter(c => !c.is_archive).sort(courseOrder);
   const archive = Object.values(map).filter(c => c.is_archive).sort(courseOrder);
@@ -803,28 +851,25 @@ function saveLastSection(course, isArchive, id) {
 // Persists whatever tab is currently open, dispatching to the right save routine. Returns
 // true only if the save actually succeeded (so navigation can be aborted on failure).
 async function saveCurrentSection() {
-  if (S.section === 'info') return await trackSave(saveSettings());
-  if (S.section === 'grading') return await trackSave(saveGradingSettings());
-  return await trackSave(saveSectionChanges(S.section));
+  if (S.section === 'info') return await trackSave(saveSettings);
+  if (S.section === 'grading') return await trackSave(saveGradingSettings);
+  return await trackSave(() => saveSectionChanges(S.section));
 }
 
 // Returns true if it's safe to leave the current tab/course.
 async function confirmLeaveIfDirty() {
   if (document.getElementById('access-settings')) return confirmLeaveAccessSettings();
-  // A save started by clicking Save directly (not through this function) may still be in
-  // flight — let it finish and clear _sectionDirty on its own before judging the flag,
-  // rather than interrupting it with a stale "unsaved changes" prompt.
+  // Check the saved snapshot only after any pending save and reload have finished.
   if (_savePromise) await _savePromise.catch(() => { });
-  if (!_sectionDirty && !inlinePanelDirty()) return true;
+  if (!hasSectionChanges() && !inlinePanelDirty()) return true;
   const choice = await confirmDialog('You have unsaved changes in this tab.',
     { title: 'Save changes?', okLabel: 'Save', okIcon: 'fa-floppy-disk', altLabel: 'Discard' });
   if (choice === true) {
     const ok = await saveCurrentSection();
     if (!ok) return false; // save failed — stay put so nothing is lost
-    _sectionDirty = false;
-    return true;
+    return !hasSectionChanges() && !inlinePanelDirty();
   }
-  if (choice === 'alt') { _sectionDirty = false; return true; } // discard
+  if (choice === 'alt') { rememberSavedSection(); return true; } // discard
   return false; // cancel — stay
 }
 
@@ -844,11 +889,13 @@ async function selectCourse(name, isArchive, el) {
 }
 
 function renderCourseShell(name, isArchive) {
+  const header = COURSE_HEADERS.get(JSON.stringify([name, isArchive]));
+  applyCourseTheme(header?.theme_colours);
   document.getElementById('main-area').innerHTML = `
     <div class="course-header${isArchive ? ' is-archive' : ''}">
       <div class="ch-title-wrap" style="flex:1;min-width:0">
-        <h2 id="ch-title">${x(name)}</h2>
-        <div id="ch-meta" class="ch-meta"><span class="skeleton skeleton-on-dark" style="display:inline-block;width:160px;height:12px;vertical-align:middle"></span></div>
+        <h2 id="ch-title">${header ? x(header.title || header.code || name) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:70%;height:1em"></span>'}</h2>
+        <div id="ch-meta" class="ch-meta">${header ? x(courseHeaderMeta(header)) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:160px;height:12px;vertical-align:middle"></span>'}</div>
       </div>
       <div class="ch-actions">
         <span class="header-chip">${isArchive ? 'Archive' : 'Active'}</span>
@@ -900,20 +947,28 @@ function applyCourseTheme(themeStr) {
   }
 }
 
+function courseHeaderMeta(m) {
+  return [m.code && m.code !== (m.title || m.code) ? m.code : null, m.semester, m.year,
+    m.credits ? m.credits + ' ECTS' : null].filter(Boolean).join(' · ');
+}
+
 async function fillCourseHeader(name, isArchive) {
-  const { data } = await sb.from('course_rows').select('b,c')
+  const { data, error } = await sb.from('course_rows').select('b,c')
     .eq('sheet_name', name).eq('is_archive', isArchive).eq('type', 'metadata')
     .in('b', ['code', 'title', 'semester', 'credits', 'year', 'theme_colours']);
   if (S.course !== name || S.isArchive !== isArchive) return;
+  if (error) { toast('Could not load course details: ' + error.message, 'err'); return; }
   const m = {};
   for (const r of (data || [])) m[r.b] = r.c;
+  COURSE_HEADERS.set(JSON.stringify([name, isArchive]), m);
   applyCourseTheme(m.theme_colours);
   const titleEl = document.getElementById('ch-title');
   const metaEl = document.getElementById('ch-meta');
   if (!titleEl) return;
-  titleEl.textContent = m.title || m.code || name;
-  const parts = [m.code && m.code !== (m.title || m.code) ? m.code : null, m.semester, m.year, m.credits ? m.credits + ' ECTS' : null].filter(Boolean);
-  metaEl.textContent = parts.join(' · ');
+  const title = m.title || m.code || name;
+  const meta = courseHeaderMeta(m);
+  if (titleEl.textContent !== title) titleEl.textContent = title;
+  if (metaEl.textContent !== meta) metaEl.textContent = meta;
 }
 
 // Shimmer placeholder shown the instant a tab/course switch starts — shaped like a card
@@ -933,13 +988,35 @@ function lockHeight(el) {
   if (el) el.style.minHeight = el.offsetHeight + 'px';
 }
 
+// Show the glass surface only while the shared toolbar is pinned below the header.
+(function () {
+  const main = document.getElementById('main-area');
+  let frame = 0;
+  function update() {
+    frame = 0;
+    const toolbar = main.querySelector('.section-topbar');
+    if (!toolbar) return;
+    const inset = parseFloat(getComputedStyle(toolbar).top);
+    toolbar.classList.toggle('is-stuck', window.scrollY > 0 && toolbar.getBoundingClientRect().top <= inset + 0.5);
+  }
+  function schedule() {
+    if (!frame) frame = requestAnimationFrame(update);
+  }
+  window.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule, { passive: true });
+  main.addEventListener('animationend', schedule);
+  new MutationObserver(schedule).observe(main, { childList: true, subtree: true });
+  new ResizeObserver(schedule).observe(main);
+  schedule();
+})();
+
 function finishSectionLoad(body) {
   applySectionPermissions(body);
   body.style.minHeight = '';
   const main = document.getElementById('main-area');
   if (main) main.style.minHeight = '';
-  body.classList.remove('loaded');
-  requestAnimationFrame(() => body.classList.add('loaded'));
+  body.classList.add('loaded');
+  rememberSavedSection();
 }
 
 async function selectSection(id, el) {
@@ -952,6 +1029,7 @@ async function selectSection(id, el) {
   if (el) el.classList.add('active');
   const body = document.getElementById('section-body');
   lockHeight(body);
+  body.classList.remove('loaded');
   body.innerHTML = sectionSkeletonHtml();
   loadSection(id);
 }
@@ -960,6 +1038,7 @@ async function loadSection(id) {
   const sec = SECTIONS.find(s => s.id === id);
   if (!sec) return;
   _sectionDirty = false; // fresh load — nothing staged yet
+  _sectionBaseline = null;
   if (id === 'info') { await loadMetadataSettings(); return; }
   if (id === 'grading') { await loadGradingSettings(); return; }
   if (id === 'links') { await loadLinksSection(sec); return; }
@@ -1013,7 +1092,7 @@ async function loadLinksSection(sec) {
   const tts = Array.from(ttNums).sort((a, b) => a - b);
 
   let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('links'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveCurrentSection()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>`;
 
   h += `<div class="settings-group" style="margin-bottom:14px">
@@ -1091,7 +1170,7 @@ async function loadGradingSettings() {
 
   const { html: gradeRows, total: gradeTotal } = renderGradingRows(metaMap);
   const h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveGradingSettings())"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveCurrentSection()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div>
   <div class="settings-panel">
     <div class="settings-group">
@@ -1164,7 +1243,7 @@ async function saveGradingSettings() {
 
   toast('Grading saved', 'ok');
   resetBtn();
-  _sectionDirty = false;
+  rememberSavedSection();
   return true;
 }
 
@@ -1208,7 +1287,7 @@ async function loadMetadataSettings() {
   const vDate = k => { const s = metaMap[k]?.c || ''; if (!s) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; const d = new Date(s); if (!isNaN(d)) return d.toISOString().slice(0, 10); return ''; };
 
   let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSettings())"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveCurrentSection()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
   </div><div class="settings-panel">`;
 
   // ── Course Identity ──
@@ -1913,7 +1992,7 @@ async function saveSettings() {
 
   toast('Settings saved', 'ok');
   resetBtn();
-  _sectionDirty = false;
+  rememberSavedSection();
   await loadSidebar();
   await fillCourseHeader(S.course, S.isArchive);
   return true;
@@ -1992,7 +2071,7 @@ function moduleContentHtml(children) {
 
 function renderHier(rows) {
   let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('modules'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveCurrentSection()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
     <div class="add-bar">
       <button onclick="addModule()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Module</button>
     </div>
@@ -2129,7 +2208,7 @@ function projectGroupBlockHtml(g, files) {
 
 function renderProjects(rows) {
   let h = `<div class="section-topbar">
-    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('projects'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+    <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveCurrentSection()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
     <div class="add-bar">
       <button onclick="addProject()" class="btn-sm"><i class="fa-solid fa-plus" style="margin-right:5px"></i>Add Project</button>
     </div>
@@ -2201,7 +2280,7 @@ function renderCards(rows, sec, opts = {}) {
   if (!opts.bare) {
     const btns = sec.types.map(t => `<button onclick="addFlatRow('${t}')" class="btn-sm"><i class="${ADD_ICONS[t] || 'fa-solid fa-plus'}" style="margin-right:5px"></i>Add ${TYPE_NAMES[t] || t}</button>`).join('');
     h += `<div class="section-topbar">
-      <button class="btn-sm btn-save-section" id="section-save-btn" onclick="trackSave(saveSectionChanges('${sec.id}'))"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
+      <button class="btn-sm btn-save-section" id="section-save-btn" onclick="saveCurrentSection()"><i class="fa-solid fa-floppy-disk" style="margin-right:6px"></i>Save</button>
       <div class="add-bar">${btns}</div>
     </div>`;
   }
@@ -2323,7 +2402,7 @@ function closeInlineEdit(discard, animate) {
   if (!_inlineEditUid) return;
   const uid = _inlineEditUid;
   const row = ROW_STORE[uid];
-  if (row && !discard) {
+  if (row && !discard && (inlinePanelDirty() || row.row_index === 0)) {
     if (row.type === 'project_group') commitInlineGroupFields(row);
     else {
       const schema = FIELDS[row.type];
@@ -2366,7 +2445,7 @@ async function requestCloseInlineEdit() {
 // written in the same pass.
 async function inlineSave() {
   if (!S.section) { closeInlineEdit(); return; }
-  await trackSave(saveSectionChanges(S.section));
+  return await saveCurrentSection();
 }
 
 // Whether the panel's current field values differ from what it opened with.

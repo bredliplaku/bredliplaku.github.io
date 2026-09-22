@@ -4,6 +4,8 @@ let isArchiveMode = false;
 // Global variables
 let availableCourses = [];
 let currentCourse = '';
+let courseViewSequence = 0;
+let courseHeaderAnimation = null;
 let courseMap = {};
 let courseYearMap = {};
 let courseSemesterMap = {};
@@ -222,7 +224,7 @@ function init() {
         const hash = window.location.hash.substring(1);
         if (hash && hash !== 'module-' && availableCourses.length > 0) {
             if (availableCourses.includes(hash)) {
-                selectCourse(hash);
+                if (hash !== currentCourse) selectCourse(hash);
             } else {
                 // Trigger backend lookup if hash doesn't exist in current mode
                 tryPublicAccess();
@@ -660,7 +662,7 @@ function setupThemeToggle() {
             applyTheme('auto');
             // Re-apply courses theme to recalculate bright/dark contrast colors
             if (courseData.metadata && courseData.metadata.theme_colours) {
-                applyColorTheme(courseData.metadata, true);
+                applyColorTheme(courseData.metadata);
             }
         }
     });
@@ -668,7 +670,7 @@ function setupThemeToggle() {
     // Expose a way to securely re-evaluate colors publicly
     window.forceThemeColorRefresh = () => {
         if (courseData.metadata && courseData.metadata.theme_colours) {
-            applyColorTheme(courseData.metadata, true);
+            applyColorTheme(courseData.metadata);
         }
     };
 }
@@ -913,7 +915,7 @@ function checkIsDarkActive() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-function applyColorTheme(metadata, isBackgroundRefresh = false) {
+function applyColorTheme(metadata) {
     if (metadata.theme_colours) {
         const isDark = checkIsDarkActive();
         // We MUST copy the array so we don't accidentally poison the permanently cached Javascript data Object
@@ -953,36 +955,9 @@ function applyColorTheme(metadata, isBackgroundRefresh = false) {
 
     const decorationContainer = document.getElementById('header-decoration');
     const newIconClass = metadata.header_decoration?.toLowerCase() || 'fa-square';
-    const isFirstLoad = !decorationContainer.dataset.currentIcon;
-
-    // Background refresh without icon change shouldn't trigger animation
-    if (isBackgroundRefresh && !isFirstLoad && decorationContainer.dataset.currentIcon === newIconClass) {
-        return;
-    }
-
-    // This function will change the icon and trigger the "pop-in" animation
-    const animateIn = () => {
-        decorationContainer.dataset.currentIcon = newIconClass;
-        decorationContainer.innerHTML = `<i class="fa-solid ${courseHtmlText(newIconClass)}"></i>`;
-        decorationContainer.style.animation = 'decor-pop-in 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards';
-    };
-
-    if (isFirstLoad) {
-        // On the very first page load, just animate the icon in after a brief delay
-        setTimeout(animateIn, 150);
-    } else {
-        // When switching courses, first trigger the "pop-out" animation
-        decorationContainer.style.animation = 'decor-pop-out 0.25s ease-in forwards';
-
-        // Add a listener that waits for the animation to end
-        decorationContainer.addEventListener('animationend', function handleAnimationEnd() {
-            // Once the pop-out is finished, call the function to pop the new one in
-            animateIn();
-
-            // IMPORTANT: Remove the listener so it only runs once
-            decorationContainer.removeEventListener('animationend', handleAnimationEnd);
-        });
-    }
+    if (decorationContainer.dataset.currentIcon === newIconClass) return;
+    decorationContainer.dataset.currentIcon = newIconClass;
+    decorationContainer.innerHTML = `<i class="fa-solid ${courseHtmlText(newIconClass)}"></i>`;
 }
 
 function showMainContent() {
@@ -1707,6 +1682,9 @@ function setupSearchFilter() {
 }
 
 function selectCourse(sheetName) {
+    const sequence = ++courseViewSequence;
+    const archive = isArchiveMode;
+    courseHeaderAnimation?.cancel();
     // If not the initial load, start the loading state
     if (currentCourse) {
         document.body.classList.add('is-switching');
@@ -1727,7 +1705,8 @@ function selectCourse(sheetName) {
         btn.classList.toggle('active', btn.dataset.sheet === sheetName);
     });
 
-    fetchCourseData(sheetName).then(data => {
+    fetchCourseData(sheetName).then(async data => {
+        if (sequence !== courseViewSequence || archive !== isArchiveMode) return;
         if (data) {
             Object.assign(courseData, data);
             window.currentCourseData = data; // Expose globally for dismissal re-renders
@@ -1743,12 +1722,23 @@ function selectCourse(sheetName) {
             renderAnnouncements(data.announcements);
             setupSortAndRender(); // Renders the content into the hidden main-container
 
-            // Immediately show the layout as soon as it's processed
+            // Complete the header's icon layout before revealing its title and metadata.
+            const header = document.getElementById('course-header');
+            try { await window.FontAwesome?.dom?.i2svg({ node: header }); } catch { }
+            if (sequence !== courseViewSequence || archive !== isArchiveMode) return;
+            updateInfoItemRows();
             document.body.classList.add('theme-ready');
             document.body.classList.remove('is-loading');
             document.body.classList.remove('is-switching');
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                courseHeaderAnimation = header.animate([
+                    { opacity: 0, transform: 'translateY(12px)' },
+                    { opacity: 1, transform: 'translateY(0)' }
+                ], { duration: 380, easing: 'cubic-bezier(.22, 1, .36, 1)' });
+            }
 
             setTimeout(() => {
+                if (sequence !== courseViewSequence || archive !== isArchiveMode) return;
                 const cat = document.getElementById('cat-companion');
                 if (cat) cat.classList.add('visible');
 
@@ -1759,13 +1749,17 @@ function selectCourse(sheetName) {
 
             // Prefetch other courses in background for faster switching
             setTimeout(() => {
+                if (sequence !== courseViewSequence || archive !== isArchiveMode) return;
                 availableCourses.forEach(c => {
-                    if (c !== sheetName && !courseDataCache[c]) fetchCourseData(c);
+                    if (c !== sheetName && !courseDataCache[getCachePrefix() + c]) fetchCourseData(c).catch(() => { });
                 });
             }, 1000);
         } else {
             document.body.classList.remove('is-switching');
         }
+    }).catch(() => {
+        if (sequence !== courseViewSequence || archive !== isArchiveMode) return;
+        document.body.classList.remove('is-switching');
     });
 }
 
@@ -1899,7 +1893,7 @@ function revalidateCourseInBackground(sheetName, cacheKeyString) {
 
         // If this is the currently displayed course and data actually changed,
         // silently re-render the UI
-        if (sheetName === currentCourse) {
+        if (cacheKeyString === getCachePrefix() + currentCourse) {
             const oldJSON = JSON.stringify(courseData);
             const newJSON = JSON.stringify(freshData);
             if (oldJSON !== newJSON) {
@@ -1911,7 +1905,7 @@ function revalidateCourseInBackground(sheetName, cacheKeyString) {
 
                 updateCourseMetadata(freshData.metadata);
                 populateActionButtons(freshData.actionButtons, freshData.metadata);
-                applyColorTheme(freshData.metadata, true);
+                applyColorTheme(freshData.metadata);
                 renderAnnouncements(freshData.announcements);
                 setupSortAndRender();
             }

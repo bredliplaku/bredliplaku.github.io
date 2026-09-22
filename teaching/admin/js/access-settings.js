@@ -71,8 +71,11 @@
     const sequence = ++viewSequence;
     document.getElementById('main-area').innerHTML = `
       <section id="access-settings" class="access-settings" aria-labelledby="access-title">
-        <div class="course-header access-header"><div class="ch-title-wrap"><h2 id="access-title">Settings</h2><div class="ch-meta">Accounts</div></div></div>
-        <div class="settings-group"><div class="settings-body access-status" role="status">Loading accounts…</div></div>
+        <div class="course-header access-header">
+          <div class="ch-title-wrap"><h2 id="access-title">Settings</h2><div class="ch-meta">Accounts</div></div>
+          <button type="button" class="btn-ghost btn-sm" id="access-add-account" disabled><i class="fa-solid fa-user-plus" aria-hidden="true"></i> Add account</button>
+        </div>
+        <div class="settings-group access-loading"><div class="settings-body access-status" role="status">Loading accounts…</div></div>
       </section>`;
     const container = screen();
     baseline = '';
@@ -99,11 +102,8 @@
   function renderSettings() {
     const container = screen();
     if (!container) return;
-    container.innerHTML = `
-      <div class="course-header access-header">
-        <div class="ch-title-wrap"><h2 id="access-title">Settings</h2><div class="ch-meta">Accounts</div></div>
-        <button type="button" class="btn-ghost btn-sm" id="access-add-account"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> Add account</button>
-      </div>
+    container.querySelector('.access-loading, .access-layout')?.remove();
+    container.insertAdjacentHTML('beforeend', `
       <div class="access-layout">
         <aside class="settings-group access-directory" aria-labelledby="access-accounts-title">
           <div class="settings-head"><span id="access-accounts-title">Accounts</span><span class="badge category-count-badge">${accounts.length}</span></div>
@@ -115,8 +115,10 @@
           </div>
         </aside>
         <div id="access-editor" class="settings-panel"></div>
-      </div>`;
-    container.querySelector('#access-add-account').addEventListener('click', () => chooseAccount(null));
+      </div>`);
+    const add = container.querySelector('#access-add-account');
+    add.disabled = !!pending;
+    add.onclick = () => chooseAccount(null);
     container.querySelector('#access-accounts').addEventListener('click', event => {
       const button = event.target.closest('[data-account-index]');
       if (button) chooseAccount(accounts[Number(button.dataset.accountIndex)].email);
@@ -168,6 +170,15 @@
     const account = selectedAccount(), locked = isLocked();
     selectedCourses = new Set((account?.assignments || []).map(courseKey));
     editor.innerHTML = `<form id="access-account-form" class="access-form settings-panel">
+      ${locked ? '' : `<div class="section-topbar">
+        <button type="submit" class="btn-sm btn-save-section" id="access-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> ${account ? 'Save' : 'Add account'}</button>
+        <div class="add-bar">
+          <button type="button" class="btn-secondary btn-sm" id="access-discard">Discard</button>
+          ${account ? '<button type="button" id="access-remove" class="btn-red btn-sm"><i class="fa-solid fa-user-minus" aria-hidden="true"></i> Remove access</button>' : ''}
+        </div>
+        <span id="access-unsaved" class="form-hint" hidden>Unsaved changes</span>
+        <p id="access-form-status" class="access-form-status" role="status" aria-live="polite"></p>
+      </div>`}
       <div class="settings-group">
         <div class="settings-head"><span>${account ? 'Account' : 'New account'}</span>
           ${locked ? '<span><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Global admin</span>' : ''}</div>
@@ -208,13 +219,6 @@
           </fieldset>
         </div>
       </div>
-      <p id="access-form-status" class="access-form-status" role="status" aria-live="polite"></p>
-      ${locked ? '' : `<div class="access-form-actions">
-        <button type="submit" class="btn-sm btn-save-section" id="access-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> ${account ? 'Save' : 'Add account'}</button>
-        <button type="button" class="btn-secondary btn-sm" id="access-discard">Discard</button>
-        <span id="access-unsaved" class="form-hint" hidden>Unsaved changes</span>
-        ${account ? '<button type="button" id="access-remove" class="btn-red btn-sm access-remove"><i class="fa-solid fa-user-minus" aria-hidden="true"></i> Remove access</button>' : ''}
-      </div>`}
     </form>`;
     const form = editor.querySelector('#access-account-form');
     form.addEventListener('submit', event => { event.preventDefault(); saveAccessAccount(); });
