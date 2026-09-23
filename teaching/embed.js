@@ -139,8 +139,7 @@
         window.TEACHING_EMBEDDED_ADMIN = adminMode;
         window.TEACHING_CONFIG.owner = {
             name: site.display_name, homeUrl: '/', email: '', cvUrl: '',
-            // The uploaded links above own icon selection; skip the single-icon override.
-            faviconUrl: '', startYear: new Date().getFullYear()
+            startYear: new Date().getFullYear()
         };
         // Preserve dependency order. Page controllers start immediately if DOMContentLoaded
         // has already fired, which is the normal case for this asynchronous loader.

@@ -222,7 +222,7 @@ function updateYear() {
     if (el) el.textContent = new Date().getFullYear();
 }
 
-// Fills the footer links, owner name, copyright start year and favicon from
+// Fills the footer links, owner name and copyright start year from
 // config.js, so nothing personal is hard-coded into the markup.
 function applyOwnerBranding() {
     const owner = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.owner) || {};
@@ -233,9 +233,6 @@ function applyOwnerBranding() {
     if (owner.name) set('footer-owner', el => { el.textContent = owner.name; });
     if (owner.startYear) set('footer-start-year', el => { el.textContent = owner.startYear; });
     if (owner.homeUrl) set('footer-home', el => { el.href = owner.homeUrl; });
-
-    const favicon = document.querySelector('link[rel="icon"]');
-    if (favicon && owner.faviconUrl) favicon.href = owner.faviconUrl;
 
     updateYear();
 }

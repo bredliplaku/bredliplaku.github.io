@@ -3161,7 +3161,7 @@ function updateYear() {
     if (yearEl) yearEl.textContent = new Date().getFullYear();
 }
 
-// Fills the footer's owner-specific bits (and favicon) from config.js so the
+// Fills the footer's owner-specific bits from config.js so the
 // markup itself stays identical across deployments (only config.js differs).
 function applyOwnerBranding() {
     const owner = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.owner) || {};
@@ -3177,8 +3177,6 @@ function applyOwnerBranding() {
     if (startYear && owner.startYear) startYear.textContent = owner.startYear;
     const home = document.getElementById('footer-home');
     if (home && owner.homeUrl) home.href = owner.homeUrl;
-    const favicon = document.querySelector('link[rel="icon"]');
-    if (favicon && owner.faviconUrl) favicon.href = owner.faviconUrl;
     const admin = document.getElementById('footer-admin');
     if (admin && lecturerSite) admin.href = TeachingSites.adminUrl(lecturerSite);
 }

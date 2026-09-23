@@ -3158,7 +3158,7 @@ function setupThemeToggle() {
 const _yr = document.getElementById('currentYear');
 if (_yr) _yr.textContent = new Date().getFullYear();
 
-// Footer branding + favicon + default colour palette from config.js, so the markup
+// Footer branding + default colour palette from config.js, so the markup
 // and CSS stay identical across deployments (only config.js differs).
 (function applyConfig() {
   const cfg = window.TEACHING_CONFIG || {};
@@ -3173,8 +3173,6 @@ if (_yr) _yr.textContent = new Date().getFullYear();
   if (startYear && owner.startYear) startYear.textContent = owner.startYear;
   const home = document.getElementById('footer-home');
   if (home && owner.homeUrl) home.href = owner.homeUrl;
-  const favicon = document.querySelector('link[rel="icon"]');
-  if (favicon && owner.faviconUrl) favicon.href = owner.faviconUrl;
 
   const t = cfg.theme || {};
   const root = document.documentElement.style;
