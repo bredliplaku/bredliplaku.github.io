@@ -4,6 +4,7 @@ begin;
 
 -- CONFIGURATION: change only this email for your deployment.
 -- Use an existing public.admins email. Existing accounts are kept on reruns.
+-- This account's assigned courses are also the ones listed on the central /teaching/ page.
 set local teaching.admin_email = 'bplaku@epoka.edu.al';
 
 -- No edits needed below. Existing course data, public reads, Google sign-in and
@@ -24,6 +25,10 @@ alter table public.teaching_accounts add column if not exists google_name_anchor
 alter table public.teaching_accounts add column if not exists first_name text;
 alter table public.teaching_accounts add column if not exists surname text;
 alter table public.teaching_accounts add column if not exists display_name text;
+-- Profile set in Settings by the person themselves (or an Admin). custom_name replaces the
+-- Google name on course pages; custom_photo is used only when Google provides no photo.
+alter table public.teaching_accounts add column if not exists custom_name text not null default '';
+alter table public.teaching_accounts add column if not exists custom_photo text not null default '';
 create table if not exists public.teaching_sites (
   id uuid primary key default gen_random_uuid(),
   email text not null unique references public.teaching_accounts(email) on delete cascade,
@@ -58,6 +63,16 @@ create table if not exists teaching_private.professor_bindings (
   foreign key (email, sheet_name, is_archive)
     references public.teaching_assignments(email, sheet_name, is_archive) on update cascade on delete cascade
 );
+-- The configured admin owns the central /teaching/ page. Their assigned courses
+-- form its public catalog, as a lecturer's assignments form their website's.
+create table if not exists teaching_private.central_owner (
+  singleton boolean primary key default true check (singleton),
+  email text not null
+);
+insert into teaching_private.central_owner(email)
+  values (lower(btrim(current_setting('teaching.admin_email'))))
+  on conflict (singleton) do update set email = excluded.email;
+alter table teaching_private.central_owner enable row level security;
 alter table public.teaching_accounts enable row level security;
 alter table public.teaching_assignments enable row level security;
 alter table teaching_private.professor_bindings enable row level security;
@@ -122,6 +137,28 @@ language sql stable security definer set search_path = '' as $$
   from (select teaching_private.google_profile(p_email) as profile) g
 $$;
 
+-- Google profile photo for account avatars; only HTTPS addresses are passed on.
+create or replace function teaching_private.google_photo(p_email text) returns text
+language sql stable security definer set search_path = '' as $$
+  select case when url ~ '^https://' then url end
+  from (select coalesce(nullif(btrim(profile->>'avatar_url'), ''), nullif(btrim(profile->>'picture'), '')) as url
+    from (select teaching_private.google_profile(p_email) as profile) g) p
+$$;
+
+-- The name and photo shown for an account: the custom name, else the Google name; the
+-- Google photo, else the custom photo. Empty when there is nothing to show (never the email).
+create or replace function teaching_private.shown_name(p_email text) returns text
+language sql stable security definer set search_path = '' as $$
+  select coalesce(nullif(btrim(a.custom_name), ''), nullif(btrim(a.name), ''), '')
+  from public.teaching_accounts a where a.email = p_email
+$$;
+create or replace function teaching_private.shown_photo(p_email text) returns text
+language sql stable security definer set search_path = '' as $$
+  select coalesce(teaching_private.google_photo(p_email),
+    (select nullif(a.custom_photo, '') from public.teaching_accounts a where a.email = p_email
+      and a.custom_photo ~ '^https://'))
+$$;
+
 create or replace function teaching_private.sync_google_names(p_email text default null) returns void
 language sql security definer set search_path = '' as $$
   update public.teaching_accounts a set name = names.google_name,
@@ -180,6 +217,9 @@ begin
   end if;
   perform teaching_private.bind_professors();
   select jsonb_build_object('email', a.email, 'name', a.name, 'role', a.role,
+    'photo', teaching_private.shown_photo(a.email), 'google_photo', teaching_private.google_photo(a.email),
+    'custom_name', a.custom_name, 'custom_photo', a.custom_photo,
+    'display_name', teaching_private.shown_name(a.email),
     'assignments', coalesce((select jsonb_agg(jsonb_build_object('sheet_name', s.sheet_name, 'is_archive', s.is_archive))
       from public.teaching_assignments s where s.email = a.email), '[]'::jsonb),
     'professor_keys', coalesce((select jsonb_agg(jsonb_build_object('sheet_name', p.sheet_name,
@@ -272,7 +312,7 @@ begin
         raise exception 'Metadata key already exists'; end if;
     end if;
     if role_name = 'lecturer' and incoming.type = 'metadata' and incoming.b ~ '^professor[1-9][0-9]*$'
-      and coalesce(btrim(incoming.c), '') = '' then raise exception 'Professor name is required'; end if;
+      and coalesce(btrim(incoming.c), '') = '' then raise exception 'Lecturer name is required'; end if;
   end loop;
   foreach uid in array p_delete_uids loop
     select * into previous from public.course_rows where row_uid = uid;
@@ -294,7 +334,9 @@ begin
     g = excluded.g, h = excluded.h, i = excluded.i, j = excluded.j;
 end $$;
 
-create or replace function public.teaching_create_course(p_rows jsonb)
+-- The New Course dialog also assigns lecturers; replace the one-argument version.
+drop function if exists public.teaching_create_course(jsonb);
+create or replace function public.teaching_create_course(p_rows jsonb, p_lecturers text[] default '{}')
 returns void language plpgsql security definer set search_path = '' as $$
 declare course_name text; archived boolean;
 begin
@@ -312,6 +354,13 @@ begin
     or (r->>'is_archive')::boolean is distinct from archived or r->>'type' is distinct from 'metadata') then
     raise exception 'Invalid course metadata'; end if;
   perform public.teaching_save_rows(p_rows, '{}');
+  -- Lecturers chosen in the dialog (Lecturer or Admin accounts only).
+  if exists (select 1 from unnest(coalesce(p_lecturers, '{}')) e where not exists (
+    select 1 from public.teaching_accounts a where a.email = lower(btrim(e)) and a.role in ('admin', 'lecturer'))) then
+    raise exception 'Choose lecturers from the Lecturer and Admin accounts'; end if;
+  insert into public.teaching_assignments(email, sheet_name, is_archive)
+    select distinct lower(btrim(e)), course_name, archived from unnest(coalesce(p_lecturers, '{}')) e
+    on conflict do nothing;
 end $$;
 
 -- An administrator replacing a professor invalidates the old automatic ownership.
@@ -394,7 +443,9 @@ language sql stable security definer set search_path = '' as $$
     (public.teaching_role() = 'lecturer' and (p_email = teaching_private.email() or exists (
       select 1 from public.teaching_accounts a
       where a.email = p_email and a.role = 'student'
-    )))
+    ))) or
+    -- Students see only their own account, to edit their profile.
+    (public.teaching_role() = 'student' and p_email = teaching_private.email())
 $$;
 
 create or replace function public.teaching_list_accounts() returns jsonb
@@ -403,11 +454,15 @@ declare actor_role text; actor_email text;
 begin
   lock table public.teaching_accounts in share row exclusive mode;
   actor_role := public.teaching_role(); actor_email := teaching_private.email();
-  if coalesce(actor_role, '') not in ('admin', 'lecturer') then
-    raise exception 'Only Admins and Lecturers can open Settings' using errcode = '42501'; end if;
+  if coalesce(actor_role, '') not in ('admin', 'lecturer', 'student') then
+    raise exception 'Settings are not available for this account' using errcode = '42501'; end if;
   perform teaching_private.sync_google_names(a.email) from public.teaching_accounts a
     where a.role <> 'disabled' and teaching_private.account_visible(a.email);
   return coalesce((select jsonb_agg(jsonb_build_object('email', a.email, 'name', a.name, 'role', a.role,
+    'central_owner', exists (select 1 from teaching_private.central_owner o where o.email = a.email),
+    'photo', teaching_private.shown_photo(a.email), 'google_photo', teaching_private.google_photo(a.email),
+    'custom_name', a.custom_name, 'custom_photo', a.custom_photo,
+    'display_name', teaching_private.shown_name(a.email),
     'site', (select jsonb_build_object('id', w.id, 'hostname', w.hostname,
       'base_path', w.base_path, 'include_www', w.include_www) from public.teaching_sites w where w.email = a.email),
     'assignments', coalesce((select jsonb_agg(jsonb_build_object('sheet_name', s.sheet_name, 'is_archive', s.is_archive))
@@ -482,6 +537,25 @@ begin
     update public.teaching_sites set hostname = null, base_path = null where email = target_email;
   end if;
   perform teaching_private.sync_google_names(target_email);
+end $$;
+
+create or replace function public.teaching_set_profile(p_email text, p_custom_name text, p_custom_photo text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare target_email text := lower(btrim(p_email)); actor_role text; name_value text; photo_value text;
+begin
+  lock table public.teaching_accounts in share row exclusive mode;
+  actor_role := public.teaching_role();
+  if actor_role is null or actor_role = 'disabled' or
+    (actor_role <> 'admin' and target_email is distinct from teaching_private.email()) then
+    raise exception 'You can edit only your own profile' using errcode = '42501'; end if;
+  name_value := btrim(coalesce(p_custom_name, ''));
+  photo_value := btrim(coalesce(p_custom_photo, ''));
+  if length(name_value) > 120 then raise exception 'Keep the display name under 120 characters'; end if;
+  if photo_value <> '' and (photo_value !~ '^https://[^[:space:]]+$' or length(photo_value) > 1000) then
+    raise exception 'Use an https:// address for the photo'; end if;
+  update public.teaching_accounts set custom_name = name_value, custom_photo = photo_value
+    where email = target_email and role <> 'disabled';
+  if not found then raise exception 'Account not found'; end if;
 end $$;
 
 create or replace function public.teaching_remove_account(p_email text) returns void
@@ -618,6 +692,45 @@ begin
   ) rows), '[]'::jsonb);
 end $$;
 
+-- The central page's catalog: the owner's assigned courses, as teaching_site_rows
+-- returns a lecturer's. Until the owner assigns any course, every course is listed.
+create or replace function public.teaching_central_rows(
+  p_archive boolean, p_sheet_name text default null, p_offset integer default 0
+) returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare owner_email text;
+begin
+  if p_archive is null or p_offset is null or p_offset < 0 then raise exception 'Invalid request'; end if;
+  select o.email into owner_email from teaching_private.central_owner o
+    join public.teaching_accounts a on a.email = o.email
+    where a.role in ('admin', 'lecturer')
+      and exists (select 1 from public.teaching_assignments s where s.email = o.email);
+  return coalesce((select jsonb_agg(to_jsonb(rows) order by rows.sheet_name, rows.row_index, rows.row_uid) from (
+    select r.* from public.course_rows r
+    where r.is_archive = p_archive
+      and ((p_sheet_name is null and r.type = 'metadata') or r.sheet_name = p_sheet_name)
+      and (owner_email is null or exists (select 1 from public.teaching_assignments s
+        where s.email = owner_email and s.sheet_name = r.sheet_name and s.is_archive = r.is_archive))
+    order by r.sheet_name, r.row_index, r.row_uid limit 1000 offset p_offset
+  ) rows), '[]'::jsonb);
+end $$;
+
+-- Lecturers of each course: Lecturer and Admin accounts assigned to it, as shown on the
+-- course pages. Only public presentation data; accounts with no name to show are left out.
+create or replace function public.teaching_lecturers(p_sheet_name text default null, p_archive boolean default null)
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object('sheet_name', l.sheet_name, 'is_archive', l.is_archive,
+    'name', l.name, 'photo', l.photo) order by l.sheet_name, l.is_archive, lower(l.name)), '[]'::jsonb)
+  from (
+    select s.sheet_name, s.is_archive, teaching_private.shown_name(a.email) as name,
+      teaching_private.shown_photo(a.email) as photo
+    from public.teaching_assignments s join public.teaching_accounts a on a.email = s.email
+    where a.role in ('admin', 'lecturer')
+      and (p_sheet_name is null or s.sheet_name = p_sheet_name)
+      and (p_archive is null or s.is_archive = p_archive)
+  ) l
+  where l.name <> ''
+$$;
+
 -- Used by the existing read-only timetable proxy for browser CORS.
 create or replace function public.teaching_site_origin_allowed(p_hostname text) returns boolean
 language sql stable security definer set search_path = '' as $$
@@ -629,18 +742,18 @@ $$;
 revoke all on function public.teaching_save_account(text,text,jsonb,jsonb,jsonb), public.teaching_prepare_website(text) from public, anon;
 grant execute on function public.teaching_save_account(text,text,jsonb,jsonb,jsonb), public.teaching_prepare_website(text) to authenticated;
 revoke all on function public.teaching_resolve_lecturer(uuid), public.teaching_resolve_site(text,text), public.teaching_site_rows(uuid,boolean,text,integer),
-  public.teaching_site_origin_allowed(text) from public;
+  public.teaching_central_rows(boolean,text,integer), public.teaching_lecturers(text,boolean), public.teaching_site_origin_allowed(text) from public;
 grant execute on function public.teaching_resolve_lecturer(uuid), public.teaching_resolve_site(text,text), public.teaching_site_rows(uuid,boolean,text,integer),
-  public.teaching_site_origin_allowed(text) to anon, authenticated;
+  public.teaching_central_rows(boolean,text,integer), public.teaching_lecturers(text,boolean), public.teaching_site_origin_allowed(text) to anon, authenticated;
 
 revoke all on all functions in schema teaching_private from public, anon, authenticated;
-revoke all on function public.teaching_access(), public.teaching_save_rows(jsonb,text[]), public.teaching_create_course(jsonb),
+revoke all on function public.teaching_access(), public.teaching_save_rows(jsonb,text[]), public.teaching_create_course(jsonb,text[]),
   public.teaching_move_course(text,text,boolean), public.teaching_delete_course(text,boolean),
   public.teaching_list_accounts(), public.teaching_set_account(text,text,text,jsonb),
-  public.teaching_remove_account(text) from public, anon;
-grant execute on function public.teaching_access(), public.teaching_save_rows(jsonb,text[]), public.teaching_create_course(jsonb),
+  public.teaching_remove_account(text), public.teaching_set_profile(text,text,text) from public, anon;
+grant execute on function public.teaching_access(), public.teaching_save_rows(jsonb,text[]), public.teaching_create_course(jsonb,text[]),
   public.teaching_move_course(text,text,boolean), public.teaching_delete_course(text,boolean),
   public.teaching_list_accounts(), public.teaching_set_account(text,text,text,jsonb),
-  public.teaching_remove_account(text) to authenticated;
+  public.teaching_remove_account(text), public.teaching_set_profile(text,text,text) to authenticated;
 notify pgrst, 'reload schema';
 commit;

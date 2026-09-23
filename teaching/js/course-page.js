@@ -39,6 +39,8 @@ let courseHeaderAnimation = null;
 let courseMap = {};
 let courseYearMap = {};
 let courseSemesterMap = {};
+let courseIconMap = {}; // header_decoration: the course's own icon on its tab
+let courseTitleMap = {}; // Full course name, shown on the selected tab
 let pendingNotifications = [];
 let isInitializing = true;
 let criticalErrorsOnly = true;
@@ -384,6 +386,8 @@ function resetForModeSwitch() {
     courseMap = {};
     courseYearMap = {};
     courseSemesterMap = {};
+    courseIconMap = {};
+    courseTitleMap = {};
 
     // Aggressively flush all caching related to courses 
     for (let key in courseDataCache) {
@@ -1175,19 +1179,14 @@ async function toggleTimetable(index, btnName) {
  * Initialize backend connection and load courses
  */
 function initBackend() {
-    tryPublicAccess().then(success => {
-        if (success) {
-            showMainContent();
-        } else {
-            if (lecturerSite) showSiteMessage('Courses unavailable', 'Please try again shortly.', true);
-            showImprovedNotification('error', 'Connection Error', 'Failed to connect to backend.');
-            showMainContent();
-        }
-    }).catch(() => {
-        if (lecturerSite) showSiteMessage('Courses unavailable', 'Please try again shortly.', true);
+    // The message also clears the loading skeleton, which otherwise stays up.
+    const fail = () => {
+        showSiteMessage('Courses unavailable', 'Please try again shortly.', true);
         showImprovedNotification('error', 'Connection Error', 'Failed to connect to backend.');
-        showMainContent();
-    });
+    };
+    tryPublicAccess().then(success => {
+        if (success) showMainContent(); else fail();
+    }).catch(fail);
 }
 
 // Shared helper: select the best initial course based on URL hash and localStorage
@@ -1217,30 +1216,33 @@ async function tryPublicAccess() {
     try {
         const rows = await fetchPublicCatalog();
         if (sequence !== catalogSequence || archive !== isArchiveMode) return true;
-        if (!rows.length && !lecturerSite) return false;
 
         const seen = new Set();
         availableCourses = [];
         const codes = {};
         const years = {};
         const semesters = {};
+        const icons = {};
+        const titles = {};
         rows.forEach(r => {
             if (!seen.has(r.sheet_name)) { seen.add(r.sheet_name); availableCourses.push(r.sheet_name); }
             const bKey = String(r.b || '').trim().toLowerCase();
             if (bKey === 'code') codes[r.sheet_name] = String(r.c || '').trim();
             if (bKey === 'year') years[r.sheet_name] = String(r.c || '').trim();
             if (bKey === 'semester') semesters[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'header_decoration') icons[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'title') titles[r.sheet_name] = String(r.c || '').trim();
         });
-
-        if (availableCourses.length === 0 && !lecturerSite) return false;
 
         Object.assign(courseMap, codes);
         Object.assign(courseYearMap, years);
         Object.assign(courseSemesterMap, semesters);
-        availableCourses.sort((a, b) => compareCourseCodes(courseMap[a] || a, courseMap[b] || b));
+        Object.assign(courseIconMap, icons);
+        Object.assign(courseTitleMap, titles);
+        availableCourses.sort((a, b) => courseOrder(a, b));
         try {
             courseStorage.setItem(getCachePrefix() + 'courseCodesCache', JSON.stringify({
-                codes, years, semesters, timestamp: Date.now()
+                codes, years, semesters, icons, titles, timestamp: Date.now()
             }));
         } catch (e) { }
 
@@ -1267,10 +1269,6 @@ async function tryPublicAccess() {
                 showSiteMessage('Course not available', 'Choose a course above or return to the course list.');
                 return true;
             }
-            if (!availableCourses.length) {
-                showSiteMessage(isArchiveMode ? 'No archived courses' : 'No active courses', 'Courses will appear here when assigned.');
-                return true;
-            }
         }
 
         const hash = requestedCourse();
@@ -1284,6 +1282,11 @@ async function tryPublicAccess() {
                 resetForModeSwitch();
                 return true;
             }
+        }
+
+        if (!availableCourses.length) {
+            showSiteMessage(isArchiveMode ? 'No archived courses' : 'No active courses', 'Courses will appear here when assigned.');
+            return true;
         }
 
         selectInitialCourse();
@@ -1302,7 +1305,7 @@ function showSiteMessage(title, message, retry = false) {
     currentCourse = '';
     document.body.classList.add('teaching-empty', 'theme-ready');
     document.body.classList.remove('is-loading', 'is-switching');
-    document.getElementById('course-code').textContent = lecturerSite.display_name;
+    document.getElementById('course-code').textContent = lecturerSite?.display_name || window.TEACHING_CONFIG.owner?.name || '';
     document.getElementById('course-title').textContent = title;
     const decoration = document.getElementById('header-decoration');
     decoration.replaceChildren();
@@ -1313,7 +1316,7 @@ function showSiteMessage(title, message, retry = false) {
     const detail = document.createElement('p'); detail.className = 'teaching-site-message'; detail.textContent = message;
     const button = document.createElement('button'); button.textContent = retry ? 'Try again' : 'Course list';
     button.onclick = () => {
-        history.replaceState({ archive: isArchiveMode }, '', lecturerSite.base_path + location.search);
+        history.replaceState({ archive: isArchiveMode }, '', (lecturerSite?.base_path || location.pathname) + location.search);
         resetForModeSwitch();
     };
     content.replaceChildren(detail, button);
@@ -1321,35 +1324,46 @@ function showSiteMessage(title, message, retry = false) {
     showMainContent();
 }
 
-function sbFetch(endpoint) {
-    return fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
-    });
+// Both catalogs are limited to their owner's assigned courses: a lecturer's
+// website to theirs, and the central page to the configured admin's.
+function fetchPublicCatalog() {
+    return lecturerSite ? TeachingSites.rows(lecturerSite, isArchiveMode) : TeachingSites.centralRows(isArchiveMode);
 }
 
-async function fetchPublicCatalog() {
-    if (lecturerSite) return TeachingSites.rows(lecturerSite, isArchiveMode);
-    const response = await sbFetch(`course_rows?type=eq.metadata&is_archive=eq.${isArchiveMode}&select=sheet_name,b,c&order=sheet_name`);
-    if (!response.ok) throw new Error(`Supabase error ${response.status}`);
-    return response.json();
+// Lecturers assigned to a course in Settings: [{ name, photo }], or null if the list is
+// unavailable (e.g. before the roles.sql update), in which case the header falls back to
+// the lecturer entries stored with the course.
+async function fetchCourseLecturers(sheetName) {
+    try {
+        const rows = await TeachingSites.rpc('teaching_lecturers', { p_sheet_name: sheetName, p_archive: isArchiveMode });
+        return Array.isArray(rows) ? rows.map(r => ({ name: r.name, photo: r.photo || '' })) : null;
+    } catch { return null; }
 }
 
 async function fetchPublicSheetData(sheetName) {
-    if (lecturerSite) {
-        const rows = await TeachingSites.rows(lecturerSite, isArchiveMode, sheetName);
-        return rows.map(r => [r.type, r.b, r.c, r.d, r.e, r.f, r.g, r.h, r.i, r.j]);
-    }
-    const response = await sbFetch(
-        `course_rows?sheet_name=eq.${encodeURIComponent(sheetName)}&is_archive=eq.${isArchiveMode}&order=row_index&select=type,b,c,d,e,f,g,h,i,j`
-    );
-    if (!response.ok) throw new Error(`Supabase error ${response.status}`);
-    const rows = await response.json();
+    const rows = await (lecturerSite ? TeachingSites.rows(lecturerSite, isArchiveMode, sheetName) :
+        TeachingSites.centralRows(isArchiveMode, sheetName));
     return rows.map(r => [r.type, r.b, r.c, r.d, r.e, r.f, r.g, r.h, r.i, r.j]);
 }
 
 function yearStart(y) {
     const m = String(y || '').match(/(\d{4})/);
     return m ? parseInt(m[1], 10) : -1;
+}
+
+// Course order, shared with the admin sidebar and Settings: newest academic year first,
+// then Summer → Spring → Fall, then course number with the code's letters as tie-break
+// (CE 123, ARCH 203, CE 345). Courses without a year or semester come last.
+const SEMESTER_ORDER = ['Summer', 'Spring', 'Fall'];
+function semesterRank(s) {
+    const m = String(s || '').match(/^\s*(Fall|Spring|Summer)/);
+    const i = m ? SEMESTER_ORDER.indexOf(m[1]) : -1;
+    return i === -1 ? SEMESTER_ORDER.length : i;
+}
+function courseOrder(a, b, useCourseMap = true) {
+    return (yearStart(courseYearMap[b]) - yearStart(courseYearMap[a]))
+        || (semesterRank(courseSemesterMap[a]) - semesterRank(courseSemesterMap[b]))
+        || compareCourseCodes(useCourseMap ? (courseMap[a] || a) : a, useCourseMap ? (courseMap[b] || b) : b);
 }
 
 // Strips academic and professional titles (Prof., Dr., Assoc., Acad., MSc., Mr., Ms., Mrs. and combinations)
@@ -1389,6 +1403,10 @@ function parseCourseCode(str) {
 }
 
 function compareCourseCodes(aCode, bCode) {
+    // Cross-listed codes ("SWE / CE 101") come after all single codes, A–Z among themselves.
+    const crossA = String(aCode || '').includes('/'), crossB = String(bCode || '').includes('/');
+    if (crossA !== crossB) return crossA ? 1 : -1;
+    if (crossA) return String(aCode).localeCompare(String(bCode), undefined, { numeric: true, sensitivity: 'base' });
     const a = parseCourseCode(aCode);
     const b = parseCourseCode(bCode);
 
@@ -1422,12 +1440,40 @@ async function populateCourseButtons() {
     const container = document.getElementById('course-buttons-container');
     if (!container) return;
     container.innerHTML = '';
+    // A selected tab grows to its full course name and the previous one shrinks back,
+    // which can change how the tabs wrap: re-round the rows once that settles, and
+    // bring the grown tab into view when the tab bar scrolls sideways (mobile).
+    if (!container._tabGrowth) {
+        container._tabGrowth = true;
+        container.addEventListener('transitionend', event => {
+            if (event.propertyName !== 'grid-template-columns' || !event.target.classList.contains('course-button-full')) return;
+            const wrapper = event.target.closest('.course-tabs-wrapper');
+            if (!wrapper) return;
+            updateButtonRows(wrapper);
+            updateScrollFaders(wrapper);
+            const button = event.target.closest('.course-button.active');
+            if (button && wrapper.scrollWidth > wrapper.clientWidth) {
+                button.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+            }
+        });
+    }
 
     // Shared helper to create a single course button
     const createCourseButton = (sheetName, label) => {
         const button = document.createElement('div');
         button.setAttribute('class', 'course-button' + (currentCourse === sheetName ? ' active' : ''));
-        button.innerHTML = `<i class="fa-solid fa-th-list"></i>&nbsp; ${courseHtmlText(formatCourseCode(label))}`;
+        // The course's own header icon (or the generic list icon), then its code. The
+        // selected tab drops the icon (the header already shows it) and grows to show
+        // the full course name in place of the code.
+        const icon = /^[a-z0-9 -]+$/i.test(courseIconMap[sheetName] || '') ? courseIconMap[sheetName].toLowerCase() : 'fa-th-list';
+        const code = formatCourseCode(label);
+        const title = (courseTitleMap[sheetName] || '').trim();
+        const full = title && title.toLowerCase() !== code.toLowerCase() ? title : '';
+        button.classList.toggle('has-full-name', !!full);
+        if (full) button.title = `${code} · ${full}`;
+        button.innerHTML = `<i class="fa-solid ${courseHtmlText(icon)} fa-fw course-button-icon" aria-hidden="true"></i>` +
+            `<span class="course-button-label"><span class="course-button-swap course-button-code"><span>${courseHtmlText(code)}</span></span>` +
+            (full ? `<span class="course-button-swap course-button-full"><span>${courseHtmlText(full)}</span></span>` : '') + `</span>`;
         button.dataset.sheet = sheetName;
         button.onclick = () => selectCourse(sheetName);
         return button;
@@ -1470,11 +1516,7 @@ async function populateCourseButtons() {
             container.classList.remove('is-archive-mode');
             const archiveBtn = createArchiveButton();
 
-            // Ensure availableCourses is sorted by course number then text prefix
-            availableCourses.sort((a, b) => compareCourseCodes(
-                useCourseMap ? (courseMap[a] || a) : a,
-                useCourseMap ? (courseMap[b] || b) : b
-            ));
+            availableCourses.sort((a, b) => courseOrder(a, b, useCourseMap));
 
             const tabsWrapper = document.createElement('div');
             tabsWrapper.setAttribute('class', 'course-tabs-wrapper');
@@ -1538,10 +1580,7 @@ async function populateCourseButtons() {
 
             sortedYears.forEach(yr => {
                 const courses = yearGroups[yr];
-                courses.sort((a, b) => compareCourseCodes(
-                    useCourseMap ? (courseMap[a] || a) : a,
-                    useCourseMap ? (courseMap[b] || b) : b
-                ));
+                courses.sort((a, b) => courseOrder(a, b, useCourseMap));
 
                 const yearGroup = document.createElement('div');
                 yearGroup.className = 'archive-year-group';
@@ -1694,6 +1733,8 @@ async function fetchCourseCodes() {
                 Object.assign(courseMap, parsed.codes);
                 if (parsed.years) Object.assign(courseYearMap, parsed.years);
                 if (parsed.semesters) Object.assign(courseSemesterMap, parsed.semesters);
+                if (parsed.icons) Object.assign(courseIconMap, parsed.icons);
+                if (parsed.titles) Object.assign(courseTitleMap, parsed.titles);
                 return courseMap;
             } else if (parsed.data && Date.now() - parsed.timestamp < CACHE_EXPIRY) {
                 Object.assign(courseMap, parsed.data);
@@ -1708,18 +1749,24 @@ async function fetchCourseCodes() {
         const codes = {};
         const years = {};
         const semesters = {};
+        const icons = {};
+        const titles = {};
         rows.forEach(r => {
             const bKey = String(r.b || '').trim().toLowerCase();
             if (bKey === 'code') codes[r.sheet_name] = String(r.c || '').trim();
             if (bKey === 'year') years[r.sheet_name] = String(r.c || '').trim();
             if (bKey === 'semester') semesters[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'header_decoration') icons[r.sheet_name] = String(r.c || '').trim();
+            if (bKey === 'title') titles[r.sheet_name] = String(r.c || '').trim();
         });
         Object.assign(courseMap, codes);
         Object.assign(courseYearMap, years);
         Object.assign(courseSemesterMap, semesters);
+        Object.assign(courseIconMap, icons);
+        Object.assign(courseTitleMap, titles);
         try {
             courseStorage.setItem(CACHE_KEY, JSON.stringify({
-                codes, years, semesters, timestamp: Date.now()
+                codes, years, semesters, icons, titles, timestamp: Date.now()
             }));
         } catch (e) { }
         return courseMap;
@@ -1826,7 +1873,7 @@ function selectCourse(sheetName) {
             let announcementCount = 0;
             document.title = titleBase;
 
-            updateCourseMetadata(data.metadata);
+            updateCourseMetadata(data.metadata, data.lecturers);
             populateActionButtons(data.actionButtons, data.metadata);
             restoreTimetableState();
             applyColorTheme(data.metadata); // Sets the new colours
@@ -1981,8 +2028,9 @@ async function fetchCourseData(sheetName, forceRefresh = false) {
 
     // No cache available — fetch from network (first visit ever)
     try {
-        let rows = await fetchPublicSheetData(sheetName, 'A2:J');
+        const [rows, lecturers] = await Promise.all([fetchPublicSheetData(sheetName, 'A2:J'), fetchCourseLecturers(sheetName)]);
         const data = rows.length === 0 ? null : processCourseData(rows);
+        if (data) data.lecturers = lecturers;
         if (data) {
             courseDataCache[cacheKeyString] = data;
             try { courseSessionStorage.setItem('courseData_' + cacheKeyString, JSON.stringify({ data })); } catch (e) { }
@@ -1996,8 +2044,9 @@ async function fetchCourseData(sheetName, forceRefresh = false) {
 
 // Background revalidation: fetch fresh data and re-render if it changed
 function revalidateCourseInBackground(sheetName, cacheKeyString) {
-    fetchPublicSheetData(sheetName, 'A2:J').then(rows => {
+    Promise.all([fetchPublicSheetData(sheetName, 'A2:J'), fetchCourseLecturers(sheetName)]).then(([rows, lecturers]) => {
         const freshData = rows.length === 0 ? null : processCourseData(rows);
+        if (freshData) freshData.lecturers = lecturers;
         if (!freshData) return;
 
         // Update caches
@@ -2016,7 +2065,7 @@ function revalidateCourseInBackground(sheetName, cacheKeyString) {
                 let titleBase = freshData.metadata.code ? `${formatCourseCode(freshData.metadata.code)} ${freshData.metadata.title || 'Course'}` : 'Course Materials';
                 document.title = titleBase;
 
-                updateCourseMetadata(freshData.metadata);
+                updateCourseMetadata(freshData.metadata, freshData.lecturers);
                 populateActionButtons(freshData.actionButtons, freshData.metadata);
                 applyColorTheme(freshData.metadata);
                 renderAnnouncements(freshData.announcements);
@@ -2449,7 +2498,7 @@ function renderAnnouncements(announcements) {
                 const photoUrl = safeCourseUrl(window.currentCourseData.metadata[`professor${profNum}_photo`], true);
                 const profName = window.currentCourseData.metadata[`professor${profNum}`];
                 if (photoUrl) {
-                    infoHtml += `<img src="${courseHtmlText(photoUrl)}" alt="Professor" class="announcement-avatar" style="border-color: ${cssColorVar};">`;
+                    infoHtml += `<img src="${courseHtmlText(photoUrl)}" alt="Lecturer" class="announcement-avatar" style="border-color: ${cssColorVar};">`;
                 } else {
                     // Fallback if professor specified but no photo provided
                     infoHtml += `<i class="fa-solid fa-user-circle announcement-icon" style="color: ${cssColorVar};"></i>`;
@@ -2740,60 +2789,41 @@ function renderAnnouncements(announcements) {
     });
 }
 
-function updateCourseMetadata(metadata) {
+function updateCourseMetadata(metadata, lecturers = null) {
     document.getElementById('course-code').textContent = metadata.code ? formatCourseCode(metadata.code) : 'Course Code';
 
+    // Lecturers come from the accounts assigned in Settings (their display name and photo).
+    // Courses nobody is assigned to yet, or an older database, use the lecturer entries
+    // stored with the course. Names are no longer links.
     const profContainer = document.getElementById('professors-container');
     if (profContainer) {
         profContainer.innerHTML = '';
-        let professors = [];
-
-        const professorKeys = Object.keys(metadata).filter(key => /^professor\d+$/.test(key))
-            .sort((a, b) => Number(a.slice(9)) - Number(b.slice(9)));
-        for (const key of professorKeys) {
-            if (metadata[key]) {
-                professors.push({
-                    name: metadata[key],
-                    photo: safeCourseUrl(metadata[`${key}_photo`], true),
-                    link: safeCourseUrl(metadata[`${key}_link`])
-                });
-            }
+        let people = Array.isArray(lecturers) && lecturers.length ? lecturers.map(l => ({ name: l.name, photo: safeCourseUrl(l.photo, true) })) : [];
+        if (!people.length) {
+            people = Object.keys(metadata).filter(key => /^professor\d+$/.test(key) && metadata[key])
+                .map(key => ({ name: metadata[key], photo: safeCourseUrl(metadata[`${key}_photo`], true) }));
         }
-
-        if (professors.length > 0) {
-            professors.forEach(prof => {
-                const item = document.createElement('span');
-                item.setAttribute('class', 'info-item professor-item');
-
-                let content = '';
-                if (prof.photo) {
-                    content = `<img src="${courseHtmlText(prof.photo)}" alt="${courseHtmlText(prof.name)}" class="professor-photo">`;
-                    content += `<i class="fa-solid fa-user-circle" style="display:none;"></i>`;
-                } else {
-                    content = '<i class="fa-solid fa-user-circle"></i>';
-                }
-                content += ` ${courseHtmlText(prof.name)}`;
-
-                if (prof.link) {
-                    item.innerHTML = `<a href="${courseHtmlText(prof.link)}" target="_blank" rel="noopener noreferrer" class="professor-link">${content}</a>`;
-                } else {
-                    item.innerHTML = content;
-                }
-
-                const photo = item.querySelector('img');
-                photo?.addEventListener('error', () => {
-                    photo.style.display = 'none';
-                    photo.nextElementSibling.style.display = 'inline-block';
-                });
-                profContainer.appendChild(item);
-            });
-        } else {
+        // By title (Prof., Assoc. Prof., Dr., …), then name.
+        people.sort((a, b) => TeachingSites.compareLecturers(a.name, b.name));
+        for (const person of people) {
             const item = document.createElement('span');
-            item.setAttribute('class', 'info-item');
+            item.className = 'info-item professor-item';
+            item.innerHTML = (person.photo
+                ? `<img src="${courseHtmlText(person.photo)}" alt="" class="professor-photo" referrerpolicy="no-referrer"><i class="fa-solid fa-user-circle" style="display:none;"></i>`
+                : '<i class="fa-solid fa-user-circle"></i>') + ` ${courseHtmlText(person.name)}`;
+            const photo = item.querySelector('img');
+            photo?.addEventListener('error', () => {
+                photo.style.display = 'none';
+                photo.nextElementSibling.style.display = 'inline-block';
+            });
+            profContainer.appendChild(item);
+        }
+        if (!people.length) {
+            const item = document.createElement('span');
+            item.className = 'info-item';
             item.innerHTML = '<i class="fa-solid fa-user-circle"></i> Instructor';
             profContainer.appendChild(item);
         }
-
     }
 
     document.getElementById('course-title').textContent = metadata.title || 'Course Title';

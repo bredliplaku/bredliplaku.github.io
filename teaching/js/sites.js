@@ -61,17 +61,21 @@
         return response.json();
     }
 
-    async function rows(site, archive, sheet = null) {
+    async function pagedRows(name, params) {
         const result = [];
         for (let offset = 0; ; offset += 1000) {
-            const page = await rpc('teaching_site_rows', {
-                p_site_id: site.id, p_archive: archive, p_sheet_name: sheet, p_offset: offset
-            });
+            const page = await rpc(name, { ...params, p_offset: offset });
             if (!Array.isArray(page)) throw new Error('Invalid course response.');
             result.push(...page);
             if (page.length < 1000) return result;
         }
     }
+
+    const rows = (site, archive, sheet = null) =>
+        pagedRows('teaching_site_rows', { p_site_id: site.id, p_archive: archive, p_sheet_name: sheet });
+    // The central page lists its owner's assigned courses, like a lecturer website.
+    const centralRows = (archive, sheet = null) =>
+        pagedRows('teaching_central_rows', { p_archive: archive, p_sheet_name: sheet });
 
     function routeCourse(site) {
         const path = normalizePath(location.pathname);
@@ -132,5 +136,38 @@
 `;
     }
 
-    window.TeachingSites = { normalizeWebsite, normalizePath, websiteUrl, adminUrl, currentDirectory, rpc, rows, routeCourse, loaderHtml, loaderScript };
+    // Lecturer order, used everywhere lecturers are listed: by title, then A–Z by name.
+    // Titles count only at the start of a name or after a comma ("Jane Doe, PhD"), so a
+    // surname such as "Ma" is not mistaken for one. Untitled names come after titled ones.
+    const TITLE_WORDS = new Set(['prof', 'professor', 'assoc', 'associate', 'asst', 'assist', 'assistant',
+        'dr', 'phd', 'mr', 'mrs', 'ms', 'msc', 'ma', 'pm', 'ba', 'bsc', 'acad']);
+    function splitLecturerName(name) {
+        const [main, ...after] = String(name || '').split(',');
+        const words = main.trim().split(/\s+/).filter(Boolean);
+        const key = word => word.toLowerCase().replace(/\./g, '');
+        const titles = [];
+        while (words.length > 1 && TITLE_WORDS.has(key(words[0]))) titles.push(key(words.shift()));
+        for (const part of after) {
+            const tokens = part.trim().split(/\s+/).map(key).filter(Boolean);
+            if (tokens.length && tokens.every(t => TITLE_WORDS.has(t))) titles.push(...tokens);
+        }
+        return { titles, name: words.join(' ') };
+    }
+    function lecturerTitleRank(name) {
+        const titles = new Set(splitLecturerName(name).titles);
+        if (titles.has('assoc') || titles.has('associate')) return 2;              // Assoc. Prof. (Dr.)
+        if (titles.has('asst') || titles.has('assist') || titles.has('assistant')) return 2.5;
+        if (titles.has('prof') || titles.has('professor')) return 1;              // Prof. (Dr.)
+        if (titles.has('dr') || titles.has('phd')) return 3;                      // Dr. / PhD
+        if (['mr', 'mrs', 'ms', 'msc', 'ma', 'pm'].some(t => titles.has(t))) return 4;
+        if (titles.has('ba') || titles.has('bsc')) return 5;
+        return 6;
+    }
+    function compareLecturers(a, b) {
+        return lecturerTitleRank(a) - lecturerTitleRank(b) ||
+            splitLecturerName(a).name.localeCompare(splitLecturerName(b).name, undefined, { sensitivity: 'base' }) ||
+            String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
+    }
+
+    window.TeachingSites = { compareLecturers, normalizeWebsite, normalizePath, websiteUrl, adminUrl, currentDirectory, rpc, rows, centralRows, routeCourse, loaderHtml, loaderScript };
 })();

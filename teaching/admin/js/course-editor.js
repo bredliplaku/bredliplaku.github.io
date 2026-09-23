@@ -106,8 +106,13 @@ window.addEventListener('beforeunload', e => {
 // These checks drive the UI only. Every write is checked again in Supabase; removing
 // disabled attributes or changing S in developer tools cannot grant database access.
 function isCourseAdmin() { return ['global_admin', 'admin'].includes(S.access?.role); }
+// Assignments grant Lecturers and Students access. For Admins, who can edit every
+// course, they are only a personal list: the sidebar's "Mine" and the public catalog.
+function isAssignedCourse(name, archive) {
+  return !!S.access?.assignments?.some(a => a.sheet_name === name && a.is_archive === archive);
+}
 function hasCourseAccess(name = S.course, archive = S.isArchive) {
-  return isCourseAdmin() || !!S.access?.assignments?.some(a => a.sheet_name === name && a.is_archive === archive);
+  return isCourseAdmin() || isAssignedCourse(name, archive);
 }
 function canEditSection(id) {
   return hasCourseAccess() && (isCourseAdmin() || S.access?.role === 'lecturer' ||
@@ -173,12 +178,6 @@ function applySectionPermissions(body) {
   body.querySelectorAll('.meta-field').forEach(inp => {
     if (!canEditMetadata(inp.dataset.metakey)) lockPermissionArea(inp.closest('.settings-group') || inp.closest('.form-group'));
   });
-  body.querySelectorAll('#professors-list .dynamic-card').forEach(card => {
-    if (!ownsProfessor(card.dataset.profkey)) lockPermissionArea(card);
-    else card.querySelector('.btn-action-del').disabled = true;
-  });
-  const add = body.querySelector('[onclick="addProfessorCard()"]');
-  if (add) add.disabled = true;
   body.querySelectorAll('[data-custom-key]').forEach(card => {
     if (!canEditMetadata(card.dataset.customKey)) lockPermissionArea(card);
   });
@@ -619,11 +618,43 @@ async function handleSession(session) {
   }
   S.admin = admin;
   S.access = admin;
-  document.getElementById('top-user').textContent = admin.name || admin.email;
+  // Before the roles.sql update, the photo comes from this sign-in's Google profile.
+  const meta = session.user.user_metadata || {};
+  S.sessionPhoto = [meta.avatar_url, meta.picture].find(url => /^https:\/\//.test(url || '')) || '';
+  renderTopUser();
   renderAccessControls();
   if (EMBEDDED_ADMIN_SITE || window.location.href.includes('#')) window.history.replaceState(null, '', ADMIN_RETURN_URL);
   showScreen('admin');
   await loadSidebar();
+  reopenLastCourse();
+}
+
+// Opens the course that was open last time in this browser, if it still exists here.
+function reopenLastCourse() {
+  if (S.course || S.section === 'access') return;
+  let last = null;
+  try { last = JSON.parse(localStorage.getItem('admin_last_course') || 'null'); } catch { }
+  if (!Array.isArray(last) || !COURSE_HEADERS.has(JSON.stringify([last[0], !!last[1]]))) return;
+  const [name, isArchive] = [last[0], !!last[1]];
+  const button = [...document.querySelectorAll('.course-btn')]
+    .find(b => b.dataset.sheet === name && b.dataset.archive === String(isArchive));
+  selectCourse(name, isArchive, button || null);
+}
+
+// The signed-in person's shown name (display name, else Google name) and photo.
+function renderTopUser() {
+  const me = S.access || {};
+  const name = me.display_name || me.name || me.email || '';
+  document.getElementById('top-user').innerHTML = userAvatar(name, me.photo || S.sessionPhoto) + `<span>${x(name)}</span>`;
+}
+
+// Google profile photo over the person's initials. The initials stay visible if the
+// photo is missing or fails to load; no-referrer avoids Google's hotlink refusals.
+function userAvatar(name, photo, className = 'user-avatar') {
+  const initials = String(name || '').split(/[\s@._-]+/).filter(Boolean)
+    .slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase();
+  return `<span class="${className}" aria-hidden="true">${x(initials)}${photo ?
+    `<img src="${x(photo)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()">` : ''}</span>`;
 }
 
 function hideBootSpinner() {
@@ -706,7 +737,9 @@ function prefetchSidebar() {
 }
 
 async function loadSidebar() {
+  const lecturers = loadCourseLecturers().catch(() => { });
   const { data, error } = await (_sidebarPrefetch || prefetchSidebar());
+  await lecturers;
   _sidebarPrefetch = null;
   if (error) { toast('Sidebar error: ' + error.message, 'err'); return; }
   const map = {};
@@ -728,14 +761,70 @@ async function loadSidebar() {
   for (const course of Object.values(map)) {
     COURSE_HEADERS.set(JSON.stringify([course.sheet_name, course.is_archive]), course);
   }
-  const active = Object.values(map).filter(c => !c.is_archive).sort(courseOrder);
-  const archive = Object.values(map).filter(c => c.is_archive).sort(courseOrder);
-  renderSidebarGroup('sb-active', active, false);
-  renderSidebarGroup('sb-archive', archive, true);
+  renderSidebar();
 }
 
-// Sidebar order: course number ascending (e.g. 123, 211, 322), then code text (A→Z), then newest
-// offering first — academic year descending, and within a year Summer → Spring → Fall.
+// Admins with their own courses choose between those and every course. Without
+// any assigned, "Mine" would be empty, so the sidebar lists every course as before.
+function sidebarScope() {
+  if (!isCourseAdmin() || !S.access?.assignments?.length) return null;
+  try { return localStorage.getItem('admin_sidebar_scope') === 'all' ? 'all' : 'mine'; } catch { return 'mine'; }
+}
+
+function setSidebarScope(scope) {
+  try { localStorage.setItem('admin_sidebar_scope', scope); } catch { }
+  renderSidebar();
+}
+
+// Lecturers assigned to each course, keyed like COURSE_HEADERS. Filled from the public
+// teaching_lecturers list; empty until roles.sql provides it.
+const COURSE_LECTURERS = new Map();
+async function loadCourseLecturers() {
+  const { data, error } = await sb.rpc('teaching_lecturers', {});
+  if (error || !Array.isArray(data)) return;
+  COURSE_LECTURERS.clear();
+  for (const row of data) {
+    const key = JSON.stringify([row.sheet_name, !!row.is_archive]);
+    if (!COURSE_LECTURERS.has(key)) COURSE_LECTURERS.set(key, []);
+    COURSE_LECTURERS.get(key).push(row);
+  }
+  for (const list of COURSE_LECTURERS.values()) list.sort((a, b) => TeachingSites.compareLecturers(a.name, b.name));
+}
+const courseLecturerNames = c => (COURSE_LECTURERS.get(JSON.stringify([c.sheet_name, c.is_archive])) || []).map(l => l.name);
+
+// Every word must appear in the code, name, semester, year or a lecturer's name, as in Settings.
+function courseMatchesQuery(c, query) {
+  const text = [c.code, c.title, c.sheet_name, c.semester, c.year, ...courseLecturerNames(c)]
+    .filter(Boolean).join(' ').toLocaleLowerCase();
+  return query.trim().toLocaleLowerCase().split(/\s+/).every(word => text.includes(word));
+}
+
+function renderSidebar() {
+  const scope = sidebarScope();
+  const toggle = document.getElementById('sb-scope');
+  toggle.hidden = !scope;
+  toggle.dataset.active = scope || ''; // Positions the sliding thumb.
+  toggle.querySelectorAll('[data-scope]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
+  });
+  const query = document.getElementById('sb-search')?.value || '';
+  const courses = [...COURSE_HEADERS.values()]
+    .filter(c => scope !== 'mine' || isAssignedCourse(c.sheet_name, c.is_archive))
+    .filter(c => !query.trim() || courseMatchesQuery(c, query));
+  const archived = courses.filter(c => c.is_archive).sort(courseOrder);
+  renderSidebarGroup('sb-active', courses.filter(c => !c.is_archive).sort(courseOrder), false);
+  renderSidebarGroup('sb-archive', archived, true);
+  // While searching, open Archived when it has matches; clearing the search restores
+  // the saved open/closed state.
+  if (query.trim() && archived.length) {
+    document.getElementById('sb-archive').classList.remove('sb-archive-collapsed');
+    document.getElementById('sb-archive-toggle').classList.add('expanded');
+  } else applyArchiveGroupState();
+}
+
+// Course order (sidebar, Settings and the public page): newest academic year first, then
+// Summer → Spring → Fall within a year, then course number ascending with the code's
+// letters as tie-break — CE 123, ARCH 203, CE 345.
 const SEMESTER_ORDER = ['Summer', 'Spring', 'Fall'];
 
 // Strips academic and professional titles (Prof., Dr., Assoc., Acad., MSc., Mr., Ms., Mrs. and combinations)
@@ -775,6 +864,10 @@ function parseCourseCode(str) {
 }
 
 function compareCourseCodes(aCode, bCode) {
+  // Cross-listed codes ("SWE / CE 101") come after all single codes, A–Z among themselves.
+  const crossA = String(aCode || '').includes('/'), crossB = String(bCode || '').includes('/');
+  if (crossA !== crossB) return crossA ? 1 : -1;
+  if (crossA) return String(aCode).localeCompare(String(bCode), undefined, { numeric: true, sensitivity: 'base' });
   const a = parseCourseCode(aCode);
   const b = parseCourseCode(bCode);
 
@@ -812,23 +905,24 @@ function yearStart(y) {
 }
 
 function courseOrder(a, b) {
-  const codeA = a.code || a.sheet_name;
-  const codeB = b.code || b.sheet_name;
-  return compareCourseCodes(codeA, codeB)
-    || (yearStart(b.year) - yearStart(a.year))
-    || (semesterRank(a.semester) - semesterRank(b.semester));
+  return (yearStart(b.year) - yearStart(a.year))
+    || (semesterRank(a.semester) - semesterRank(b.semester))
+    || compareCourseCodes(a.code || a.sheet_name, b.code || b.sheet_name);
 }
 
 function renderSidebarGroup(id, courses, isArchive) {
   const el = document.getElementById(id);
-  if (!courses.length) { el.innerHTML = `<div class="sb-empty">None</div>`; return; }
+  if (!courses.length) {
+    el.innerHTML = `<div class="sb-empty">${document.getElementById('sb-search')?.value.trim() ? 'No matches' : 'None'}</div>`;
+    return;
+  }
   el.innerHTML = courses.map(c => {
     const active = S.course === c.sheet_name && S.isArchive === isArchive;
     const code = c.code || c.sheet_name;
     const title = c.title && c.title !== code ? c.title : '';
     const term = [c.semester, c.year].filter(Boolean).join(' ');
     const icon = c.icon || 'fa-solid fa-graduation-cap';
-    return `<button class="course-btn${active ? ' active' : ''}"
+    return `<button class="course-btn${active ? ' active' : ''}" data-sheet="${x(c.sheet_name)}" data-archive="${isArchive}"
                 onclick="selectCourse('${xjs(c.sheet_name)}',${isArchive},this)">
       <i class="${x(icon)} cb-icon"></i>
       <div class="cb-text">
@@ -886,6 +980,7 @@ async function selectCourse(name, isArchive, el) {
   if (!(await confirmLeaveIfDirty())) return;
   closeInlineEdit(true); // drop any open editor without re-prompting
   S.course = name; S.isArchive = isArchive; S.section = getLastSection(name, isArchive);
+  try { localStorage.setItem('admin_last_course', JSON.stringify([name, isArchive])); } catch { }
   document.querySelectorAll('.course-btn').forEach(b => b.classList.remove('active'));
   if (el) el.classList.add('active');
   if (window.innerWidth <= 768 && document.getElementById('sidebar').classList.contains('mobile-open')) {
@@ -899,26 +994,33 @@ function renderCourseShell(name, isArchive) {
   const header = COURSE_HEADERS.get(JSON.stringify([name, isArchive]));
   applyCourseTheme(header?.theme_colours);
   document.getElementById('main-area').innerHTML = `
-    <div class="course-header${isArchive ? ' is-archive' : ''}">
-      <div class="ch-title-wrap" style="flex:1;min-width:0">
-        <h2 id="ch-title">${header ? x(header.title || header.code || name) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:70%;height:1em"></span>'}</h2>
-        <div id="ch-meta" class="ch-meta">${header ? x(courseHeaderMeta(header)) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:160px;height:12px;vertical-align:middle"></span>'}</div>
-      </div>
+    <div class="course-header ch-course${isArchive ? ' is-archive' : ''}">
       <div class="ch-actions">
-        <span class="header-chip">${isArchive ? 'Archive' : 'Active'}</span>
+        <!-- Colour-coded actions: labels on wider screens, icons only on phones (the
+             names stay as tooltips and accessible labels). Status shows only when
+             archived, as a plain tag rather than a button. -->
+        ${isArchive ? '<span class="ch-status">Archived</span>' : ''}
+        <div class="ch-action-group" role="group" aria-label="Course actions">
         ${isArchive
-      ? `<button class="btn-ghost btn-sm" ${isCourseAdmin() ? '' : 'disabled'} onclick="restoreCourse('${xjs(name)}')"><i class="fa-solid fa-rotate-left" style="margin-right:5px"></i>Restore</button>`
-      : `<button class="btn-ghost btn-sm" ${canArchiveCourse(name, isArchive) ? '' : 'disabled'} onclick="archiveCourse('${xjs(name)}')"><i class="fa-solid fa-box-archive" style="margin-right:5px"></i>Archive</button>`}
-        <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,120,120,0.5)"
-                ${isCourseAdmin() ? '' : 'disabled'} onclick="deleteCourse('${xjs(name)}',${isArchive})"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+      ? `<button class="btn-sm ch-action ch-action-restore" title="Restore" aria-label="Restore" ${isCourseAdmin() ? '' : 'disabled'} onclick="restoreCourse('${xjs(name)}')"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span class="ch-action-label">Restore</span></button>`
+      : `<button class="btn-sm ch-action ch-action-archive" title="Archive" aria-label="Archive" ${canArchiveCourse(name, isArchive) ? '' : 'disabled'} onclick="archiveCourse('${xjs(name)}')"><i class="fa-solid fa-box-archive" aria-hidden="true"></i><span class="ch-action-label">Archive</span></button>`}
+        <button class="btn-sm ch-action ch-action-delete" title="Delete" aria-label="Delete"
+                ${isCourseAdmin() ? '' : 'disabled'} onclick="deleteCourse('${xjs(name)}',${isArchive})"><i class="fa-solid fa-trash" aria-hidden="true"></i><span class="ch-action-label">Delete</span></button>
+        </div>
       </div>
+      <!-- Same structure and styles (main.css) as the public course header, minus the
+           week counter and term progress bar. -->
+      <div id="header-decoration" aria-hidden="true"><i class="fa-solid ${x(courseIconClass(header?.icon))}"></i></div>
+      <h2 id="ch-code">${header ? x(header.code || name) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:90px;height:0.9em"></span>'}</h2>
+      <h1 id="ch-title">${header ? x(header.title || header.code || name) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:60%;height:1em"></span>'}</h1>
+      <div class="course-info" id="ch-info">${[140, 120, 110, 100].map(w => `<span class="info-item skeleton skeleton-on-dark" style="width:${w}px"></span>`).join('')}</div>
     </div>
     <div class="section-tabs" id="section-tabs">
       ${SECTIONS.map((s, i, arr) => {
         const r = i === 0 ? 'border-radius:20px 8px 8px 20px'
           : i === arr.length - 1 ? 'border-radius:8px 20px 20px 8px' : '';
         return `<button class="section-tab${s.id === S.section ? ' active' : ''}" style="${r}" data-sec="${s.id}"
-                  onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon}" style="margin-right:5px;font-size:0.88em"></i>` : ''}${s.label}${canEditSection(s.id) ? '' : ' <i class="fa-solid fa-lock" title="View only"></i>'}</button>`;
+                  onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon} tab-icon" aria-hidden="true"></i>` : ''}<span class="tab-label" data-label="${x(s.label)}">${s.label}</span>${canEditSection(s.id) ? '' : '<i class="fa-solid fa-lock tab-lock" title="View only"></i>'}</button>`;
       }).join('')}
     </div>
     <div class="section-body" id="section-body">${sectionSkeletonHtml()}</div>
@@ -941,6 +1043,13 @@ function darkenHex(hex, amount = 0.25) {
 
 // Recolours the whole admin UI to the current course's primary colour (col-1 of the course's
 // theme_colours metadata). Falls back to the default blue (:root) when the course sets none.
+function lightenHex(hex, amount = 0.4) {
+  hex = String(hex || '').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  const channel = i => { const v = parseInt(hex.substring(i, i + 2), 16); return Math.min(255, Math.round(v + (255 - v) * amount)); };
+  return '#' + [0, 2, 4].map(i => channel(i).toString(16).padStart(2, '0')).join('');
+}
+
 function applyCourseTheme(themeStr) {
   const root = document.documentElement;
   const first = String(themeStr || '').split(',')[0].trim();
@@ -948,34 +1057,89 @@ function applyCourseTheme(themeStr) {
   if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) {
     root.style.setProperty('--primary-color', hex);
     root.style.setProperty('--primary-dark', darkenHex(hex, 0.25));
+    // Dark mode header colours, computed as on the public course page.
+    const theme = root.dataset.theme;
+    const dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+    const base = dark ? lightenHex(hex, 0.1) : hex;
+    root.style.setProperty('--course-header-bg1', dark ? darkenHex(base, 0.4) : base);
+    root.style.setProperty('--course-header-bg2', dark ? darkenHex(base, 0.6) : darkenHex(base, 0.25));
   } else {
-    root.style.removeProperty('--primary-color');
-    root.style.removeProperty('--primary-dark');
+    ['--primary-color', '--primary-dark', '--course-header-bg1', '--course-header-bg2']
+      .forEach(prop => root.style.removeProperty(prop));
   }
 }
 
-function courseHeaderMeta(m) {
-  return [m.code && m.code !== (m.title || m.code) ? m.code : null, m.semester, m.year,
-    m.credits ? m.credits + ' ECTS' : null].filter(Boolean).join(' · ');
+// The course's Font Awesome icon from its Info tab (read as the public page reads it).
+function courseIconClass(icon) {
+  const value = String(icon || '').trim().toLowerCase();
+  return /^[a-z0-9 -]+$/.test(value) ? value : 'fa-square';
 }
+
+// The public header's info chips: lecturers, semester, level, type and credits. Lecturers are
+// the accounts assigned in Settings; the lecturer entries stored with the course only fill
+// in while nobody is assigned (as on the public page).
+function courseInfoChips(m, isArchive, assigned = []) {
+  const chips = [];
+  let lecturers = assigned.map(l => ({ name: l.name, photo: l.photo }));
+  if (!lecturers.length) {
+    lecturers = Object.keys(m).filter(key => /^professor\d+$/.test(key) && String(m[key] || '').trim())
+      .map(key => ({ name: m[key], photo: m[`${key}_photo`] }))
+      .sort((a, b) => TeachingSites.compareLecturers(a.name, b.name));
+  }
+  for (const person of lecturers) {
+    const photo = safeCourseUrl(person.photo);
+    chips.push(`<span class="info-item professor-item">${photo
+      ? `<img src="${x(photo)}" alt="" class="professor-photo" referrerpolicy="no-referrer"
+        onerror="this.nextElementSibling.style.display='inline-block';this.remove()"><i class="fa-solid fa-user-circle" style="display:none"></i>`
+      : '<i class="fa-solid fa-user-circle"></i>'} ${x(person.name)}</span>`);
+  }
+  if (!lecturers.length) chips.push('<span class="info-item"><i class="fa-solid fa-user-circle"></i> Instructor</span>');
+  const semester = m.semester || 'Unknown Semester';
+  chips.push(`<span class="info-item"><i class="fa-solid fa-calendar-check"></i> ${x(isArchive && m.year ? `${semester} ${m.year}` : semester)}</span>`);
+  chips.push(`<span class="info-item"><i class="fa-solid fa-graduation-cap"></i> ${x(m.level || 'Undergraduate')}</span>`);
+  chips.push(String(m.type || '').trim().toLowerCase() === 'elective'
+    ? '<span class="info-item"><i class="fa-regular fa-circle"></i> Elective</span>'
+    : '<span class="info-item"><i class="fa-solid fa-exclamation-circle"></i> Compulsory</span>');
+  if (m.credits) chips.push(`<span class="info-item"><i class="fa-solid fa-trophy"></i> ${x(m.credits)} ECTS</span>`);
+  return chips.join('');
+}
+
+// Rounds the outer ends of each visual row of chips, as the public header does.
+function tagInfoRows(container) {
+  const items = [...(container?.querySelectorAll('.info-item') || [])].filter(el => el.offsetParent);
+  items.forEach(el => el.classList.remove('first-in-row', 'last-in-row', 'only-in-row', 'middle-in-row'));
+  const rows = [];
+  for (const el of items) {
+    const row = rows.find(r => Math.abs(r.top - el.offsetTop) < 5);
+    if (row) row.items.push(el); else rows.push({ top: el.offsetTop, items: [el] });
+  }
+  rows.sort((a, b) => a.top - b.top).forEach(({ items: row }) => {
+    if (row.length === 1) row[0].classList.add('only-in-row');
+    else { row[0].classList.add('first-in-row'); row[row.length - 1].classList.add('last-in-row'); }
+  });
+}
+window.addEventListener('resize', () => tagInfoRows(document.getElementById('ch-info')), { passive: true });
 
 async function fillCourseHeader(name, isArchive) {
   const { data, error } = await sb.from('course_rows').select('b,c')
-    .eq('sheet_name', name).eq('is_archive', isArchive).eq('type', 'metadata')
-    .in('b', ['code', 'title', 'semester', 'credits', 'year', 'theme_colours']);
+    .eq('sheet_name', name).eq('is_archive', isArchive).eq('type', 'metadata');
   if (S.course !== name || S.isArchive !== isArchive) return;
   if (error) { toast('Could not load course details: ' + error.message, 'err'); return; }
   const m = {};
-  for (const r of (data || [])) m[r.b] = r.c;
-  COURSE_HEADERS.set(JSON.stringify([name, isArchive]), m);
+  for (const r of (data || [])) m[String(r.b || '').trim().toLowerCase()] = r.c;
+  m.icon = m.header_decoration || '';
+  // Merge: the sidebar re-renders from these entries when its scope changes.
+  const key = JSON.stringify([name, isArchive]);
+  COURSE_HEADERS.set(key, { ...COURSE_HEADERS.get(key), ...m, sheet_name: name, is_archive: isArchive });
   applyCourseTheme(m.theme_colours);
-  const titleEl = document.getElementById('ch-title');
-  const metaEl = document.getElementById('ch-meta');
-  if (!titleEl) return;
-  const title = m.title || m.code || name;
-  const meta = courseHeaderMeta(m);
-  if (titleEl.textContent !== title) titleEl.textContent = title;
-  if (metaEl.textContent !== meta) metaEl.textContent = meta;
+  const codeEl = document.getElementById('ch-code');
+  if (!codeEl) return;
+  codeEl.textContent = m.code || name;
+  document.getElementById('ch-title').textContent = m.title || m.code || name;
+  document.getElementById('header-decoration').innerHTML = `<i class="fa-solid ${x(courseIconClass(m.icon))}"></i>`;
+  const info = document.getElementById('ch-info');
+  info.innerHTML = courseInfoChips(m, isArchive, COURSE_LECTURERS.get(key) || []);
+  tagInfoRows(info);
 }
 
 // Shimmer placeholder shown the instant a tab/course switch starts — shaped like a card
@@ -1037,7 +1201,16 @@ async function selectSection(id, el) {
   const body = document.getElementById('section-body');
   lockHeight(body);
   body.classList.remove('loaded');
-  body.innerHTML = sectionSkeletonHtml();
+  // Keep the current tab on screen, inert and dimmed (except its toolbar), until the
+  // next one renders over it: blanking to a skeleton on every switch is tiring. Only a
+  // slow load, still showing the old tab after 400ms, swaps in the skeleton.
+  [...body.children].forEach(child => { child.inert = true; });
+  setTimeout(() => {
+    if (!body.isConnected || !body.querySelector(':scope > [inert]:not(.section-topbar)')) return;
+    const toolbar = body.querySelector(':scope > .section-topbar[inert]');
+    body.innerHTML = sectionSkeletonHtml();
+    if (toolbar) body.prepend(toolbar);
+  }, 400);
   loadSection(id);
 }
 
@@ -1279,14 +1452,6 @@ async function loadMetadataSettings() {
     }
   }
 
-  const profNums = new Set();
-  for (const k of Object.keys(metaMap)) {
-    const m = k.match(/^professor(\d+)$/);
-    if (m) profNums.add(parseInt(m[1]));
-  }
-  const profs = Array.from(profNums).sort((a, b) => a - b);
-  if (!profs.length) profs.push(1);
-
   const themeStr = metaMap['theme_colours']?.c || '';
   const themeParts = themeStr.split(',').map(s => s.trim());
 
@@ -1361,16 +1526,19 @@ async function loadMetadataSettings() {
     </div></div>
   </div>`;
 
-  // ── Professors (dynamic) ──
+  // ── Lecturers: the accounts assigned to this course in Settings (read-only here) ──
+  const assigned = COURSE_LECTURERS.get(JSON.stringify([S.course, S.isArchive])) || [];
   h += `<div class="settings-group">
-    <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-user-tie""></i>Professors</span>
-      <button class="btn-sm btn-secondary" type="button" onclick="addProfessorCard()"><i class="fa-solid fa-plus"></i></button>
+    <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-user-tie"></i>Lecturers</span>
+      ${canManageLecturerAssignments() ? '<button class="btn-sm btn-secondary" type="button" onclick="openAccessSettings()">Manage in Settings</button>' : ''}
     </div>
-    <div class="settings-body" id="professors-list">`;
-  for (const n of profs) {
-    h += professorCardHtml(n, metaMap);
-  }
-  h += `</div></div>`;
+    <div class="settings-body">
+      ${assigned.length ? `<div class="info-lecturers">${assigned.map(l =>
+        `<span class="info-lecturer">${userAvatar(l.name, safeCourseUrl(l.photo), 'info-lecturer-avatar')}${x(l.name)}</span>`).join('')}</div>`
+      : '<div class="form-hint">No lecturers assigned yet.</div>'}
+      <div class="form-hint">Lecturers are the accounts assigned to this course in Settings. Their names and photos come from their profiles.</div>
+    </div>
+  </div>`;
 
   // ── Appearance ──
   const hdVal = metaMap['header_decoration']?.c || '';
@@ -1451,67 +1619,11 @@ async function loadMetadataSettings() {
   updateThemePreview();
 }
 
+const canManageLecturerAssignments = () => isCourseAdmin();
+
 function updateDynamicCardLabel(input, fallback) {
   const lbl = input.closest('.dynamic-card')?.querySelector('.dcl-text');
   if (lbl) lbl.textContent = input.value.trim() || fallback;
-}
-
-function professorCardHtml(n, metaMap) {
-  const name = metaMap[`professor${n}`]?.c || '';
-  const link = metaMap[`professor${n}_link`]?.c || '';
-  const photo = metaMap[`professor${n}_photo`]?.c || '';
-  return `<div class="dynamic-card" data-profkey="professor${n}">
-    <div class="dynamic-card-head">
-      <span class="dynamic-card-label"><i class="fa-solid fa-user-tie" style="margin-right:5px;opacity:0.7"></i><span class="dcl-text">${x(name || 'New Professor')}</span></span>
-      <button class="btn-action-del" type="button" onclick="removeProfessorCard(this)" title="Delete professor"><i class="fa-solid fa-trash"></i></button>
-    </div>
-    <div class="dynamic-card-body sg-grid1">
-      <div class="form-group">
-        <label class="form-label">Name</label>
-        <input type="text" name="prof_name" value="${x(name)}" oninput="updateDynamicCardLabel(this,'New Professor')">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Profile URL</label>
-        <div class="icon-input-wrap">
-          <input type="text" name="prof_link" value="${x(link)}"
-                 oninput="updateLinkPreview(this,this.nextElementSibling)">
-          <a href="${x(safeCourseUrl(link) || '#')}" target="_blank" rel="noopener noreferrer"
-             style="flex-shrink:0;padding:6px 10px;background:var(--primary-color);color:white;border-radius:10px;text-decoration:none;display:${link ? 'flex' : 'none'};align-items:center;gap:4px;font-size:0.82em;border:1.5px solid rgba(0,0,0,0.18)">
-            <i class="fa-solid fa-arrow-up-right-from-square"></i>
-          </a>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Photo URL</label>
-        <div class="icon-input-wrap">
-          <input type="text" name="prof_photo" value="${x(photo)}"
-                 oninput="updatePhotoPreview(this,this.nextElementSibling)">
-          <img src="${x(safeCourseUrl(photo) || '')}" alt="" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;display:${photo ? 'block' : 'none'};border:2px solid #e0e0e0"
-               onerror="this.style.display='none'">
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
-
-function addProfessorCard() {
-  if (!requirePermission(isCourseAdmin())) return;
-  const list = document.getElementById('professors-list');
-  const noMsg = list.querySelector('#no-prof-msg');
-  if (noMsg) noMsg.remove();
-  const nums = [...list.querySelectorAll('[data-profkey]')].map(card => Number(card.dataset.profkey.replace('professor', '')));
-  list.insertAdjacentHTML('beforeend', professorCardHtml(Math.max(0, ...nums) + 1, {}));
-  markDirty();
-}
-
-function removeProfessorCard(btn) {
-  if (!requirePermission(isCourseAdmin())) return;
-  btn.closest('.dynamic-card').remove();
-  markDirty();
-  const list = document.getElementById('professors-list');
-  if (!list.querySelector('.dynamic-card')) {
-    list.insertAdjacentHTML('beforeend', `<div id="no-prof-msg" class="form-hint" style="padding:4px 0">No professors yet.</div>`);
-  }
 }
 
 function timetableCardHtml(n, metaMap) {
@@ -1975,24 +2087,7 @@ async function saveSettings() {
     pushField(key, inp.value.trim());
   }
 
-  // Keep professor keys and existing row IDs stable. In particular, saving one lecturer
-  // never deletes, renumbers or resubmits another professor's records.
-  const profCards = [...document.querySelectorAll('#professors-list .dynamic-card')];
-  const presentProfKeys = new Set(profCards.map(card => card.dataset.profkey));
-  const toDelete = isCourseAdmin() ? (existing || []).filter(r => /^professor\d+(_link|_photo)?$/.test(r.b) &&
-    !presentProfKeys.has(r.b.replace(/_(link|photo)$/, ''))).map(r => r.row_uid) : [];
-  for (const card of profCards) {
-    const key = card.dataset.profkey;
-    if (!ownsProfessor(key)) continue;
-    const name = card.querySelector('[name=prof_name]')?.value?.trim() || '';
-    const link = card.querySelector('[name=prof_link]')?.value?.trim() || '';
-    const photo = card.querySelector('[name=prof_photo]')?.value?.trim() || '';
-    if (!name && !isCourseAdmin()) { toast('Your professor name is required.', 'err'); resetBtn(); return false; }
-    pushField(key, name);
-    pushField(key + '_link', link);
-    pushField(key + '_photo', photo);
-  }
-  const { error } = await saveCourseRows(toUpsert, toDelete);
+  const { error } = await saveCourseRows(toUpsert, []);
   if (error) { toast('Save failed: ' + error.message, 'err'); resetBtn(); return false; }
 
   // Timetables and Grading save separately (saveTimetablesWork/saveGradingSettings), not here.
@@ -2030,7 +2125,53 @@ function openEditCustomMeta(uid) {
 // Module hierarchy (modules + materials + funfacts)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Row actions ──────────────────────────────────────────────────────────
+// Every row shows at most a quiet Edit, an "Add" menu when it holds items, and a ⋯ menu
+// for everything else (Delete lives there, so it is never one stray tap away). Menus are
+// part of the row, so their actions find the row with closest('[data-uid]'); they are
+// positioned with fixed coordinates so rounded, clipped containers never cut them off.
+function rowEditBtn(uid, label = 'Edit') {
+  return `<button type="button" class="row-edit-btn" title="${label}" aria-label="${label}" onclick="openInlineEdit('${xjs(uid)}')"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>Edit</span></button>`;
+}
+
+function rowMenuHtml(items, { text = '', label = 'More actions' } = {}) {
+  return `<div class="row-menu">
+    <button type="button" class="row-menu-btn${text ? ' has-text' : ''}" aria-haspopup="menu" aria-expanded="false" aria-label="${label}" title="${label}"
+      onclick="toggleRowMenu(this)">${text ? `<span>${text}</span><i class="fa-solid fa-chevron-down row-menu-caret" aria-hidden="true"></i>` : '<i class="fa-solid fa-ellipsis" aria-hidden="true"></i>'}</button>
+    <div class="row-menu-list" role="menu" hidden>${items.map(item =>
+      `<button type="button" role="menuitem"${item.danger ? ' class="is-danger"' : ''} onclick="closeRowMenus();${item.action}"><i class="${item.icon}" aria-hidden="true"></i>${item.label}</button>`).join('')}</div>
+  </div>`;
+}
+
+const DELETE_ITEM = { label: 'Delete', icon: 'fa-solid fa-trash', danger: true, action: 'stageDeleteRow(this)' };
+
+function toggleRowMenu(button) {
+  const list = button.nextElementSibling;
+  const opening = list.hidden;
+  closeRowMenus();
+  if (!opening) return;
+  list.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  const r = button.getBoundingClientRect();
+  const width = list.offsetWidth, height = list.offsetHeight;
+  list.style.left = `${Math.max(8, Math.min(r.right - width, innerWidth - width - 8))}px`;
+  list.style.top = `${r.bottom + 6 + height > innerHeight - 8 ? r.top - 6 - height : r.bottom + 6}px`;
+  list.querySelector('button:not(:disabled)')?.focus();
+}
+
+function closeRowMenus() {
+  document.querySelectorAll('.row-menu-list:not([hidden])').forEach(list => {
+    list.hidden = true;
+    list.previousElementSibling?.setAttribute('aria-expanded', 'false');
+  });
+}
+document.addEventListener('click', event => { if (!event.target.closest('.row-menu')) closeRowMenus(); });
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeRowMenus(); });
+window.addEventListener('scroll', closeRowMenus, { passive: true });
+window.addEventListener('resize', closeRowMenus, { passive: true });
+
 function moduleHeaderHtml(p) {
+  const uid = xjs(p.row_uid);
   return `<div class="module-header">
         <div class="drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
         <div class="mod-icon">${p.d ? `<i class="${x(p.d)}"></i>` : ''}</div>
@@ -2039,10 +2180,12 @@ function moduleHeaderHtml(p) {
           ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
         </div>
         <div class="card-actions">
-          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${xjs(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${xjs(p.row_uid)}','material')"><i class="fa-regular fa-file-powerpoint" style="margin-right:5px"></i>Add Material</button>
-          <button class="btn-ghost btn-sm" onclick="addMaterialOrFunfact('${xjs(p.row_uid)}','funfact')"><i class="fa-solid fa-lightbulb" style="margin-right:5px"></i>Add Fun Fact</button>
-          <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+          ${rowEditBtn(p.row_uid, 'Edit module')}
+          ${rowMenuHtml([
+            { label: 'Material', icon: 'fa-regular fa-file-lines', action: `addMaterialOrFunfact('${uid}','material')` },
+            { label: 'Fun fact', icon: 'fa-regular fa-lightbulb', action: `addMaterialOrFunfact('${uid}','funfact')` }
+          ], { text: 'Add', label: 'Add to this module' })}
+          ${rowMenuHtml([DELETE_ITEM], { label: 'More module actions' })}
         </div>
       </div>`;
 }
@@ -2054,10 +2197,7 @@ function funfactCardHtml(c) {
     <div class="card-main">
       <div class="card-title">${x((c.b || '').substring(0, 100))}</div>
     </div>
-    <div class="card-actions">
-      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-      <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-    </div>
+    <div class="card-actions">${rowEditBtn(c.row_uid)}${rowMenuHtml([DELETE_ITEM])}</div>
   </div>`;
 }
 
@@ -2068,7 +2208,7 @@ function moduleContentHtml(children) {
   // The materials/funfacts wrapper divs always render, even when empty, so "Add Material"/
   // "Add Fun Fact" always has somewhere to insert into — only the placeholder text is conditional.
   if (!children.length) {
-    h += `<div class="empty-content" style="padding:14px;margin:0">No items. Use the buttons above.</div>`;
+    h += `<div class="empty-content" style="padding:14px;margin:0">No items yet. Use Add above.</div>`;
   }
   h += `<div class="module-materials">${materials.map(c => materialCardHtml(c)).join('')}</div>`;
   h += `<div class="module-funfacts">${funfacts.map(c => funfactCardHtml(c)).join('')}</div>`;
@@ -2135,7 +2275,7 @@ function projectRefCardHtml(p) {
         ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
       </div>
       <div class="card-actions">
-        <button class="btn-ghost btn-sm" onclick="editProjectFromModules('${xjs(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
+        <button type="button" class="row-edit-btn" title="Edit in Projects" aria-label="Edit in Projects" onclick="editProjectFromModules('${xjs(p.row_uid)}')"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>Edit</span></button>
       </div>
     </div>
   </div>`;
@@ -2157,6 +2297,7 @@ async function editProjectFromModules(uid) {
 function projectHeaderHtml(p) {
   // No drag handle here: project ORDER is set in the Modules view (where projects appear as
   // refs alongside modules). This tab is for editing project content only.
+  const uid = xjs(p.row_uid);
   return `<div class="module-header">
         <div class="mod-icon">${p.d ? `<i class="${x(p.d)}"></i>` : ''}</div>
         <div class="mod-info">
@@ -2164,11 +2305,13 @@ function projectHeaderHtml(p) {
           ${p.e ? `<div class="mod-sub">${x(p.e)}</div>` : ''}
         </div>
         <div class="card-actions">
-          <button class="btn-ghost btn-sm" onclick="openInlineEdit('${xjs(p.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-          <button class="btn-ghost btn-sm" onclick="addProjectFile('${xjs(p.row_uid)}')"><i class="fa-solid fa-file" style="margin-right:5px"></i>Add File</button>
-          <button class="btn-ghost btn-sm" onclick="addProjectDescription('${xjs(p.row_uid)}')"><i class="fa-solid fa-align-left" style="margin-right:5px"></i>Add Description</button>
-          <button class="btn-ghost btn-sm" onclick="addProjectGroup('${xjs(p.row_uid)}')"><i class="fa-solid fa-users" style="margin-right:5px"></i>Add Group</button>
-          <button class="btn-ghost btn-sm btn-red" style="border-color:rgba(255,100,100,0.4)" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+          ${rowEditBtn(p.row_uid, 'Edit project')}
+          ${rowMenuHtml([
+            { label: 'File', icon: 'fa-regular fa-file-lines', action: `addProjectFile('${uid}')` },
+            { label: 'Description', icon: 'fa-solid fa-align-left', action: `addProjectDescription('${uid}')` },
+            { label: 'Group', icon: 'fa-solid fa-users', action: `addProjectGroup('${uid}')` }
+          ], { text: 'Add', label: 'Add to this project' })}
+          ${rowMenuHtml([DELETE_ITEM], { label: 'More project actions' })}
         </div>
       </div>`;
 }
@@ -2180,27 +2323,28 @@ function projectDescCardHtml(d) {
       <div class="card-title">Project Description</div>
       <div class="card-detail">${x((d.b || '').substring(0, 80))}</div>
     </div>
-    <div class="card-actions">
-      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(d.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-      <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-    </div>
+    <div class="card-actions">${rowEditBtn(d.row_uid)}${rowMenuHtml([DELETE_ITEM])}</div>
   </div>`;
 }
 
 function pgbHeadHtml(g) {
+  // Name and actions share the first line; the topic and leader get a full-width line
+  // below, so neither is squeezed into a narrow column beside the name.
   const members = [g.e, g.f, g.g, g.h, g.i].filter(Boolean);
   return `<div class="pgb-headwrap">
     <div class="pgb-head">
       <div class="pgb-name"><i class="fa-solid fa-users" style="opacity:0.5;margin-right:6px"></i>${x(g.b || 'Group')}</div>
-      <div class="pgb-chips">
-        ${g.c ? `<span class="pgb-chip"><i class="fa-solid fa-chalkboard-user" style="margin-right:4px;opacity:0.6"></i>${x(g.c)}</span>` : ''}
-        ${g.d ? `<span class="pgb-chip"><i class="fa-solid fa-star" style="margin-right:4px;opacity:0.6"></i>${x(g.d)}</span>` : ''}
-      </div>
       <div class="card-actions">
-        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(g.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-        <button class="btn-secondary btn-sm" onclick="addGroupFile('${xjs(g.row_uid)}')"><i class="fa-solid fa-file-circle-plus" style="margin-right:5px"></i>Add File</button>
-        <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
+        ${rowEditBtn(g.row_uid, 'Edit group')}
+        ${rowMenuHtml([
+          { label: 'Add file', icon: 'fa-regular fa-file-lines', action: `addGroupFile('${xjs(g.row_uid)}')` },
+          DELETE_ITEM
+        ], { label: 'More group actions' })}
       </div>
+      ${g.c || g.d ? `<div class="pgb-details">
+        ${g.c ? `<div class="pgb-topic">${x(g.c)}</div>` : ''}
+        ${g.d ? `<span class="pgb-chip"><i class="fa-solid fa-star" style="margin-right:4px;opacity:0.6"></i>${x(g.d)}</span>` : ''}
+      </div>` : ''}
     </div>
     ${members.length ? `<div class="pgb-members">${members.map(m => `<span class="member-chip">${x(m)}</span>`).join('')}</div>` : ''}
   </div>`;
@@ -2249,7 +2393,7 @@ function renderProjects(rows) {
     for (const grp of proj.groups) h += projectGroupBlockHtml(grp.header, grp.files);
 
     if (!proj.desc && !proj.files.length && !proj.groups.length) {
-      h += `<div class="empty-content" style="padding:14px;margin:0">No content yet. Click <strong>Add File</strong>, <strong>Add Description</strong>, or <strong>Add Group</strong> above.</div>`;
+      h += `<div class="empty-content" style="padding:14px;margin:0">No content yet. Use <strong>Add</strong> above for a file, description or group.</div>`;
     }
 
     h += `</div></div>`;
@@ -2274,10 +2418,7 @@ function flatCardHtml(row) {
         <div class="card-title">${x((t1 || '').substring(0, 70)) || '(empty)'}</div>
         ${t2 ? `<div class="card-detail">${x((t2 || '').substring(0, 80))}</div>` : ''}
       </div>
-      <div class="card-actions">
-        <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(row.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-        <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-      </div>
+      <div class="card-actions">${rowEditBtn(row.row_uid)}${rowMenuHtml([DELETE_ITEM])}</div>
     </div>`;
 }
 
@@ -2304,10 +2445,7 @@ function materialCardHtml(c) {
       <div class="card-title">${x(c.c || 'Untitled')}</div>
       ${c.d ? `<div class="card-detail">${x(c.d.substring(0, 80))}</div>` : ''}
     </div>
-    <div class="card-actions">
-      <button class="btn-secondary btn-sm" onclick="openInlineEdit('${xjs(c.row_uid)}')"><i class="fa-solid fa-pen" style="margin-right:5px"></i>Edit</button>
-      <button class="btn-red btn-sm" onclick="stageDeleteRow(this)"><i class="fa-solid fa-trash" style="margin-right:5px"></i>Delete</button>
-    </div>
+    <div class="card-actions">${rowEditBtn(c.row_uid)}${rowMenuHtml([DELETE_ITEM])}</div>
   </div>`;
 }
 
@@ -2470,7 +2608,6 @@ function readInlineFieldsJson(row) {
   if (!schema || schema === 'dynamic') return '';
   return JSON.stringify(readInlineFieldsFromDom(schema));
 }
-
 
 // Sortable's own `filter`/`handle` gating isn't enough once a panel is open — dragging a
 // card out from under an open editor (or reordering while its commit-on-close logic is
@@ -2639,7 +2776,7 @@ function refreshModuleContentPlaceholder(contentEl) {
   let placeholder = contentEl.querySelector(':scope > .empty-content');
   if (mats || funs) {
     const isEmpty = (!mats || !mats.children.length) && (!funs || !funs.children.length);
-    if (isEmpty && !placeholder) contentEl.insertAdjacentHTML('afterbegin', `<div class="empty-content" style="padding:14px;margin:0">No items. Use the buttons above.</div>`);
+    if (isEmpty && !placeholder) contentEl.insertAdjacentHTML('afterbegin', `<div class="empty-content" style="padding:14px;margin:0">No items yet. Use Add above.</div>`);
     else if (!isEmpty && placeholder) placeholder.remove();
   } else {
     const hasContent = !!contentEl.querySelector(':scope > [data-uid], :scope > .project-group-block');
@@ -2918,64 +3055,125 @@ async function deleteRow(uid) {
 // Course management
 // ─────────────────────────────────────────────────────────────────────────────
 
+// A course's key (and public link) from its code: "CE 101" → CE_101, "SWE / CE 101" → SWE_CE_101.
+function sheetNameFromCode(code) {
+  return String(code || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+let _newCourseTaken = new Set();
+
 async function openNewCourseModal() {
   if (!requirePermission(isCourseAdmin())) return;
   if (!(await confirmLeaveIfDirty())) return;
-  document.getElementById('modal-title').textContent = 'New Course';
-  document.getElementById('modal-save').innerHTML = '<i class="fa-solid fa-plus" style="margin-right:5px"></i>Create';
+  const option = (value, selected = '') => `<option value="${x(value)}"${value === selected ? ' selected' : ''}>${x(value || '—')}</option>`;
+  document.getElementById('modal-title').textContent = 'New course';
+  document.getElementById('modal-save').innerHTML = '<i class="fa-solid fa-plus" style="margin-right:5px"></i>Create course';
   document.getElementById('modal-save').onclick = createCourse;
   document.getElementById('modal-foot').style.display = '';
   document.getElementById('modal-body').innerHTML = `
-    <div class="form-group">
-      <label class="form-label">Sheet Name (DB key)</label>
-      <input type="text" id="nc_sheet">
-      <div class="form-hint">Unique ID: letters, digits, underscores. Cannot be changed later.</div>
-    </div>
-    <div class="form-group"><label class="form-label">Course Code</label><input type="text" id="nc_code"></div>
-    <div class="form-group"><label class="form-label">Course Title</label><input type="text" id="nc_title"></div>
-    <div class="form-group"><label class="form-label">Academic Year</label><input type="text" id="nc_year" oninput="onYearInput(this)" onblur="normalizeYearField(this)"></div>
-    <div class="form-group">
-      <label class="form-label">Semester</label>
-      <select id="nc_sem">
-        <option value=""></option>
-        <option>Fall Semester</option><option>Spring Semester</option><option>Summer Semester</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Status</label>
-      <select id="nc_archive"><option value="false">Active</option><option value="true">Archived</option></select>
-    </div>
-  `;
+    <form id="nc-form" class="nc-form" novalidate onsubmit="event.preventDefault();createCourse()">
+      <section class="nc-section" aria-labelledby="nc-identity">
+        <h4 class="nc-section-title" id="nc-identity">Course identity</h4>
+        <div class="sg-grid">
+          <div class="form-group"><label class="form-label" for="nc_code">Course code <span class="nc-required" aria-hidden="true">*</span></label>
+            <input type="text" id="nc_code" required maxlength="60" placeholder="e.g. CE 101" autocomplete="off" oninput="updateNewCourseKey()"></div>
+          <div class="form-group"><label class="form-label" for="nc_title">Title <span class="nc-required" aria-hidden="true">*</span></label>
+            <input type="text" id="nc_title" required maxlength="200" placeholder="e.g. Engineering Mechanics" autocomplete="off"></div>
+          <div class="form-group"><label class="form-label" for="nc_year">Academic year <span class="nc-required" aria-hidden="true">*</span></label>
+            <input type="text" id="nc_year" required placeholder="e.g. 2026–2027" autocomplete="off" oninput="onYearInput(this)" onblur="normalizeYearField(this)"></div>
+          <div class="form-group"><label class="form-label" for="nc_sem">Semester <span class="nc-required" aria-hidden="true">*</span></label>
+            <select id="nc_sem" required>${['', 'Fall Semester', 'Spring Semester', 'Summer Semester'].map(v => option(v)).join('')}</select></div>
+          <div class="form-group"><label class="form-label" for="nc_level">Level</label>
+            <select id="nc_level">${['', 'Undergraduate', 'Graduate', 'Integrated Second Cycle', 'Postgraduate'].map(v => option(v)).join('')}</select></div>
+          <div class="form-group"><label class="form-label" for="nc_type">Type</label>
+            <select id="nc_type">${['', 'Compulsory', 'Elective', 'Optional'].map(v => option(v)).join('')}</select></div>
+          <div class="form-group"><label class="form-label" for="nc_credits">Credits (ECTS)</label>
+            <input type="number" id="nc_credits" min="1" max="10" step="1"></div>
+        </div>
+        <p class="form-hint" id="nc-key-hint" aria-live="polite">The course link is made from the code.</p>
+      </section>
+      <section class="nc-section" aria-labelledby="nc-lecturers-title">
+        <h4 class="nc-section-title" id="nc-lecturers-title">Lecturers</h4>
+        <div id="nc-lecturers" class="nc-lecturers"><div class="form-hint">Loading lecturers…</div></div>
+        <p class="form-hint">They see this course in their sidebar and on their teaching website, with their name on the course page. You can change this later in Settings.</p>
+      </section>
+      <p id="nc-status" class="access-form-status is-error" role="alert"></p>
+    </form>`;
   document.getElementById('modal-overlay').classList.add('open');
+  document.getElementById('nc_code').focus();
+  // Existing active keys, to warn before creating a duplicate; and the lecturer choices.
+  const [taken, accounts] = await Promise.all([takenCourseNames(false), sb.rpc('teaching_list_accounts')]);
+  _newCourseTaken = taken || new Set();
+  updateNewCourseKey();
+  const list = document.getElementById('nc-lecturers');
+  if (!list) return;
+  const people = (Array.isArray(accounts.data) ? accounts.data : [])
+    .filter(a => ['admin', 'global_admin', 'lecturer'].includes(a.role))
+    .sort((a, b) => TeachingSites.compareLecturers(a.display_name || a.name || a.email, b.display_name || b.name || b.email));
+  // You are ticked when you keep a course list, so the new course joins "My courses".
+  const mine = !!S.access?.assignments?.length;
+  list.innerHTML = people.length ? people.map(p => {
+    const name = p.display_name || p.name || p.email;
+    const checked = p.email === S.access?.email ? mine : false;
+    return `<label class="nc-lecturer">
+      <input type="checkbox" name="nc_lecturer" value="${x(p.email)}"${checked ? ' checked' : ''}>
+      ${userAvatar(name, p.photo, 'access-avatar')}
+      <span class="nc-lecturer-text"><span class="nc-lecturer-name">${x(name)}${p.email === S.access?.email ? ' <span class="nc-you">(you)</span>' : ''}</span>
+        <span class="nc-lecturer-sub">${x(p.role === 'lecturer' ? 'Lecturer' : 'Admin')}</span></span>
+    </label>`;
+  }).join('') : '<div class="form-hint">No Lecturer accounts yet. Add them in Settings.</div>';
+}
+
+function updateNewCourseKey() {
+  const hint = document.getElementById('nc-key-hint');
+  if (!hint) return;
+  const key = sheetNameFromCode(document.getElementById('nc_code').value);
+  hint.classList.toggle('is-error', !!key && _newCourseTaken.has(key));
+  hint.textContent = !key ? 'The course link is made from the code.'
+    : _newCourseTaken.has(key) ? `An active course already uses ${key}. Archive it first, or change the code.`
+      : `Course link: …/#${key}`;
 }
 
 async function createCourse() {
   if (!requirePermission(isCourseAdmin())) return;
-  const sheet = document.getElementById('nc_sheet').value.trim();
-  const code = document.getElementById('nc_code').value.trim();
-  const title = document.getElementById('nc_title').value.trim();
-  const year = document.getElementById('nc_year').value.trim();
-  const sem = document.getElementById('nc_sem').value.trim();
-  const archive = document.getElementById('nc_archive').value === 'true';
-  if (!sheet) { toast('Sheet name is required', 'err'); return; }
-  const btn = document.getElementById('modal-save'); btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px"></i>Creating…';
-  const base = { sheet_name: sheet, is_archive: archive, type: 'metadata', b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: '' };
-  const rows = [];
-  if (code) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 10, b: 'code', c: code });
-  if (title) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 20, b: 'title', c: title });
-  if (year) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 25, b: 'year', c: year });
-  if (sem) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 30, b: 'semester', c: sem });
-  if (!rows.length) rows.push({ ...base, row_uid: newCourseRowUid(), row_index: 10, b: 'code', c: sheet });
-  const { error } = await sb.rpc('teaching_create_course', { p_rows: rows });
-  btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-plus" style="margin-right:5px"></i>Create';
-  if (error) { toast('Create failed: ' + error.message, 'err'); return; }
+  const value = id => document.getElementById(id)?.value.trim() || '';
+  const status = document.getElementById('nc-status');
+  normalizeYearField(document.getElementById('nc_year'));
+  const code = value('nc_code'), title = value('nc_title'), year = value('nc_year'), semester = value('nc_sem');
+  const missing = [['nc_code', code, 'course code'], ['nc_title', title, 'title'], ['nc_year', year, 'academic year'], ['nc_sem', semester, 'semester']]
+    .filter(([, v]) => !v);
+  document.querySelectorAll('#nc-form [required]').forEach(el => el.setAttribute('aria-invalid', String(!el.value.trim())));
+  if (missing.length) {
+    status.textContent = `Add the ${missing.map(m => m[2]).join(', ')}.`;
+    document.getElementById(missing[0][0]).focus();
+    return;
+  }
+  const sheet = sheetNameFromCode(code);
+  if (!sheet) { status.textContent = 'Use letters or numbers in the course code.'; return; }
+  if (_newCourseTaken.has(sheet)) { status.textContent = `An active course already uses ${sheet}. Archive it first, or change the code.`; return; }
+  status.textContent = '';
+  const lecturers = [...document.querySelectorAll('input[name="nc_lecturer"]:checked')].map(input => input.value);
+  const base = { sheet_name: sheet, is_archive: false, type: 'metadata', b: '', c: '', d: '', e: '', f: '', g: '', h: '', i: '', j: '' };
+  const fields = [['code', code], ['title', title], ['year', year], ['semester', semester],
+    ['level', value('nc_level')], ['type', value('nc_type')], ['credits', value('nc_credits')]].filter(([, v]) => v);
+  const rows = fields.map(([key, c], i) => ({ ...base, row_uid: newCourseRowUid(), row_index: (i + 1) * 10, b: key, c }));
+  const btn = document.getElementById('modal-save');
+  btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:5px"></i>Creating…';
+  const { error } = await sb.rpc('teaching_create_course', { p_rows: rows, p_lecturers: lecturers });
+  btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-plus" style="margin-right:5px"></i>Create course';
+  if (error) { status.textContent = 'Could not create the course. ' + error.message; return; }
   document.getElementById('modal-save').onclick = modalSave;
   closeModal(); toast('Course created', 'ok');
+  // Assignments changed: your course list, and the lecturers shown for the course.
+  try { await refreshTeachingAccess(); } catch { }
   await loadSidebar();
-  S.course = sheet; S.isArchive = archive; S.section = getLastSection(sheet, archive);
-  renderCourseShell(sheet, archive);
-  await loadSidebar();
+  S.course = sheet; S.isArchive = false; S.section = getLastSection(sheet, false);
+  try { localStorage.setItem('admin_last_course', JSON.stringify([sheet, false])); } catch { }
+  renderCourseShell(sheet, false);
+  renderSidebar();
 }
+
 
 // ── Archive naming ───────────────────────────────────────────────────────
 // sheet_name doubles as the public course link (teaching/index.html reads #<sheet_name>), so
@@ -3087,7 +3285,9 @@ async function deleteCourse(n, a) {
   if (!await confirmDialog('This CANNOT be undone.', { title: `Permanently delete ALL data for "${n}"?`, okLabel: 'Delete Everything', danger: true })) return;
   const { error } = await sb.rpc('teaching_delete_course', { p_name: n, p_archive: a });
   if (error) { toast('Failed: ' + error.message, 'err'); return; }
-  toast(`"${n}" deleted`, 'ok'); S.course = null; clearMain(); await loadSidebar();
+  toast(`"${n}" deleted`, 'ok'); S.course = null; clearMain();
+  try { await refreshTeachingAccess(); } catch { } // Its assignments were deleted too.
+  await loadSidebar();
 }
 
 function clearMain() {

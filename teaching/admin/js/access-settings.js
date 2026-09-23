@@ -6,6 +6,7 @@
   let selectedEmail = null, baseline = '', pending = null, viewSequence = 0;
   let downloadPending = false, downloadError = null, websiteNeedsUpdate = false;
   let accountQuery = '', courseQuery = '', courseFilter = 'active';
+  let courseFacets = {}, professorsExpanded = false;
   let selectedCourses = new Set();
   const roleLabels = { admin: 'Admin', lecturer: 'Lecturer', student: 'Student' };
   const roleGroups = [
@@ -16,34 +17,38 @@
 
   const isAdmin = () => ['admin', 'global_admin'].includes(S.access?.role);
   const canManageAccounts = () => isAdmin() || S.access?.role === 'lecturer';
+  // Everyone opens Settings for their own profile; Students see only themselves.
+  const canOpenSettings = () => ['admin', 'global_admin', 'lecturer', 'student'].includes(S.access?.role);
+  // Your own profile, or anyone's as an Admin. A Lecturer cannot edit a Student's profile.
+  const canEditProfile = account => !!account && (isAdmin() || account.email === S.access?.email);
   const screen = () => document.getElementById('access-settings');
   const archiveFlag = value => value === true || value === 'true' || value === 1 || value === '1';
   const courseKey = course => JSON.stringify([course.sheet_name, archiveFlag(course.is_archive)]);
   const selectedAccount = () => accounts.find(account => account.email === selectedEmail) || null;
-  const isLocked = () => {
-    const account = selectedAccount();
-    if (!account) return false;
-    return isAdmin() ? account.role === 'admin' && accounts.filter(item => item.role === 'admin').length === 1 :
-      account.role !== 'student';
-  };
+  // Role and courses: Lecturers change only Students'; Students change nothing (their
+  // profile is edited separately).
+  const isLocked = () => !isAdmin() && !!selectedAccount() &&
+    (selectedAccount().role !== 'student' || S.access?.role === 'student');
+  // The only Admin keeps the role, but still chooses their own courses.
+  const isLastAdmin = () => isAdmin() && selectedAccount()?.role === 'admin' &&
+    accounts.filter(item => item.role === 'admin').length === 1;
   const canDownloadWebsite = account => canManageAccounts() && account?.role === 'lecturer' &&
     (isAdmin() || account.email === S.access?.email);
-  const canRemoveAccount = () => !!selectedAccount() && !isLocked() &&
+  const canRemoveAccount = () => !!selectedAccount() && !isLocked() && !isLastAdmin() &&
     (isAdmin() || selectedAccount().assignments.length > 0);
   const matchesQuery = (text, query) => query.trim().toLocaleLowerCase().split(/\s+/)
     .every(word => text.toLocaleLowerCase().includes(word));
-  const accountName = account => account.name || account.email;
-  const initials = account => accountName(account).split(/[\s@._-]+/).filter(Boolean)
-    .slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase();
-  const byName = (a, b) => accountName(a).localeCompare(accountName(b), undefined,
-    { sensitivity: 'base', numeric: true }) || a.email.localeCompare(b.email);
+  const accountName = account => account.display_name || account.name || account.email;
+  const byName = (a, b) => TeachingSites.compareLecturers(accountName(a), accountName(b)) || a.email.localeCompare(b.email);
 
   window.renderAccessControls = function () {
     const create = document.getElementById('new-course-btn');
     if (create) create.disabled = !['global_admin', 'admin'].includes(S.access?.role);
-    const button = document.getElementById('access-settings-btn');
+    // The profile photo and name in the top bar open Settings.
+    const button = document.getElementById('top-user');
     if (!button) return;
-    button.hidden = !canManageAccounts();
+    button.disabled = !canOpenSettings();
+    button.title = canOpenSettings() ? 'Settings' : '';
     button.setAttribute('aria-pressed', String(!!screen()));
   };
 
@@ -60,10 +65,26 @@
         const field = String(row.b || '').trim().toLowerCase();
         if (['code', 'title', 'semester', 'year'].includes(field)) map.get(key)[field] = String(row.c || '').trim();
         if (field === 'header_decoration') map.get(key).icon = String(row.c || '').trim();
+        // Lecturer entries stored with the course: only a fallback for older data.
+        if (/^professor[1-9]\d*$/.test(field) && String(row.c || '').trim()) {
+          (map.get(key).storedLecturers ||= []).push(String(row.c).trim());
+        }
       }
       if (!data || data.length < 1000) break;
     }
-    return [...map.values()].sort((a, b) => Number(a.is_archive) - Number(b.is_archive) || courseOrder(a, b));
+    await loadCourseLecturers().catch(() => { });
+    return attachLecturers([...map.values()].sort(courseOrder));
+  }
+
+  // Lecturers per course, for search and the Lecturer filter: the accounts assigned in
+  // Settings, or the course's stored entries while the assignment list is unavailable.
+  function attachLecturers(list) {
+    for (const course of list) {
+      const names = courseLecturerNames(course);
+      course.professors = COURSE_LECTURERS.size ? names
+        : [...(course.storedLecturers || [])].sort(TeachingSites.compareLecturers);
+    }
+    return list;
   }
 
   async function readAccounts() {
@@ -86,7 +107,7 @@
   }
 
   window.openAccessSettings = async function () {
-    if (!canManageAccounts()) { toast('Only Admins and Lecturers can open Settings.', 'err'); return; }
+    if (!canOpenSettings()) { toast('Settings are not available for this account.', 'err'); return; }
     if (!(await confirmLeaveIfDirty())) return;
     closeInlineEdit(true);
     S.course = null; S.isArchive = false; S.section = 'access';
@@ -97,7 +118,7 @@
     document.getElementById('main-area').innerHTML = `
       <section id="access-settings" class="access-settings" aria-labelledby="access-title">
         <div class="course-header access-header">
-          <div class="ch-title-wrap"><h2 id="access-title">Settings</h2><div class="ch-meta">${isAdmin() ? 'Accounts' : 'My account and assigning courses'}</div></div>
+          <div class="ch-title-wrap"><h2 id="access-title">Settings</h2><div class="ch-meta">${settingsSubtitle()}</div></div>
           <button type="button" class="btn-ghost btn-sm" id="access-add-account" disabled><i class="fa-solid fa-user-plus" aria-hidden="true"></i> ${isAdmin() ? 'Add account' : 'Add student'}</button>
         </div>
         <div class="settings-group access-loading"><div class="settings-body access-status" role="status">Loading accounts…</div></div>
@@ -107,9 +128,9 @@
     renderAccessControls();
     try {
       await refreshTeachingAccess();
-      if (!canManageAccounts()) throw new Error('You no longer have access to Settings.');
+      if (!canOpenSettings()) throw new Error('You no longer have access to Settings.');
       const results = await Promise.all([readAccounts(), readCourses(), checkWebsiteDatabase()]);
-      if (sequence !== viewSequence || screen() !== container || !canManageAccounts()) return;
+      if (sequence !== viewSequence || screen() !== container || !canOpenSettings()) return;
       [accounts, courses, websiteNeedsUpdate] = results;
       downloadError = null;
       selectedEmail = accounts.some(account => account.email === selectedEmail) ? selectedEmail :
@@ -127,10 +148,14 @@
     }
   };
 
+  function settingsSubtitle() {
+    return isAdmin() ? 'Accounts' : canManageAccounts() ? 'My account and assigning courses' : 'My profile';
+  }
+
   function renderSettings() {
     const container = screen();
     if (!container) return;
-    container.querySelector('.ch-meta').textContent = isAdmin() ? 'Accounts' : 'My account and assigning courses';
+    container.querySelector('.ch-meta').textContent = settingsSubtitle();
     container.querySelector('.access-loading, .access-layout')?.remove();
     container.insertAdjacentHTML('beforeend', `
       <div class="access-layout">
@@ -148,6 +173,7 @@
     const add = container.querySelector('#access-add-account');
     add.innerHTML = `<i class="fa-solid fa-user-plus" aria-hidden="true"></i> ${isAdmin() ? 'Add account' : 'Add student'}`;
     add.disabled = !!pending;
+    add.hidden = !canManageAccounts();
     add.onclick = () => chooseAccount(null);
     container.querySelector('#access-accounts').addEventListener('click', event => {
       const button = event.target.closest('[data-account-index]');
@@ -171,10 +197,10 @@
       if (!members.length) return '';
       count += members.length;
       return `<div class="access-role-group">
-        <h3 class="sidebar-label access-group-title"><i class="${group.icon}" aria-hidden="true"></i>${!isAdmin() && group.roles.includes('lecturer') ? 'My account' : group.label}<span>${members.length}</span></h3>
+        <h3 class="sidebar-label access-group-title"><i class="${group.icon}" aria-hidden="true"></i>${!isAdmin() && group.roles.includes(S.access?.role) ? 'My account' : group.label}<span>${members.length}</span></h3>
         ${members.map(account => `<button type="button" class="access-account${account.email === selectedEmail ? ' is-selected' : ''}"
           data-account-index="${accounts.indexOf(account)}" aria-pressed="${account.email === selectedEmail}">
-          <span class="access-avatar" aria-hidden="true">${x(initials(account))}</span>
+          ${userAvatar(accountName(account), account.photo, 'access-avatar')}
           <span class="access-account-text"><span class="access-account-name">${x(accountName(account))}</span>
             <span class="access-account-email">${x(account.name ? account.email : 'Not signed in yet')}</span></span>
           ${account.role === 'admin' ? '<i class="fa-solid fa-shield-halved access-owner-mark" title="Admin" aria-label="Admin"></i>' : ''}
@@ -188,51 +214,74 @@
     if (pending || email === selectedEmail) return;
     if (!(await confirmLeaveAccessSettings())) return;
     selectedEmail = email;
-    courseQuery = ''; courseFilter = 'active';
+    courseQuery = ''; courseFilter = 'active'; courseFacets = {}; professorsExpanded = false;
     renderAccountList();
     renderEditor();
     document.getElementById(email ? 'access-role' : 'access-email')?.focus();
   }
 
+  // Name and photo shown on course pages. The Google name and photo are used unless the
+  // person (or an Admin) sets a display name; a photo address only when Google has none.
+  function profileHtml(account) {
+    const editable = canEditProfile(account);
+    const shown = accountName(account);
+    return `<div class="access-profile">${userAvatar(shown, account.photo, 'access-avatar access-avatar-lg')}
+        <div class="access-profile-text"><strong>${x(shown)}</strong>
+          <span>${account.name ? `Google name: ${x(account.name)}` : 'Not signed in yet'}</span></div></div>
+      <fieldset id="access-profile-fields" class="access-profile-fields"${editable ? '' : ' disabled'}>
+        <div class="sg-grid">
+          <div class="form-group"><label class="form-label" for="access-custom-name">Display name</label>
+            <input id="access-custom-name" type="text" maxlength="120" autocomplete="off"
+              placeholder="${x(account.name || 'Name shown on course pages')}" value="${x(account.custom_name || '')}"></div>
+          ${account.google_photo ? '' : `<div class="form-group"><label class="form-label" for="access-custom-photo">Photo address</label>
+            <input id="access-custom-photo" type="url" inputmode="url" maxlength="1000" autocomplete="off" pattern="https://.+"
+              placeholder="https://…" value="${x(account.custom_photo || '')}"></div>`}
+        </div>
+        <div class="form-hint">${editable
+          ? `Shown on course pages instead of the Google name when set.${account.google_photo ? ' The photo comes from Google.' : ' The Google account has no photo, so you can link one.'}`
+          : 'Only this person or an Admin can change their name and photo.'}</div>
+      </fieldset>`;
+  }
+
   function renderEditor() {
     const editor = document.getElementById('access-editor');
     if (!editor) return;
-    const account = selectedAccount(), locked = isLocked();
+    const account = selectedAccount(), locked = isLocked(), lastAdmin = isLastAdmin();
     const roles = isAdmin() ? ['admin', 'lecturer', 'student'] : [account?.role || 'student'];
     const defaultRole = account?.role || (isAdmin() ? 'lecturer' : 'student');
     selectedCourses = new Set((account?.assignments || []).map(courseKey));
     editor.innerHTML = `<form id="access-account-form" class="access-form settings-panel">
-      ${locked ? '' : `<div class="section-topbar">
+      ${locked && !canEditProfile(account) ? '' : `<div class="section-topbar">
         <button type="submit" class="btn-sm btn-save-section" id="access-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> ${account ? 'Save' : isAdmin() ? 'Add account' : 'Add student'}</button>
         <div class="add-bar">
           <button type="button" class="btn-secondary btn-sm" id="access-discard">Discard</button>
-          ${account ? '<button type="button" id="access-remove" class="btn-red btn-sm"><i class="fa-solid fa-user-minus" aria-hidden="true"></i> Remove access</button>' : ''}
+          ${account && !lastAdmin && !locked ? '<button type="button" id="access-remove" class="btn-red btn-sm"><i class="fa-solid fa-user-minus" aria-hidden="true"></i> Remove access</button>' : ''}
         </div>
         <span id="access-unsaved" class="form-hint" hidden>Unsaved changes</span>
         <p id="access-form-status" class="access-form-status" role="status" aria-live="polite"></p>
       </div>`}
       <div class="settings-group">
         <div class="settings-head"><span>${account ? account.email === S.access?.email ? 'My account' : 'Account' : isAdmin() ? 'New account' : 'New student'}</span>
-          ${locked ? `<span>${isAdmin() ? 'Keep at least one Admin' : 'Managed by an Admin'}</span>` : ''}</div>
+          ${locked ? '<span>Managed by an Admin</span>' : lastAdmin ? '<span>Keep at least one Admin</span>' : ''}</div>
         <div class="settings-body">
-          ${account?.name ? `<div class="access-profile"><span class="access-avatar" aria-hidden="true">${x(initials(account))}</span><strong>${x(account.name)}</strong></div>` : ''}
+          ${account ? profileHtml(account) : ''}
           <fieldset id="access-account-fields"${locked ? ' disabled' : ''}>
             <div class="sg-grid">
               <div class="form-group"><label class="form-label" for="access-email">Email</label>
                 <input id="access-email" name="email" type="email" required autocomplete="off" maxlength="320"
                   placeholder="name@epoka.edu.al" value="${x(account?.email || '')}"${account ? ' readonly' : ''}></div>
               <div class="form-group"><label class="form-label" for="access-role">Role</label>
-                <select id="access-role" name="role"${!isAdmin() ? ' disabled' : ''}>${roles.map(role => `<option value="${role}"${defaultRole === role ? ' selected' : ''}>${roleLabels[role]}</option>`).join('')}
+                <select id="access-role" name="role"${!isAdmin() || lastAdmin ? ' disabled' : ''}>${roles.map(role => `<option value="${role}"${defaultRole === role ? ' selected' : ''}>${roleLabels[role]}</option>`).join('')}
                 </select></div>
             </div>
           </fieldset>
-          ${!account?.name ? '<div class="form-hint">Name appears after Google sign-in.</div>' : ''}
+          ${!account ? '<div class="form-hint">Name and photo appear after their first Google sign-in.</div>' : ''}
         </div>
       </div>
       <div class="settings-group" id="access-website-group">
         <div class="settings-head"><span>Teaching website</span></div>
         <div class="settings-body">
-          <div class="form-hint">Upload this lecturer’s file to any website folder. It shows their assigned courses.</div>
+          <div class="form-hint">Upload this file to your website. It only shows your assigned courses.</div>
           <div class="access-website-actions">
             <button type="button" class="btn-secondary btn-sm" id="access-download-loader"><i class="fa-solid fa-download" aria-hidden="true"></i> Download index.html</button>
           </div>
@@ -247,15 +296,18 @@
         <div class="settings-head"><span>Assigned courses</span><span id="access-assigned-count" class="badge category-count-badge"></span></div>
         <div class="settings-body">
           ${!isAdmin() && !locked ? '<div class="form-hint">Only your courses are shown.</div>' : ''}
-          <div id="access-all-courses" class="form-hint" hidden><i class="fa-solid fa-check" aria-hidden="true"></i> Access to all courses</div>
+          <div id="access-all-courses" class="form-hint" hidden>${account?.central_owner ?
+            'Admins can edit every course; the courses selected here are listed under My courses in the sidebar and on the main teaching page, which shows all courses while none are selected.' :
+            'Admins can edit every course; the courses selected here are listed under My courses in the sidebar.'}</div>
           <fieldset id="access-course-fields">
             <div class="access-course-tools">
               <div class="access-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                <input type="search" id="access-course-search" aria-label="Search courses by code, name, semester or year" placeholder="Search code, name, semester or year" value="${x(courseQuery)}" autocomplete="off"></div>
+                <input type="search" id="access-course-search" aria-label="Search courses by code, name, lecturer, semester or year" placeholder="Search code, name, lecturer, semester or year" value="${x(courseQuery)}" autocomplete="off"></div>
               <div class="access-course-filters" role="group" aria-label="Filter courses">
                 ${[['active', 'Active'], ['archived', 'Archived'], ['all', 'All'], ['assigned', 'Assigned']].map(([filter, label]) =>
       `<button type="button" class="btn-secondary btn-sm" data-course-filter="${filter}" aria-pressed="${filter === courseFilter}">${label}<span data-filter-count="${filter}"></span></button>`).join('')}
               </div>
+              <div id="access-course-facets" class="access-course-facets" hidden></div>
             </div>
             <div class="access-selection-tools"><span id="access-course-result-count" class="form-hint" role="status"></span>
               <div><button type="button" class="btn-secondary btn-sm" id="access-select-shown">Select shown</button>
@@ -270,6 +322,7 @@
     form.addEventListener('submit', event => { event.preventDefault(); saveAccessAccount(); });
     editor.querySelector('#access-role').addEventListener('change', updateRoleFields);
     editor.querySelector('#access-email').addEventListener('input', updateDirtyIndicator);
+    editor.querySelector('#access-profile-fields')?.addEventListener('input', updateDirtyIndicator);
     editor.querySelector('#access-download-loader')?.addEventListener('click', downloadLoader);
     editor.querySelector('#access-remove')?.addEventListener('click', removeAccount);
     editor.querySelector('#access-discard')?.addEventListener('click', renderEditor);
@@ -280,6 +333,14 @@
     editor.querySelectorAll('[data-course-filter]').forEach(button => button.addEventListener('click', () => {
       courseFilter = button.dataset.courseFilter; renderCourses();
     }));
+    editor.querySelector('#access-course-facets').addEventListener('click', event => {
+      if (event.target.closest('[data-facet-more]')) { professorsExpanded = true; renderFacets(); return; }
+      const pill = event.target.closest('[data-facet]');
+      if (!pill) return;
+      const { facet, value } = pill.dataset;
+      courseFacets[facet] = courseFacets[facet] === value ? null : value;
+      renderCourses();
+    });
     editor.querySelector('#access-select-shown').addEventListener('click', () => selectShown(true));
     editor.querySelector('#access-clear-shown').addEventListener('click', () => selectShown(false));
     editor.querySelector('#access-course-choices').addEventListener('change', event => {
@@ -295,13 +356,83 @@
     updateRoleFields();
   }
 
-  function visibleCourses() {
+  // Semester, academic year and professor pills. Keys are normalised so that
+  // "Fall Semester" and "Fall", "2024-2025" and "2024–2025", or "Prof. Dr. A B"
+  // and "A B" group together.
+  const FACETS = [
+    { id: 'semester', label: 'Semester' },
+    { id: 'year', label: 'Academic year' },
+    { id: 'professor', label: 'Lecturer' }
+  ];
+  const PROFESSOR_PILLS = 6;
+  const SEMESTER_ORDER = ['Summer', 'Spring', 'Fall'];
+  const courseTerm = course => [semesterName(course), yearName(course)].filter(Boolean).join(' ');
+  function semesterName(course) {
+    const value = String(course.semester || '').trim();
+    const match = value.match(/\b(Fall|Spring|Summer)\b/i);
+    return match ? match[1][0].toUpperCase() + match[1].slice(1).toLowerCase() : value;
+  }
+  function yearName(course) {
+    const value = String(course.year || '').trim();
+    const years = value.match(/(\d{4})\D*(\d{4})?/);
+    return years ? (years[2] ? `${years[1]}–${years[2]}` : years[1]) : value;
+  }
+  function facetValues(course, facet) {
+    if (facet === 'semester') return semesterName(course) ? [{ key: semesterName(course), label: semesterName(course) }] : [];
+    if (facet === 'year') return yearName(course) ? [{ key: yearName(course), label: yearName(course) }] : [];
+    return (course.professors || []).map(name => {
+      const label = stripTitles(name).replace(/\s+/g, ' ');
+      return { key: label.toLocaleLowerCase(), label, full: name };
+    }).filter(value => value.key);
+  }
+
+  // `except` leaves one pill group out, so its own counts show what choosing
+  // another of its values would give.
+  function visibleCourses(except = null) {
     return courses.filter(course => {
       if (courseFilter === 'active' && course.is_archive) return false;
       if (courseFilter === 'archived' && !course.is_archive) return false;
       if (courseFilter === 'assigned' && !selectedCourses.has(courseKey(course))) return false;
-      return matchesQuery([course.code, course.title, course.sheet_name, course.semester, course.year].filter(Boolean).join(' '), courseQuery);
+      if (FACETS.some(({ id }) => id !== except && courseFacets[id] &&
+        !facetValues(course, id).some(value => value.key === courseFacets[id]))) return false;
+      return matchesQuery([course.code, course.title, course.sheet_name, course.semester, course.year,
+      ...(course.professors || [])].filter(Boolean).join(' '), courseQuery);
     });
+  }
+
+  // A group appears only when it can narrow the list (two or more values), or
+  // while one of its pills is chosen so it can be cleared.
+  function renderFacets() {
+    const container = document.getElementById('access-course-facets');
+    if (!container) return;
+    container.innerHTML = FACETS.map(({ id, label }) => {
+      const counts = new Map();
+      for (const course of visibleCourses(id)) {
+        for (const value of new Map(facetValues(course, id).map(v => [v.key, v])).values()) {
+          const entry = counts.get(value.key) || { ...value, count: 0 };
+          entry.count++; counts.set(value.key, entry);
+        }
+      }
+      if (courseFacets[id] && !counts.has(courseFacets[id])) {
+        counts.set(courseFacets[id], { key: courseFacets[id], label: courseFacets[id], count: 0 });
+      }
+      if (counts.size < 2 && !courseFacets[id]) return '';
+      // Same order as the course list: newest year, Summer → Spring → Fall;
+      // lecturers A–Z by name without titles.
+      let values = [...counts.values()].sort(id === 'year' ? (a, b) => yearStart(b.key) - yearStart(a.key) || a.key.localeCompare(b.key) :
+        id === 'semester' ? (a, b) => (SEMESTER_ORDER.indexOf(a.key) + 1 || 9) - (SEMESTER_ORDER.indexOf(b.key) + 1 || 9) || a.key.localeCompare(b.key) :
+          (a, b) => TeachingSites.compareLecturers(a.full || a.label, b.full || b.label));
+      let more = '';
+      if (id === 'professor' && !professorsExpanded && values.length > PROFESSOR_PILLS + 1) {
+        const hidden = values.length - PROFESSOR_PILLS;
+        values = values.filter((value, index) => index < PROFESSOR_PILLS || value.key === courseFacets[id]);
+        more = `<button type="button" class="access-facet-more" data-facet-more>+${hidden} more</button>`;
+      }
+      return `<div class="access-facet" role="group" aria-label="${label}"><span class="access-facet-label">${label}</span>
+        ${values.map(value => `<button type="button" data-facet="${id}" data-value="${x(value.key)}"
+          aria-pressed="${value.key === courseFacets[id]}">${x(value.label)}<span>${value.count}</span></button>`).join('')}${more}</div>`;
+    }).join('');
+    container.hidden = !container.innerHTML.trim();
   }
 
   function renderCourses() {
@@ -311,14 +442,16 @@
     list.innerHTML = visible.map(course => {
       const code = course.code || course.sheet_name;
       const title = course.title && course.title !== code ? course.title : '';
-      const term = [course.semester, course.year].filter(Boolean).join(' ');
+      const term = courseTerm(course);
+      const professors = (course.professors || []).join(', ');
       const selected = selectedCourses.has(courseKey(course));
+      // Code and name on one line; the term, which tells offerings apart, as a bold tag.
       return `<label class="access-course-option${selected ? ' is-selected' : ''}">
         <input type="checkbox" name="course" data-course-index="${courses.indexOf(course)}"${selected ? ' checked' : ''}${pending || isLocked() ? ' disabled' : ''}>
-        <i class="${x(course.icon || 'fa-solid fa-graduation-cap')} cb-icon" aria-hidden="true"></i>
-        <span class="cb-text"><span class="cb-code">${x(code)}</span>${title ? `<span class="cb-name">${x(title)}</span>` : ''}
-          ${term ? `<span class="cb-sub">${x(term)}</span>` : ''}</span>
-        ${course.is_archive ? '<span class="access-course-state"><i class="fa-solid fa-box-archive" aria-hidden="true"></i><span>Archived</span></span>' : ''}
+        <span class="access-course-text"><span class="access-course-title"><strong>${x(code)}</strong>${title ? ` ${x(title)}` : ''}</span>
+          ${professors ? `<span class="access-course-professors">${x(professors)}</span>` : ''}</span>
+        <span class="access-course-meta">${term ? `<span class="access-course-term">${x(term)}</span>` : ''}
+          ${course.is_archive ? '<span class="access-course-state">Archived</span>' : ''}</span>
       </label>`;
     }).join('');
     document.getElementById('access-course-empty').hidden = visible.length > 0;
@@ -329,12 +462,12 @@
       const active = button.dataset.courseFilter === courseFilter;
       button.setAttribute('aria-pressed', String(active)); button.classList.toggle('active', active);
     });
+    renderFacets();
     updateCourseCounts();
   }
 
   function updateCourseCounts() {
-    const unrestricted = ['admin', 'global_admin'].includes(document.getElementById('access-role')?.value);
-    document.getElementById('access-assigned-count').textContent = unrestricted ? 'All' : String(selectedCourses.size);
+    document.getElementById('access-assigned-count').textContent = String(selectedCourses.size);
     const counts = {
       active: courses.filter(course => !course.is_archive).length,
       archived: courses.filter(course => course.is_archive).length, all: courses.length, assigned: selectedCourses.size
@@ -357,10 +490,8 @@
   function updateRoleFields() {
     const role = document.getElementById('access-role')?.value;
     if (!role) return;
-    const unrestricted = ['admin', 'global_admin'].includes(role);
-    const fields = document.getElementById('access-course-fields');
-    fields.hidden = unrestricted; fields.disabled = unrestricted || !!pending;
-    document.getElementById('access-all-courses').hidden = !unrestricted;
+    document.getElementById('access-course-fields').disabled = !!pending;
+    document.getElementById('access-all-courses').hidden = !['admin', 'global_admin'].includes(role);
     document.getElementById('access-website-group').hidden = role !== 'lecturer';
     renderCourses(); updateDirtyIndicator();
   }
@@ -371,14 +502,18 @@
     const role = form.querySelector('#access-role').value;
     return {
       email: form.querySelector('#access-email').value.trim().toLowerCase(), role,
-      assignments: ['admin', 'global_admin'].includes(role) ? [] : [...selectedCourses].sort().map(key => {
+      custom_name: form.querySelector('#access-custom-name')?.value.trim() ?? null,
+      custom_photo: form.querySelector('#access-custom-photo')?.value.trim() ?? null,
+      // For Admins these are their own list of courses, not an access limit.
+      assignments: [...selectedCourses].sort().map(key => {
         const [sheet_name, is_archive] = JSON.parse(key); return { sheet_name, is_archive };
       })
     };
   }
 
   function formFingerprint() { return JSON.stringify(formValues()); }
-  window.accessSettingsDirty = () => !!screen() && !!baseline && !isLocked() && baseline !== formFingerprint();
+  window.accessSettingsDirty = () => !!screen() && !!baseline &&
+    (!isLocked() || canEditProfile(selectedAccount())) && baseline !== formFingerprint();
   function updateDirtyIndicator() {
     const dirty = accessSettingsDirty();
     const indicator = document.getElementById('access-unsaved');
@@ -404,7 +539,7 @@
     const status = document.getElementById('access-download-status');
     status.textContent = websiteNeedsUpdate ? 'Website downloads need a database update.' :
       !savedLecturer ? 'Save this lecturer account first.' : downloadPending ? 'Preparing this lecturer’s file…' :
-        error || 'Upload once. Course changes update automatically.';
+        error || '';
     status.classList.toggle('is-error', websiteNeedsUpdate || !!error);
     status.setAttribute('role', websiteNeedsUpdate || error ? 'alert' : 'status');
     document.getElementById('access-website-upgrade').hidden = !websiteNeedsUpdate;
@@ -426,6 +561,8 @@
     screen().querySelectorAll('button').forEach(button => { button.disabled = value; });
     document.getElementById('access-account-search').disabled = value;
     document.getElementById('access-account-fields').disabled = value || isLocked();
+    const profile = document.getElementById('access-profile-fields');
+    if (profile) profile.disabled = value || !canEditProfile(selectedAccount());
     const save = document.getElementById('access-save');
     if (save) save.innerHTML = value ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Saving…' :
       '<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> ' + (selectedAccount() ? 'Save' : isAdmin() ? 'Add account' : 'Add student');
@@ -442,7 +579,8 @@
 
   window.saveAccessAccount = async function () {
     if (pending) return await pending;
-    if (!canManageAccounts() || isLocked()) return false;
+    const profileOnly = isLocked();
+    if (profileOnly ? !canEditProfile(selectedAccount()) : !canManageAccounts()) return false;
     const form = document.getElementById('access-account-form');
     if (!form || !form.reportValidity()) return false;
     const values = formValues();
@@ -452,25 +590,47 @@
       formStatus('This account already exists. Select it from the list.', true); return false;
     }
     const previous = selectedAccount();
+    const profileChanged = !!previous && canEditProfile(previous) && values.custom_name !== null &&
+      (values.custom_name !== (previous.custom_name || '') ||
+        (values.custom_photo !== null && values.custom_photo !== (previous.custom_photo || '')));
     if (!isAdmin() && !previous && !values.assignments.length) {
       formStatus('Select at least one of your courses.', true); return false;
     }
     formStatus('', false);
     pending = (async () => {
       try {
-        const { error } = await sb.rpc('teaching_set_account', {
-          p_email: values.email, p_role: values.role, p_assignments: values.assignments,
-          p_name: ''
-        });
-        if (error) throw error;
+        if (!profileOnly) {
+          const { error } = await sb.rpc('teaching_set_account', {
+            p_email: values.email, p_role: values.role, p_assignments: values.assignments,
+            p_name: ''
+          });
+          if (error) throw error;
+        }
+        if (profileChanged) {
+          const { error } = await sb.rpc('teaching_set_profile', {
+            p_email: values.email, p_custom_name: values.custom_name,
+            p_custom_photo: values.custom_photo ?? previous.custom_photo ?? ''
+          });
+          if (error) throw error;
+        }
         baseline = formFingerprint(); selectedEmail = values.email;
         if (values.email === S.access?.email && values.role !== (isAdmin() ? 'admin' : S.access?.role)) {
           baseline = ''; window.location.reload(); return true;
         }
+        // Your own course list drives "My courses"; your profile, the top bar.
+        if (values.email === S.access?.email) {
+          try { await refreshTeachingAccess(); renderTopUser(); } catch { /* Shown after reload. */ }
+        }
+        // Names and course assignments feed the lecturer lists everywhere.
+        try {
+          await loadCourseLecturers(); attachLecturers(courses); renderSidebar();
+          if (S.course) fillCourseHeader(S.course, S.isArchive);
+        } catch { /* Refreshed on the next load. */ }
         accounts = accounts.filter(account => account.email !== values.email);
         const site = values.role === 'lecturer' ? previous?.site :
           previous?.site ? { ...previous.site, hostname: null, base_path: null } : null;
-        accounts.push({ ...values, site, name: previous?.name || '' });
+        accounts.push({ ...previous, ...values, site, name: previous?.name || '', central_owner: !!previous?.central_owner, photo: previous?.photo,
+          custom_name: values.custom_name ?? previous?.custom_name ?? '', custom_photo: values.custom_photo ?? previous?.custom_photo ?? '' });
         accounts.sort(byName);
         // Reload Google names and the database-filtered student list.
         try { accounts = await readAccounts(); } catch { /* Keep the successful save visible. */ }
@@ -529,7 +689,7 @@
         } else {
           account.assignments = [];
         }
-        baseline = ''; courseQuery = ''; courseFilter = 'active';
+        baseline = ''; courseQuery = ''; courseFilter = 'active'; courseFacets = {}; professorsExpanded = false;
         if (screen()) renderSettings();
         toast('Access removed', 'ok'); return true;
       } catch (error) {

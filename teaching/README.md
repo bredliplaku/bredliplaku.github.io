@@ -11,23 +11,25 @@ their own websites through an uploaded `index.html` file.
 
 ### Add someone
 
-Open `/teaching/admin/`, sign in with Google, then open **Settings** beside your name.
+Open `/teaching/admin/`, sign in with Google, then select your photo and name in the top bar to open **Settings**.
 
 1. Choose **Add account** and enter the person's Google sign-in email.
 2. Select their role: **Admin**, **Lecturer** or **Student**.
-3. For a Lecturer or Student, select the courses they can work on.
+3. Select their courses. For a Lecturer or Student, these are the courses they
+   can work on. An Admin can edit every course; their selection is a personal
+   list (see [My courses](#my-courses-and-the-main-teaching-page)).
 4. Save. They can now sign in using that Google account.
 
 **Names come from Google.** You can add someone before their first sign-in;
-their email is shown until their Google name is available. There is no separate
-display-name field, and adding an account does not send an invitation email.
+their email is shown until their Google name is available. Adding an account does
+not send an invitation email. See [Profiles](#profiles) for display names and photos.
 
 ### What each role can do
 
 | Role | Courses | Editable content | Course actions |
 |---|---|---|---|
 | **Admin** | All, including future courses | Everything | Create, archive, restore, delete |
-| **Lecturer** | Assigned courses | Everything except Course Identity, Dates and other lecturers' profile entries | Archive |
+| **Lecturer** | Assigned courses | Everything except Course Identity and Dates | Archive |
 | **Student** | Assigned courses | Modules, Projects and Announcements | None |
 
 Students can read the other tabs. Restricted controls are disabled, and Supabase
@@ -38,7 +40,7 @@ checks permissions on every write, including requests made outside the editor.
 - **Admins** manage all accounts, roles and assignments. At least one Admin must remain.
 - **Lecturers** see their own profile and all active Students. They can select an
   existing Student or use **Add student**, then assign only their own courses.
-- **Students** have no Settings access.
+- **Students** see only their own account, to edit their [profile](#profiles).
 
 > **Removing a student's access as a Lecturer** removes only the assignments
 > for that lecturer's courses. The student stays listed and keeps access granted
@@ -48,29 +50,69 @@ checks permissions on every write, including requests made outside the editor.
 
 Select the person in Settings, check or uncheck their courses, then save.
 Use the search and **Active**, **Archived**, **All** or **Assigned** filters to
-find the right course and semester.
+find the right course and semester. The search matches the course code, name,
+semester, year and the [lecturers](#lecturers-on-course-pages) assigned to it.
+The sidebar has the same search.
 
 Active and archived offerings have separate assignments. Archiving or restoring
 a course moves its assignments with it. After an access change, reload an open
 editor to refresh the controls; the database already uses the new permissions.
 
-### Matching a lecturer to their course profile
+### My courses and the main teaching page
 
-**Lecturer** is the account role. **Professors** is the section in the course
-editor where lecturer profiles are listed.
+Admins can select courses too. Selecting them does not restrict what an Admin
+can edit:
 
-The name in a profile entry must match the lecturer's **first recorded Google
-name**. Matching ignores case, common titles such as `Prof.` and `Dr.`, and extra
-spaces. The lecturer must have signed in for their name to be available.
+- **Sidebar:** an Admin with selected courses sees them under **My courses**.
+  **All courses** lists every course again. The choice is remembered in that browser.
+- **New courses:** the [New Course](#new-courses) dialog ticks you as a lecturer
+  when you keep a course list, so the course joins it. Untick to leave it out.
+- **Main teaching page:** `/teaching/` lists the courses selected for the
+  account set as `teaching.admin_email` at the top of [roles.sql](supabase/roles.sql),
+  in the same way a lecturer's website lists their assigned courses. Settings
+  marks that account. While it has no courses selected, the page lists every course.
 
-Once matched, they can edit that entry's name, photo and link. They cannot add
-or remove profile entries or edit another lecturer's entry. Changing their
-Google profile name does not give them ownership of a different entry.
+The main page only opens courses in that list. Links to other courses on
+`/teaching/#…` stop working; share those from the lecturer's own website instead.
 
-If it stays locked, an Admin should check the name and assignment, resolve any
-duplicate matching names, and ask the lecturer to reload. If an Admin changes
-the name in that entry, the match resets; use the lecturer's first recorded
-Google name to establish it again.
+### Profiles
+
+Select your photo and name in the top bar, then your account in Settings.
+
+- **Display name:** shown on course pages instead of the Google name. Leave it
+  empty to use the Google name.
+- **Photo:** the Google photo. If the Google account has none, a **Photo
+  address** (`https://…`) can be set instead.
+
+Everyone can edit their own profile, and Admins can edit anyone's. A Lecturer
+cannot edit a Student's name or photo. An account with no name to show is left
+off course pages; its email is never shown there.
+
+### Lecturers on course pages
+
+A course's lecturers are the **Lecturer** and **Admin** accounts assigned to it
+in Settings. The course header shows their display names and photos, on the
+main page, lecturer websites and in the editor. Names are not links. The Info
+tab lists them read-only; change them in Settings.
+
+Lecturers are listed by title everywhere: Prof. (Dr.), Assoc. Prof. (Dr.), Dr. or
+PhD, then Mr/Ms/Mrs/MSc/MA/PM, then BA/BSc, and names without a title last; A–Z by
+name within each. Titles count at the start of the name or after a comma.
+
+Lecturer entries saved in older versions of the Info tab are kept, and are shown
+only for a course nobody is assigned to yet.
+
+### New courses
+
+**New Course** in the sidebar asks for the Course Identity and the lecturers.
+Code, title, academic year and semester are required. The course's link is made
+from its code, e.g. `CE 101` → `CE_101` and `SWE / CE 101` → `SWE_CE_101`; an
+active course already using that link must be archived first. New courses start
+as Active.
+
+**Order everywhere:** newest academic year first, then Summer → Spring → Fall,
+then course number (`CE 123`, `ARCH 203`, `CE 345`). Cross-listed codes such as
+`SWE / CE 101` follow, A–Z.
 
 ## Lecturer websites
 
@@ -232,8 +274,8 @@ so existing uploads continue to work.
 |---|---|
 | Sign-in returns to the central website | The exact lecturer admin URL is in Supabase's Redirect URLs, including `www` if used. |
 | Website download is unavailable | Save the account as Lecturer. If Settings asks for a database update, run the current `roles.sql`. |
-| A course is missing | Check its assignment and whether it is archived. |
-| A lecturer's profile entry stays locked | Check the name match and duplicates under [course profiles](#matching-a-lecturer-to-their-course-profile). |
+| A course is missing | Check its assignment and whether it is archived. On `/teaching/`, check the main page owner's courses. |
+| A lecturer is missing from a course page | Check their assignment, and that they have a name to show (see [Profiles](#profiles)). |
 | A renamed script or stylesheet fails to load | Publish the referencing HTML and the renamed file together, then reload. |
 
 ---
