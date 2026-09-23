@@ -19,13 +19,15 @@
 
 | Page | Purpose |
 |---|---|
-| [**Home**](index.html) | Personal links and access to the site's tools |
+| [**Home**](https://bredliplaku.com/) | Personal links and access to the site's tools |
 | [**Syllabase**](teaching/) | Course materials, editing, account permissions and lecturer websites |
 | [**Timetable**](timetable/) | Class and lecturer schedules, with a separate editor |
 | [**Stando**](https://bredliplaku.com/attendance/) | Smart Attendance replaces paper-based attendance with NFC |
 | [**Exam portal**](exam_form/) | Exam access and administration |
 | [**Glyph**](exam_stamp/) | Adds student names to exam PDFs and downloads the copies as a ZIP |
 | [**Projects**](projects/) | Projects and userscripts |
+
+Stando is maintained in a [separate repository](https://github.com/bredliplaku/attendance).
 
 The site is hosted on **GitHub Pages** and uses HTML, CSS and JavaScript directly.
 **Supabase** stores teaching and timetable data and handles Google sign-in.

@@ -99,8 +99,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
   <title>Syllabase</title>
+  <!-- Replace /favicon.ico with the path to your website's own favicon. -->
   <link rel="icon" href="/favicon.ico">
+  <!-- Keep the initial background in sync with the course page before it loads. -->
+  <style id="teaching-startup-theme">
+    html { color-scheme: light; background: var(--teaching-start-light, #fff); color: #333; }
+    html[data-theme="dark"] { color-scheme: dark; background: #000; color: #e0e0e0; }
+    @media (prefers-color-scheme: dark) {
+      html:not([data-theme="light"]) { color-scheme: dark; background: #000; color: #e0e0e0; }
+    }
+    body { margin: 0; background: inherit; }
+  </style>
+  <script>
+    (function () {
+      let theme = 'auto';
+      try { theme = localStorage.getItem('theme-preference') || 'auto'; } catch { }
+      if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+      const light = new URLSearchParams(location.search).has('admin') ? '#f4f4f4' : '#ffffff';
+      document.documentElement.style.setProperty('--teaching-start-light', light);
+      const dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : light;
+    })();
+  </script>
   ${loaderScript(false, lecturerId)}
 </head>
 <body>

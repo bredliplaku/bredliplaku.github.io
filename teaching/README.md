@@ -81,7 +81,7 @@ GitHub or a separate Supabase project.
 ### 1. Download and upload
 
 1. In Settings, save the Lecturer account and its course assignments.
-2. Select that account and choose **Download website file**. Lecturers can
+2. Select that account and choose **Download index.html**. Lecturers can
    download their own file too.
 3. Upload it as `index.html` to the desired website folder.
 4. Open that folder's address. It should show the lecturer's assigned courses.
@@ -135,6 +135,10 @@ Pasting file links works without it.
 
 The file loads the current application and course data. It contains a public
 lecturer ID, not a password.
+
+The initial theme styles and favicon link live in the downloaded HTML itself.
+To update those in an existing upload, download and replace its `index.html` once.
+The favicon comment shows where to set the website's own icon; the loader keeps it.
 
 | Change | What happens |
 |---|---|

@@ -70,8 +70,10 @@
     const { data, error } = await sb.rpc('teaching_list_accounts');
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('Could not load accounts.');
-    return data.map(account => ({ ...account, role: account.role === 'global_admin' ? 'admin' : account.role,
-      assignments: Array.isArray(account.assignments) ? account.assignments : [] })).sort(byName);
+    return data.map(account => ({
+      ...account, role: account.role === 'global_admin' ? 'admin' : account.role,
+      assignments: Array.isArray(account.assignments) ? account.assignments : []
+    })).sort(byName);
   }
 
   const needsDatabaseUpdate = error => ['PGRST202', '42883', '42703', '42P01'].includes(error?.code);
@@ -95,7 +97,7 @@
     document.getElementById('main-area').innerHTML = `
       <section id="access-settings" class="access-settings" aria-labelledby="access-title">
         <div class="course-header access-header">
-          <div class="ch-title-wrap"><h2 id="access-title">Settings</h2><div class="ch-meta">${isAdmin() ? 'Accounts' : 'My account and students'}</div></div>
+          <div class="ch-title-wrap"><h2 id="access-title">Settings</h2><div class="ch-meta">${isAdmin() ? 'Accounts' : 'My account and assigning courses'}</div></div>
           <button type="button" class="btn-ghost btn-sm" id="access-add-account" disabled><i class="fa-solid fa-user-plus" aria-hidden="true"></i> ${isAdmin() ? 'Add account' : 'Add student'}</button>
         </div>
         <div class="settings-group access-loading"><div class="settings-body access-status" role="status">Loading accounts…</div></div>
@@ -128,7 +130,7 @@
   function renderSettings() {
     const container = screen();
     if (!container) return;
-    container.querySelector('.ch-meta').textContent = isAdmin() ? 'Accounts' : 'My account and students';
+    container.querySelector('.ch-meta').textContent = isAdmin() ? 'Accounts' : 'My account and assigning courses';
     container.querySelector('.access-loading, .access-layout')?.remove();
     container.insertAdjacentHTML('beforeend', `
       <div class="access-layout">
@@ -220,8 +222,7 @@
                 <input id="access-email" name="email" type="email" required autocomplete="off" maxlength="320"
                   placeholder="name@epoka.edu.al" value="${x(account?.email || '')}"${account ? ' readonly' : ''}></div>
               <div class="form-group"><label class="form-label" for="access-role">Role</label>
-                <select id="access-role" name="role"${!isAdmin() ? ' disabled' : ''}>${
-                  roles.map(role => `<option value="${role}"${defaultRole === role ? ' selected' : ''}>${roleLabels[role]}</option>`).join('')}
+                <select id="access-role" name="role"${!isAdmin() ? ' disabled' : ''}>${roles.map(role => `<option value="${role}"${defaultRole === role ? ' selected' : ''}>${roleLabels[role]}</option>`).join('')}
                 </select></div>
             </div>
           </fieldset>
@@ -233,7 +234,7 @@
         <div class="settings-body">
           <div class="form-hint">Upload this lecturer’s file to any website folder. It shows their assigned courses.</div>
           <div class="access-website-actions">
-            <button type="button" class="btn-secondary btn-sm" id="access-download-loader"><i class="fa-solid fa-download" aria-hidden="true"></i> Download website file</button>
+            <button type="button" class="btn-secondary btn-sm" id="access-download-loader"><i class="fa-solid fa-download" aria-hidden="true"></i> Download index.html</button>
           </div>
           <p id="access-download-status" class="form-hint" role="status" aria-live="polite"></p>
           <div id="access-website-upgrade" class="access-website-upgrade" hidden>
@@ -253,7 +254,7 @@
                 <input type="search" id="access-course-search" aria-label="Search courses by code, name, semester or year" placeholder="Search code, name, semester or year" value="${x(courseQuery)}" autocomplete="off"></div>
               <div class="access-course-filters" role="group" aria-label="Filter courses">
                 ${[['active', 'Active'], ['archived', 'Archived'], ['all', 'All'], ['assigned', 'Assigned']].map(([filter, label]) =>
-                  `<button type="button" class="btn-secondary btn-sm" data-course-filter="${filter}" aria-pressed="${filter === courseFilter}">${label}<span data-filter-count="${filter}"></span></button>`).join('')}
+      `<button type="button" class="btn-secondary btn-sm" data-course-filter="${filter}" aria-pressed="${filter === courseFilter}">${label}<span data-filter-count="${filter}"></span></button>`).join('')}
               </div>
             </div>
             <div class="access-selection-tools"><span id="access-course-result-count" class="form-hint" role="status"></span>
@@ -334,8 +335,10 @@
   function updateCourseCounts() {
     const unrestricted = ['admin', 'global_admin'].includes(document.getElementById('access-role')?.value);
     document.getElementById('access-assigned-count').textContent = unrestricted ? 'All' : String(selectedCourses.size);
-    const counts = { active: courses.filter(course => !course.is_archive).length,
-      archived: courses.filter(course => course.is_archive).length, all: courses.length, assigned: selectedCourses.size };
+    const counts = {
+      active: courses.filter(course => !course.is_archive).length,
+      archived: courses.filter(course => course.is_archive).length, all: courses.length, assigned: selectedCourses.size
+    };
     screen().querySelectorAll('[data-filter-count]').forEach(label => { label.textContent = String(counts[label.dataset.filterCount]); });
     const visible = visibleCourses();
     document.getElementById('access-select-shown').parentElement.hidden = isLocked();
@@ -366,10 +369,12 @@
     const form = document.getElementById('access-account-form');
     if (!form) return null;
     const role = form.querySelector('#access-role').value;
-    return { email: form.querySelector('#access-email').value.trim().toLowerCase(), role,
+    return {
+      email: form.querySelector('#access-email').value.trim().toLowerCase(), role,
       assignments: ['admin', 'global_admin'].includes(role) ? [] : [...selectedCourses].sort().map(key => {
         const [sheet_name, is_archive] = JSON.parse(key); return { sheet_name, is_archive };
-      }) };
+      })
+    };
   }
 
   function formFingerprint() { return JSON.stringify(formValues()); }
@@ -394,7 +399,7 @@
     const isLecturer = document.getElementById('access-role')?.value === 'lecturer';
     button.disabled = !!pending || downloadPending || !canDownloadWebsite(selectedAccount()) || !isLecturer;
     button.innerHTML = downloadPending ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Preparing file…' :
-      '<i class="fa-solid fa-download" aria-hidden="true"></i> Download website file';
+      '<i class="fa-solid fa-download" aria-hidden="true"></i> Download index.html';
     const error = downloadError?.email === selectedEmail ? downloadError.message : '';
     const status = document.getElementById('access-download-status');
     status.textContent = websiteNeedsUpdate ? 'Website downloads need a database update.' :

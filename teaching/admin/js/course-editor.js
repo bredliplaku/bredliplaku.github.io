@@ -3103,7 +3103,11 @@ function clearMain() {
 function setupThemeToggle() {
   const KEY = 'theme-preference';
   const icons = { auto: 'fa-solid fa-adjust', light: 'fa-regular fa-sun', dark: 'fa-regular fa-moon' };
-  const getSaved = () => localStorage.getItem(KEY) || 'auto';
+  const getSaved = () => {
+    let pref = document.documentElement.dataset.theme || 'auto';
+    try { pref = localStorage.getItem(KEY) || 'auto'; } catch { }
+    return ['light', 'dark'].includes(pref) ? pref : 'auto';
+  };
   const currentIsDark = () => {
     const forced = document.documentElement.getAttribute('data-theme');
     if (forced) return forced === 'dark';
@@ -3133,7 +3137,7 @@ function setupThemeToggle() {
     const html = document.documentElement;
     if (pref === 'auto') html.removeAttribute('data-theme');
     else html.setAttribute('data-theme', pref);
-    localStorage.setItem(KEY, pref);
+    try { localStorage.setItem(KEY, pref); } catch { }
     updateUI(pref);
     updateThemeColorMeta();
   };

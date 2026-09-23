@@ -27,7 +27,7 @@ window.TEACHING_CONFIG = {
         email: 'bplaku@epoka.edu.al',
         cvUrl: 'https://eis.epoka.edu.al/cv/fullcv/655',
         homeUrl: '/',              // where the footer "home" icon points
-        faviconUrl: '/favicon.png', // browser-tab icon
+        faviconUrl: '/favicon/favicon-96x96.png?v=20260923', // Keep in sync with the PNG link in the HTML; lecturer pages use their own icons.
         startYear: 2023,           // first year of the copyright range
     },
 
