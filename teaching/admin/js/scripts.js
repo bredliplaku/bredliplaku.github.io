@@ -1,6 +1,11 @@
 const SUPABASE_URL = window.TEACHING_CONFIG.supabaseUrl;
 const SUPABASE_ANON_KEY = window.TEACHING_CONFIG.supabaseAnonKey;
 const { createClient } = supabase;
+const EMBEDDED_ADMIN_SITE = window.TEACHING_EMBEDDED_ADMIN ? window.TEACHING_SITE : null;
+const ADMIN_RETURN_URL = EMBEDDED_ADMIN_SITE ? TeachingSites.adminUrl(EMBEDDED_ADMIN_SITE) :
+  window.location.origin + window.location.pathname;
+const AUTH_STORAGE_KEY = `sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}${
+  EMBEDDED_ADMIN_SITE ? '-teaching-' + EMBEDDED_ADMIN_SITE.id : ''}-auth-token`;
 // Synchronously pre-clear only genuinely unusable session blobs BEFORE createClient
 // (corrupt JSON, or missing the refresh_token needed to revive the session). An expired
 // access_token alone is normal — that's what the refresh_token is for — so it must NOT
@@ -8,19 +13,15 @@ const { createClient } = supabase;
 // visit once the (short-lived) access_token naturally expires.
 (function () {
   try {
-    for (const k of Object.keys(localStorage)) {
-      if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
-        try {
-          const d = JSON.parse(localStorage.getItem(k));
-          if (!d?.access_token || !d?.refresh_token)
-            localStorage.removeItem(k);
-        } catch { localStorage.removeItem(k); }
-      }
-    }
-  } catch { }
+    const d = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY));
+    if (!d?.access_token || !d?.refresh_token) localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {
+    try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch { }
+  }
 })();
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { flowType: 'implicit', detectSessionInUrl: true, persistSession: true }
+  auth: { flowType: EMBEDDED_ADMIN_SITE ? 'pkce' : 'implicit', storageKey: AUTH_STORAGE_KEY,
+    detectSessionInUrl: true, persistSession: true }
 });
 
 const S = { course: null, isArchive: false, section: 'info', admin: null, access: null };
@@ -372,12 +373,8 @@ const SECTION_ROW_BASE = { modules: 100000, projects: 200000, announce: 300000, 
 // must NOT flash the login screen, since onAuthStateChange corrects it a moment later.
 function hasStoredSession() {
   try {
-    for (const k of Object.keys(localStorage)) {
-      if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
-        const d = JSON.parse(localStorage.getItem(k));
-        if (d?.access_token && d?.refresh_token) return true;
-      }
-    }
+    const d = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY));
+    return !!(d?.access_token && d?.refresh_token);
   } catch { }
   return false;
 }
@@ -416,7 +413,8 @@ function estimateAuthTimeoutMs() {
   }, estimateAuthTimeoutMs());
 
   try {
-    const { data: { session } } = await sb.auth.getSession();
+    const { data: { session }, error } = await sb.auth.getSession();
+    if (error) throw error;
     if (session && !_sessionHandled) {
       clearTimeout(timeoutId);
       _sessionHandled = true;
@@ -455,11 +453,15 @@ async function signIn() {
   const btn = document.getElementById('signin-btn');
   const origHTML = btn.innerHTML;
   btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:8px"></i>Signing in...';
-  const { error } = await sb.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.origin + window.location.pathname }
-  });
-  if (error) { toast('Sign-in failed: ' + error.message, 'err'); btn.disabled = false; btn.innerHTML = origHTML; }
+  try {
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: ADMIN_RETURN_URL }
+    });
+    if (error) throw error;
+  } catch (error) {
+    toast('Sign-in failed: ' + error.message, 'err'); btn.disabled = false; btn.innerHTML = origHTML;
+  }
 }
 
 async function signOut(force = false) {
@@ -474,7 +476,7 @@ async function signOut(force = false) {
   closeInlineEdit(true);
   clearMain();
   renderAccessControls();
-  window.history.replaceState(null, '', window.location.pathname);
+  window.history.replaceState(null, '', ADMIN_RETURN_URL);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -498,6 +500,7 @@ let _oneTapWanted = false; // login screen showed before the GIS script finished
 window._gsiOnLoad = () => { if (_oneTapWanted) showOneTap(); };
 
 async function initOneTap() {
+  if (EMBEDDED_ADMIN_SITE) return false;
   if (_oneTapInited) return true;
   if (!window.google?.accounts?.id || !window.crypto?.subtle) return false;
 
@@ -520,6 +523,8 @@ async function initOneTap() {
 }
 
 async function showOneTap() {
+  // Lecturer websites use Supabase OAuth and its redirect allowlist.
+  if (EMBEDDED_ADMIN_SITE) return;
   _oneTapWanted = false;
   if (!(await initOneTap())) { _oneTapWanted = true; return; } // GIS not ready yet; retried from _gsiOnLoad
   google.accounts.id.prompt();
@@ -531,6 +536,7 @@ function cancelOneTap() {
 }
 
 async function onOneTapCredential(resp) {
+  if (EMBEDDED_ADMIN_SITE) return;
   const btn = document.getElementById('signin-btn');
   const origHTML = btn.innerHTML;
   btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:8px"></i>Signing in...';
@@ -614,7 +620,7 @@ async function handleSession(session) {
   S.access = admin;
   document.getElementById('top-user').textContent = admin.name || admin.email;
   renderAccessControls();
-  if (window.location.href.includes('#')) window.history.replaceState(null, '', window.location.pathname);
+  if (EMBEDDED_ADMIN_SITE || window.location.href.includes('#')) window.history.replaceState(null, '', ADMIN_RETURN_URL);
   showScreen('admin');
   await loadSidebar();
 }
@@ -3329,7 +3335,10 @@ function xjs(s) { return x(String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, 
 function safeCourseUrl(value) {
   const url = String(value || '').trim();
   if (!url) return '';
-  try { return ['https:', 'http:'].includes(new URL(url, window.location.href).protocol) ? url : ''; }
+  try {
+    const resolved = new URL(url, EMBEDDED_ADMIN_SITE ? window.TEACHING_CONFIG.appBaseUrl : window.location.href);
+    return ['https:', 'http:'].includes(resolved.protocol) ? EMBEDDED_ADMIN_SITE ? resolved.href : url : '';
+  }
   catch { return ''; }
 }
 function newCourseRowUid() { return 'course:' + crypto.randomUUID(); }

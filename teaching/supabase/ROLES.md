@@ -59,7 +59,10 @@ or restore a disabled account.
 
 Lecturers can download their own website file. Admins can download one for any
 Lecturer. A file uploaded as `/academic/index.html` creates the public course page,
-not an `/academic/admin` page. Its Sign In link goes to the central admin portal.
+with its Sign In link opening `/academic/?admin` on the same website. Approve that
+exact return address in Supabase's Redirect URLs before signing in. See
+[lecturer admin setup](../SETUP.md#admin-on-a-lecturers-website).
+The upload does not create an `/academic/admin/` route.
 Permissions always belong to the signed-in account, regardless of the referring
 website. Downloaded files and public IDs remain valid through this upgrade.
 

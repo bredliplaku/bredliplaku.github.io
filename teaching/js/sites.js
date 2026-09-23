@@ -33,6 +33,12 @@
 
     const websiteUrl = site => site?.hostname && site?.base_path ? `https://${site.hostname}${site.base_path}` : '';
 
+    function adminUrl(site) {
+        const url = new URL(site.base_path, location.origin);
+        url.search = '?admin';
+        return url.href;
+    }
+
     function currentDirectory() {
         const path = normalizePath(location.pathname);
         if (path.endsWith('/')) return path;
@@ -102,5 +108,5 @@
 `;
     }
 
-    window.TeachingSites = { normalizeWebsite, normalizePath, websiteUrl, currentDirectory, rpc, rows, routeCourse, loaderHtml, loaderScript };
+    window.TeachingSites = { normalizeWebsite, normalizePath, websiteUrl, adminUrl, currentDirectory, rpc, rows, routeCourse, loaderHtml, loaderScript };
 })();

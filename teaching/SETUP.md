@@ -5,6 +5,8 @@ their Lecturer account and courses, then download their website file from the
 public admin page. Upload that `index.html` to the desired website folder once.
 It shares this application and database; no website address, fork, DNS change,
 or separate Supabase setup is required. Lecturers can download their own file.
+Their Sign In button opens `?admin` on the same website. Before using it, approve
+that exact return address in Supabase as described below.
 The independent deployment instructions below are for people who want to operate
 their own unrelated teaching system.
 
@@ -23,6 +25,48 @@ There are two audiences below:
 
 - **[Running your own copy](#running-your-own-copy)** — a colleague setting up their instance.
 - **[Before you share it](#before-you-share-it)** — the original author preparing the repo for others.
+
+## Admin on a lecturer's website
+
+Publish the updated central teaching files, including `embed.js`, the public and
+admin scripts, and `admin/index.html`. Existing personalized downloads pick up
+this change automatically; nobody needs to upload another file.
+
+For a file uploaded to `https://eriseldagoga.com/academic/`, the admin address is:
+
+```text
+https://eriseldagoga.com/academic/?admin
+```
+
+In **Supabase → Authentication → URL Configuration → Redirect URLs**, add that
+exact address. Add the `www` version separately only if it is also used. Use each
+lecturer's actual domain and upload folder; avoid broad wildcard entries. Keep
+the project's existing Site URL. Configure this before sign-in: an unapproved
+return address can fall back to the project's Site URL instead.
+
+The Sign In button uses Supabase's existing Google provider. Google authenticates
+the person, Supabase returns them to the approved `?admin` address, and the database
+checks their teaching role and course assignments. The lecturer ID in the uploaded
+file supplies branding, never account permissions. Refresh, logout, and Back keep
+the lecturer's own website address. `/academic/admin/` is not created by the file.
+
+Embedded admin uses PKCE and a separate browser session key for each lecturer
+website. It requires HTTPS (localhost is allowed for local development). Google
+One Tap remains available on the original admin page; embedded admin uses the
+Supabase Sign In button. The optional Google Drive picker still uses Google's
+JavaScript OAuth client and needs the site's origin registered in Google Cloud
+if that feature is used. Pasting file links does not need the picker.
+
+The redirect allowlist controls where OAuth returns; it cannot stop someone
+copying or hosting the public files. It also does not bind existing sessions or
+API requests to a website. Approve only websites you trust with signed-in sessions.
+Use Settings to remove account/course access; removing a redirect URL alone does
+not revoke a previously issued session. Public course pages remain readable
+without sign-in or website registration.
+
+References: [Supabase redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls),
+[Google sign-in through Supabase](https://supabase.com/docs/guides/auth/social-login/auth-google),
+[PKCE](https://supabase.com/docs/guides/auth/sessions/pkce-flow).
 
 ---
 

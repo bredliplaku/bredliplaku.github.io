@@ -3180,7 +3180,7 @@ function applyOwnerBranding() {
     const favicon = document.querySelector('link[rel="icon"]');
     if (favicon && owner.faviconUrl) favicon.href = owner.faviconUrl;
     const admin = document.getElementById('footer-admin');
-    if (admin && lecturerSite) admin.href = new URL('admin/', window.TEACHING_CONFIG.appBaseUrl).href;
+    if (admin && lecturerSite) admin.href = TeachingSites.adminUrl(lecturerSite);
 }
 
 // Applies the default colour palette from config.js as CSS custom properties.
