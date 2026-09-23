@@ -51,8 +51,10 @@
         const config = window.TEACHING_CONFIG;
         const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
             method: 'POST', credentials: 'omit', cache: 'no-store',
-            headers: { apikey: config.supabaseAnonKey, Authorization: `Bearer ${config.supabaseAnonKey}`,
-                'Content-Type': 'application/json' },
+            headers: {
+                apikey: config.supabaseAnonKey, Authorization: `Bearer ${config.supabaseAnonKey}`,
+                'Content-Type': 'application/json'
+            },
             body: JSON.stringify(params), signal: AbortSignal.timeout(15000)
         });
         if (!response.ok) throw new Error('The teaching service is unavailable.');
@@ -97,12 +99,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Courses</title>
+  <title>Syllabase</title>
+  <link rel="icon" href="/favicon.ico">
   ${loaderScript(false, lecturerId)}
 </head>
 <body>
-  <p role="status">Loading courses…</p>
-  <noscript>Enable JavaScript to view courses.</noscript>
+  <noscript>Please enable JavaScript to view content.</noscript>
 </body>
 </html>
 `;
