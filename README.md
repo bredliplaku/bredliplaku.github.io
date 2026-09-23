@@ -1,64 +1,56 @@
 <div align="center">
-  <img src="miscellaneous/profile.jpg" width="100" style="border-radius: 50%" alt="Profile Photo">
+  <img src="miscellaneous/profile.jpg" width="140" alt="Bredli Plaku">
   <h1>Bredli's Website</h1>
-  <p><strong>A personal hub, portfolio, and central access point for various academic tools and web applications.</strong></p>
-
+  <p>Personal website, teaching materials and academic tools.</p>
   <p>
-    <a href="https://bredliplaku.github.io/">View Live Site</a> &middot;
-    <a href="https://research.bredliplaku.com/">Research</a> &middot;
-    <a href="https://teaching.bredliplaku.com/">Teaching</a>
-  </p>
-  
-  <p>
-    <img alt="HTML5" src="https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white">
-    <img alt="CSS3" src="https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white">
-    <img alt="JavaScript" src="https://img.shields.io/badge/Vanilla_JS-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black">
+    <a href="https://bredliplaku.com/"><strong>Website</strong></a>
+    &nbsp;·&nbsp;
+    <a href="teaching/README.md"><strong>Syllabase reference</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/bredliplaku/attendance/blob/main/README.md"><strong>Stando reference</strong></a>
+    &nbsp;·&nbsp;
+    <a href="LICENSE">MIT license</a>
   </p>
 </div>
-
-<hr>
-
-## 🌟 Overview
-
-Welcome to my personal GitHub Pages repository! This space serves as the central hub for my online presence, hosting my personal landing page alongside an array of interactive web applications, academic tools, and browser extensions designed to streamline educational workflows.
-
-The site is fully responsive, features automatic system light/dark theme switching, and comes with a friendly virtual cat companion!
-
-## 🚀 Projects Included
-
-This repository contains multiple self-contained modules and applications:
-
-### 📱 Smart Attendance (`/attendance`)
-A robust, real-time student attendance tracking application.
-- **Google Integration**: Seamless sign-in and data syncing.
-- **Admin Dashboard**: Easily manage pending absences, new registrations, and view comprehensive scan logs.
-- **Data Management**: Bulk actions, history tracking, and an integrated Excel (`.xlsx`) import/export system for the UID Database.
-- **Offline Capable**: Local data caching ensures no scan is lost even during temporary internet disconnections.
-
-### 📚 Teaching Portal (`/teaching`)
-A dedicated portal hosting materials for courses taught, structured neatly for convenient access by students.
-
-### 🛠️ UserScripts (`/projects`)
-Browser enhancement scripts designed to optimize the university's EIS portal.
-- **EIS Enhancer (`EIS_enhancer.user.js`)**: Modifies the EIS interface for better usability.
-- **EIS Grader (`EIS_grader.user.js`)**: Assists with automated grade calculations and form filling.
-
-### 📅 Additional Academic Tools
-- **Timetable (`/timetable`)**: View and manage weekly academic schedules smoothly across desktop and mobile.
-- **Exam Form Generator (`/exam_form`)**: Generates standardized exam forms.
-
-## 🛠️ Tech Stack & Features
-
-- **Core**: HTML5, CSS3, JavaScript (No heavy frontend frameworks).
-- **Fun Features**: An interactive cat companion built into the website with randomized dialogue and idle animations.
-
-## 📬 Connect
-
-- **LinkedIn**: [Bredli Plaku](https://about.bredliplaku.com/)
-- **GitHub**: [@bredliplaku](https://github.com/bredliplaku)
-- **Contact**: Reach out via my work [email](mailto:bplaku@epoka.edu.al).
 
 ---
-<div align="center">
-  <i>"Curiosity killed the cat, but satisfaction brought it back." — Your website companion 🐈</i>
-</div>
+
+## Pages
+
+| Page | Purpose |
+|---|---|
+| [**Home**](index.html) | Personal links and access to the site's tools |
+| [**Syllabase**](teaching/) | Course materials, editing, account permissions and lecturer websites |
+| [**Timetable**](timetable/) | Class and lecturer schedules, with a separate editor |
+| [**Stando**](https://bredliplaku.com/attendance/) | Smart Attendance replaces paper-based attendance with NFC |
+| [**Exam portal**](exam_form/) | Exam access and administration |
+| [**Glyph**](exam_stamp/) | Adds student names to exam PDFs and downloads the copies as a ZIP |
+| [**Projects**](projects/) | Projects and userscripts |
+
+The site is hosted on **GitHub Pages** and uses HTML, CSS and JavaScript directly.
+**Supabase** stores teaching and timetable data and handles Google sign-in.
+Course pages are public; editing requires an account with the right permissions.
+
+
+## 🛠️ Shared files
+
+Each tool has its own folder. These files are shared or used by the home page:
+
+| File or folder | Used for |
+|---|---|
+| [css/main.css](css/main.css) | Shared colors, components and public course styles |
+| [css/styles.css](css/styles.css), [js/scripts.js](js/scripts.js) | Home page layout and behavior |
+| [teaching/js/config.js](teaching/js/config.js) | Supabase connection, Google client ID, branding and theme |
+| [miscellaneous/](miscellaneous/) | Site assets |
+
+**When changing shared code:**
+
+- Keep configuration and helper scripts before page scripts in the HTML.
+- Load page-specific styles after shared styles.
+- Update every reference when renaming a file. Timetable also uses teaching's
+  timetable renderer and editor stylesheet.
+- Publish renamed files together with the HTML that loads them.
+
+> **Keep `teaching/embed.js` at its published address.** Uploaded lecturer files
+> depend on it. If the application moves, keep a compatible loader at the old
+> address or replace each uploaded file.

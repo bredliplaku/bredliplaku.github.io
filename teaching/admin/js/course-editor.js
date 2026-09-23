@@ -1,3 +1,4 @@
+// Course editor: sign-in, permissions, section forms and saves.
 const SUPABASE_URL = window.TEACHING_CONFIG.supabaseUrl;
 const SUPABASE_ANON_KEY = window.TEACHING_CONFIG.supabaseAnonKey;
 const { createClient } = supabase;

@@ -90,7 +90,7 @@
             name: site.display_name, homeUrl: '/', email: '', cvUrl: '',
             faviconUrl: '/favicon.ico', startYear: new Date().getFullYear()
         };
-        // Preserve dependency order. scripts.js starts immediately if DOMContentLoaded
+        // Preserve dependency order. Page controllers start immediately if DOMContentLoaded
         // has already fired, which is the normal case for this asynchronous loader.
         for (const script of scripts) {
             await loadScript(script.src, script.crossorigin ? { crossorigin: script.crossorigin } : {});

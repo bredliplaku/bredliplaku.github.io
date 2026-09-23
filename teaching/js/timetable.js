@@ -6,13 +6,10 @@
    columns equalised, the whole thing scaled to fit, plus the click-through
    "more info" popover.
 
-   Lives in teaching/ because teaching/ owns it and must stay self-contained —
-   the folder can be handed to someone who has no /timetable/ page at all.
-   The department Class Timetable page loads this same file from here
-   (../teaching/js/timetable.js); the dependency only ever runs that way.
+   Shared by course-page.js and the public and admin timetable pages.
 
    Plain (non-module) script on purpose: these stay window globals, so the
-   pages call them unqualified. Load it BEFORE the page's own scripts.js.
+   pages call them unqualified. Load it before the page controller.
 
    Depends on: DOMPurify (for the popover body) and the .tt-* rules in
    /css/main.css. Nothing else — no page state, no config.

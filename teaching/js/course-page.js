@@ -1,4 +1,4 @@
-// Configuration
+// Public course catalog, course content, navigation and page interactions.
 let isArchiveMode = false;
 const lecturerSite = window.TEACHING_SITE || null;
 let catalogSequence = 0;

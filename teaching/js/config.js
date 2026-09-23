@@ -1,20 +1,6 @@
-/* ==========================================================================
-   config.js — per-deployment configuration for the Teaching pages.
-
-   Shared lecturer websites load this central configuration automatically.
-   Only independent deployments need their own Supabase and branding settings.
-
-   Loaded by both js/scripts.js (public page) and admin/js/scripts.js.
-
-   These values are safe to commit and are public by design:
-     - supabaseAnonKey is meant to be exposed to the browser; your data is
-       protected by Supabase Row-Level Security, not by hiding this key.
-     - googleClientId only identifies the app to Google; it grants nothing on
-       its own.
-
-   NOTE: on GitHub Pages this file MUST be committed — Pages only serves
-   committed files, so a gitignored config would 404 and break the site.
-   ========================================================================== */
+// Shared browser configuration for teaching, timetable and lecturer websites.
+// Publish this file with the site. The anon key and Google client ID are public;
+// database policies enforce access. Never put a service-role key or secret here.
 window.TEACHING_CONFIG = {
     // Derived from this script, including when loaded on a lecturer's domain.
     appBaseUrl: new URL('../', document.currentScript.src).href,
