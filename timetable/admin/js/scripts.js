@@ -386,6 +386,8 @@
     document.getElementById('login-screen').style.display = w === 'login' ? 'flex' : 'none';
     document.getElementById('error-screen').style.display = w === 'error' ? 'flex' : 'none';
     document.getElementById('admin-app').style.display = w === 'admin' ? 'flex' : 'none';
+    // The sign-in card carries its own back link, so the footer's would be a duplicate.
+    document.getElementById('footer-back').style.display = w === 'login' ? 'none' : '';
     if (w !== 'admin') hideLoading();
     if (w === 'admin') startIdleWatch(); else stopIdleWatch();
     if (w === 'login') showOneTap(); else cancelOneTap();

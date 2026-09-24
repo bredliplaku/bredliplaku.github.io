@@ -104,8 +104,9 @@
             node.setAttribute(attr, new URL(node.getAttribute(attr), pageBase).href);
         });
         // Navigation belongs to the host website; copyright stays with the app.
-        const back = page.getElementById('footer-back');
-        if (back) back.href = new URL(site.base_path, location.origin).href;
+        page.querySelectorAll('#footer-back, #signin-back').forEach(back => {
+            back.href = new URL(site.base_path, location.origin).href;
+        });
         const home = page.getElementById('footer-home');
         if (home) home.href = new URL('/', location.origin).href;
         const owner = window.TEACHING_CONFIG.owner || {};

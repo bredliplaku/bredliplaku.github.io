@@ -2827,7 +2827,7 @@ function updateCourseMetadata(metadata, lecturers = null) {
     }
 
     document.getElementById('course-title').textContent = metadata.title || 'Course Title';
-    // Archived courses show their academic year alongside the semester (e.g. "Fall Semester 2023-2024"),
+    // Archived courses show their academic year alongside the semester (e.g. "Fall Semester 2023–2024"),
     // since without the active/current-year context, the semester alone is ambiguous for a past offering.
     const semesterText = metadata.semester || 'Unknown Semester';
     document.getElementById('course-semester').textContent = (isArchiveMode && metadata.year) ? `${semesterText} ${metadata.year}` : semesterText;
