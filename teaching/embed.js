@@ -110,6 +110,8 @@
         if (owner) owner.textContent = site.display_name;
         page.getElementById('footer-cv')?.remove();
         page.getElementById('footer-email')?.remove();
+        // Remove before mounting so the cat never flashes on lecturer websites.
+        page.getElementById('cat-companion')?.remove();
         page.querySelectorAll(iconLinks).forEach(link => link.remove());
         page.head.append(...uploadedIcons);
         const forcedTheme = document.documentElement.dataset.theme;
@@ -137,6 +139,7 @@
         startupTheme.remove();
         window.TEACHING_SITE = site;
         window.TEACHING_EMBEDDED_ADMIN = adminMode;
+        window.TEACHING_CONFIG.catCompanion = false;
         window.TEACHING_CONFIG.owner = {
             name: site.display_name, homeUrl: '/', email: '', cvUrl: '',
             startYear: new Date().getFullYear()

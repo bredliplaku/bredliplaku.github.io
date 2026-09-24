@@ -206,7 +206,8 @@ website; it does not make the course private wherever it is otherwise listed.
 | EIS timetable proxy | Redeploy the Supabase Edge Function; publishing the website does not deploy it. |
 
 The shared settings in [js/config.js](js/config.js) also apply to lecturer
-websites. This file is public: service-role keys and secrets must not go in it.
+websites, except that the loader replaces the footer branding and disables the
+cat companion. This file is public: service-role keys and secrets must not go in it.
 
 ### Apply a roles update
 

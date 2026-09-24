@@ -18,7 +18,8 @@ window.TEACHING_CONFIG = {
     // Restrict the key to the Picker API + your site's referrer before committing it.
     googleApiKey: '',
 
-    // --- Floating cat companion on the public course page (true = shown) ---
+    // --- Floating cat companion on the main public course page (true = shown) ---
+    // Lecturer websites disable it in embed.js.
     catCompanion: true,
 
     // --- Branding / links shown in the footer of both pages ---
