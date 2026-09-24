@@ -749,13 +749,9 @@ async function loadSidebar() {
     const k = r.sheet_name + '|' + String(isArch);
     if (!map[k]) map[k] = { sheet_name: r.sheet_name, is_archive: isArch };
     const bKey = String(r.b || '').trim().toLowerCase();
-    if (bKey === 'code') map[k].code = String(r.c || '').trim();
-    if (bKey === 'title') map[k].title = String(r.c || '').trim();
-    if (bKey === 'semester') map[k].semester = String(r.c || '').trim();
-    if (bKey === 'year') map[k].year = String(r.c || '').trim();
-    if (bKey === 'credits') map[k].credits = String(r.c || '').trim();
-    if (bKey === 'theme_colours') map[k].theme_colours = String(r.c || '').trim();
-    if (bKey === 'header_decoration') map[k].icon = String(r.c || '').trim();
+    if (!bKey || bKey === 'sheet_name' || bKey === 'is_archive') continue;
+    map[k][bKey] = String(r.c || '').trim();
+    if (bKey === 'header_decoration') map[k].icon = map[k][bKey];
   }
   COURSE_HEADERS.clear();
   for (const course of Object.values(map)) {
@@ -991,10 +987,16 @@ async function selectCourse(name, isArchive, el) {
 }
 
 function renderCourseShell(name, isArchive) {
-  const header = COURSE_HEADERS.get(JSON.stringify([name, isArchive]));
+  const key = JSON.stringify([name, isArchive]);
+  const header = COURSE_HEADERS.get(key);
   applyCourseTheme(header?.theme_colours);
-  document.getElementById('main-area').innerHTML = `
-    <div class="course-header ch-course${isArchive ? ' is-archive' : ''}">
+  const main = document.getElementById('main-area');
+  // Moving between courses: no entry animation, and the previous tab content is carried
+  // over (dimmed, inert) instead of blanking to a skeleton.
+  const switching = !!main.querySelector('.course-header.ch-course');
+  const carried = [...(main.querySelector('#section-body')?.children || [])];
+  main.innerHTML = `
+    <div class="course-header ch-course${isArchive ? ' is-archive' : ''}${switching ? ' no-enter' : ''}">
       <div class="ch-actions">
         <!-- Colour-coded actions: labels on wider screens, icons only on phones (the
              names stay as tooltips and accessible labels). Status shows only when
@@ -1013,9 +1015,10 @@ function renderCourseShell(name, isArchive) {
       <div id="header-decoration" aria-hidden="true"><i class="fa-solid ${x(courseIconClass(header?.icon))}"></i></div>
       <h2 id="ch-code">${header ? x(header.code || name) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:90px;height:0.9em"></span>'}</h2>
       <h1 id="ch-title">${header ? x(header.title || header.code || name) : '<span class="skeleton skeleton-on-dark" style="display:inline-block;width:60%;height:1em"></span>'}</h1>
-      <div class="course-info" id="ch-info">${[140, 120, 110, 100].map(w => `<span class="info-item skeleton skeleton-on-dark" style="width:${w}px"></span>`).join('')}</div>
+      <div class="course-info" id="ch-info">${header ? courseInfoChips(header, isArchive, COURSE_LECTURERS.get(key) || [])
+      : [140, 120, 110, 100].map(w => `<span class="info-item skeleton skeleton-on-dark" style="width:${w}px"></span>`).join('')}</div>
     </div>
-    <div class="section-tabs" id="section-tabs">
+    <div class="section-tabs${switching ? ' no-enter' : ''}" id="section-tabs">
       ${SECTIONS.map((s, i, arr) => {
         const r = i === 0 ? 'border-radius:20px 8px 8px 20px'
           : i === arr.length - 1 ? 'border-radius:8px 20px 20px 8px' : '';
@@ -1023,8 +1026,18 @@ function renderCourseShell(name, isArchive) {
                   onclick="selectSection('${s.id}',this)">${s.icon ? `<i class="${s.icon} tab-icon" aria-hidden="true"></i>` : ''}<span class="tab-label" data-label="${x(s.label)}">${s.label}</span>${canEditSection(s.id) ? '' : '<i class="fa-solid fa-lock tab-lock" title="View only"></i>'}</button>`;
       }).join('')}
     </div>
-    <div class="section-body" id="section-body">${sectionSkeletonHtml()}</div>
+    <div class="section-body" id="section-body"></div>
   `;
+  tagInfoRows(document.getElementById('ch-info'));
+  const body = document.getElementById('section-body');
+  carried.forEach(child => { child.inert = true; body.appendChild(child); });
+  setTimeout(() => {
+    if (!body.isConnected || body.classList.contains('loaded')) return;
+    if (body.children.length && !body.querySelector(':scope > [inert]:not(.section-topbar)')) return;
+    const toolbar = body.querySelector(':scope > .section-topbar[inert]');
+    body.innerHTML = sectionSkeletonHtml();
+    if (toolbar) body.prepend(toolbar);
+  }, 400);
   fillCourseHeader(name, isArchive);
   loadSection(S.section);
   renderAccessControls();

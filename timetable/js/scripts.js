@@ -326,8 +326,11 @@ function renderCategories() {
             const button = document.createElement('button');
             button.className = 'course-button';
             button.dataset.category = cat.id;
-            button.innerHTML = `<i class="${escapeAttr(cat.icon)}"></i>`;
-            button.append(cat.name);
+            // Same structure as the teaching course tabs: the selected tab closes its
+            // icon and shows its name in bold (main.css .course-button-icon / -label).
+            button.innerHTML = `<i class="${escapeAttr(cat.icon)} fa-fw course-button-icon" aria-hidden="true"></i>` +
+                '<span class="course-button-label"><span class="course-button-swap"><span></span></span></span>';
+            button.querySelector('.course-button-swap > span').textContent = cat.name;
             if (cat.id === activeId) button.classList.add('active');
             tabs.appendChild(button);
 

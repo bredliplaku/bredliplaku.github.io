@@ -345,7 +345,13 @@
     }
 
     S.admin = admin;
-    document.getElementById('top-user').textContent = `${admin.name} ${admin.surname}`;
+    // Photo (initials underneath) and name, as in the teaching admin's top bar.
+    const name = [admin.name, admin.surname].filter(Boolean).join(' ') || session.user.email || '';
+    const meta = session.user.user_metadata || {};
+    const photo = [meta.avatar_url, meta.picture].find(url => /^https:\/\//.test(url || '')) || '';
+    const initials = name.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase();
+    document.getElementById('top-user').innerHTML = `<span class="user-avatar" aria-hidden="true">${x(initials)}${photo
+      ? `<img src="${x(photo)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()">` : ''}</span><span>${x(name)}</span>`;
     // Strip the OAuth fragment so a refresh doesn't try to re-consume it.
     if (window.location.href.includes('#')) {
       window.history.replaceState(null, '', window.location.pathname);
@@ -432,6 +438,10 @@
   }
 
   function compareCourseLabels(aLabel, bLabel) {
+    // Cross-listed codes ("SWE / CE 101") come after single codes, A–Z (as in teaching).
+    const crossA = String(aLabel || '').includes('/'), crossB = String(bLabel || '').includes('/');
+    if (crossA !== crossB) return crossA ? 1 : -1;
+    if (crossA) return String(aLabel).localeCompare(String(bLabel), undefined, { numeric: true, sensitivity: 'base' });
     const a = parseCourseLabel(aLabel);
     const b = parseCourseLabel(bLabel);
 
@@ -525,9 +535,7 @@
       // Pill ends on the outermost tabs so the strip reads as one control.
       const r = i === 0 ? 'border-radius:20px 8px 8px 20px'
         : i === arr.length - 1 ? 'border-radius:8px 20px 20px 8px' : '';
-      return `<button class="section-tab${s.id === S.section ? ' active' : ''}" style="${r}" data-sec="${s.id}">
-                <i class="${s.icon}" style="margin-right:5px;font-size:0.88em"></i>${s.label}
-              </button>`;
+      return `<button class="section-tab${s.id === S.section ? ' active' : ''}" style="${r}" data-sec="${s.id}"><i class="${s.icon} tab-icon" aria-hidden="true"></i><span class="tab-label" data-label="${x(s.label)}">${s.label}</span></button>`;
     }).join('');
 
     document.querySelectorAll('#section-tabs .section-tab').forEach(btn => {
@@ -608,10 +616,13 @@
         <div class="settings-group">
           <div class="settings-head"><span style="display:flex;align-items:center;gap:6px"><i class="fa-solid fa-eye"></i>Preview</span></div>
           <div class="settings-body">
-            <div class="course-info" style="margin-bottom:12px">
-              <span class="info-item"><i class="fa-regular fa-clock"></i> <span id="preview-week">—</span></span>
+            <!-- As on the public header: the chip and bar are made for its blue banner. -->
+            <div class="header-preview">
+              <div class="course-info">
+                <span class="info-item"><i class="fa-regular fa-clock"></i> <span id="preview-week">—</span></span>
+              </div>
+              <div class="progress-bar"><div class="progress" id="preview-progress" style="width:0%"></div></div>
             </div>
-            <div class="progress-bar"><div class="progress" id="preview-progress" style="width:0%"></div></div>
             <div class="form-hint" id="preview-note" style="margin-top:8px"></div>
           </div>
         </div>
@@ -849,7 +860,7 @@
                 <span>Entries</span>
               </div>
               <div class="entries-header-actions" style="display:flex;align-items:center;gap:6px">
-                <button class="btn-sm btn-secondary" type="button" data-sort-cat-entries="1" title="Sort entries by code then text">
+                <button class="btn-sm btn-secondary" type="button" data-sort-cat-entries="1" title="Sort entries by code, or lecturers by title then name">
                   <i class="fa-solid fa-arrow-down-a-z" style="margin-right:5px"></i><span>Sort</span>
                 </button>
                 <button class="btn-sm btn-secondary" type="button" data-toggle-cat-vis="1" title="${allHidden ? 'Show all entries' : 'Hide all entries'}">
@@ -1228,10 +1239,12 @@
       const rows = [...list.querySelectorAll(':scope > .entry-row')];
       if (rows.length <= 1) return;
 
+      // Lecturers by title (Prof., Assoc. Prof., Dr., …) then name, as everywhere else.
+      const lecturers = catCard.querySelector('[name="cat_kind"]')?.value === 'lecturer';
       rows.sort((a, b) => {
         const aLabel = fieldValue(a, 'entry_label');
         const bLabel = fieldValue(b, 'entry_label');
-        return compareCourseLabels(aLabel, bLabel);
+        return lecturers ? TeachingSites.compareLecturers(aLabel, bLabel) : compareCourseLabels(aLabel, bLabel);
       });
 
       rows.forEach(row => list.appendChild(row));
