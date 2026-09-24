@@ -22,13 +22,15 @@ window.TEACHING_CONFIG = {
     // Lecturer websites disable it in embed.js.
     catCompanion: true,
 
-    // --- Branding / links shown in the footer of both pages ---
+    // --- Copyright and footer links (public page + admin) ---
+    // Keep the name and start year in sync with the main website's footer.
+    // Lecturer websites retain this copyright; the end year updates automatically.
     owner: {
         name: 'Bredli Plaku',
+        startYear: 2023,
+        homeUrl: '/',              // root of the website the visitor is on
         email: 'bplaku@epoka.edu.al',
         cvUrl: 'https://eis.epoka.edu.al/cv/fullcv/655',
-        homeUrl: '/',              // where the footer "home" icon points
-        startYear: 2023,           // first year of the copyright range
     },
 
     // --- Default colour palette. Applied to both the public page and admin.

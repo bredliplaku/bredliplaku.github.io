@@ -103,11 +103,18 @@
             const attr = node.hasAttribute('href') ? 'href' : 'src';
             node.setAttribute(attr, new URL(node.getAttribute(attr), pageBase).href);
         });
-        // Navigation and branding belong to the host website, while assets stay central.
+        // Navigation belongs to the host website; copyright stays with the app.
         const back = page.getElementById('footer-back');
         if (back) back.href = new URL(site.base_path, location.origin).href;
-        const owner = page.getElementById('footer-owner');
-        if (owner) owner.textContent = site.display_name;
+        const home = page.getElementById('footer-home');
+        if (home) home.href = new URL('/', location.origin).href;
+        const owner = window.TEACHING_CONFIG.owner || {};
+        const name = page.getElementById('footer-owner');
+        if (name && owner.name) name.textContent = owner.name;
+        const startYear = page.getElementById('footer-start-year');
+        if (startYear && owner.startYear) startYear.textContent = owner.startYear;
+        const currentYear = page.getElementById('currentYear');
+        if (currentYear) currentYear.textContent = new Date().getFullYear();
         page.getElementById('footer-cv')?.remove();
         page.getElementById('footer-email')?.remove();
         // Remove before mounting so the cat never flashes on lecturer websites.
@@ -141,8 +148,7 @@
         window.TEACHING_EMBEDDED_ADMIN = adminMode;
         window.TEACHING_CONFIG.catCompanion = false;
         window.TEACHING_CONFIG.owner = {
-            name: site.display_name, homeUrl: '/', email: '', cvUrl: '',
-            startYear: new Date().getFullYear()
+            ...owner, homeUrl: '/', email: '', cvUrl: ''
         };
         // Preserve dependency order. Page controllers start immediately if DOMContentLoaded
         // has already fired, which is the normal case for this asynchronous loader.
