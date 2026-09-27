@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      5.9
+// @version      6.0
 // @description  Automatically enhance EIS and log in with your preferred method.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
@@ -563,17 +563,97 @@
         }
     }
 
-    function replaceEpokaText(node) {
+    // ************************************************************************
+    // American → British English Spelling
+    // ************************************************************************
+    const britishSpellings = {
+        advisor: 'adviser', advisors: 'advisers', advisorship: 'advisership', advisorships: 'adviserships',
+        enroll: 'enrol', enrolls: 'enrols', enrollment: 'enrolment', enrollments: 'enrolments',
+        program: 'programme', programs: 'programmes',
+        center: 'centre', centers: 'centres', centered: 'centred',
+        color: 'colour', colors: 'colours', colored: 'coloured', colorful: 'colourful',
+        behavior: 'behaviour', behaviors: 'behaviours', behavioral: 'behavioural',
+        honor: 'honour', honors: 'honours', honored: 'honoured',
+        favor: 'favour', favors: 'favours', favorite: 'favourite', favorites: 'favourites', favorable: 'favourable',
+        labor: 'labour', endeavor: 'endeavour', endeavors: 'endeavours',
+        neighbor: 'neighbour', neighbors: 'neighbours', neighborhood: 'neighbourhood',
+        humor: 'humour', rumor: 'rumour',
+        counselor: 'counsellor', counselors: 'counsellors', counseling: 'counselling', counseled: 'counselled',
+        catalog: 'catalogue', catalogs: 'catalogues',
+        defense: 'defence', defenses: 'defences', offense: 'offence', offenses: 'offences',
+        canceled: 'cancelled', canceling: 'cancelling',
+        labeled: 'labelled', labeling: 'labelling',
+        modeled: 'modelled', modeling: 'modelling',
+        traveled: 'travelled', traveling: 'travelling', traveler: 'traveller', travelers: 'travellers',
+        fulfill: 'fulfil', fulfills: 'fulfils', fulfillment: 'fulfilment',
+        installment: 'instalment', installments: 'instalments',
+        acknowledgment: 'acknowledgement', acknowledgments: 'acknowledgements',
+        practiced: 'practised', practicing: 'practising',
+        skillful: 'skilful', gray: 'grey'
+    };
+
+    // -ize / -yze families (organize, organization, organizer, ...) → -ise / -yse
+    const izeStems = [
+        'organ', 'recogn', 'real', 'author', 'priorit', 'final', 'summar', 'minim', 'maxim', 'custom',
+        'optim', 'special', 'standard', 'categor', 'util', 'apolog', 'emphas', 'synchron', 'initial',
+        'normal', 'personal', 'visual', 'memor', 'critic', 'character', 'general', 'civil', 'local',
+        'global', 'harmon', 'legal', 'modern', 'stabil', 'symbol', 'familiar', 'capital', 'digit',
+        'central', 'mobil', 'public', 'random', 'rational', 'social', 'subsid', 'international',
+        'hypothes', 'synthes', 'sympath', 'jeopard', 'privat'
+    ];
+    const izeSuffixes = ['ize', 'izes', 'ized', 'izing', 'izer', 'izers', 'ization', 'izations', 'izational'];
+    izeStems.forEach(stem => izeSuffixes.forEach(suffix => {
+        britishSpellings[stem + suffix] = stem + suffix.replace('z', 's');
+    }));
+    ['anal', 'paral', 'catal'].forEach(stem => ['yze', 'yzes', 'yzed', 'yzing', 'yzer', 'yzers'].forEach(suffix => {
+        britishSpellings[stem + suffix] = stem + suffix.replace('z', 's');
+    }));
+
+    const britishRegex = new RegExp(`\\b(?:${Object.keys(britishSpellings).join('|')})\\b`, 'gi');
+
+    // Preserve the casing of the original word (ADVISOR → ADVISER, Advisor → Adviser)
+    function matchCase(source, target) {
+        if (source === source.toUpperCase()) return target.toUpperCase();
+        if (source[0] === source[0].toUpperCase()) return target[0].toUpperCase() + target.slice(1);
+        return target;
+    }
+
+    function localiseText(text) {
+        return text
+            .replace(/\bEpoka\b/g, 'EPOKA')
+            .replace(britishRegex, word => matchCase(word, britishSpellings[word.toLowerCase()]));
+    }
+
+    // Never touch code, styles or editable content (would alter what the user submits)
+    const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'CODE', 'PRE']);
+
+    function localiseNode(node) {
         if (node.nodeType === Node.TEXT_NODE) {
-            node.textContent = node.textContent.replace(/\bEpoka\b/g, "EPOKA");
+            const updated = localiseText(node.textContent);
+            if (updated !== node.textContent) node.textContent = updated;
         } else if (node.nodeType === Node.ELEMENT_NODE) {
-            node.childNodes.forEach(child => replaceEpokaText(child));
+            if (skipTags.has(node.tagName) || node.isContentEditable) return;
+
+            // An <option> without a value submits its text, so pin the original first
+            if (node.tagName === 'OPTION' && !node.hasAttribute('value')) {
+                node.setAttribute('value', node.text);
+            }
+
+            ['placeholder', 'title'].forEach(attr => {
+                const value = node.getAttribute(attr);
+                if (value) {
+                    const updated = localiseText(value);
+                    if (updated !== value) node.setAttribute(attr, updated);
+                }
+            });
+
+            node.childNodes.forEach(child => localiseNode(child));
         }
     }
 
     // Run body text replacement immediately
     if (document.body) {
-        replaceEpokaText(document.body);
+        localiseNode(document.body);
         solidifyIcons();
     }
 
@@ -582,11 +662,7 @@
         let shouldProcess = false;
         mutations.forEach(mutation => {
             if (mutation.addedNodes.length > 0) {
-                mutation.addedNodes.forEach(node => {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        replaceEpokaText(node);
-                    }
-                });
+                mutation.addedNodes.forEach(node => localiseNode(node));
                 shouldProcess = true;
             }
         });

@@ -139,7 +139,6 @@
             "I've sent a few emails on your behalf. They mostly say 'sdfghjkl;'. You're welcome.",
             "Alright? Just having a little rest before my next big rest.",
             "Blimey, that's a lot of reading. My eyes are tired just looking at it.",
-            "Click on a section to learn more!",
             "Was that a bird? Sorry, I lost my train of thought. What were we talking about?",
             "They say curiosity killed the cat, but satisfaction brought it back. That's why I get nine lives. 😉",
             "The human's typing is so loud. It's putting me off my afternoon slumber.",
