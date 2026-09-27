@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      6.0
+// @version      6.3
 // @description  Automatically enhance EIS and log in with your preferred method.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
@@ -381,9 +381,35 @@
         /* NextIntelligence Assistant Floating Launcher & Chat Panel */
         #npa-launcher,
         .npa-launcher {
-            border-radius: var(--grid-radius) !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            box-sizing: border-box !important;
+            width: 32px !important;
+            height: 32px !important;
+            min-width: 0 !important;
+            min-height: 0 !important;
+            padding: 0 !important;
+            color: #fff !important;
+            font-size: 16px !important;
+            line-height: 1 !important;
+            border-radius: var(--small-radius) !important;
             box-shadow: var(--box-shadow) !important;
             transition: transform 0.2s ease, box-shadow 0.2s ease, border-radius 0.2s ease !important;
+        }
+        /* Size and colour icons without overriding the site's open/closed visibility. */
+        #npa-launcher svg,
+        .npa-launcher svg,
+        #npa-launcher i,
+        .npa-launcher i {
+            flex: 0 0 auto !important;
+            width: 16px !important;
+            height: 16px !important;
+            margin: 0 !important;
+            color: #fff !important;
+            font-size: 16px !important;
+            line-height: 16px !important;
+            text-align: center !important;
         }
         #npa-launcher:hover,
         .npa-launcher:hover {
@@ -395,26 +421,57 @@
         #npa-launcher.active,
         #npa-launcher[aria-expanded="true"],
         body.npa-open #npa-launcher {
-            border-radius: var(--grid-radius) !important;
+            border-radius: var(--small-radius) !important;
             box-shadow: var(--box-shadow) !important;
         }
 
         #npa-panel,
         .npa-panel {
+            box-sizing: border-box !important;
+            width: 350px !important;
+            max-width: calc(100vw - 28px) !important;
+            height: 540px !important;
+            max-height: calc(100vh - 72px) !important;
+            max-height: calc(100dvh - 72px) !important;
+            bottom: 56px !important;
             border-radius: var(--grid-radius) !important;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
             overflow: hidden !important;
         }
         .npa-panel-header {
+            box-sizing: border-box !important;
+            height: 44px !important;
+            flex: 0 0 44px !important;
+            padding: 10px 14px !important;
+            color: #fff !important;
             border-radius: var(--grid-radius) var(--grid-radius) 0 0 !important;
             font-family: 'Google Sans', sans-serif !important;
         }
+        .npa-panel-title {
+            color: #fff !important;
+            font-weight: 600 !important;
+        }
         .npa-panel-body {
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            height: calc(100% - 44px) !important;
             border-radius: 0 0 var(--grid-radius) var(--grid-radius) !important;
             overflow: hidden !important;
         }
         #npa-frame {
+            display: block !important;
+            width: 100% !important;
+            height: 100% !important;
             border-radius: 0 0 var(--grid-radius) var(--grid-radius) !important;
+        }
+        /* Restore contrast without changing icon visibility or SVG fill/stroke modes. */
+        #npa-close,
+        .npa-close,
+        #npa-close svg,
+        .npa-close svg,
+        #npa-close i,
+        .npa-close i {
+            color: #fff !important;
         }
         #npa-close,
         .npa-close {
