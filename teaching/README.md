@@ -142,36 +142,61 @@ The host must serve the file as a web page. The public page works without
 registering its address. The upload creates no `/academic/admin/` folder;
 the Sign In button opens `?admin` on the same website.
 
-### 2. Allow sign-in in Supabase
+### 2. Allow sign-in
 
-In the existing Supabase project:
+Each new website is registered in two places. Use the HTTPS address the browser
+actually ends up on, and add the `www` version separately if visitors use it.
 
-1. Open **Authentication → URL Configuration → Redirect URLs**.
-2. Add the full admin address, including the folder and `?admin`.
-3. If visitors also use the `www` address, add that version separately.
+| Where | What to add | Needed for |
+|---|---|---|
+| **Supabase** → Authentication → URL Configuration → Redirect URLs | The full admin address, including the folder and `?admin` | Sign-in (required) |
+| **Google Cloud Console** → APIs & Services → Credentials → the existing OAuth client → Authorised JavaScript origins | The origin only, with no folder or path | One Tap and the Drive picker (optional) |
 
 For the example above, the entries are:
 
 ```text
-https://example.com/academic/?admin
-https://www.example.com/academic/?admin
+Supabase:      https://example.com/academic/?admin
+               https://www.example.com/academic/?admin
+Google Cloud:  https://example.com
+               https://www.example.com
 ```
 
-Use the HTTPS address the browser actually ends up on. Add exact addresses,
-without broad wildcards, and keep the project's existing **Site URL**.
-An unapproved return address may send the person to the Site URL instead.
+Add exact addresses, without broad wildcards, and keep the project's existing
+**Site URL**. An unapproved return address may send the person to the Site URL instead.
 
-**Google sign-in stays in Supabase.** It uses the existing Google provider;
-there is no new Google client to create for each lecturer. Anyone signing in
-gets their own account's permissions, regardless of whose website they visit.
+**Without the Google Cloud origin**, the Sign In button and pasted Drive links
+still work. The quick One Tap prompt does not appear, and the Drive picker
+cannot open.
+
+**Google sign-in stays in Supabase.** It uses the existing Google provider and
+its OAuth client; there is no new Google client to create for each lecturer.
+Do not delete that client or change its Supabase callback under **Authorised
+redirect URIs**: Supabase sign-in depends on both. Anyone signing in gets their
+own account's permissions, regardless of whose website they visit.
 
 **Website approval controls sign-in returns.** It cannot prevent copying the
 public file, and removing an approved address does not revoke existing sessions.
 Approve trusted websites; remove account or course access in Settings when needed.
 
-**Optional — Google Drive picker:** the file-selection window also needs the
-website's origin, such as `https://example.com`, registered in Google Cloud.
-Pasting file links works without it.
+### Several lecturers on one domain
+
+Lecturers can share one domain, each in their own folder, such as
+`https://example.com/lecturer-a/` and `https://example.com/lecturer-b/`.
+If you control the whole domain, register it once:
+
+```text
+Supabase:      https://example.com/**
+Google Cloud:  https://example.com
+```
+
+After that, a new lecturer on that domain only needs their file uploaded to a
+new folder; no Supabase or Google Cloud change is needed.
+
+- The footer **Home** link goes to the domain root, so put a page there, for
+  example a list of lecturers.
+- The pages share one browser origin. Signing in on one lecturer's `?admin`
+  also signs the person in on the others in that browser, with their own
+  permissions. On shared computers, sign out after use.
 
 ### After upload
 
@@ -275,6 +300,7 @@ so existing uploads continue to work.
 | Problem | What to check |
 |---|---|
 | Sign-in returns to the central website | The exact lecturer admin URL is in Supabase's Redirect URLs, including `www` if used. |
+| One Tap does not appear, or the Drive picker fails | The website's origin is in the Google Cloud Console OAuth client's Authorised JavaScript origins. |
 | Website download is unavailable | Save the account as Lecturer. If Settings asks for a database update, run the current `roles.sql`. |
 | A course is missing | Check its assignment and whether it is archived. On `/teaching/`, check the main page owner's courses. |
 | A lecturer is missing from a course page | Check their assignment, and that they have a name to show (see [Profiles](#profiles)). |
