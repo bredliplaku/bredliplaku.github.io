@@ -1,17 +1,14 @@
 /* ==========================================================================
    common.js — page chrome for /exam_stamp/.
 
-   The same small set of helpers /timetable/ and /teaching/ each keep locally:
-   theme toggle, row-aware button rounding, footer branding and the toast
-   notifications. Deliberately duplicated rather than hoisted to a site-wide
-   file, so this folder can be handed to a colleague on its own — its only
-   outside dependency is /css/main.css.
+   Theme toggle, row-aware button rounding, footer year and the toast
+   notifications. Kept local rather than hoisted to a site-wide file, so this
+   folder can be handed to a colleague on its own — its only outside
+   dependency is /css/main.css. The footer links, owner name and palette are
+   set in index.html and main.css.
 
    Plain (non-module) script: everything below is a window global. Loaded
    before this page's scripts.js.
-
-   Reads window.TEACHING_CONFIG (from teaching/js/config.js) for branding and
-   palette, but degrades to no-ops if it isn't present.
    ========================================================================== */
 
 
@@ -196,34 +193,4 @@ function showNotification(type, title, message, duration) {
 function updateYear() {
     const el = document.getElementById('currentYear');
     if (el) el.textContent = new Date().getFullYear();
-}
-
-// Fills the footer links, owner name and copyright start year from
-// config.js, so nothing personal is hard-coded into the markup.
-function applyOwnerBranding() {
-    const owner = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.owner) || {};
-    const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
-
-    if (owner.cvUrl) set('footer-cv', el => { el.href = owner.cvUrl; });
-    if (owner.email) set('footer-email', el => { el.href = `mailto:${owner.email}`; });
-    if (owner.name) set('footer-owner', el => { el.textContent = owner.name; });
-    if (owner.startYear) set('footer-start-year', el => { el.textContent = owner.startYear; });
-    if (owner.homeUrl) set('footer-home', el => { el.href = owner.homeUrl; });
-
-    updateYear();
-}
-
-// Applies the config.js palette as CSS custom properties on :root.
-function applyThemeDefaults() {
-    const t = (window.TEACHING_CONFIG && window.TEACHING_CONFIG.theme) || {};
-    const root = document.documentElement.style;
-    const map = {
-        '--primary-color': t.primary,
-        '--primary-dark': t.primaryDark,
-        '--secondary-color': t.secondary,
-        '--tertiary-color': t.tertiary,
-        '--accent-color': t.accent,
-        '--success-color': t.success,
-    };
-    Object.entries(map).forEach(([prop, val]) => { if (val) root.setProperty(prop, val); });
 }

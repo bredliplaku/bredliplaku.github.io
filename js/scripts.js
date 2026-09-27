@@ -231,8 +231,8 @@
             updateButtonGroupRadii();
             window.addEventListener('resize', updateButtonGroupRadii);
 
-            // main.css hides the cat by default until this class is added; teaching/index.html
-            // waits for a course to load first, but this page has no content to wait for.
+            // main.css hides the cat by default until this class is added; this page has
+            // no content to wait for, so show it straight away.
             const cat = document.getElementById('cat-companion');
             if (cat) cat.classList.add('visible');
         });

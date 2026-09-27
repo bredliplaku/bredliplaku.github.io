@@ -1945,8 +1945,7 @@
     /* === BOOT ============================================================ */
 
     async function init() {
-        applyThemeDefaults();
-        applyOwnerBranding();
+        updateYear();
         setupThemeToggle();
         trackButtonRows(document.getElementById('names-actions'));
         trackButtonRows(document.getElementById('group-actions'));
