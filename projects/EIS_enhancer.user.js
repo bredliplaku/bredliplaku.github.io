@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EIS Enhancer
 // @namespace    https://bredliplaku.com/
-// @version      6.3
+// @version      6.4
 // @description  Automatically enhance EIS and log in with your preferred method.
 // @author       Bredli Plaku
 // @updateURL    https://github.com/bredliplaku/bredliplaku.github.io/raw/refs/heads/main/projects/EIS_enhancer.user.js
@@ -682,14 +682,23 @@
     }
 
     // Never touch code, styles or editable content (would alter what the user submits)
-    const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'CODE', 'PRE']);
+    const skipSelector = 'script, style, noscript, textarea, code, pre';
+
+    // The parser streams a <style>/<script> body in as its own text node, so the
+    // observer must also check where a node lands, not just the node itself
+    // (otherwise "color" → "colour" and "center" → "centre" break the page's CSS/JS)
+    function isInsideSkipped(target) {
+        return target.nodeType === Node.ELEMENT_NODE &&
+            (target.closest(skipSelector) !== null || target.isContentEditable);
+    }
 
     function localiseNode(node) {
         if (node.nodeType === Node.TEXT_NODE) {
+            if (node.parentNode && isInsideSkipped(node.parentNode)) return;
             const updated = localiseText(node.textContent);
             if (updated !== node.textContent) node.textContent = updated;
         } else if (node.nodeType === Node.ELEMENT_NODE) {
-            if (skipTags.has(node.tagName) || node.isContentEditable) return;
+            if (node.matches(skipSelector) || node.isContentEditable) return;
 
             // An <option> without a value submits its text, so pin the original first
             if (node.tagName === 'OPTION' && !node.hasAttribute('value')) {
@@ -719,7 +728,9 @@
         let shouldProcess = false;
         mutations.forEach(mutation => {
             if (mutation.addedNodes.length > 0) {
-                mutation.addedNodes.forEach(node => localiseNode(node));
+                if (!isInsideSkipped(mutation.target)) {
+                    mutation.addedNodes.forEach(node => localiseNode(node));
+                }
                 shouldProcess = true;
             }
         });
