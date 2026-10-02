@@ -24,6 +24,8 @@
 | [**Stando**](https://bredliplaku.com/attendance/) | Smart Attendance replaces paper-based attendance with NFC |
 | [**Exam portal**](exam_form/) | Exam access and administration |
 | [**Glyph**](exam_stamp/) | Adds student names to exam PDFs and downloads the copies as a ZIP |
+| [**Figura**](projects/charts/) | Redraws the charts in an Excel workbook and saves them at an exact size and DPI, as PNG, JPEG or SVG |
+| [**Performance Portal**](projects/eval.html) | Academic staff evaluation form and live ranking, stored in Google Sheets |
 | [**Projects**](projects/) | Projects and userscripts |
 
 Syllabase and Stando are maintained in separate repositories:
@@ -39,7 +41,7 @@ Each tool has its own folder. These files are shared or used by the home page:
 
 | File or folder | Used for |
 |---|---|
-| [css/main.css](css/main.css) | Shared colors and components |
+| [css/main.css](css/main.css) | Shared colors and components; its "APP FORMS" section is the Syllabase / Stando form style the tool pages opt into with `<body class="app-form">` |
 | [css/styles.css](css/styles.css), [js/scripts.js](js/scripts.js) | Home page layout and behavior |
 | [miscellaneous/](miscellaneous/) | Site assets |
 

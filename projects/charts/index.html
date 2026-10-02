@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <!-- Without the trailing slash every relative path below resolves one
+         folder too high, so add it before anything loads. -->
+    <script>
+        (function () {
+            const p = location.pathname;
+            if (!p.endsWith('/') && !p.split('/').pop().includes('.')) {
+                location.replace(p + '/' + location.search + location.hash);
+            }
+        })();
+    </script>
+
+    <meta name="theme-color" content="#f4f4f4">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="Export the charts in an Excel file at the exact size and resolution you need.">
+    <title>Figura</title>
+    <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
+    <link rel="manifest" href="/favicon/site.webmanifest" />
+
+    <!-- Apply the saved theme before the stylesheets arrive (no white flash). -->
+    <style id="figura-startup-theme">
+        html {
+            color-scheme: light;
+            background: #fff;
+            color: #333;
+        }
+
+        html[data-theme="dark"] {
+            color-scheme: dark;
+            background: #000;
+            color: #e0e0e0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            html:not([data-theme="light"]) {
+                color-scheme: dark;
+                background: #000;
+                color: #e0e0e0;
+            }
+        }
+
+        body {
+            margin: 0;
+            background: inherit;
+        }
+    </style>
+    <script>
+        (function () {
+            let theme = 'auto';
+            try { theme = localStorage.getItem('theme-preference') || 'auto'; } catch { }
+            if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+            const dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+            document.querySelector('meta[name="theme-color"]').content = dark ? '#121212' : '#f4f4f4';
+        })();
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <!-- Carlito has the same letter widths as Calibri, so charts lay out as in Excel. -->
+    <link href="https://fonts.googleapis.com/css2?family=Carlito:ital,wght@0,400;0,700;1,400;1,700&display=swap"
+        rel="stylesheet">
+
+    <link rel="stylesheet" href="../../css/main.css">
+    <link rel="stylesheet" href="css/styles.css">
+
+    <script src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
+
+    <!-- JSZip opens the .xlsx and packs the ZIP. Nothing is uploaded. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+    <script defer src="js/common.js"></script>
+    <script defer src="js/engine.js"></script>
+    <script defer src="js/scripts.js"></script>
+</head>
+
+<body class="app-form">
+
+    <div class="main-content-wrapper">
+
+        <div class="container">
+
+            <div class="app-header">
+                <h1>Figura</h1>
+                <h2>Export Excel charts at the exact size your paper needs.</h2>
+                <div class="app-info" id="app-info">
+                    <span class="info-item" id="chip-file"><i class="fa-solid fa-file-excel"></i><span>No
+                            file</span></span>
+                    <span class="info-item" id="chip-charts"><i class="fa-solid fa-chart-column"></i><span>0
+                            charts</span></span>
+                    <span class="info-item"><i class="fa-solid fa-lock"></i><span>Stays on your device</span></span>
+                </div>
+                <div class="progress-bar" id="progress-bar">
+                    <div class="progress" id="progress"></div>
+                </div>
+            </div>
+
+            <!-- Step 1: the file -->
+            <div class="module active" id="mod-file">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-file-excel"></i> Excel file</div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">1</div>
+                </div>
+                <div class="module-fold">
+                    <div class="module-content">
+                        <div class="fg-dropzone" id="file-drop" role="button" tabindex="0"
+                            aria-label="Choose an Excel file">
+                            <i class="fa-solid fa-file-circle-plus"></i>
+                            <div class="fg-dropzone-text">
+                                <strong>Drop an Excel file here</strong>
+                                <span class="form-hint">or tap to choose one (.xlsx or .xlsm)</span>
+                            </div>
+                        </div>
+                        <input type="file" id="file-input" hidden
+                            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12">
+    
+                        <div class="fg-file hidden" id="file-card">
+                            <div class="fg-file-badge"><i class="fa-solid fa-file-excel"></i></div>
+                            <div class="fg-file-info">
+                                <span class="fg-file-name" id="file-name"></span>
+                                <span class="fg-file-meta" id="file-meta"></span>
+                            </div>
+                            <div class="fg-file-tools">
+                                <button type="button" class="icon-btn" id="file-replace" title="Open another file"
+                                    aria-label="Open another file"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+                                <button type="button" class="icon-btn danger" id="file-remove" title="Close"
+                                    aria-label="Close the file"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+    
+                        <div class="settings-group fg-supported">
+                            <div class="settings-head">Supported charts</div>
+                            <div class="settings-body">
+                                <div class="fg-types" id="type-list"></div>
+                                <span class="form-hint">3D charts come out flat. Surface and map charts aren't supported
+                                    yet.</span>
+                            </div>
+                        </div>
+    
+                        <div class="step-nav">
+                            <button class="fg-next btn-primary" data-next="mod-settings" disabled>Next <i
+                                    class="fa-solid fa-arrow-right"></i></button>
+                            <span class="form-hint fg-next-hint">Open a file first.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: how to save -->
+            <div class="module" id="mod-settings">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-sliders"></i> Settings</div>
+                    <div class="fg-head-summary" id="settings-summary" aria-hidden="true"></div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">2</div>
+                </div>
+                <div class="module-fold">
+                    <div class="module-content">
+                        <div class="settings-group">
+                            <div class="settings-head">Size</div>
+                            <div class="settings-body">
+                                <div class="seg seg-fill" data-key="mode" role="group" aria-label="Size">
+                                    <button type="button" data-val="excel">Same as in Excel</button>
+                                    <button type="button" data-val="width">Set a width</button>
+                                </div>
+                                <div class="fg-size hidden" id="size-fields">
+                                    <div class="sg-grid">
+                                        <div class="form-group">
+                                            <label for="width">Width</label>
+                                            <div class="field-unit">
+                                                <input type="number" id="width" class="form-control" min="10" max="2000"
+                                                    step="1" inputmode="decimal">
+                                                <span>mm</span>
+                                            </div>
+                                            <div class="opt-chips fg-presets" role="group" aria-label="Journal widths">
+                                                <button type="button" class="opt-chip" data-w="90">90 <small>1
+                                                        column</small></button>
+                                                <button type="button" class="opt-chip" data-w="140">140 <small>1.5
+                                                        columns</small></button>
+                                                <button type="button" class="opt-chip" data-w="190">190 <small>2
+                                                        columns</small></button>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Height</label>
+                                            <div class="seg seg-fill" data-key="keep" role="group" aria-label="Height">
+                                                <button type="button" data-val="true">Keep proportions</button>
+                                                <button type="button" data-val="false">Set height</button>
+                                            </div>
+                                            <div class="field-unit fg-height hidden" id="height-box">
+                                                <input type="number" id="height" class="form-control" min="10" max="2000"
+                                                    step="1" inputmode="decimal" aria-label="Height">
+                                                <span>mm</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Text size</label>
+                                            <div class="seg seg-fill" data-key="text" role="group" aria-label="Text size">
+                                                <button type="button" data-val="keep">Keep as in Excel</button>
+                                                <button type="button" data-val="scale">Resize with chart</button>
+                                            </div>
+                                            <span class="form-hint" id="text-hint"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+    
+                        <div class="settings-group">
+                            <div class="settings-head">File</div>
+                            <div class="settings-body">
+                                <div class="sg-grid">
+                                    <div class="form-group">
+                                        <label>Format</label>
+                                        <div class="seg seg-fill" data-key="fmt" role="group" aria-label="Format">
+                                            <button type="button" data-val="png">PNG</button>
+                                            <button type="button" data-val="jpg">JPEG</button>
+                                            <button type="button" data-val="svg">SVG</button>
+                                        </div>
+                                        <span class="form-hint" id="fmt-hint"></span>
+                                    </div>
+                                    <div class="form-group" id="res-group">
+                                        <label for="dpi">Resolution</label>
+                                        <div class="field-unit">
+                                            <input type="number" id="dpi" class="form-control" min="50" max="2400"
+                                                step="1" inputmode="numeric">
+                                            <span>DPI</span>
+                                        </div>
+                                        <div class="opt-chips fg-presets" role="group" aria-label="Common resolutions">
+                                            <button type="button" class="opt-chip" data-dpi="150">150</button>
+                                            <button type="button" class="opt-chip" data-dpi="300">300</button>
+                                            <button type="button" class="opt-chip" data-dpi="600">600</button>
+                                            <button type="button" class="opt-chip" data-dpi="1200">1200</button>
+                                        </div>
+                                        <span class="form-hint">300 is standard for print.</span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Background</label>
+                                        <div class="seg seg-fill" data-key="bg" role="group" aria-label="Background">
+                                            <button type="button" data-val="white">White</button>
+                                            <button type="button" data-val="transparent">Transparent</button>
+                                        </div>
+                                        <span class="form-hint" id="bg-hint"></span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Number format</label>
+                                        <div class="seg seg-fill" data-key="dec" role="group" aria-label="Number format">
+                                            <button type="button" data-val="point">1,234.5</button>
+                                            <button type="button" data-val="comma">1 234,5</button>
+                                        </div>
+                                        <span class="form-hint">How numbers look on axes and labels.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+    
+                        <div class="step-nav">
+                            <button class="fg-next btn-primary" data-next="mod-charts" disabled>Next <i
+                                    class="fa-solid fa-arrow-right"></i></button>
+                            <button type="button" id="btn-reset" class="btn-grey btn-sm"><i
+                                    class="fa-solid fa-rotate-left"></i> Reset</button>
+                            <span class="form-hint fg-next-hint">Open a file first.</span>
+                            <span class="form-hint fg-remember">Saved in this browser.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: the charts -->
+            <div class="module is-locked" id="mod-charts">
+                <div class="module-header">
+                    <div class="module-title"><i class="fa-solid fa-chart-pie"></i> Charts</div>
+                    <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                    <div class="module-background-number">3</div>
+                </div>
+                <div class="module-fold">
+                    <div class="module-content">
+                        <div class="empty-content" id="charts-empty">
+                            <i class="fa-solid fa-chart-simple"></i>
+                            <span>Open a file and its charts show up here.</span>
+                        </div>
+    
+                        <div id="charts-panel" class="hidden">
+                            <div class="fg-toolbar">
+                                <div class="course-actions" id="chart-actions">
+                                    <button id="btn-save-all" class="btn-green"><i class="fa-solid fa-file-zipper"></i>
+                                        Save all as ZIP</button>
+                                    <button id="btn-replace" class="btn-blue"><i class="fa-solid fa-file-import"></i>
+                                        Open another</button>
+                                </div>
+                                <select id="sheet-filter" class="form-control hidden" aria-label="Show charts from"></select>
+                            </div>
+                            <div class="fg-grid" id="chart-grid"></div>
+                            <p class="form-hint fg-footnote">Charts are redrawn from the values saved in the file, so
+                                small differences from Excel can happen.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <footer class="footer">
+            <div class="social-links">
+                <a id="footer-home" href="/" rel="noopener noreferrer"><i class="fa-solid fa-house"
+                        title="Home"></i></a>
+                <a id="footer-cv" href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank"
+                    rel="noopener noreferrer" title="CV"><i class="fa-regular fa-id-card"></i></a>
+                <a id="footer-email" href="mailto:bplaku@epoka.edu.al" target="_blank" rel="noopener noreferrer"
+                    title="Email"><i class="fa-regular fa-envelope"></i></a>
+                <button id="theme-toggle" class="theme-toggle" aria-label="Theme: Auto" title="Theme: Auto">
+                    <i id="theme-toggle-icon" class="fa-solid fa-adjust" aria-hidden="true"></i>
+                </button>
+            </div>
+            <p style="font-size:0.8em; text-transform: uppercase; letter-spacing: 2px; font-weight: 700;">
+                <i class="fa-regular fa-copyright"></i> <span id="footer-start-year">2023</span>–<span
+                    id="currentYear"></span> <span id="footer-owner">Bredli Plaku</span>. All Rights Reserved.
+            </p>
+        </footer>
+    </div>
+
+    <!-- One chart, bigger. -->
+    <dialog class="app-dialog fg-dialog" id="preview-dialog" aria-labelledby="preview-title">
+        <div class="app-dialog-head">
+            <div class="app-dialog-title">
+                <div id="preview-title"></div>
+                <div class="app-dialog-sub" id="preview-sub"></div>
+            </div>
+            <button type="button" class="icon-btn" id="preview-prev" title="Previous" aria-label="Previous chart"><i
+                    class="fa-solid fa-chevron-left"></i></button>
+            <button type="button" class="icon-btn" id="preview-next" title="Next" aria-label="Next chart"><i
+                    class="fa-solid fa-chevron-right"></i></button>
+            <button type="button" class="icon-btn" id="preview-close" title="Close" aria-label="Close"><i
+                    class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="app-dialog-body">
+            <div class="fg-frame fg-frame-lg" id="preview-frame"></div>
+        </div>
+        <div class="app-dialog-foot">
+            <button type="button" class="btn-blue" id="preview-save"><i class="fa-solid fa-file-arrow-down"></i>
+                Save</button>
+            <span class="form-hint" id="preview-px"></span>
+        </div>
+    </dialog>
+
+    <div class="fg-drop-overlay" id="drop-overlay">
+        <div class="fg-drop-overlay-inner">
+            <i class="fa-solid fa-file-excel"></i>
+            <strong>Drop it here</strong>
+            <span>.xlsx or .xlsm</span>
+        </div>
+    </div>
+
+    <div class="in-page-notifications" id="notification-area"></div>
+</body>
+
+</html>

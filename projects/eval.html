@@ -3,518 +3,420 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Academic Performance Portal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#f4f4f4">
+    <title>Performance Portal</title>
     <link rel="icon" type="image/png" href="/favicon/favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="/favicon/favicon.svg" />
     <link rel="shortcut icon" href="/favicon/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png" />
     <link rel="manifest" href="/favicon/site.webmanifest" />
-    <meta name="theme-color" content="#ffffff" />
 
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Google API client library -->
-    <script src="https://apis.google.com/js/api.js" async defer></script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-
-    <style>
-        /* Google Sans Text (For Body) */
-        @font-face {
-            font-family: 'Google Sans Text';
-            font-style: normal;
-            font-weight: 400;
-            font-display: swap;
-            src: url(https://fonts.gstatic.com/s/googlesanstext/v24/5aUu9-KzpRiLCAt4Unrc-xIKmCU5qEp2i0VBuxM.woff2) format('woff2');
+    <!-- Match the saved or system theme before external styles load (as the
+         Syllabase and Stando pages do), so there is no white flash. -->
+    <style id="eval-startup-theme">
+        html {
+            color-scheme: light;
+            background: #fff;
+            color: #333;
         }
 
-        /* Google Sans (For Headers) */
-        @font-face {
-            font-family: 'Google Sans';
-            font-style: normal;
-            font-weight: 400;
-            font-display: swap;
-            src: url(https://fonts.gstatic.com/s/googlesans/v52/4UaGrENHsxJlGDuGo1OIlL3Kwp5MKg.woff2) format('woff2');
+        html[data-theme="dark"] {
+            color-scheme: dark;
+            background: #000;
+            color: #e0e0e0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            html:not([data-theme="light"]) {
+                color-scheme: dark;
+                background: #000;
+                color: #e0e0e0;
+            }
         }
 
         body {
-            font-family: 'Google Sans Text', 'Inter', sans-serif;
-            background-color: #f8f9fa;
+            margin: 0;
+            background: inherit;
+        }
+    </style>
+    <script>
+        (function () {
+            let theme = 'auto';
+            try { theme = localStorage.getItem('theme-preference') || 'auto'; } catch { }
+            if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+            const dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+            document.querySelector('meta[name="theme-color"]').content = dark ? '#121212' : '#f4f4f4';
+        })();
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="../css/main.css">
+
+    <!-- Google API client library and Google Identity Services -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
+
+    <style>
+        /* ==================================================================
+           Performance Portal — page-specific styles.
+           The design system (header banner, modules, buttons, toasts) and the
+           form language (labels, fields, settings groups, segmented choices,
+           repeating rows) come from /css/main.css. This block holds only the
+           sign-in card, the top bar, the stat tiles, the ranking table and the
+           floating save bar.
+           ================================================================== */
+
+        .module.active .module-content {
+            padding: 20px 22px 18px;
         }
 
-        h1,
-        h2,
-        h3,
-        h4,
-        h5,
-        h6 {
-            font-family: 'Google Sans', 'Inter', sans-serif;
-            font-weight: 600;
+        @media (max-width: 640px) {
+            .module.active .module-content {
+                padding: 16px 14px 14px;
+            }
         }
 
-        /* Custom styles inspired by your tracker */
-        .header-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 1rem 1.5rem;
-            background-color: #ffffff;
-            border-bottom: 1px solid #dee2e6;
-            position: sticky;
-            top: 0;
-            z-index: 50;
+        .module-content > p.form-hint,
+        .settings-body > p.form-hint {
+            margin: 0 0 14px;
         }
 
-        .header-title {
-            font-family: 'Google Sans', sans-serif;
-            font-size: 1.25rem;
-            font-weight: 500;
-            color: #1f1f1f;
+        .sg-grid.sg-wide {
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         }
 
-        .user-menu {
+        .sg-grid.sg-narrow {
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        }
+
+        /* A count of the filled-in fields, on each section's header. */
+        .ev-filled {
             position: relative;
-        }
-
-        .user-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            cursor: pointer;
-            border: 2px solid transparent;
-            transition: border-color 0.2s;
-        }
-
-        .user-avatar:hover {
-            border-color: #0b57d0;
-        }
-
-        .dropdown-menu {
-            display: none;
-            position: absolute;
-            right: 0;
-            top: 50px;
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            min-width: 280px;
-            z-index: 100;
-            border: 1px solid #e0e0e0;
-        }
-
-        .dropdown-header {
-            padding: 1rem;
-            display: flex;
-            align-items: center;
-            border-bottom: 1px solid #f0f0f0;
-        }
-
-        .dropdown-header-info {
-            margin-left: 12px;
-        }
-
-        .dropdown-name {
-            font-weight: 600;
-            color: #202124;
-            font-size: 0.95rem;
-        }
-
-        .dropdown-email {
-            font-size: 0.85rem;
-            color: #5f6368;
-        }
-
-        .dropdown-item {
-            display: flex;
-            align-items: center;
-            padding: 0.75rem 1rem;
-            color: #444746;
-            font-size: 0.9rem;
-            cursor: pointer;
-            text-decoration: none;
-        }
-
-        .dropdown-item i,
-        .dropdown-item svg {
-            width: 20px;
-            margin-right: 12px;
-            color: #5f6368;
-        }
-
-        .dropdown-item:hover {
-            background-color: #f8f9fa;
-        }
-
-        .main-container {
-            max-width: 900px;
-            margin: 1.5rem auto;
-            padding: 0 1rem;
-        }
-
-        /* Card styles */
-        .card {
-            background-color: #ffffff;
-            border-radius: 12px;
-            border: 1px solid #e0e0e0;
-            margin-bottom: 1.5rem;
-            overflow: hidden;
-            transition: box-shadow 0.3s ease-in-out;
-        }
-
-        .card:hover {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        }
-
-        .card-header {
-            padding: 1.25rem 1.5rem;
-            border-bottom: 1px solid #f0f0f0;
-        }
-
-        .card-header h2 {
-            font-size: 1.15rem;
-            font-weight: 600;
-            color: #202124;
-        }
-
-        .card-body {
-            padding: 1.5rem;
-        }
-
-        /* Form styles */
-        .form-group {
-            margin-bottom: 1.25rem;
-        }
-
-        .form-group:last-child {
-            margin-bottom: 0;
-        }
-
-        .form-label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-size: 0.9rem;
+            z-index: 1;
+            margin-left: auto;
+            margin-right: 28px;
+            padding: 4px 10px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.15);
+            font-size: 0.75em;
             font-weight: 500;
-            color: #3c4043;
+            white-space: nowrap;
         }
 
-        .form-input {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            border: 1px solid #bdc1c6;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            transition: border-color 0.2s, box-shadow 0.2s;
-            background-color: #fff;
-            /* Ensure select has bg */
+        .ev-filled:empty {
+            display: none;
         }
 
-        .form-input[readonly] {
-            background-color: #f8f9fa;
-            color: #5f6368;
-            cursor: not-allowed;
+        @media (max-width: 768px) {
+            .ev-filled {
+                margin-left: 0;
+            }
         }
 
-        .form-input:focus {
-            outline: none;
-            border-color: #0b57d0;
-            box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.2);
-        }
-
-        .form-input-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1rem;
-        }
-
-        /* Dynamic list styles */
-        .dynamic-list-item {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            gap: 1rem;
+        /* --- Signed out: a white card centred on the page (Stando) --- */
+        .signin-screen {
+            display: flex;
             align-items: center;
-            padding: 1rem;
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            margin-bottom: 1rem;
+            justify-content: center;
+            min-height: 70vh;
+            padding: 40px 0;
+            font-size: 1rem;
         }
 
-        .dynamic-list-item-content {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 1rem;
+        .signin-card {
+            width: 100%;
+            max-width: 440px;
+            padding: 30px 28px 18px;
+            border: 1px solid #e0e0e0;
+            border-radius: 16px;
+            background: var(--card-background);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            color: var(--text-color);
+            text-align: center;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
-        /* Button styles */
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s, box-shadow 0.2s;
-            border: none;
+        .signin-card h2 {
+            margin: 0 0 6px;
+            color: var(--primary-color);
+            font-size: 1em !important;
+            font-weight: 500;
+        }
+
+        .signin-card h1 {
+            display: block;
+            margin: 0 0 24px;
+            color: var(--text-color);
+            font-size: 1.6em !important;
+            font-weight: 700;
+            line-height: 1.25;
+            text-wrap: balance;
+        }
+
+        .btn-google {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            max-width: 300px;
+            min-height: 52px;
+            margin: 0 auto;
+            padding: 8px;
+            border: 1.5px solid transparent;
+            border-radius: 26px;
+            background: var(--primary-color);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+            color: #fff;
+            font-size: 0.95em;
+            font-weight: 500;
+        }
+
+        .btn-google:hover:not(:disabled) {
+            border-color: transparent;
+            background: var(--primary-dark);
+            box-shadow: 0 3px 10px rgba(26, 35, 126, 0.3);
+            filter: none;
+        }
+
+        .btn-google:disabled {
+            opacity: 0.85;
+            cursor: wait;
+        }
+
+        /* Google's colours need a white ground; on the blue they'd clash. */
+        .google-icon {
+            flex-shrink: 0;
+            width: 36px;
+            height: 36px;
+            margin-right: auto;
+            padding: 8px;
+            border-radius: 50%;
+            background: #fff;
+        }
+
+        .btn-google::after {
+            content: "";
+            flex-shrink: 0;
+            width: 36px;
+            margin-left: auto;
+        }
+
+        .signin-note {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 26px -28px 0;
+            padding: 16px 28px 0;
+            border-top: 1px solid rgba(0, 0, 0, 0.08);
+            color: #757575;
+            font-size: 0.8em;
+        }
+
+        .signin-note > span {
+            text-align: left;
+        }
+
+        /* --- Top bar: the view switch on the left, the person on the right --- */
+        .ev-topbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .ev-user {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .ev-user-chip {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            text-decoration: none;
+            gap: 8px;
+            min-width: 0;
+            padding: 3px 12px 3px 3px;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            background: var(--card-background);
+            font-size: 0.88em;
+            font-weight: 500;
         }
 
-        .btn i,
-        .btn svg {
-            margin-right: 0.5rem;
-        }
-
-        .btn-primary {
-            background-color: #0b57d0;
-            color: #ffffff;
-        }
-
-        .btn-primary:hover {
-            background-color: #0a50be;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .btn-secondary {
-            background-color: #e8f0fe;
-            color: #0b57d0;
-        }
-
-        .btn-secondary:hover {
-            background-color: #dce7fb;
-        }
-
-        .btn-danger-outline {
-            background-color: transparent;
-            color: #d93025;
-            border: 1px solid #d93025;
-            padding: 0.5rem 0.75rem;
-        }
-
-        .btn-danger-outline:hover {
-            background-color: #fef7f7;
-        }
-
-        .btn-icon {
-            padding: 0.5rem;
-            background-color: #f1f3f4;
-            color: #5f6368;
+        .ev-user-chip img {
+            width: 30px;
+            height: 30px;
             border-radius: 50%;
+            object-fit: cover;
+            background: #eceef7;
         }
 
-        .btn-icon:hover {
-            background-color: #e8eaed;
+        .ev-user-chip span {
+            overflow: hidden;
+            max-width: 22ch;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
-        .btn-danger-icon {
-            background-color: #fef7f7;
-            color: #d93025;
-            padding: 0.75rem;
-            border-radius: 8px;
-        }
-
-        .btn-danger-icon:hover {
-            background-color: #fceeee;
-        }
-
-        /* Loader */
-        .loader-backdrop {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(255, 255, 255, 0.7);
-            display: flex;
-            justify-content: center;
+        #sign-out-btn {
+            display: inline-flex;
             align-items: center;
-            z-index: 9998;
-            backdrop-filter: blur(4px);
+            gap: 6px;
         }
 
-        .loader-spinner {
-            width: 48px;
-            height: 48px;
-            border: 5px solid #0b57d0;
-            border-bottom-color: transparent;
-            border-radius: 50%;
-            display: inline-block;
-            box-sizing: border-box;
-            animation: rotation 1s linear infinite;
-        }
-
-        @keyframes rotation {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(180deg);
-            }
-        }
-
-        /* Notification */
-        .notification-toast {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background-color: #333;
-            color: white;
-            padding: 1rem 1.5rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            z-index: 10000;
+        /* --- Repeating rows --- */
+        .ev-list-head {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
-            opacity: 0;
-            transform: translateY(-20px);
-            transition: opacity 0.3s, transform 0.3s;
-        }
-
-        .notification-toast.show {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        .notification-toast i,
-        .notification-toast svg {
-            margin-right: 1rem;
-            font-size: 1.2rem;
-        }
-
-        .notification-toast.success {
-            background-color: #1e8e3e;
-        }
-
-        .notification-toast.error {
-            background-color: #d93025;
-        }
-
-        .notification-toast.info {
-            background-color: #0b57d0;
-        }
-
-        /* Login */
-        #login-screen {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 80vh;
-            text-align: center;
-        }
-
-        #login-screen h1 {
-            font-size: 2rem;
-            font-weight: 600;
-            color: #202124;
-        }
-
-        #login-screen p {
-            font-size: 1.1rem;
-            color: #5f6368;
-            max-width: 450px;
-            margin-top: 0.5rem;
-            margin-bottom: 2rem;
-        }
-
-        /* Collapsible Sections */
-        details.card {
-            margin-bottom: 1.5rem;
-        }
-
-        details summary {
-            list-style: none;
-            padding: 1.25rem 1.5rem;
-            cursor: pointer;
-            display: flex;
             justify-content: space-between;
-            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
         }
 
-        details summary::-webkit-details-marker {
-            display: none;
-        }
-
-        details summary h2 {
-            font-size: 1.15rem;
-            font-weight: 600;
-            color: #202124;
+        .ev-list-head .form-label {
             margin: 0;
         }
 
-        details summary .chevron {
-            transition: transform 0.2s;
-            color: #5f6368;
+        .ev-list-head button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
-        details[open] summary .chevron {
-            transform: rotate(90deg);
-        }
-
-        details .card-body {
-            border-top: 1px solid #f0f0f0;
-        }
-
-        /* Dashboard */
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            background-color: #ffffff;
+        .ev-list:empty::before {
+            content: attr(data-empty);
+            display: block;
+            margin-bottom: 10px;
+            padding: 16px;
             border-radius: 12px;
-            border: 1px solid #e0e0e0;
-            padding: 1.5rem;
+            background: #f5f5f5;
+            color: #757575;
+            font-size: 0.88em;
+            text-align: center;
         }
 
-        .stat-card-title {
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: #5f6368;
-            margin-bottom: 0.5rem;
+        /* --- Floating save bar --- */
+        .ev-savebar {
+            position: sticky;
+            bottom: 12px;
+            z-index: 20;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px 14px;
+            margin-top: 6px;
+            padding: 10px 12px 10px 18px;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.88);
+            box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+        }
+
+        .ev-savebar .form-hint {
+            margin: 0;
+        }
+
+        #save-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* --- Dashboard --- */
+        .ev-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .ev-stat {
+            min-width: 0;
+            padding: 14px 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 15px;
+            background: var(--card-background);
+        }
+
+        .ev-stat-label {
+            color: #9e9e9e;
+            font-size: 0.72em;
+            font-weight: 700;
+            letter-spacing: 0.07em;
             text-transform: uppercase;
         }
 
-        .stat-card-value {
-            font-size: 2.25rem;
-            font-weight: 600;
-            color: #0b57d0;
+        .ev-stat-value {
+            margin-top: 4px;
+            color: var(--primary-color);
+            font-size: 1.9em;
+            font-weight: 700;
+            line-height: 1.1;
+            font-variant-numeric: tabular-nums;
         }
 
-        .stat-card-value.rank {
-            color: #1e8e3e;
+        .ev-stat-value.is-rank {
+            color: var(--success-color);
         }
 
-        .stat-card-value-small {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #202124;
+        .ev-stat-sub {
+            overflow: hidden;
+            margin-top: 4px;
+            color: #757575;
+            font-size: 0.85em;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .ev-table-wrap {
+            overflow-x: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 15px;
         }
 
         .ranking-table {
             width: 100%;
             border-collapse: collapse;
+            font-size: 0.9em;
+            font-variant-numeric: tabular-nums;
         }
 
         .ranking-table th,
         .ranking-table td {
-            padding: 1rem 1.25rem;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
-            font-size: 0.95rem;
+            padding: 11px 14px;
+            border-bottom: 1px solid #eceef2;
+            text-align: right;
+            white-space: nowrap;
         }
 
         .ranking-table th {
-            font-weight: 600;
-            color: #3c4043;
-            background-color: #f8f9fa;
+            background: #f7f8fc;
+            color: #9e9e9e;
+            font-size: 0.8em;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
-        .ranking-table td {
-            color: #202124;
+        .ranking-table th:nth-child(2),
+        .ranking-table td:nth-child(2) {
+            text-align: left;
         }
 
         .ranking-table tr:last-child td {
@@ -522,686 +424,854 @@
         }
 
         .ranking-table .rank-col {
-            width: 60px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #1e8e3e;
+            width: 56px;
+            color: var(--success-color);
+            font-weight: 700;
             text-align: center;
         }
 
+        .ranking-table th.rank-col {
+            color: #9e9e9e;
+        }
+
         .ranking-table .score-col {
-            font-weight: 600;
-            color: #0b57d0;
+            color: var(--primary-color);
+            font-weight: 700;
         }
 
         .ranking-table .user-col {
             font-weight: 500;
         }
 
-        /* Responsive */
+        .ranking-table tr.is-me td {
+            background: rgba(57, 73, 171, 0.07);
+        }
+
+        .ranking-table .empty-row td {
+            padding: 28px;
+            color: #757575;
+            text-align: center;
+            white-space: normal;
+        }
+
+        /* --- Busy overlay --- */
+        .ev-loader {
+            position: fixed;
+            inset: 0;
+            z-index: 9998;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.6);
+            -webkit-backdrop-filter: blur(3px);
+            backdrop-filter: blur(3px);
+        }
+
         @media (max-width: 640px) {
-            .header-bar {
-                padding: 1rem;
+            .ev-topbar .seg {
+                display: flex;
+                flex: 1 1 100%;
             }
 
-            .main-container {
-                margin: 1rem auto;
+            .ev-topbar .seg > button {
+                flex: 1 1 0;
             }
 
-            .card-body {
-                padding: 1rem;
+            .ev-user {
+                flex: 1 1 100%;
+                justify-content: space-between;
             }
 
-            .form-input-grid {
-                grid-template-columns: 1fr;
+            .ev-savebar {
+                bottom: calc(8px + env(safe-area-inset-bottom));
+                padding: 10px;
             }
 
-            .dynamic-list-item {
-                grid-template-columns: 1fr;
-                gap: 0.5rem;
+            #save-btn {
+                flex: 1 1 auto;
+                justify-content: center;
+            }
+        }
+
+        /* --- Dark mode --- */
+        html[data-theme="dark"] .signin-card,
+        html[data-theme="dark"] .ev-user-chip,
+        html[data-theme="dark"] .ev-stat {
+            border-color: var(--dark-border);
+            background: var(--dark-surface);
+        }
+
+        html[data-theme="dark"] .signin-card h2 {
+            color: #9fa8da;
+        }
+
+        html[data-theme="dark"] .signin-card h1 {
+            color: var(--dark-text);
+        }
+
+        html[data-theme="dark"] .btn-google {
+            background: #3949ab;
+        }
+
+        html[data-theme="dark"] .btn-google:hover:not(:disabled) {
+            background: #5c6bc0;
+            box-shadow: none;
+        }
+
+        html[data-theme="dark"] .signin-note {
+            border-top-color: var(--dark-border);
+            color: var(--dark-text-muted);
+        }
+
+        html[data-theme="dark"] .ev-list:empty::before {
+            background: var(--dark-surface-light);
+            color: var(--dark-text-muted);
+        }
+
+        html[data-theme="dark"] .ev-savebar {
+            border-color: var(--dark-border);
+            background: rgba(18, 18, 18, 0.88);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        html[data-theme="dark"] .ev-stat-sub {
+            color: var(--dark-text-muted);
+        }
+
+        html[data-theme="dark"] .ev-table-wrap {
+            border-color: var(--dark-border);
+        }
+
+        html[data-theme="dark"] .ranking-table th {
+            background: var(--dark-surface-light);
+            color: var(--dark-text-muted);
+        }
+
+        html[data-theme="dark"] .ranking-table td {
+            border-bottom-color: var(--dark-border);
+        }
+
+        html[data-theme="dark"] .ranking-table tr.is-me td {
+            background: rgba(121, 134, 203, 0.14);
+        }
+
+        html[data-theme="dark"] .ev-loader {
+            background: rgba(0, 0, 0, 0.55);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            html:not([data-theme="light"]) .signin-card,
+            html:not([data-theme="light"]) .ev-user-chip,
+            html:not([data-theme="light"]) .ev-stat {
+                border-color: var(--dark-border);
+                background: var(--dark-surface);
             }
 
-            .dynamic-list-item-content {
-                grid-template-columns: 1fr;
-                gap: 0.5rem;
+            html:not([data-theme="light"]) .signin-card h2 {
+                color: #9fa8da;
             }
 
-            .btn-danger-icon {
-                width: 100%;
+            html:not([data-theme="light"]) .signin-card h1 {
+                color: var(--dark-text);
+            }
+
+            html:not([data-theme="light"]) .btn-google {
+                background: #3949ab;
+            }
+
+            html:not([data-theme="light"]) .btn-google:hover:not(:disabled) {
+                background: #5c6bc0;
+                box-shadow: none;
+            }
+
+            html:not([data-theme="light"]) .signin-note {
+                border-top-color: var(--dark-border);
+                color: var(--dark-text-muted);
+            }
+
+            html:not([data-theme="light"]) .ev-list:empty::before {
+                background: var(--dark-surface-light);
+                color: var(--dark-text-muted);
+            }
+
+            html:not([data-theme="light"]) .ev-savebar {
+                border-color: var(--dark-border);
+                background: rgba(18, 18, 18, 0.88);
+                box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+            }
+
+            html:not([data-theme="light"]) .ev-stat-sub {
+                color: var(--dark-text-muted);
+            }
+
+            html:not([data-theme="light"]) .ev-table-wrap {
+                border-color: var(--dark-border);
+            }
+
+            html:not([data-theme="light"]) .ranking-table th {
+                background: var(--dark-surface-light);
+                color: var(--dark-text-muted);
+            }
+
+            html:not([data-theme="light"]) .ranking-table td {
+                border-bottom-color: var(--dark-border);
+            }
+
+            html:not([data-theme="light"]) .ranking-table tr.is-me td {
+                background: rgba(121, 134, 203, 0.14);
+            }
+
+            html:not([data-theme="light"]) .ev-loader {
+                background: rgba(0, 0, 0, 0.55);
             }
         }
     </style>
-    <script src="https://kit.fontawesome.com/4dd5c549ad.js" crossorigin="anonymous"></script>
 </head>
 
-<body>
+<body class="app-form">
 
-    <!-- Header -->
-    <header class="header-bar">
-        <h1 class="header-title">Academic Performance Portal</h1>
-        <div class="user-menu" id="user-menu" style="display: none;">
-            <img id="user-avatar" class="user-avatar" alt="User Avatar">
-            <div class="dropdown-menu" id="dropdown-menu">
-                <div class="dropdown-header">
-                    <img id="dropdown-avatar" class="user-avatar" alt="User Avatar">
-                    <div class="dropdown-header-info">
-                        <div id="dropdown-name" class="dropdown-name"></div>
-                        <div id="dropdown-email" class="dropdown-email"></div>
-                    </div>
-                </div>
-                <a href="#form" class="dropdown-item">
-                    <i class="fa-solid fa-file-lines"></i>
-                    My Evaluation Form
-                </a>
-                <a href="#dashboard" class="dropdown-item">
-                    <i class="fa-solid fa-chart-line"></i>
-                    Admin Dashboard
-                </a>
-                <div class="dropdown-item" id="sign-out-btn" style="border-top: 1px solid #f0f0f0;">
-                    <i class="fa-solid fa-right-from-bracket"></i>
-                    Sign out
-                </div>
-            </div>
-        </div>
-    </header>
+    <div class="main-content-wrapper">
+        <div class="container">
 
-    <!-- Main Content -->
-    <main class="main-container">
-
-        <!-- Login Screen -->
-        <div id="login-screen">
-            <h1>Welcome to the Performance Portal</h1>
-            <p>Please sign in with your Google account to access your evaluation form and the admin dashboard.</p>
-            <!-- NEW: Custom Sign-In Button -->
-            <button id="custom-signin-btn" class="btn btn-primary">
-                <i class="fa-brands fa-google"></i>
-                Sign in with Google
-            </button>
-        </div>
-
-        <!-- App Content (Hidden by default) -->
-        <div id="app-content" style="display: none;">
-
-            <!-- View: Evaluation Form -->
-            <div id="form-view" class="view" style="display: none;">
-                <form id="evaluation-form">
-
-                    <!-- 1. General Information -->
-                    <details class="card" open>
-                        <summary>
-                            <h2>1. General Information</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid" style="grid-template-columns: 1fr 1fr;">
-                                <div class="form-group">
-                                    <label class="form-label" for="1.1-name">Full Name</label>
-                                    <input type="text" id="1.1-name" class="form-input" readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="1.6-email">Email</label>
-                                    <input type="email" id="1.6-email" class="form-input" readonly>
-                                </div>
-                            </div>
-                            <div class="form-input-grid" style="grid-template-columns: 1fr 1fr 1fr;">
-                                <div class="form-group">
-                                    <label class="form-label" for="1.2-rank">Academic Rank</label>
-                                    <!-- UPDATED: Readonly as per Excel -->
-                                    <input type="text" id="1.2-rank" class="form-input" readonly
-                                        placeholder="Auto-filled from Section 2">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="1.4-faculty">Faculty</label>
-                                    <!-- UPDATED: Select dropdown -->
-                                    <select id="1.4-faculty" class="form-input">
-                                        <option value="">Select Faculty...</option>
-                                        <option value="Architecture and Engineering">Architecture and Engineering
-                                        </option>
-                                        <option value="Law and Social Sciences">Law and Social Sciences</option>
-                                        <option value="Economics and Administrative Sciences">Economics and
-                                            Administrative Sciences</option>
-                                        <!-- Add other faculties as needed -->
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="1.5-department">Department</label>
-                                    <!-- UPDATED: Select dropdown -->
-                                    <select id="1.5-department" class="form-input">
-                                        <option value="">Select Department...</option>
-                                        <option value="Economics">Economics</option>
-                                        <option value="Business Administration">Business Administration</option>
-                                        <option value="Architecture">Architecture</option>
-                                        <option value="Civil Engineering">Civil Engineering</option>
-                                        <option value="Computer Engineering">Computer Engineering</option>
-                                        <option value="Software Engineering">Software Engineering</option>
-                                        <option value="Law">Law</option>
-                                        <option value="Political Science and International Relations">Political Science
-                                            and International Relations</option>
-                                        <!-- Add other departments as needed -->
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- NEW: 2. Qualifications -->
-                    <details class="card">
-                        <summary>
-                            <h2>2. Qualifications (Year Completed)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <p class="text-sm text-gray-600 mb-4">Enter the year you completed your highest
-                                qualification. Your Academic Rank will be auto-filled.</p>
-                            <div class="form-input-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="2.1-msc">Master of Science (MSc)</label>
-                                    <input type="number" id="2.1-msc" class="form-input qualification-year" min="1950"
-                                        max="2099" placeholder="e.g., 2010">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="2.2-phd">Doctor of Philosophy (PhD)</label>
-                                    <input type="number" id="2.2-phd" class="form-input qualification-year" min="1950"
-                                        max="2099" placeholder="e.g., 2014">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="2.3-assoc-prof">Associate Professor (Assoc. Prof.
-                                        Dr.)</label>
-                                    <input type="number" id="2.3-assoc-prof" class="form-input qualification-year"
-                                        min="1950" max="2099" placeholder="e.g., 2018">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="2.4-prof">Professor (Prof. Dr.)</label>
-                                    <input type="number" id="2.4-prof" class="form-input qualification-year" min="1950"
-                                        max="2099" placeholder="e.g., 2022">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 3. Teaching Experience -->
-                    <details class="card">
-                        <summary>
-                            <h2>3. Teaching Experience (Years)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="3.1-undergrad-years">Undergraduate (BA / BSc)</label>
-                                    <input type="number" id="3.1-undergrad-years" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="3.1-grad-years">Graduate (PM / MSc / PhD)</label>
-                                    <input type="number" id="3.1-grad-years" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="3.1-integrated-years">Integrated Second Cycle
-                                        (MSc)</label>
-                                    <input type="number" id="3.1-integrated-years" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 3. Taught Courses & Averages -->
-                    <details class="card">
-                        <summary>
-                            <h2>3. Taught Courses & Averages</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid" style="grid-template-columns: 1fr 1fr;">
-                                <div class="form-group">
-                                    <label class="form-label" for="3.5-student-avg">Student Course Evaluation
-                                        Average</label>
-                                    <input type="number" id="3.5-student-avg" class="form-input" min="0" max="5"
-                                        step="0.01" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="3.6-student-num-avg">Student Number per Course
-                                        Average</label>
-                                    <input type="number" id="3.6-student-num-avg" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-
-                            <hr class="my-6">
-
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-lg font-medium">Taught Courses (Total ECTS)</h3>
-                                <button type="button" id="add-course-btn" class="btn btn-secondary">
-                                    <i class="fa-solid fa-plus"></i> Add Course
-                                </button>
-                            </div>
-                            <div id="course-list"></div>
-                            <div class="form-input-grid"
-                                style="grid-template-columns: 1fr 1fr 1fr; background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-                                <div class="form-group">
-                                    <label class="form-label">Total Undergraduate ECTS</label>
-                                    <input type="number" id="3.2-undergrad-ects" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Total Graduate ECTS</label>
-                                    <input type="number" id="3.3-grad-ects" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Total Integrated ECTS</label>
-                                    <input type="number" id="3.4-integrated-ects" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 4. Supervising -->
-                    <details class="card">
-                        <summary>
-                            <h2>4. Supervising (Completed Students)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="4.1-bachelor">Bachelor (BA / BSc)</label>
-                                    <input type="number" id="4.1-bachelor" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="4.2-pm">Professional Master (PM)</label>
-                                    <input type="number" id="4.2-pm" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="4.3-msc">Master of Science (MSc)</label>
-                                    <input type="number" id="4.3-msc" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="4.4-phd">Doctor of Philosophy (PhD)</label>
-                                    <input type="number" id="4.4-phd" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 5. Publications -->
-                    <details class="card">
-                        <summary>
-                            <h2>5. Publications (No. of items)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="text-lg font-medium">Publication List</h3>
-                                <button type="button" id="add-publication-btn" class="btn btn-secondary">
-                                    <i class="fa-solid fa-plus"></i> Add Publication
-                                </button>
-                            </div>
-                            <div id="publication-list"></div>
-                            <div class="form-input-grid"
-                                style="grid-template-columns: repeat(3, 1fr); background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-                                <!-- Q1-Q3 -->
-                                <div class="form-group">
-                                    <label class="form-label">Q1 Articles</label>
-                                    <input type="number" id="5.1-q1" class="form-input" min="0" value="0" readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Q2 Articles</label>
-                                    <input type="number" id="5.2-q2" class="form-input" min="0" value="0" readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Q3 Articles</label>
-                                    <input type="number" id="5.3-q3" class="form-input" min="0" value="0" readonly>
-                                </div>
-                                <!-- Other Indexed -->
-                                <div class="form-group">
-                                    <label class="form-label">Other Indexed</label>
-                                    <input type="number" id="5.4-other-indexed" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Other Journals</label>
-                                    <input type="number" id="5.5-other-journals" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <!-- Monographs -->
-                                <div class="form-group">
-                                    <label class="form-label">Monograph (Indexed)</label>
-                                    <input type="number" id="5.6-monograph-indexed" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Monograph (Other)</label>
-                                    <input type="number" id="5.7-monograph-other" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <!-- Books -->
-                                <div class="form-group">
-                                    <label class="form-label">Book (Indexed)</label>
-                                    <input type="number" id="5.8-book-indexed" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Book (Local)</label>
-                                    <input type="number" id="5.10-book-local" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <!-- Chapters -->
-                                <div class="form-group">
-                                    <label class="form-label">Chapter (Indexed)</label>
-                                    <input type="number" id="5.9-chapter-indexed" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Chapter (Local)</label>
-                                    <input type="number" id="5.11-chapter-local" class="form-input" min="0" value="0"
-                                        readonly>
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 6. Academic Engagements -->
-                    <details class="card">
-                        <summary>
-                            <h2>6. Academic Engagements (No. of items)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="6.1-conf-intl-proceedings">Intl. Conference
-                                        (Proceedings)</label>
-                                    <input type="number" id="6.1-conf-intl-proceedings" class="form-input" min="0"
-                                        value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.2-conf-local-proceedings">Local Conference
-                                        (Proceedings)</label>
-                                    <input type="number" id="6.2-conf-local-proceedings" class="form-input" min="0"
-                                        value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.3-committee-indexed">Committee (Indexed
-                                        Journal)</label>
-                                    <input type="number" id="6.3-committee-indexed" class="form-input" min="0"
-                                        value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.4-committee-other">Committee (Other
-                                        Journal)</label>
-                                    <input type="number" id="6.4-committee-other" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.5-editor-indexed">Editor (Indexed Journal)</label>
-                                    <input type="number" id="6.5-editor-indexed" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.6-editor-other">Editor (Other Journal)</label>
-                                    <input type="number" id="6.6-editor-other" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.7-reviewer-indexed">Reviewer (Indexed
-                                        Journal)</label>
-                                    <input type="number" id="6.7-reviewer-indexed" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.8-reviewer-other">Reviewer (Other Journal)</label>
-                                    <input type="number" id="6.8-reviewer-other" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="6.9-keynote-intl">Committee/Keynote (Intl.
-                                        Conf.)</label>
-                                    <input type="number" id="6.9-keynote-intl" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 7. Innovations & Collaborations -->
-                    <details class="card">
-                        <summary>
-                            <h2>7. Innovations & Collaborations (No. of items)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="7.1-award-intl">International Awards</label>
-                                    <input type="number" id="7.1-award-intl" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="7.2-award-local">National Awards</label>
-                                    <input type="number" id="7.2-award-local" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="7.3-patent">Patents</label>
-                                    <input type="number" id="7.3-patent" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="7.4-project-eu">EU Research Projects</label>
-                                    <input type="number" id="7.4-project-eu" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="7.5-project-local">Local Research Projects</label>
-                                    <input type="number" id="7.5-project-local" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="7.6-new-business">New Businesses Established</label>
-                                    <input type="number" id="7.6-new-business" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="7.7-service-agreement">Service Agreements</label>
-                                    <input type="number" id="7.7-service-agreement" class="form-input" min="0"
-                                        value="0">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 8. International Academic Engagement -->
-                    <details class="card">
-                        <summary>
-                            <h2>8. International Engagement (No. of items)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid" style="grid-template-columns: 1fr 1fr;">
-                                <div class="form-group">
-                                    <label class="form-label" for="8.1-research-partner">Research in Partner
-                                        Institution</label>
-                                    <input type="number" id="8.1-research-partner" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="8.2-engagement-eu">Engagement in EU/OECD HEI</label>
-                                    <input type="number" id="8.2-engagement-eu" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 9. Institutional Contribution -->
-                    <details class="card">
-                        <summary>
-                            <h2>9. Institutional Contribution (Units)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid" style="grid-template-columns: repeat(3, 1fr);">
-                                <div class="form-group">
-                                    <label class="form-label" for="9.1-design-ug">Designing UG Programme</label>
-                                    <input type="number" id="9.1-design-ug" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.2-design-g">Designing G Programme</label>
-                                    <input type="number" id="9.2-design-g" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.3-design-isc">Designing ISC Programme</label>
-                                    <input type="number" id="9.3-design-isc" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-                            <hr class="my-4">
-                            <div class="form-input-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="9.4-vice-rector">Vice Rector (years)</label>
-                                    <input type="number" id="9.4-vice-rector" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.5-dean">Dean (years)</label>
-                                    <input type="number" id="9.5-dean" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.6-hod">Head of Dept. (years)</label>
-                                    <input type="number" id="9.6-hod" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.7-boards">University Boards (years)</label>
-                                    <input type="number" id="9.7-boards" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.8-committees">Ad Hoc Committees (months)</label>
-                                    <input type="number" id="9.8-committees" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.9-drafting">Drafting Regulations (months)</label>
-                                    <input type="number" id="9.9-drafting" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.10-publications">Uni. Publications (years)</label>
-                                    <input type="number" id="9.10-publications" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.11-employment">Student Employment
-                                        (students)</label>
-                                    <input type="number" id="9.11-employment" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.12-promo">Promotional Activities (days)</label>
-                                    <input type="number" id="9.12-promo" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.13-registration">Student Registration
-                                        (days)</label>
-                                    <input type="number" id="9.13-registration" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.14-activities-prof">Academic Activities
-                                        (no.)</label>
-                                    <input type="number" id="9.14-activities-prof" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.15-activities-club">Student Club Activities
-                                        (no.)</label>
-                                    <input type="number" id="9.15-activities-club" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="9.16-advisor">Student Advisor (students)</label>
-                                    <input type="number" id="9.16-advisor" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 10. Professional Contribution -->
-                    <details class="card">
-                        <summary>
-                            <h2>10. Professional Contribution (No. of items)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-input-grid">
-                                <div class="form-group">
-                                    <label class="form-label" for="10.1-innovation-transfer">Innovation Transfer</label>
-                                    <input type="number" id="10.1-innovation-transfer" class="form-input" min="0"
-                                        value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="10.2-expertise">Professional Expertise</label>
-                                    <input type="number" id="10.2-expertise" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="10.3-artistic">Artistic Contribution</label>
-                                    <input type="number" id="10.3-artistic" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="10.4-edu-programs">Educational Programs</label>
-                                    <input type="number" id="10.4-edu-programs" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="10.5-project-proposal">Project Proposals</label>
-                                    <input type="number" id="10.5-project-proposal" class="form-input" min="0"
-                                        value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="10.6-advisory">Advisory Roles</label>
-                                    <input type="number" id="10.6-advisory" class="form-input" min="0" value="0">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="10.7-society">Contribution to Society</label>
-                                    <input type="number" id="10.7-society" class="form-input" min="0" value="0">
-                                </div>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- 11. Other Contributions -->
-                    <details class="card">
-                        <summary>
-                            <h2>11. Other Contributions (Units)</h2>
-                            <i class="fa-solid fa-chevron-right chevron"></i>
-                        </summary>
-                        <div class="card-body">
-                            <div class="form-group">
-                                <label class="form-label" for="11-other">Other contributions (approved by HoD)</label>
-                                <input type="number" id="11-other" class="form-input" min="0" value="0">
-                                <p class="text-sm text-gray-500 mt-2">Enter the total number of units. The HoD will
-                                    assign points (max 5) based on this.</p>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- Save Button -->
-                    <div class="card">
-                        <div class="card-body"
-                            style="background-color: #f8f9fa; display: flex; justify-content: flex-end; align-items: center; gap: 1rem;">
-                            <div id="save-status" class="text-sm text-gray-600"></div>
-                            <button type="submit" id="save-btn" class="btn btn-primary">
-                                <i class="fa-solid fa-check"></i> Save My Evaluation
-                            </button>
-                        </div>
-                    </div>
-
-                </form>
+            <!-- Signed out: a sign-in card stands in for the whole page. -->
+            <div id="login-screen" class="signin-screen">
+                <section class="signin-card" aria-labelledby="login-title">
+                    <h2>Welcome to the</h2>
+                    <h1 id="login-title">Performance Portal</h1>
+                    <button type="button" id="custom-signin-btn" class="btn-google">
+                        <svg class="google-icon" viewBox="0 0 18 18" aria-hidden="true">
+                            <path
+                                d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"
+                                fill="#4285F4" />
+                            <path
+                                d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"
+                                fill="#34A853" />
+                            <path
+                                d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+                                fill="#FBBC05" />
+                            <path
+                                d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+                                fill="#EA4335" />
+                        </svg>
+                        Sign in
+                    </button>
+                    <p class="signin-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Sign in with
+                            your Google account to fill in your<br>evaluation form and see the ranking.</span></p>
+                </section>
             </div>
 
-            <!-- View: Admin Dashboard -->
-            <div id="dashboard-view" class="view" style="display: none;">
+            <!-- Signed in -->
+            <div id="app-content" class="hidden">
 
-                <div class="card">
-                    <div class="card-header">
-                        <h2>Admin Dashboard</h2>
+                <div class="ev-topbar">
+                    <div class="seg" id="view-switch" role="group" aria-label="View">
+                        <button type="button" data-view="form" aria-pressed="true"><i
+                                class="fa-solid fa-file-lines"></i> My evaluation</button>
+                        <button type="button" data-view="dashboard" aria-pressed="false"><i
+                                class="fa-solid fa-ranking-star"></i> Ranking</button>
                     </div>
-                    <div class="card-body">
-                        <p class="mb-6 text-gray-600">This dashboard reads all submissions from the Google Sheet,
-                            calculates their scores in real-time, and ranks them. This data is not saved back to the
-                            sheet; it is computed live in your browser.</p>
+                    <div class="ev-user" id="user-menu">
+                        <span class="ev-user-chip" id="user-chip" title=""><img id="user-avatar" alt=""
+                                referrerpolicy="no-referrer"><span id="user-name"></span></span>
+                        <button type="button" id="sign-out-btn" class="btn-red btn-sm"><i
+                                class="fa-solid fa-right-from-bracket"></i> Sign out</button>
+                    </div>
+                </div>
 
-                        <div id="dashboard-summary" class="dashboard-grid">
-                            <!-- Summary cards will be injected here -->
+                <div class="app-header">
+                    <h1>Performance Portal</h1>
+                    <h2>Your academic evaluation, saved as you type, and the live staff ranking.</h2>
+                    <div class="app-info">
+                        <span class="info-item"><i class="fa-solid fa-user"></i><span id="chip-name">—</span></span>
+                        <span class="info-item"><i class="fa-solid fa-cloud"></i><span id="save-status">Not saved
+                                yet</span></span>
+                        <span class="info-item"><i class="fa-solid fa-table"></i><span>Stored in Google
+                                Sheets</span></span>
+                    </div>
+                </div>
+
+                <!-- View: Evaluation Form -->
+                <div id="form-view" class="view">
+                    <div class="course-actions" id="form-actions">
+                        <button type="button" class="btn-blue" id="expand-all"><i class="fa-solid fa-angles-down"></i>
+                            Open all sections</button>
+                        <button type="button" class="btn-grey" id="collapse-all"><i class="fa-solid fa-angles-up"></i>
+                            Close all</button>
+                    </div>
+
+                    <form id="evaluation-form" novalidate>
+
+                        <!-- 1. General Information -->
+                        <div class="module active">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-id-card"></i> General information</div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">1</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <div class="sg-grid sg-wide">
+                                        <div class="form-group">
+                                            <label for="1.1-name">Full name</label>
+                                            <input type="text" id="1.1-name" class="form-control" readonly>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="1.6-email">Email</label>
+                                            <input type="email" id="1.6-email" class="form-control" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="sg-grid" style="margin-top:12px">
+                                        <div class="form-group">
+                                            <label for="1.2-rank">Academic rank</label>
+                                            <input type="text" id="1.2-rank" class="form-control" readonly
+                                                placeholder="Filled in from section 2">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="1.4-faculty">Faculty</label>
+                                            <select id="1.4-faculty" class="form-control">
+                                                <option value="">Select a faculty…</option>
+                                                <option value="Architecture and Engineering">Architecture and Engineering
+                                                </option>
+                                                <option value="Law and Social Sciences">Law and Social Sciences</option>
+                                                <option value="Economics and Administrative Sciences">Economics and
+                                                    Administrative Sciences</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="1.5-department">Department</label>
+                                            <select id="1.5-department" class="form-control">
+                                                <option value="">Select a department…</option>
+                                                <option value="Economics">Economics</option>
+                                                <option value="Business Administration">Business Administration</option>
+                                                <option value="Architecture">Architecture</option>
+                                                <option value="Civil Engineering">Civil Engineering</option>
+                                                <option value="Computer Engineering">Computer Engineering</option>
+                                                <option value="Software Engineering">Software Engineering</option>
+                                                <option value="Law">Law</option>
+                                                <option value="Political Science and International Relations">Political
+                                                    Science and International Relations</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="card" style="border: none; box-shadow: none;">
-                            <div class="card-header" style="padding-left: 0; padding-right: 0;">
-                                <h3>Full Ranking</h3>
+                        <!-- 2. Qualifications -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-graduation-cap"></i> Qualifications
+                                </div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">2</div>
                             </div>
-                            <div class="card-body" style="padding: 0;">
-                                <div class="overflow-x-auto">
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <p class="form-hint">The year each was completed. Your academic rank in section 1
+                                        follows from the highest one.</p>
+                                    <div class="sg-grid">
+                                        <div class="form-group">
+                                            <label for="2.1-msc">Master of Science (MSc)</label>
+                                            <input type="number" id="2.1-msc" class="form-control qualification-year"
+                                                min="1950" max="2099" placeholder="e.g. 2010" inputmode="numeric">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="2.2-phd">Doctor of Philosophy (PhD)</label>
+                                            <input type="number" id="2.2-phd" class="form-control qualification-year"
+                                                min="1950" max="2099" placeholder="e.g. 2014" inputmode="numeric">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="2.3-assoc-prof">Associate Professor</label>
+                                            <input type="number" id="2.3-assoc-prof" class="form-control qualification-year"
+                                                min="1950" max="2099" placeholder="e.g. 2018" inputmode="numeric">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="2.4-prof">Professor</label>
+                                            <input type="number" id="2.4-prof" class="form-control qualification-year"
+                                                min="1950" max="2099" placeholder="e.g. 2022" inputmode="numeric">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 3. Teaching -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-chalkboard-user"></i> Teaching</div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">3</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <div class="settings-group">
+                                        <div class="settings-head">Teaching experience (years)</div>
+                                        <div class="settings-body">
+                                            <div class="sg-grid">
+                                                <div class="form-group">
+                                                    <label for="3.1-undergrad-years">Undergraduate (BA / BSc)</label>
+                                                    <input type="number" id="3.1-undergrad-years" class="form-control"
+                                                        min="0" value="0" inputmode="numeric">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="3.1-grad-years">Graduate (PM / MSc / PhD)</label>
+                                                    <input type="number" id="3.1-grad-years" class="form-control" min="0"
+                                                        value="0" inputmode="numeric">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="3.1-integrated-years">Integrated second cycle (MSc)</label>
+                                                    <input type="number" id="3.1-integrated-years" class="form-control"
+                                                        min="0" value="0" inputmode="numeric">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-head">Averages</div>
+                                        <div class="settings-body">
+                                            <div class="sg-grid sg-wide">
+                                                <div class="form-group">
+                                                    <label for="3.5-student-avg">Student course evaluation average</label>
+                                                    <input type="number" id="3.5-student-avg" class="form-control" min="0"
+                                                        max="5" step="0.01" value="0" inputmode="decimal">
+                                                    <span class="form-hint">Out of 5.</span>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="3.6-student-num-avg">Students per course, on
+                                                        average</label>
+                                                    <input type="number" id="3.6-student-num-avg" class="form-control"
+                                                        min="0" value="0" inputmode="numeric">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-head">Taught courses</div>
+                                        <div class="settings-body">
+                                            <div class="ev-list-head">
+                                                <span class="form-hint" style="margin:0">One row per course; the ECTS
+                                                    totals below add up by cycle.</span>
+                                                <button type="button" id="add-course-btn" class="btn-blue btn-sm"><i
+                                                        class="fa-solid fa-plus"></i> Add a course</button>
+                                            </div>
+                                            <div id="course-list" class="ev-list" data-empty="No courses yet."></div>
+                                            <div class="sg-grid">
+                                                <div class="form-group">
+                                                    <label for="3.2-undergrad-ects">Undergraduate ECTS</label>
+                                                    <input type="number" id="3.2-undergrad-ects" class="form-control"
+                                                        min="0" value="0" readonly>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="3.3-grad-ects">Graduate ECTS</label>
+                                                    <input type="number" id="3.3-grad-ects" class="form-control" min="0"
+                                                        value="0" readonly>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="3.4-integrated-ects">Integrated ECTS</label>
+                                                    <input type="number" id="3.4-integrated-ects" class="form-control"
+                                                        min="0" value="0" readonly>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 4. Supervising -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-user-graduate"></i> Supervising</div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">4</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <p class="form-hint">Students who completed under your supervision.</p>
+                                    <div class="sg-grid">
+                                        <div class="form-group">
+                                            <label for="4.1-bachelor">Bachelor (BA / BSc)</label>
+                                            <input type="number" id="4.1-bachelor" class="form-control" min="0" value="0"
+                                                inputmode="numeric">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="4.2-pm">Professional Master (PM)</label>
+                                            <input type="number" id="4.2-pm" class="form-control" min="0" value="0"
+                                                inputmode="numeric">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="4.3-msc">Master of Science (MSc)</label>
+                                            <input type="number" id="4.3-msc" class="form-control" min="0" value="0"
+                                                inputmode="numeric">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="4.4-phd">Doctor of Philosophy (PhD)</label>
+                                            <input type="number" id="4.4-phd" class="form-control" min="0" value="0"
+                                                inputmode="numeric">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 5. Publications -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-book"></i> Publications</div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">5</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <div class="settings-group">
+                                        <div class="settings-head">Publication list</div>
+                                        <div class="settings-body">
+                                            <div class="ev-list-head">
+                                                <span class="form-hint" style="margin:0">One row per item; the counts
+                                                    below follow from the categories.</span>
+                                                <button type="button" id="add-publication-btn" class="btn-blue btn-sm"><i
+                                                        class="fa-solid fa-plus"></i> Add a publication</button>
+                                            </div>
+                                            <div id="publication-list" class="ev-list" data-empty="No publications yet.">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-head">Counts (calculated)</div>
+                                        <div class="settings-body">
+                                            <div class="sg-grid sg-narrow">
+                                                <div class="form-group"><label for="5.1-q1">Q1 articles</label><input
+                                                        type="number" id="5.1-q1" class="form-control" value="0" readonly>
+                                                </div>
+                                                <div class="form-group"><label for="5.2-q2">Q2 articles</label><input
+                                                        type="number" id="5.2-q2" class="form-control" value="0" readonly>
+                                                </div>
+                                                <div class="form-group"><label for="5.3-q3">Q3 articles</label><input
+                                                        type="number" id="5.3-q3" class="form-control" value="0" readonly>
+                                                </div>
+                                                <div class="form-group"><label for="5.4-other-indexed">Other
+                                                        indexed</label><input type="number" id="5.4-other-indexed"
+                                                        class="form-control" value="0" readonly></div>
+                                                <div class="form-group"><label for="5.5-other-journals">Other
+                                                        journals</label><input type="number" id="5.5-other-journals"
+                                                        class="form-control" value="0" readonly></div>
+                                                <div class="form-group"><label for="5.6-monograph-indexed">Monograph
+                                                        (indexed)</label><input type="number" id="5.6-monograph-indexed"
+                                                        class="form-control" value="0" readonly></div>
+                                                <div class="form-group"><label for="5.7-monograph-other">Monograph
+                                                        (other)</label><input type="number" id="5.7-monograph-other"
+                                                        class="form-control" value="0" readonly></div>
+                                                <div class="form-group"><label for="5.8-book-indexed">Book
+                                                        (indexed)</label><input type="number" id="5.8-book-indexed"
+                                                        class="form-control" value="0" readonly></div>
+                                                <div class="form-group"><label for="5.10-book-local">Book
+                                                        (local)</label><input type="number" id="5.10-book-local"
+                                                        class="form-control" value="0" readonly></div>
+                                                <div class="form-group"><label for="5.9-chapter-indexed">Chapter
+                                                        (indexed)</label><input type="number" id="5.9-chapter-indexed"
+                                                        class="form-control" value="0" readonly></div>
+                                                <div class="form-group"><label for="5.11-chapter-local">Chapter
+                                                        (local)</label><input type="number" id="5.11-chapter-local"
+                                                        class="form-control" value="0" readonly></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 6. Academic Engagements -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-people-group"></i> Academic engagements
+                                </div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">6</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <p class="form-hint">Number of items.</p>
+                                    <div class="sg-grid">
+                                        <div class="form-group"><label for="6.1-conf-intl-proceedings">International
+                                                conference (proceedings)</label><input type="number"
+                                                id="6.1-conf-intl-proceedings" class="form-control" min="0" value="0"
+                                                inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.2-conf-local-proceedings">Local conference
+                                                (proceedings)</label><input type="number" id="6.2-conf-local-proceedings"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.3-committee-indexed">Committee (indexed
+                                                journal)</label><input type="number" id="6.3-committee-indexed"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.4-committee-other">Committee (other
+                                                journal)</label><input type="number" id="6.4-committee-other"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.5-editor-indexed">Editor (indexed
+                                                journal)</label><input type="number" id="6.5-editor-indexed"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.6-editor-other">Editor (other
+                                                journal)</label><input type="number" id="6.6-editor-other"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.7-reviewer-indexed">Reviewer (indexed
+                                                journal)</label><input type="number" id="6.7-reviewer-indexed"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.8-reviewer-other">Reviewer (other
+                                                journal)</label><input type="number" id="6.8-reviewer-other"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="6.9-keynote-intl">Committee or keynote
+                                                (international conference)</label><input type="number"
+                                                id="6.9-keynote-intl" class="form-control" min="0" value="0"
+                                                inputmode="numeric"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 7. Innovations & Collaborations -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-lightbulb"></i> Innovations and
+                                    collaborations</div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">7</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <p class="form-hint">Number of items.</p>
+                                    <div class="sg-grid">
+                                        <div class="form-group"><label for="7.1-award-intl">International
+                                                awards</label><input type="number" id="7.1-award-intl" class="form-control"
+                                                min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="7.2-award-local">National awards</label><input
+                                                type="number" id="7.2-award-local" class="form-control" min="0" value="0"
+                                                inputmode="numeric"></div>
+                                        <div class="form-group"><label for="7.3-patent">Patents</label><input type="number"
+                                                id="7.3-patent" class="form-control" min="0" value="0" inputmode="numeric">
+                                        </div>
+                                        <div class="form-group"><label for="7.4-project-eu">EU research
+                                                projects</label><input type="number" id="7.4-project-eu"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="7.5-project-local">Local research
+                                                projects</label><input type="number" id="7.5-project-local"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="7.6-new-business">New businesses
+                                                established</label><input type="number" id="7.6-new-business"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="7.7-service-agreement">Service
+                                                agreements</label><input type="number" id="7.7-service-agreement"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 8. International Academic Engagement -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-globe"></i> International engagement
+                                </div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">8</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <p class="form-hint">Number of items.</p>
+                                    <div class="sg-grid sg-wide">
+                                        <div class="form-group"><label for="8.1-research-partner">Research in a partner
+                                                institution</label><input type="number" id="8.1-research-partner"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="8.2-engagement-eu">Engagement in an EU or OECD
+                                                university</label><input type="number" id="8.2-engagement-eu"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 9. Institutional Contribution -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-building-columns"></i> Institutional
+                                    contribution</div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">9</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <div class="settings-group">
+                                        <div class="settings-head">Programme design (units)</div>
+                                        <div class="settings-body">
+                                            <div class="sg-grid">
+                                                <div class="form-group"><label for="9.1-design-ug">Undergraduate
+                                                        programme</label><input type="number" id="9.1-design-ug"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.2-design-g">Graduate
+                                                        programme</label><input type="number" id="9.2-design-g"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.3-design-isc">Integrated second cycle
+                                                        programme</label><input type="number" id="9.3-design-isc"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="settings-group">
+                                        <div class="settings-head">Roles and service</div>
+                                        <div class="settings-body">
+                                            <div class="sg-grid">
+                                                <div class="form-group"><label for="9.4-vice-rector">Vice rector
+                                                        (years)</label><input type="number" id="9.4-vice-rector"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.5-dean">Dean (years)</label><input
+                                                        type="number" id="9.5-dean" class="form-control" min="0" value="0"
+                                                        inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.6-hod">Head of department
+                                                        (years)</label><input type="number" id="9.6-hod"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.7-boards">University boards
+                                                        (years)</label><input type="number" id="9.7-boards"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.8-committees">Ad hoc committees
+                                                        (months)</label><input type="number" id="9.8-committees"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.9-drafting">Drafting regulations
+                                                        (months)</label><input type="number" id="9.9-drafting"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.10-publications">University
+                                                        publications (years)</label><input type="number"
+                                                        id="9.10-publications" class="form-control" min="0" value="0"
+                                                        inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.11-employment">Student employment
+                                                        (students)</label><input type="number" id="9.11-employment"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.12-promo">Promotional activities
+                                                        (days)</label><input type="number" id="9.12-promo"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.13-registration">Student
+                                                        registration (days)</label><input type="number"
+                                                        id="9.13-registration" class="form-control" min="0" value="0"
+                                                        inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.14-activities-prof">Academic
+                                                        activities (number)</label><input type="number"
+                                                        id="9.14-activities-prof" class="form-control" min="0" value="0"
+                                                        inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.15-activities-club">Student club
+                                                        activities (number)</label><input type="number"
+                                                        id="9.15-activities-club" class="form-control" min="0" value="0"
+                                                        inputmode="numeric"></div>
+                                                <div class="form-group"><label for="9.16-advisor">Student advisor
+                                                        (students)</label><input type="number" id="9.16-advisor"
+                                                        class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 10. Professional Contribution -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-briefcase"></i> Professional
+                                    contribution</div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">10</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <p class="form-hint">Number of items.</p>
+                                    <div class="sg-grid">
+                                        <div class="form-group"><label for="10.1-innovation-transfer">Innovation
+                                                transfer</label><input type="number" id="10.1-innovation-transfer"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="10.2-expertise">Professional
+                                                expertise</label><input type="number" id="10.2-expertise"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="10.3-artistic">Artistic
+                                                contribution</label><input type="number" id="10.3-artistic"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="10.4-edu-programs">Educational
+                                                programmes</label><input type="number" id="10.4-edu-programs"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="10.5-project-proposal">Project
+                                                proposals</label><input type="number" id="10.5-project-proposal"
+                                                class="form-control" min="0" value="0" inputmode="numeric"></div>
+                                        <div class="form-group"><label for="10.6-advisory">Advisory roles</label><input
+                                                type="number" id="10.6-advisory" class="form-control" min="0" value="0"
+                                                inputmode="numeric"></div>
+                                        <div class="form-group"><label for="10.7-society">Contribution to
+                                                society</label><input type="number" id="10.7-society" class="form-control"
+                                                min="0" value="0" inputmode="numeric"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 11. Other Contributions -->
+                        <div class="module">
+                            <div class="module-header">
+                                <div class="module-title"><i class="fa-solid fa-circle-plus"></i> Other contributions
+                                </div>
+                                <span class="ev-filled"></span>
+                                <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                                <div class="module-background-number">11</div>
+                            </div>
+                            <div class="module-fold">
+                                <div class="module-content">
+                                    <div class="sg-grid sg-wide">
+                                        <div class="form-group">
+                                            <label for="11-other">Other contributions, approved by the head of
+                                                department (units)</label>
+                                            <input type="number" id="11-other" class="form-control" min="0" value="0"
+                                                inputmode="numeric">
+                                            <span class="form-hint">The total number of units. The head of department
+                                                assigns the points, up to 5.</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Save -->
+                        <div class="ev-savebar">
+                            <span class="form-hint" id="save-hint">Changes save on their own a moment after you
+                                stop typing.</span>
+                            <button type="submit" id="save-btn" class="btn-green"><i class="fa-solid fa-check"></i>
+                                Save my evaluation</button>
+                        </div>
+
+                    </form>
+                </div>
+
+                <!-- View: Ranking -->
+                <div id="dashboard-view" class="view hidden">
+                    <div class="module active">
+                        <div class="module-header">
+                            <div class="module-title"><i class="fa-solid fa-ranking-star"></i> Ranking</div>
+                            <i class="fa-solid fa-chevron-down module-toggle-chevron"></i>
+                            <div class="module-background-number"><i class="fa-solid fa-trophy"></i></div>
+                        </div>
+                        <div class="module-fold">
+                            <div class="module-content">
+                                <p class="form-hint" style="margin:0 0 14px">Every submission in the sheet, scored with
+                                    the rules from its CONFIG tab and ranked here in your browser. Nothing on this view is
+                                    written back to the sheet.</p>
+                                <div id="dashboard-summary" class="ev-stats"></div>
+                                <div class="ev-table-wrap">
                                     <table class="ranking-table">
                                         <thead>
                                             <tr>
                                                 <th class="rank-col">Rank</th>
                                                 <th>Name</th>
-                                                <th class="score-col">Total Points</th>
+                                                <th>Total</th>
                                                 <th>Teaching</th>
                                                 <th>Research</th>
                                                 <th>Admin</th>
@@ -1210,89 +1280,106 @@
                                                 <th>Prof.</th>
                                             </tr>
                                         </thead>
-                                        <tbody id="ranking-table-body">
-                                            <!-- Ranking rows will be injected here -->
-                                        </tbody>
+                                        <tbody id="ranking-table-body"></tbody>
                                     </table>
                                 </div>
                             </div>
                         </div>
-
                     </div>
                 </div>
 
             </div>
-
         </div>
 
-    </main>
-
-    <!-- Loader -->
-    <div id="loader" class="loader-backdrop" style="display: none;">
-        <div class="loader-spinner"></div>
+        <footer class="footer">
+            <div class="social-links">
+                <a href="/" rel="noopener noreferrer"><i class="fa-solid fa-house" title="Home"></i></a>
+                <a href="https://eis.epoka.edu.al/cv/fullcv/655" target="_blank" rel="noopener noreferrer"
+                    title="CV"><i class="fa-regular fa-id-card"></i></a>
+                <a href="mailto:bplaku@epoka.edu.al" target="_blank" rel="noopener noreferrer" title="Email"><i
+                        class="fa-regular fa-envelope"></i></a>
+                <button id="theme-toggle" class="theme-toggle" aria-label="Theme: Auto" title="Theme: Auto">
+                    <i id="theme-toggle-icon" class="fa-solid fa-adjust" aria-hidden="true"></i>
+                </button>
+            </div>
+            <p style="font-size:0.8em; text-transform: uppercase; letter-spacing: 2px; font-weight: 700;">
+                <i class="fa-regular fa-copyright"></i> 2023–<span id="currentYear"></span> Bredli Plaku. All Rights
+                Reserved.
+            </p>
+        </footer>
     </div>
 
-    <!-- Notification -->
-    <div id="notification" class="notification-toast">
-        <i id="notification-icon" class="fa-solid"></i>
-        <div>
-            <h4 id="notification-title" class="font-semibold"></h4>
-            <p id="notification-message"></p>
+    <!-- Busy overlay -->
+    <div id="loader" class="ev-loader hidden" role="status" aria-label="Working">
+        <div class="loading-spinner">
+            <div></div>
+            <div></div>
+            <div></div>
         </div>
     </div>
 
-    <!-- Dynamic Item Templates -->
+    <div class="in-page-notifications" id="notification-area"></div>
+
+    <!-- Repeating row templates -->
     <template id="course-template">
-        <div class="dynamic-list-item">
-            <div class="dynamic-list-item-content" style="grid-template-columns: 1fr 1fr;">
-                <div class="form-group">
-                    <label class="form-label">Cycle</label>
-                    <select class="form-input course-cycle">
-                        <option value="none">Select...</option>
-                        <option value="undergrad">Undergraduate</option>
-                        <option value="grad">Graduate</option>
-                        <option value="integrated">Integrated</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">ECTS</label>
-                    <input type="number" class="form-input course-ects" min="0" value="0">
+        <div class="dynamic-card dynamic-list-item">
+            <div class="dynamic-card-head">
+                <span class="dynamic-card-label">Course</span>
+                <button type="button" class="icon-btn danger remove-btn" title="Remove this course"
+                    aria-label="Remove this course"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+            <div class="dynamic-card-body">
+                <div class="sg-grid">
+                    <div class="form-group">
+                        <label>Cycle</label>
+                        <select class="form-control course-cycle">
+                            <option value="none">Select…</option>
+                            <option value="undergrad">Undergraduate</option>
+                            <option value="grad">Graduate</option>
+                            <option value="integrated">Integrated</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>ECTS</label>
+                        <input type="number" class="form-control course-ects" min="0" value="0" inputmode="numeric">
+                    </div>
                 </div>
             </div>
-            <button type="button" class="btn-danger-icon remove-btn">
-                <i class="fa-solid fa-trash"></i>
-            </button>
         </div>
     </template>
 
     <template id="publication-template">
-        <div class="dynamic-list-item">
-            <div class="dynamic-list-item-content">
-                <div class="form-group">
-                    <label class="form-label">Category</label>
-                    <select class="form-input pub-category">
-                        <option value="none">Select...</option>
-                        <option value="5.1-q1">Q1 Article</option>
-                        <option value="5.2-q2">Q2 Article</option>
-                        <option value="5.3-q3">Q3 Article</option>
-                        <option value="5.4-other-indexed">Other Indexed Article</option>
-                        <option value="5.5-other-journals">Other Journal</option>
-                        <option value="5.6-monograph-indexed">Monograph (Indexed)</option>
-                        <option value="5.7-monograph-other">Monograph (Other)</option>
-                        <option value="5.8-book-indexed">Book (Indexed)</option>
-                        <option value="5.9-chapter-indexed">Chapter (Indexed)</option>
-                        <option value="5.10-book-local">Book (Local)</option>
-                        <option value="5.11-chapter-local">Chapter (Local)</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Title / Description</label>
-                    <input type="text" class="form-input pub-title" placeholder="Optional: Title or brief description">
+        <div class="dynamic-card dynamic-list-item">
+            <div class="dynamic-card-head">
+                <span class="dynamic-card-label">Publication</span>
+                <button type="button" class="icon-btn danger remove-btn" title="Remove this publication"
+                    aria-label="Remove this publication"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+            <div class="dynamic-card-body">
+                <div class="sg-grid sg-wide">
+                    <div class="form-group">
+                        <label>Category</label>
+                        <select class="form-control pub-category">
+                            <option value="none">Select…</option>
+                            <option value="5.1-q1">Q1 article</option>
+                            <option value="5.2-q2">Q2 article</option>
+                            <option value="5.3-q3">Q3 article</option>
+                            <option value="5.4-other-indexed">Other indexed article</option>
+                            <option value="5.5-other-journals">Other journal</option>
+                            <option value="5.6-monograph-indexed">Monograph (indexed)</option>
+                            <option value="5.7-monograph-other">Monograph (other)</option>
+                            <option value="5.8-book-indexed">Book (indexed)</option>
+                            <option value="5.9-chapter-indexed">Chapter (indexed)</option>
+                            <option value="5.10-book-local">Book (local)</option>
+                            <option value="5.11-chapter-local">Chapter (local)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Title or description</label>
+                        <input type="text" class="form-control pub-title" placeholder="Optional">
+                    </div>
                 </div>
             </div>
-            <button type="button" class="btn-danger-icon remove-btn">
-                <i class="fa-solid fa-trash"></i>
-            </button>
         </div>
     </template>
 
@@ -1321,25 +1408,20 @@
         // === DOM ELEMENTS ===
         const dom = {
             loader: document.getElementById('loader'),
-            notification: document.getElementById('notification'),
-            notificationIcon: document.getElementById('notification-icon'),
-            notificationTitle: document.getElementById('notification-title'),
-            notificationMessage: document.getElementById('notification-message'),
             loginScreen: document.getElementById('login-screen'),
             appContent: document.getElementById('app-content'),
-            customSigninBtn: document.getElementById('custom-signin-btn'), // NEW: Custom sign-in button
-            userMenu: document.getElementById('user-menu'),
+            customSigninBtn: document.getElementById('custom-signin-btn'),
             userAvatar: document.getElementById('user-avatar'),
-            dropdownMenu: document.getElementById('dropdown-menu'),
-            dropdownAvatar: document.getElementById('dropdown-avatar'),
-            dropdownName: document.getElementById('dropdown-name'),
-            dropdownEmail: document.getElementById('dropdown-email'),
+            userName: document.getElementById('user-name'),
+            userChip: document.getElementById('user-chip'),
+            chipName: document.getElementById('chip-name'),
             signOutBtn: document.getElementById('sign-out-btn'),
+            viewSwitch: document.getElementById('view-switch'),
             views: document.querySelectorAll('.view'),
             form: document.getElementById('evaluation-form'),
             saveBtn: document.getElementById('save-btn'),
             saveStatus: document.getElementById('save-status'),
-            // NEW: Qualification inputs
+            saveHint: document.getElementById('save-hint'),
             qualificationInputs: document.querySelectorAll('.qualification-year'),
             academicRankInput: document.getElementById('1.2-rank'),
             // Dynamic Lists
@@ -1372,34 +1454,85 @@
 
         // === UTILITY FUNCTIONS ===
 
+        const escapeHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
         function showLoader(show) {
-            dom.loader.style.display = show ? 'flex' : 'none';
+            dom.loader.classList.toggle('hidden', !show);
         }
 
-        let notificationTimeout;
-        function showNotification(type, title, message) {
-            clearTimeout(notificationTimeout);
-            dom.notificationIcon.setAttribute('class', 'fa-solid');
-            dom.notification.setAttribute('class', 'notification-toast');
+        // Toasts, as on the other app pages: at most two on screen, a new one
+        // replaces an older one of its type, and errors stay until dismissed.
+        function showNotification(type, title, message, duration) {
+            const area = document.getElementById('notification-area');
+            const dismiss = (el) => { el.classList.add('removing'); setTimeout(() => el.remove(), 300); };
+            area.querySelectorAll(`.in-page-notification-${type}`).forEach(dismiss);
+            const existing = area.querySelectorAll('.in-page-notification');
+            if (existing.length >= 2) dismiss(existing[0]);
+            const icons = { success: 'check-circle', error: 'times-circle', warning: 'exclamation-circle', info: 'info-circle' };
+            const n = document.createElement('div');
+            n.className = `in-page-notification in-page-notification-${type}`;
+            const icon = document.createElement('i');
+            icon.className = `fa-solid fa-${icons[type] || icons.info}`;
+            const body = document.createElement('div');
+            body.className = 'notification-content';
+            const strong = document.createElement('strong');
+            strong.textContent = title;
+            body.append(strong, document.createElement('br'), document.createTextNode(message || ''));
+            const close = document.createElement('button');
+            close.className = 'notification-close';
+            close.type = 'button';
+            close.setAttribute('aria-label', 'Dismiss');
+            close.innerHTML = '&times;';
+            close.onclick = () => dismiss(n);
+            n.append(icon, body, close);
+            area.appendChild(n);
+            if (type !== 'error') setTimeout(() => dismiss(n), duration || 5000);
+        }
 
-            if (type === 'success') {
-                dom.notificationIcon.classList.add('fa-check-circle');
-                dom.notification.classList.add('success');
-            } else if (type === 'error') {
-                dom.notificationIcon.classList.add('fa-exclamation-circle');
-                dom.notification.classList.add('error');
-            } else {
-                dom.notificationIcon.classList.add('fa-info-circle');
-                dom.notification.classList.add('info');
-            }
+        // Theme toggle: auto → the opposite of the system theme → auto.
+        function setupThemeToggle() {
+            const KEY = 'theme-preference', BTN = document.getElementById('theme-toggle');
+            const icons = { auto: 'fa-solid fa-adjust', light: 'fa-regular fa-sun', dark: 'fa-regular fa-moon' };
+            const saved = () => { try { return localStorage.getItem(KEY) || 'auto'; } catch (e) { return 'auto'; } };
+            const isDark = () => { const f = document.documentElement.getAttribute('data-theme'); return f ? f === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; };
+            const apply = (pref) => {
+                if (pref === 'auto') document.documentElement.removeAttribute('data-theme');
+                else document.documentElement.setAttribute('data-theme', pref);
+                try { localStorage.setItem(KEY, pref); } catch (e) { }
+                // The kit swaps <i> for <svg>, so the icon is replaced, not reclassed.
+                const old = document.getElementById('theme-toggle-icon');
+                if (old) { const i = document.createElement('i'); i.id = 'theme-toggle-icon'; i.className = icons[pref]; i.setAttribute('aria-hidden', 'true'); old.replaceWith(i); }
+                const label = 'Theme: ' + pref.charAt(0).toUpperCase() + pref.slice(1);
+                BTN.setAttribute('aria-label', label); BTN.title = label;
+                document.querySelector('meta[name="theme-color"]').content = isDark() ? '#121212' : '#f4f4f4';
+            };
+            BTN.addEventListener('click', () => {
+                const sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+                apply(saved() === 'auto' ? (sysDark ? 'light' : 'dark') : 'auto');
+            });
+            matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (saved() === 'auto') apply('auto'); });
+            apply(saved());
+        }
 
-            dom.notificationTitle.textContent = title;
-            dom.notificationMessage.textContent = message;
-            dom.notification.classList.add('show');
+        // Connected button rows round their outer ends per visual row.
+        function trackButtonRows(container) {
+            const update = () => {
+                const buttons = Array.from(container.children).filter(b => b.tagName === 'BUTTON' && !b.classList.contains('hidden'));
+                buttons.forEach(b => b.classList.remove('first-in-row', 'last-in-row', 'only-in-row', 'middle-in-row'));
+                const rows = {};
+                buttons.forEach(b => { const k = Object.keys(rows).find(t => Math.abs(t - b.offsetTop) < 5); (rows[k] || (rows[b.offsetTop] = [])).push(b); });
+                Object.values(rows).forEach((r, i) => {
+                    if (r.length === 1) r[0].classList.add(i === 0 ? 'only-in-row' : 'middle-in-row');
+                    else { r[0].classList.add('first-in-row'); r[r.length - 1].classList.add('last-in-row'); }
+                });
+            };
+            update();
+            new ResizeObserver(update).observe(container);
+        }
 
-            notificationTimeout = setTimeout(() => {
-                dom.notification.classList.remove('show');
-            }, 5000);
+        function setSaveStatus(text) {
+            dom.saveStatus.textContent = text;
+            dom.saveHint.textContent = text;
         }
 
         // Debounce function to prevent rapid saving
@@ -1417,6 +1550,10 @@
         window.addEventListener('load', init);
 
         function init() {
+            document.getElementById('currentYear').textContent = new Date().getFullYear();
+            setupThemeToggle();
+            trackButtonRows(document.getElementById('form-actions'));
+
             // Set up GSI / GAPI clients
             setTimeout(() => {
                 if (typeof google !== 'undefined') {
@@ -1433,31 +1570,29 @@
             }, 500); // Wait a bit for libraries to load
 
             // App event listeners
-            dom.customSigninBtn.addEventListener('click', handleAuthClick); // NEW
+            dom.customSigninBtn.addEventListener('click', handleAuthClick);
             dom.signOutBtn.addEventListener('click', handleSignOut);
             window.addEventListener('hashchange', handleHashChange);
-
-            // User menu toggle
-            dom.userAvatar.addEventListener('click', () => {
-                dom.dropdownMenu.style.display = dom.dropdownMenu.style.display === 'block' ? 'none' : 'block';
+            dom.viewSwitch.addEventListener('click', (e) => {
+                const b = e.target.closest('button[data-view]');
+                if (b) window.location.hash = b.dataset.view;
             });
 
-            // Close dropdown if clicking outside
-            document.addEventListener('click', (e) => {
-                if (!dom.userMenu.contains(e.target)) {
-                    dom.dropdownMenu.style.display = 'none';
-                }
-            });
+            // Sections fold like the other app pages' modules.
+            document.querySelectorAll('.module-header').forEach(h => h.addEventListener('click', () => h.closest('.module').classList.toggle('active')));
+            document.getElementById('expand-all').addEventListener('click', () => dom.form.querySelectorAll('.module').forEach(m => m.classList.add('active')));
+            document.getElementById('collapse-all').addEventListener('click', () => dom.form.querySelectorAll('.module').forEach(m => m.classList.remove('active')));
 
             // Form event listeners
             dom.form.addEventListener('submit', handleFormSubmit);
-            dom.addCourseBtn.addEventListener('click', () => addCourseItem());
-            dom.addPubBtn.addEventListener('click', () => addPublicationItem());
+            dom.addCourseBtn.addEventListener('click', () => { addCourseItem(); queueSave(); });
+            dom.addPubBtn.addEventListener('click', () => { addPublicationItem(); queueSave(); });
 
             dom.courseList.addEventListener('click', (e) => {
                 if (e.target.closest('.remove-btn')) {
                     e.target.closest('.dynamic-list-item').remove();
                     updateCourseTotals();
+                    queueSave();
                 }
             });
             dom.courseList.addEventListener('change', updateCourseTotals);
@@ -1466,20 +1601,32 @@
                 if (e.target.closest('.remove-btn')) {
                     e.target.closest('.dynamic-list-item').remove();
                     updatePublicationTotals();
+                    queueSave();
                 }
             });
             dom.pubList.addEventListener('change', updatePublicationTotals);
 
-            // NEW: Listen to changes on qualification year inputs
             dom.qualificationInputs.forEach(input => {
                 input.addEventListener('input', updateAcademicRank);
             });
 
             // Auto-save on form change
-            dom.form.addEventListener('input', debounce(autoSave, 2000));
+            dom.form.addEventListener('input', () => { updateFilledCounts(); queueSave(); });
+            dom.form.addEventListener('change', updateFilledCounts);
         }
 
-        // UPDATED: Init Google API Client
+        const queueSave = debounce(() => { if (currentUser) autoSave(); }, 2000);
+
+        // Each section's header counts the fields that have something in them.
+        function updateFilledCounts() {
+            dom.form.querySelectorAll('.module').forEach(mod => {
+                const fields = Array.from(mod.querySelectorAll('.module-content .form-control')).filter(f => !f.readOnly);
+                const filled = fields.filter(f => f.value !== '' && f.value !== '0' && f.value !== 'none').length;
+                const chip = mod.querySelector('.ev-filled');
+                if (chip) chip.textContent = filled ? `${filled} filled` : '';
+            });
+        }
+
         function initGoogleApi() {
             try {
                 tokenClient = google.accounts.oauth2.initTokenClient({
@@ -1509,7 +1656,7 @@
             }
         }
 
-        // === AUTHENTICATION (REBUILT) ===
+        // === AUTHENTICATION ===
 
         function handleAuthClick() {
             showLoader(true);
@@ -1582,7 +1729,7 @@
             }
 
             gapi.client.setToken(null);
-            tokenClient = null;
+            // The token client is kept, so signing in again works without a reload.
             currentUser = null;
             SCORING_LOGIC = {};
             allSubmissions = [];
@@ -1593,23 +1740,23 @@
 
         function updateAuthUI(isSignedIn, user = null) {
             if (isSignedIn && user) {
-                dom.loginScreen.style.display = 'none';
-                dom.appContent.style.display = 'block';
-                dom.userMenu.style.display = 'block';
+                dom.loginScreen.classList.add('hidden');
+                dom.appContent.classList.remove('hidden');
 
-                dom.userAvatar.src = user.picture;
-                dom.dropdownAvatar.src = user.picture;
-                dom.dropdownName.textContent = user.name;
-                dom.dropdownEmail.textContent = user.email;
+                dom.userAvatar.src = user.picture || '';
+                dom.userAvatar.hidden = !user.picture;
+                dom.userName.textContent = user.name;
+                dom.userChip.title = user.email;
+                dom.chipName.textContent = user.name;
 
                 // Populate user info into form
                 document.getElementById('1.1-name').value = user.name;
                 document.getElementById('1.6-email').value = user.email;
+                updateFilledCounts();
 
             } else {
-                dom.loginScreen.style.display = 'flex';
-                dom.appContent.style.display = 'none';
-                dom.userMenu.style.display = 'none';
+                dom.loginScreen.classList.remove('hidden');
+                dom.appContent.classList.add('hidden');
                 window.location.hash = '';
             }
         }
@@ -1620,15 +1767,16 @@
             if (!currentUser) return; // Don't route if not logged in
 
             const hash = window.location.hash.replace('#', '');
-            dom.views.forEach(view => view.style.display = 'none');
+            const view = hash === 'dashboard' ? 'dashboard' : 'form';
+            dom.views.forEach(v => v.classList.add('hidden'));
+            dom.viewSwitch.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
 
-            if (hash === 'dashboard') {
-                document.getElementById('dashboard-view').style.display = 'block';
+            if (view === 'dashboard') {
+                document.getElementById('dashboard-view').classList.remove('hidden');
                 loadDashboard();
             } else {
-                // Default to form view
-                document.getElementById('form-view').style.display = 'block';
-                // loadUserData() is already called after sign-in
+                // Default to form view; loadUserData() is already called after sign-in
+                document.getElementById('form-view').classList.remove('hidden');
             }
         }
 
@@ -1695,6 +1843,7 @@
                     if (userRow && userRow[2]) {
                         const savedData = JSON.parse(userRow[2]);
                         populateForm(savedData);
+                        if (userRow[1]) setSaveStatus(`Last saved ${new Date(userRow[1]).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`);
                         showNotification('success', 'Data Loaded', 'Your saved evaluation has been loaded.');
                     } else {
                         showNotification('info', 'New Form', 'Welcome! Please fill out your evaluation.');
@@ -1715,7 +1864,7 @@
 
         // Save the current user's data
         async function saveUserData(data) {
-            dom.saveStatus.textContent = 'Saving...';
+            setSaveStatus('Saving…');
             try {
                 // 1. Get all data to find the user's row
                 const response = await gapi.client.sheets.spreadsheets.values.get({
@@ -1745,7 +1894,7 @@
                     resource: valueRangeBody,
                 });
 
-                dom.saveStatus.textContent = `Saved at ${new Date().toLocaleTimeString()}`;
+                setSaveStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
                 return true;
 
             } catch (error) {
@@ -1757,7 +1906,7 @@
                         return await saveUserData(data);
                     }
                 }
-                dom.saveStatus.textContent = 'Save failed.';
+                setSaveStatus('Save failed');
                 showNotification('error', 'Save Error', 'Could not save data to Google Sheet.');
                 return false;
             }
@@ -1813,12 +1962,13 @@
         }
 
         function autoSave() {
-            dom.saveStatus.textContent = 'Auto-saving...';
+            setSaveStatus('Auto-saving…');
             const data = serializeForm();
             saveUserData(data);
         }
 
-        // Convert form to a storable JSON object
+        // Convert form to a storable JSON object. The field IDs are the keys
+        // stored in the sheet and used by its CONFIG rules: never rename them.
         function serializeForm() {
             const data = {
                 email: currentUser.email,
@@ -1831,7 +1981,7 @@
             };
 
             // Get all simple input values
-            const inputs = dom.form.querySelectorAll('.form-input[id]');
+            const inputs = dom.form.querySelectorAll('.form-control[id]');
             inputs.forEach(input => {
                 if (input.id) {
                     data.formValues[input.id] = input.type === 'number' ? (input.valueAsNumber || 0) : input.value;
@@ -1879,11 +2029,12 @@
                 }
             }
 
-            // NEW: After populating, update the rank
+            // After populating, update the rank
             updateAcademicRank();
+            updateFilledCounts();
         }
 
-        // NEW: Update Academic Rank based on Qualification inputs
+        // Update Academic Rank based on Qualification inputs
         function updateAcademicRank() {
             const yearProf = document.getElementById('2.4-prof').valueAsNumber || 0;
             const yearAssoc = document.getElementById('2.3-assoc-prof').valueAsNumber || 0;
@@ -1905,6 +2056,11 @@
         }
 
         // === DYNAMIC ITEM LOGIC ===
+
+        // Rows are labelled "Course 1", "Course 2"… and renumber when one goes.
+        function renumber(list, word) {
+            list.querySelectorAll('.dynamic-card-label').forEach((l, i) => { l.textContent = `${word} ${i + 1}`; });
+        }
 
         function addCourseItem(data = null) {
             const template = document.getElementById('course-template');
@@ -1934,6 +2090,7 @@
             dom.undergradECTSInput.value = undergrad;
             dom.gradECTSInput.value = grad;
             dom.integratedECTSInput.value = integrated;
+            renumber(dom.courseList, 'Course');
         }
 
         function addPublicationItem(data = null) {
@@ -1961,6 +2118,7 @@
             Object.keys(counts).forEach(key => {
                 dom.pubCountInputs[key].value = counts[key];
             });
+            renumber(dom.pubList, 'Publication');
         }
 
         // === DASHBOARD LOGIC ===
@@ -1980,7 +2138,8 @@
                 if (!rows || rows.length < 2) {
                     // No data found (or just headers)
                     showNotification('info', 'Empty Dashboard', 'No submissions found yet.');
-                    dom.rankingTableBody.innerHTML = '<tr><td colspan="9" class="text-center p-8 text-gray-500">No submissions to display.</td></tr>';
+                    dom.dashboardSummary.innerHTML = '';
+                    dom.rankingTableBody.innerHTML = '<tr class="empty-row"><td colspan="9">No submissions to display yet.</td></tr>';
                     showLoader(false);
                     return;
                 }
@@ -2056,44 +2215,32 @@
             const userRank = allSubmissions.findIndex(s => s.email === userEmail) + 1;
             const userRecord = userRank > 0 ? allSubmissions[userRank - 1] : { total: 0 };
 
-            dom.dashboardSummary.innerHTML = `
-                <div class="stat-card">
-                    <div class="stat-card-title">Your Rank</div>
-                    <div class="stat-card-value rank">#${userRank > 0 ? userRank : 'N/A'}</div>
-                    <div class="stat-card-value-small mt-2">${userRecord.total.toFixed(2)} pts</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-card-title">Top Performer</div>
-                    <div class="stat-card-value">${topScorer.total.toFixed(2)}</div>
-                    <div class="stat-card-value-small mt-2 truncate">${topScorer.name}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-card-title">Total Submissions</div>
-                    <div class="stat-card-value">${totalStaff}</div>
-                    <div class="stat-card-value-small mt-2">&nbsp;</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-card-title">Average Score</div>
-                    <div class="stat-card-value">${avgScore.toFixed(2)}</div>
-                    <div class="stat-card-value-small mt-2">&nbsp;</div>
-                </div>
-            `;
+            // Names come from the sheet, so they are escaped before going into HTML.
+            const tile = (label, value, sub, cls) => `
+                <div class="ev-stat">
+                    <div class="ev-stat-label">${label}</div>
+                    <div class="ev-stat-value${cls ? ' ' + cls : ''}">${value}</div>
+                    <div class="ev-stat-sub">${sub || '&nbsp;'}</div>
+                </div>`;
+            dom.dashboardSummary.innerHTML =
+                tile('Your rank', userRank > 0 ? '#' + userRank : 'N/A', `${userRecord.total.toFixed(2)} points`, 'is-rank') +
+                tile('Top score', topScorer.total.toFixed(2), escapeHtml(topScorer.name)) +
+                tile('Submissions', totalStaff) +
+                tile('Average score', avgScore.toFixed(2));
 
             // 2. Render Table
             dom.rankingTableBody.innerHTML = '';
             if (allSubmissions.length === 0) {
-                dom.rankingTableBody.innerHTML = '<tr><td colspan="9" class="text-center p-8 text-gray-500">No submissions to display.</td></tr>';
+                dom.rankingTableBody.innerHTML = '<tr class="empty-row"><td colspan="9">No submissions to display yet.</td></tr>';
                 return;
             }
 
             allSubmissions.forEach((staff, index) => {
                 const tr = document.createElement('tr');
-                if (staff.email === currentUser.email) {
-                    tr.style.backgroundColor = '#e8f0fe';
-                }
+                if (staff.email === currentUser.email) tr.classList.add('is-me');
                 tr.innerHTML = `
                     <td class="rank-col">${index + 1}</td>
-                    <td class="user-col">${staff.name}</td>
+                    <td class="user-col">${escapeHtml(staff.name)}</td>
                     <td class="score-col">${staff.total.toFixed(2)}</td>
                     <td>${(staff.teaching || 0).toFixed(2)}</td>
                     <td>${(staff.research || 0).toFixed(2)}</td>
