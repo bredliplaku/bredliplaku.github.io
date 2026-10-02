@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="miscellaneous/profile.jpg" width="140" alt="Bredli Plaku">
+  <img src="miscellaneous/profile.webp" width="140" alt="Bredli Plaku">
   <h1>Bredli's Website</h1>
   <p>Personal website, teaching materials and academic tools.</p>
   <p>

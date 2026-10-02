@@ -844,6 +844,33 @@
         return cells;
     }
 
+    // One line of a CSV/TSV export, split on , ; or tab. Quoted fields stay
+    // whole and lose their quotes, so "Hoxha, Ana" is one name, not two, and
+    // an exporter that quotes every cell doesn't put quote marks on the paper.
+    function splitRow(line) {
+        const cells = [];
+        let cell = '';
+        let quoted = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (quoted) {
+                if (ch === '"' && line[i + 1] === '"') { cell += '"'; i++; }
+                else if (ch === '"') quoted = false;
+                else cell += ch;
+            } else if (ch === '"' && !cell.trim()) {
+                quoted = true;
+                cell = '';
+            } else if (ch === ',' || ch === ';' || ch === '\t') {
+                cells.push(cell);
+                cell = '';
+            } else {
+                cell += ch;
+            }
+        }
+        cells.push(cell);
+        return cells;
+    }
+
     async function importNamesFile(file) {
         try {
             let names;
@@ -853,7 +880,7 @@
                 const sheet = wb.Sheets[wb.SheetNames[0]];
                 names = namesFromRows(window.XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false }));
             } else {
-                const rows = (await file.text()).split(/\r?\n/).map(l => l.split(/[,;\t]/));
+                const rows = (await file.text()).split(/\r?\n/).map(splitRow);
                 // A single-column file is just a list; anything wider is a
                 // table and gets the column-picking treatment.
                 names = rows.some(r => r.length > 1) ? namesFromRows(rows) : rows.map(r => r[0]);
@@ -932,8 +959,6 @@
         state.variants.splice(to, 0, moved);
         relabel();
 
-        const remap = {};
-        state.variants.forEach((v, newIndex) => { remap[v.letter] = newIndex; });
         Object.keys(state.assign).forEach(name => {
             const old = state.assign[name];
             // Work out where the paper that student was on has ended up.
@@ -1766,26 +1791,49 @@
             `${state.names.length} files, starting with "${first}" — roughly ${formatBytes(avg * state.names.length)} in total. Each copy also records the student's name in the PDF's document properties.`;
     }
 
+    // Every open/close goes through here so the header's aria-expanded never
+    // disagrees with what is on screen. A closed panel is only squashed to
+    // zero height, so it is also made inert — otherwise Tab would wander
+    // into controls nobody can see.
+    function setModuleOpen(mod, open) {
+        mod.classList.toggle('active', open);
+        const header = mod.querySelector('.module-header');
+        if (header) header.setAttribute('aria-expanded', String(open));
+        const content = mod.querySelector('.module-content');
+        if (content) content.inert = !open;
+    }
+
     function openModule(id) {
         const mod = document.getElementById(id);
-        if (mod) mod.classList.add('active');
+        if (mod) setModuleOpen(mod, true);
     }
 
     /* The steps are an accordion because the page is a linear form, not a
        browse list: one panel open at a time keeps the whole flow on one screen
        instead of a wall of controls. Finishing a step and pressing "Next"
        closes it and opens the following one; the headers still work as
-       ordinary toggles for going back. */
+       ordinary toggles for going back — from the keyboard too. */
     function wireModules() {
         document.querySelectorAll('.module .module-header').forEach(header => {
-            header.addEventListener('click', () => {
-                const mod = header.closest('.module');
-                mod.classList.toggle('active');
+            const mod = header.closest('.module');
+            header.setAttribute('role', 'button');
+            header.tabIndex = 0;
+            header.querySelectorAll('.module-background-number').forEach(n => n.setAttribute('aria-hidden', 'true'));
+            setModuleOpen(mod, mod.classList.contains('active'));
+
+            const toggle = () => {
+                setModuleOpen(mod, !mod.classList.contains('active'));
                 // A canvas is sized to whatever width it had when it was
                 // drawn, so reopening a panel means redrawing it.
                 if (!mod.classList.contains('active') || !state.variants.length) return;
                 if (mod.id === 'mod-pdf') setTimeout(() => renderPage(state.currentPage), 360);
                 if (mod.id === 'mod-watermark') setTimeout(() => renderWatermarkPage(state.wmPage), 360);
+            };
+            header.addEventListener('click', toggle);
+            header.addEventListener('keydown', (e) => {
+                if (e.target !== header || (e.key !== 'Enter' && e.key !== ' ')) return;
+                e.preventDefault();
+                toggle();
             });
         });
 
@@ -1794,8 +1842,8 @@
                 const current = btn.closest('.module');
                 const next = document.getElementById(btn.dataset.next);
                 if (!next) return;
-                current.classList.remove('active');
-                next.classList.add('active');
+                setModuleOpen(current, false);
+                setModuleOpen(next, true);
                 next.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 if (next.id === 'mod-watermark' && state.variants.length) {
                     setTimeout(() => renderWatermarkPage(state.wmPage), 360);
@@ -1865,6 +1913,11 @@
 
         // --- papers ---
         dom.pdfDrop.addEventListener('click', () => dom.pdfFile.click());
+        dom.pdfDrop.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            dom.pdfFile.click();
+        });
         dom.pdfFile.addEventListener('change', () => {
             if (dom.pdfFile.files.length) addPdfFiles(Array.from(dom.pdfFile.files));
             dom.pdfFile.value = '';

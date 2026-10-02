@@ -39,35 +39,40 @@
             });
         }
 
+        /* === STORAGE ===
+           localStorage throws when site data is blocked; the theme should still
+           work for the visit, just without being remembered. */
+        const storage = {
+            get(key) { try { return localStorage.getItem(key); } catch (e) { return null; } },
+            set(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* not persisted */ } },
+        };
+
         /* === THEME TOGGLE === */
         function setupThemeToggle() {
             const KEY = 'theme-preference';
-            const container = document.querySelector('.footer-tools');
-            if (!container) return;
+            const btn = document.getElementById('theme-toggle');
+            if (!btn) return;
 
             const icons = { auto: 'fa-solid fa-circle-half-stroke', light: 'fa-regular fa-sun', dark: 'fa-regular fa-moon' };
 
+            // Replaced rather than reclassed: the FontAwesome kit swaps each <i> for an <svg>
             const swapIcon = (newClasses) => {
-                const old = container.querySelector('#theme-toggle-icon');
+                const old = document.getElementById('theme-toggle-icon');
                 if (!old) return;
                 const i = document.createElement('i');
                 i.id = 'theme-toggle-icon';
-                i.className = 'theme-toggle ' + newClasses;
-                i.setAttribute('role', 'button');
-                i.tabIndex = 0;
+                i.className = newClasses;
+                i.setAttribute('aria-hidden', 'true');
                 old.replaceWith(i);
             };
 
             const applyTheme = (theme) => {
                 document.documentElement.setAttribute('data-theme', theme);
-                localStorage.setItem(KEY, theme);
+                storage.set(KEY, theme);
                 swapIcon(icons[theme] || icons.auto);
                 const label = theme.charAt(0).toUpperCase() + theme.slice(1);
-                const el = container.querySelector('#theme-toggle-icon');
-                if (el) {
-                    el.setAttribute('aria-label', `Theme: ${label}`);
-                    el.title = `Theme: ${label}`;
-                }
+                btn.setAttribute('aria-label', `Theme: ${label}`);
+                btn.title = `Theme: ${label}`;
                 // Update meta theme-color for browser chrome
                 const isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
                 document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
@@ -77,8 +82,8 @@
                 document.head.appendChild(meta);
             };
 
-            container.addEventListener('click', () => {
-                const currentPref = localStorage.getItem(KEY) || 'auto';
+            btn.addEventListener('click', () => {
+                const currentPref = storage.get(KEY) || 'auto';
                 const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
                 let newPref;
 
@@ -99,12 +104,12 @@
             });
 
             window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-                if (localStorage.getItem(KEY) === 'auto') {
+                if ((storage.get(KEY) || 'auto') === 'auto') {
                     applyTheme('auto');
                 }
             });
 
-            applyTheme(localStorage.getItem(KEY) || 'auto');
+            applyTheme(storage.get(KEY) || 'auto');
         }
 
         /* === CAT COMPANION === */

@@ -28,7 +28,11 @@ function setupThemeToggle() {
         dark: 'fa-regular fa-moon',
     };
 
-    const getSaved = () => localStorage.getItem(KEY) || 'auto';
+    // Storage can throw when site data is blocked. The theme then still works
+    // for the visit, and — since this runs first in init() — so does the page.
+    const getSaved = () => {
+        try { return localStorage.getItem(KEY) || 'auto'; } catch { return 'auto'; }
+    };
 
     const currentIsDark = () => {
         const forced = document.documentElement.getAttribute('data-theme');
@@ -41,7 +45,7 @@ function setupThemeToggle() {
     // prefers-color-scheme-scoped ones stay as the auto-mode fallback.
     const updateThemeColorMeta = () => {
         const meta = document.querySelector('meta[name="theme-color"]:not([media])');
-        if (meta) meta.setAttribute('content', currentIsDark() ? '#121212' : '#f4f4f4');
+        if (meta) meta.setAttribute('content', currentIsDark() ? '#000000' : '#f4f4f4');
     };
 
     // The icon is replaced rather than reclassed: Font Awesome's SVG mode
@@ -70,7 +74,7 @@ function setupThemeToggle() {
         const html = document.documentElement;
         if (pref === 'auto') html.removeAttribute('data-theme');
         else html.setAttribute('data-theme', pref);
-        localStorage.setItem(KEY, pref);
+        try { localStorage.setItem(KEY, pref); } catch { /* not persisted */ }
         updateUI(pref);
         updateThemeColorMeta();
     };
