@@ -22,7 +22,6 @@
 | [**Home**](https://bredliplaku.com/) | Personal links and access to the site's tools |
 | [**Syllabase**](https://bredliplaku.com/teaching/) | Course materials, timetable, account permissions and lecturer websites |
 | [**Stando**](https://bredliplaku.com/attendance/) | Smart Attendance replaces paper-based attendance with NFC |
-| [**Exam portal**](exam_form/) | Exam access and administration |
 | [**Glyph**](exam_stamp/) | Adds student names to exam PDFs and downloads the copies as a ZIP |
 | [**Figura**](projects/charts/) | Redraws the charts in an Excel workbook and saves them at an exact size and DPI, as PNG, JPEG or SVG |
 | [**Performance Portal**](projects/eval.html) | Academic staff evaluation form and live ranking, stored in Google Sheets |
