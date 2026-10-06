@@ -1,8 +1,9 @@
 /* ==========================================================================
    scripts.js — Figura's page logic.
 
-   Engine (engine.js): loadWorkbook, renderChart, toSVG, toCanvas, chartKind,
-   pngSetDpi, jpegSetDpi, cssFont, NUMLOC, r2.
+   Engine (engine.js): loadWorkbook, renderChart, toSVG, toCanvas, toPDF,
+   pdfFaces, parseTTF, chartKind, pngSetDpi, jpegSetDpi, encodeTIFF, cssFont,
+   NUMLOC, r2.
    Chrome (common.js): setupThemeToggle, trackButtonRows, showNotification,
    updateYear.
    ========================================================================== */
@@ -58,7 +59,8 @@
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const safe = s => String(s).trim().replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/\s+/g, '_').slice(0, 80) || 'chart';
     const f1 = v => (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, '');
-    const fmtLabel = () => ({ png: 'PNG', jpg: 'JPEG', svg: 'SVG' }[S.fmt]);
+    const fmtLabel = () => ({ png: 'PNG', jpg: 'JPEG', tif: 'TIFF', svg: 'SVG', pdf: 'PDF' }[S.fmt]);
+    const isVector = () => S.fmt === 'svg' || S.fmt === 'pdf';
     const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
     /* ----- Settings UI ----- */
@@ -82,20 +84,24 @@
         $('height-box').classList.toggle('hidden', S.keep);
         $$('.opt-chip[data-w]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.w === +S.width)));
         $$('.opt-chip[data-dpi]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.dpi === +S.dpi)));
-        const svg = S.fmt === 'svg';
-        $('res-group').classList.toggle('hidden', svg);
+        const vector = isVector();
+        $('res-fields').classList.toggle('is-off', vector);
+        $('res-vector').classList.toggle('is-off', !vector);
+        $('res-vector-text').textContent = `Not needed for ${fmtLabel()}`;
         const clearBtn = document.querySelector('.seg[data-key="bg"] button[data-val="transparent"]');
         clearBtn.disabled = S.fmt === 'jpg';
         $('bg-hint').textContent = S.fmt === 'jpg' ? "JPEG can't be transparent." : '';
         $('fmt-hint').textContent = {
-            png: 'Best for Word and PowerPoint.',
+            png: 'Sharp and lossless. Best for Word and PowerPoint.',
             jpg: 'Smaller files, a bit softer.',
-            svg: 'Vector, sharp at any size. No DPI needed.'
+            tif: 'Lossless, with the DPI saved inside. For journals that ask for TIFF.',
+            svg: 'Vector, for the web or for editing in Inkscape or Illustrator.',
+            pdf: 'Vector with the fonts embedded. Best for LaTeX and journals.'
         }[S.fmt];
         $('text-hint').textContent = textHint();
         // The collapsed header still says what you'll get.
         const parts = [S.mode === 'width' ? `${f1(S.width)} mm wide` : 'Excel size', fmtLabel()];
-        if (!svg) parts.push(`${S.dpi} DPI`);
+        if (!vector) parts.push(`${S.dpi} DPI`);
         if (S.bg === 'transparent' && S.fmt !== 'jpg') parts.push('Transparent');
         $('settings-summary').innerHTML = parts.map(p => `<span>${esc(p)}</span>`).join('');
         const n = shown().length;
@@ -170,7 +176,7 @@
         try { const r = draw(ch, sz, clearBg()); return toSVG(r.items, r.W, r.H, `role="img" aria-label="${esc('Preview of ' + titleOf(ch))}"`); }
         catch (e) { console.error(e); return '<div class="fg-na" style="padding:16px"><i class="fa-solid fa-triangle-exclamation"></i><span>This chart couldn\'t be drawn.</span></div>'; }
     }
-    const pxText = sz => { const [px, py] = pxOf(sz); return S.fmt === 'svg' ? 'Vector, any size' : `${px} × ${py} px at ${S.dpi} DPI`; };
+    const pxText = sz => { const [px, py] = pxOf(sz); return isVector() ? 'Vector, any size' : `${px} × ${py} px at ${S.dpi} DPI`; };
 
     /* ----- Chart cards ----- */
     const dimHTML = cls => `<div class="fg-dim ${cls}" aria-hidden="true"><span class="ext"></span><span class="ln"></span><span class="v"></span></div>`;
@@ -225,6 +231,7 @@
             el.querySelector('.fg-save').innerHTML = `<i class="fa-solid fa-file-arrow-down"></i> Save ${fmtLabel()}`;
         }
         if (previewAt >= 0) renderPreview();
+        warmFonts();
     }
     let timer = 0;
     function schedule() { clearTimeout(timer); if (WB) timer = setTimeout(updateCards, 120); }
@@ -296,6 +303,35 @@
         });
     }
 
+    /* ----- PDF fonts: downloaded the first time a PDF needs them, then kept ----- */
+    class NoFonts extends Error { }
+    const ttf = new Map();
+    function loadFace(fc) {
+        let p = ttf.get(fc.key);
+        if (!p) {
+            p = fetch(fc.url).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then(parseTTF);
+            p.catch(() => ttf.delete(fc.key));
+            ttf.set(fc.key, p);
+        }
+        return p;
+    }
+    async function pdfFonts(items) {
+        try { return new Map(await Promise.all(pdfFaces(items).map(async fc => [fc.key, await loadFace(fc)]))); }
+        catch (e) { throw new NoFonts(); }
+    }
+    // With PDF picked and a file open, fetch the fonts its charts use right
+    // away, so the first Save doesn't wait on the download.
+    const warmed = new WeakSet();
+    function warmFonts() {
+        if (S.fmt !== 'pdf' || !WB) return;
+        for (const ch of supported()) {
+            if (warmed.has(ch)) continue;
+            warmed.add(ch);
+            try { for (const fc of pdfFaces(draw(ch, outSize(ch), false).items)) loadFace(fc).catch(() => { }); }
+            catch (e) { }
+        }
+    }
+
     /* ----- Files ----- */
     class TooBig extends Error { }
     async function makeFile(ch) {
@@ -307,14 +343,26 @@
             const text = '<?xml version="1.0" encoding="UTF-8"?>\n' + toSVG(r.items, r.W, r.H, `width="${r2(sz.w)}mm" height="${r2(sz.h)}mm"`);
             return { name: base + '.svg', blob: new Blob([text], { type: 'image/svg+xml' }) };
         }
+        if (S.fmt === 'pdf') {
+            const r = draw(ch, sz, clear);
+            const bytes = await toPDF(r.items, r.W, r.H, { fonts: await pdfFonts(r.items), title: titleOf(ch) });
+            return { name: base + '.pdf', blob: new Blob([bytes], { type: 'application/pdf' }) };
+        }
         const [px, py] = pxOf(sz);
         if (px > 32767 || py > 32767 || px * py > 268e6 || (IOS && px * py > 16777216)) throw new TooBig();
-        const r = draw(ch, sz, S.fmt === 'png' && clear);
+        const tif = S.fmt === 'tif';
+        const r = draw(ch, sz, S.fmt !== 'jpg' && clear);
         const cv = document.createElement('canvas'); cv.width = px; cv.height = py;
-        const ctx = cv.getContext('2d');
+        const ctx = cv.getContext('2d', tif ? { willReadFrequently: true } : undefined);
         if (!ctx) throw new TooBig();
-        if (S.fmt === 'jpg') { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, px, py); }
+        // An opaque TIFF drops the alpha channel, so it needs the white underneath too.
+        if (S.fmt === 'jpg' || (tif && !clear)) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, px, py); }
         toCanvas(ctx, r.items, px / r.W);
+        if (tif) {
+            const bytes = encodeTIFF(px, py, S.dpi, clear, (y, n) => ctx.getImageData(0, y, px, n).data);
+            cv.width = 0; cv.height = 0;
+            return { name: `${base}_${S.dpi}dpi.tif`, blob: new Blob([bytes], { type: 'image/tiff' }) };
+        }
         const type = S.fmt === 'jpg' ? 'image/jpeg' : 'image/png';
         const blob = await new Promise(res => cv.toBlob(res, type, 0.95));
         cv.width = 0; cv.height = 0;
@@ -325,6 +373,7 @@
         return { name: `${base}_${S.dpi}dpi.${S.fmt}`, blob: new Blob([bytes], { type }) };
     }
     const TOO_BIG = 'Too big for this browser. Try a lower DPI or a smaller width.';
+    const NO_FONTS = "The fonts for the PDF couldn't be downloaded. Check your connection and try again.";
     function deliver(name, blob) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = name;
@@ -349,7 +398,8 @@
             remember();
             showNotification('success', 'Saved', f.name, 3000);
         } catch (e) {
-            showNotification('error', 'Not saved', e instanceof TooBig ? TOO_BIG : "The image couldn't be made.");
+            if (!(e instanceof TooBig || e instanceof NoFonts)) console.error(e);
+            showNotification('error', 'Not saved', e instanceof TooBig ? TOO_BIG : e instanceof NoFonts ? NO_FONTS : "The file couldn't be made.");
         } finally { setBusy(false); syncControls(); }
     }
     async function saveAll() {
@@ -368,7 +418,12 @@
                     while (used.has(name)) name = f.name.replace(/(\.\w+)$/, `_${n++}$1`);
                     used.add(name);
                     zip.file(name, f.blob, { compression: S.fmt === 'svg' ? 'DEFLATE' : 'STORE' });
-                } catch (e) { skipped++; }
+                } catch (e) {
+                    // Without the fonts no PDF can be made, so stop here.
+                    if (e instanceof NoFonts) throw e;
+                    if (!(e instanceof TooBig)) console.error(e);
+                    skipped++;
+                }
             }
             if (!used.size) { showNotification('error', 'Nothing saved', TOO_BIG); return; }
             const blob = await zip.generateAsync({ type: 'blob' }, m => progress((list.length + m.percent / 100) / (list.length + 1)));
@@ -378,7 +433,8 @@
             if (skipped) showNotification('warning', `${plural(used.size, 'chart')} saved`, `${skipped} left out for being too big. Lower the DPI to include ${skipped > 1 ? 'them' : 'it'}.`);
             else showNotification('success', `${plural(used.size, 'chart')} saved`, name, 4000);
         } catch (e) {
-            showNotification('error', "ZIP didn't work", 'Try saving the charts one by one.');
+            if (e instanceof NoFonts) showNotification('error', 'Not saved', NO_FONTS);
+            else showNotification('error', "ZIP didn't work", 'Try saving the charts one by one.');
         } finally { setBusy(false); progress(null); syncControls(); }
     }
 

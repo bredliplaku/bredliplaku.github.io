@@ -2,8 +2,8 @@
    engine.js — Figura's chart engine. No DOM, no UI.
 
    Reads an .xlsx package (JSZip), parses each chart part into a plain model
-   and redraws it as a display list of paths and text runs, which the two back
-   ends turn into SVG markup or canvas pixels at any size.
+   and redraws it as a display list of paths and text runs, which the back
+   ends turn into SVG markup, a PDF page or canvas pixels at any size.
 
    Classic charts (c:chartSpace): column, bar, line, area, scatter, bubble,
    radar, stock, pie, doughnut, pie of pie and bar of pie, combinations,
@@ -2650,9 +2650,10 @@ function renderChart(m, W, H, opt) {
 
 /* ===== Back ends ===== */
 function cssColor(c) { if (!c) return 'none'; if (c.a == null || c.a >= 1) return c.c; const [r, g, b] = hexToRgb(c.c); return `rgba(${r},${g},${b},${r2(c.a)})`; }
+const SERIF_RE = /times|cambria|georgia|garamond|book antiqua|palatino|serif|minion/i;
 function fontStack(fam) {
   const f = (fam || 'Calibri').replace(/["']/g, '');
-  const serif = /times|cambria|georgia|garamond|book antiqua|palatino|serif|minion/i.test(f);
+  const serif = SERIF_RE.test(f);
   const tail = serif ? '"Times New Roman", Tinos, Times, serif' : 'Calibri, Carlito, Arial, Helvetica, sans-serif';
   return `"${f}", ${tail}`;
 }
@@ -2719,6 +2720,375 @@ function toCanvas(ctx, items, scale) {
   ctx.restore();
 }
 
+/* ===== PDF back end =====
+   One vector page, sized to the chart, for LaTeX and journals. Text stays
+   text, in an embedded subset of a font with Excel's letter widths: Carlito
+   for Calibri (and any other sans), Arimo for Arial and Helvetica, Tinos for
+   Times. The page fetches the font files (pdfFaces lists them) and hands them
+   in parsed; only the letters a chart uses go into the file, so a PDF is tens
+   of kilobytes. Written as PDF 1.4, which pdfLaTeX includes without a warning. */
+const PDF_FONT_CDN = 'https://cdn.jsdelivr.net/npm/@expo-google-fonts/';
+const PDF_FAMILIES = { Carlito: 'carlito@0.4.1', Arimo: 'arimo@0.4.3', Tinos: 'tinos@0.4.2' };
+function pdfFace(f) {
+  const fam = (f.family || 'Calibri').replace(/["']/g, '');
+  const name = SERIF_RE.test(fam) ? 'Tinos' : /arial|helvetica|arimo|liberation sans/i.test(fam) ? 'Arimo' : 'Carlito';
+  const style = (f.bold ? '700Bold' : '400Regular') + (f.italic ? '_Italic' : '');
+  const key = `${name}_${style}`;
+  return { key, serif: name === 'Tinos', url: `${PDF_FONT_CDN}${PDF_FAMILIES[name]}/${style}/${key}.ttf` };
+}
+function pdfFaces(items) {
+  const out = new Map();
+  for (const p of items) if (p.t === 'text') for (const ln of p.items) for (const r of ln.runs) { const fc = pdfFace(r.f); out.set(fc.key, fc); }
+  return [...out.values()];
+}
+
+/* TrueType: just enough of the file to map letters to glyphs, measure them
+   and cut out a subset. */
+function parseTTF(buf) {
+  const b = new Uint8Array(buf), v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const T = {};
+  for (let i = 0, n = v.getUint16(4); i < n; i++) {
+    const o = 12 + 16 * i, at = v.getUint32(o + 8);
+    T[String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3])] = b.subarray(at, at + v.getUint32(o + 12));
+  }
+  if (!T.glyf || !T.loca || !T.cmap || !T.hmtx) throw new Error('Not a TrueType font');
+  const dv = t => new DataView(t.buffer, t.byteOffset, t.byteLength);
+  const head = dv(T.head), hhea = dv(T.hhea), hm = dv(T.hmtx), lv = dv(T.loca);
+  const n = dv(T.maxp).getUint16(4), nhm = hhea.getUint16(34), long = head.getInt16(50) === 1;
+  const adv = new Uint16Array(n), lsb = new Int16Array(n), loca = new Uint32Array(n + 1);
+  for (let g = 0; g < n; g++) {
+    adv[g] = hm.getUint16(4 * Math.min(g, nhm - 1));
+    lsb[g] = g < nhm ? hm.getInt16(4 * g + 2) : hm.getInt16(4 * nhm + 2 * (g - nhm));
+  }
+  for (let g = 0; g <= n; g++) loca[g] = long ? lv.getUint32(4 * g) : lv.getUint16(2 * g) * 2;
+  const os2 = T['OS/2'] && dv(T['OS/2']), post = T.post && dv(T.post);
+  const ascent = hhea.getInt16(4);
+  return {
+    T, n, adv, lsb, loca, cmap: readCmap(dv(T.cmap)), upm: head.getUint16(18),
+    name: psName(T.name) || 'Font',
+    bbox: [head.getInt16(36), head.getInt16(38), head.getInt16(40), head.getInt16(42)],
+    ascent, descent: hhea.getInt16(6),
+    capHeight: os2 && os2.getUint16(0) >= 2 ? os2.getInt16(88) : Math.round(ascent * 0.7),
+    italicAngle: post ? post.getInt32(4) / 65536 : 0,
+    fixed: post ? post.getUint32(12) !== 0 : false,
+    bold: (head.getUint16(44) & 1) !== 0
+  };
+}
+function readCmap(v) {
+  let f4 = -1, f12 = -1;
+  for (let i = 0, n = v.getUint16(2); i < n; i++) {
+    const pid = v.getUint16(4 + 8 * i), eid = v.getUint16(6 + 8 * i), at = v.getUint32(8 + 8 * i), fmt = v.getUint16(at);
+    if (fmt === 12 && (pid === 0 || (pid === 3 && eid === 10))) f12 = at;
+    else if (fmt === 4 && (pid === 0 || (pid === 3 && eid <= 1))) f4 = at;
+  }
+  const map = new Map();
+  if (f12 >= 0) {
+    for (let i = 0, n = v.getUint32(f12 + 12); i < n; i++) {
+      const o = f12 + 16 + 12 * i, s = v.getUint32(o), e = Math.min(v.getUint32(o + 4), s + 0xFFFF), g = v.getUint32(o + 8);
+      for (let c = s; c <= e; c++) map.set(c, g + c - s);
+    }
+  } else if (f4 >= 0) {
+    const seg2 = v.getUint16(f4 + 6), ends = f4 + 14, starts = ends + seg2 + 2, deltas = starts + seg2, ranges = deltas + seg2;
+    for (let i = 0; i < seg2; i += 2) {
+      const e = v.getUint16(ends + i), s = v.getUint16(starts + i), d = v.getUint16(deltas + i), ro = v.getUint16(ranges + i);
+      for (let c = s; c <= e && c < 0xFFFF; c++) {
+        let g = ro ? v.getUint16(ranges + i + ro + 2 * (c - s)) : c;
+        if (g) g = (g + d) & 0xFFFF;
+        if (g) map.set(c, g);
+      }
+    }
+  }
+  return map;
+}
+function psName(t) {
+  if (!t) return null;
+  const v = new DataView(t.buffer, t.byteOffset, t.byteLength), base = v.getUint16(4);
+  for (let i = 0, n = v.getUint16(2); i < n; i++) {
+    const o = 6 + 12 * i, pid = v.getUint16(o), len = v.getUint16(o + 8), at = base + v.getUint16(o + 10);
+    if (v.getUint16(o + 6) !== 6) continue;
+    let s = '';
+    if (pid === 1) for (let j = 0; j < len; j++) s += String.fromCharCode(t[at + j]);
+    else for (let j = 0; j + 1 < len; j += 2) s += String.fromCharCode(v.getUint16(at + j));
+    s = s.replace(/[^\x21-\x7e]|[[\](){}<>/%#]/g, '');
+    if (s) return s;
+  }
+  return null;
+}
+/* A font holding only glyphs `gids` (0 first), renumbered in that order. A
+   composite glyph (an accented letter, say) is built from other glyphs, which
+   come along at the end. */
+function subsetTTF(F, gids) {
+  const order = gids.slice(), map = new Map(order.map((g, i) => [g, i]));
+  const src = F.T.glyf, sv = new DataView(src.buffer, src.byteOffset, src.byteLength);
+  function parts(g, cb) {
+    const s = F.loca[g];
+    if (F.loca[g + 1] - s < 10 || sv.getInt16(s) >= 0) return;
+    let p = s + 10, fl;
+    do {
+      fl = sv.getUint16(p); cb(p + 2 - s, sv.getUint16(p + 2));
+      p += 4 + (fl & 1 ? 4 : 2) + (fl & 8 ? 2 : fl & 0x40 ? 4 : fl & 0x80 ? 8 : 0);
+    } while (fl & 0x20);
+  }
+  for (let i = 0; i < order.length; i++) parts(order[i], (at, g) => { if (!map.has(g)) { map.set(g, order.length); order.push(g); } });
+  const n = order.length, loca = new Uint8Array(4 * (n + 1)), lv = new DataView(loca.buffer);
+  const hmtx = new Uint8Array(4 * n), hv = new DataView(hmtx.buffer);
+  let size = 0;
+  for (const g of order) size += (F.loca[g + 1] - F.loca[g] + 3) & ~3;
+  const glyf = new Uint8Array(size), gv = new DataView(glyf.buffer);
+  let at = 0;
+  order.forEach((g, i) => {
+    const s = F.loca[g], e = F.loca[g + 1];
+    lv.setUint32(4 * i, at);
+    glyf.set(src.subarray(s, e), at);
+    parts(g, (off, old) => gv.setUint16(at + off, map.get(old)));
+    hv.setUint16(4 * i, F.adv[g]); hv.setInt16(4 * i + 2, F.lsb[g]);
+    at += (e - s + 3) & ~3;
+  });
+  lv.setUint32(4 * n, at);
+  const copy = (tag, edit) => { const t = F.T[tag].slice(); if (edit) edit(new DataView(t.buffer)); return t; };
+  const tables = {
+    head: copy('head', d => { d.setUint32(8, 0); d.setInt16(50, 1); }),
+    hhea: copy('hhea', d => d.setUint16(34, n)),
+    maxp: copy('maxp', d => d.setUint16(4, n)),
+    loca, glyf, hmtx
+  };
+  for (const tag of ['cvt ', 'fpgm', 'prep']) if (F.T[tag]) tables[tag] = F.T[tag];
+  return { bytes: sfnt(tables), order };
+}
+function ttfSum(d) {
+  let s = 0;
+  for (let i = 0; i < d.length; i += 4) s = (s + ((d[i] << 24) | (d[i + 1] << 16) | (d[i + 2] << 8) | d[i + 3])) >>> 0;
+  return s;
+}
+function sfnt(tables) {
+  const tags = Object.keys(tables).sort(), n = tags.length;
+  let es = 0; while ((2 << es) <= n) es++;
+  let size = 12 + 16 * n;
+  for (const t of tags) size += (tables[t].length + 3) & ~3;
+  const out = new Uint8Array(size), v = new DataView(out.buffer);
+  v.setUint32(0, 0x00010000); v.setUint16(4, n); v.setUint16(6, 16 << es); v.setUint16(8, es); v.setUint16(10, 16 * n - (16 << es));
+  let at = 12 + 16 * n, headAt = 0;
+  tags.forEach((t, i) => {
+    const d = tables[t], o = 12 + 16 * i;
+    for (let j = 0; j < 4; j++) out[o + j] = t.charCodeAt(j);
+    v.setUint32(o + 4, ttfSum(d)); v.setUint32(o + 8, at); v.setUint32(o + 12, d.length);
+    if (t === 'head') headAt = at;
+    out.set(d, at); at += (d.length + 3) & ~3;
+  });
+  v.setUint32(headAt + 8, (0xB1B0AFBA - ttfSum(out)) >>> 0);
+  return out;
+}
+
+/* SVG path data to PDF path operators. Arcs become Béziers. */
+const pn = (v, d = 2) => { const m = 10 ** d, r = Math.round(v * m) / m; return Object.is(r, -0) ? '0' : String(r); };
+function arcBeziers(x1, y1, rx, ry, phi, large, sweep, x2, y2) {
+  if (x1 === x2 && y1 === y2) return [];
+  rx = Math.abs(rx); ry = Math.abs(ry);
+  if (!rx || !ry) return [[x1, y1, x2, y2, x2, y2]];
+  const a = phi * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
+  const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2, xp = co * dx + si * dy, yp = -si * dx + co * dy;
+  const lam = xp * xp / (rx * rx) + yp * yp / (ry * ry);
+  if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+  const num = rx * rx * ry * ry - rx * rx * yp * yp - ry * ry * xp * xp, den = rx * rx * yp * yp + ry * ry * xp * xp;
+  const f = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, num / den));
+  const cxp = f * rx * yp / ry, cyp = -f * ry * xp / rx;
+  const cx = co * cxp - si * cyp + (x1 + x2) / 2, cy = si * cxp + co * cyp + (y1 + y2) / 2;
+  const ang = (ux, uy, vx, vy) => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+  const ux = (xp - cxp) / rx, uy = (yp - cyp) / ry;
+  let t = ang(1, 0, ux, uy), dt = ang(ux, uy, (-xp - cxp) / rx, (-yp - cyp) / ry);
+  if (!sweep && dt > 0) dt -= 2 * Math.PI; else if (sweep && dt < 0) dt += 2 * Math.PI;
+  const segs = Math.max(1, Math.ceil(Math.abs(dt) / (Math.PI / 2) - 1e-9)), step = dt / segs, k = 4 / 3 * Math.tan(step / 4);
+  const P = (u, w) => [cx + rx * u * co - ry * w * si, cy + rx * u * si + ry * w * co];
+  const out = [];
+  for (let i = 0; i < segs; i++, t += step) {
+    const c0 = Math.cos(t), s0 = Math.sin(t), c1 = Math.cos(t + step), s1 = Math.sin(t + step);
+    out.push([...P(c0 - k * s0, s0 + k * c0), ...P(c1 + k * s1, s1 - k * c1), ...P(c1, s1)]);
+  }
+  out[out.length - 1][4] = x2; out[out.length - 1][5] = y2;
+  return out;
+}
+function pdfPath(d) {
+  const tok = d.match(/[a-df-zA-DF-Z]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+  const out = [], P = (x, y) => `${pn(x)} ${pn(y)}`;
+  let i = 0, cmd = '', last = '', x = 0, y = 0, sx = 0, sy = 0, kx = 0, ky = 0;
+  const num = () => +tok[i++];
+  const curve = (x1, y1, x2, y2, x3, y3) => { out.push(`${P(x1, y1)} ${P(x2, y2)} ${P(x3, y3)} c`); kx = x2; ky = y2; x = x3; y = y3; };
+  const quad = (qx, qy, x3, y3) => { curve(x + 2 / 3 * (qx - x), y + 2 / 3 * (qy - y), x3 + 2 / 3 * (qx - x3), y3 + 2 / 3 * (qy - y3), x3, y3); kx = qx; ky = qy; };
+  while (i < tok.length) {
+    if (/[a-z]/i.test(tok[i])) cmd = tok[i++];
+    else if (!cmd) { i++; continue; }
+    const C = cmd.toUpperCase(), ox = cmd === C ? 0 : x, oy = cmd === C ? 0 : y;
+    if (C !== 'Z' && i >= tok.length) break;
+    switch (C) {
+      case 'M': x = sx = ox + num(); y = sy = oy + num(); out.push(P(x, y) + ' m'); cmd = cmd === 'M' ? 'L' : 'l'; break;
+      case 'L': x = ox + num(); y = oy + num(); out.push(P(x, y) + ' l'); break;
+      case 'H': x = ox + num(); out.push(P(x, y) + ' l'); break;
+      case 'V': y = oy + num(); out.push(P(x, y) + ' l'); break;
+      case 'C': { const a = [ox + num(), oy + num(), ox + num(), oy + num(), ox + num(), oy + num()]; curve(...a); break; }
+      case 'S': { const r = /[CS]/.test(last) ? [2 * x - kx, 2 * y - ky] : [x, y]; const a = [ox + num(), oy + num(), ox + num(), oy + num()]; curve(r[0], r[1], ...a); break; }
+      case 'Q': { const a = [ox + num(), oy + num(), ox + num(), oy + num()]; quad(...a); break; }
+      case 'T': { const q = /[QT]/.test(last) ? [2 * x - kx, 2 * y - ky] : [x, y]; quad(q[0], q[1], ox + num(), oy + num()); break; }
+      case 'A': {
+        const rx = num(), ry = num(), rot = num(), lg = num(), sw = num(), ex = ox + num(), ey = oy + num();
+        for (const b of arcBeziers(x, y, rx, ry, rot, lg, sw, ex, ey)) curve(...b);
+        x = ex; y = ey; break;
+      }
+      case 'Z': out.push('h'); x = sx; y = sy; cmd = ''; break;
+      default: cmd = '';
+    }
+    last = C;
+  }
+  return out.join('\n');
+}
+
+async function deflate(bytes) {
+  if (typeof CompressionStream === 'undefined') return null;
+  try { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer()); }
+  catch (e) { return null; }
+}
+const latin1 = s => { const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i) & 255; return b; };
+const hex4 = n => n.toString(16).toUpperCase().padStart(4, '0');
+const utf16hex = cp => cp > 0xFFFF ? hex4(0xD800 + ((cp - 0x10000) >> 10)) + hex4(0xDC00 + ((cp - 0x10000) & 0x3FF)) : hex4(cp);
+function pdfString(s) {
+  s = String(s);
+  if (/^[\x20-\x7e]*$/.test(s)) return '(' + s.replace(/[\\()]/g, '\\$&') + ')';
+  let h = 'FEFF'; for (const ch of s) h += utf16hex(ch.codePointAt(0));
+  return `<${h}>`;
+}
+const pdfRGB = c => hexToRgb(c.c).map(v => pn(v / 255, 3)).join(' ');
+
+/* `fonts` maps each pdfFaces key to its parseTTF result. Returns the bytes. */
+async function toPDF(items, W, H, opt) {
+  const c = [`1 0 0 -1 0 ${pn(H)} cm`, '4 M'];   // y runs down, as in the display list
+  const faces = new Map(), alphas = new Map();
+  let st = {}; const saved = [];
+  const push = () => { c.push('q'); saved.push(st); st = Object.assign({}, st); };
+  const pop = () => { c.push('Q'); st = saved.pop() || {}; };
+  const set = (key, val, op) => { if (st[key] !== val) { st[key] = val; c.push(op); } };
+  const alpha = (fa, sa) => {
+    const key = `${pn(fa)} ${pn(sa)}`;
+    if ((st.gs || '1 1') === key) return;
+    if (!alphas.has(key)) alphas.set(key, 'G' + alphas.size);
+    st.gs = key; c.push(`/${alphas.get(key)} gs`);
+  };
+  const aOf = col => col.a == null ? 1 : col.a;
+  function face(f) {
+    const fc = pdfFace(f);
+    let u = faces.get(fc.key);
+    if (!u) {
+      const F = opt.fonts.get(fc.key);
+      if (!F) throw new Error('Font not loaded: ' + fc.key);
+      u = { F, fc, res: 'F' + (faces.size + 1), cid: new Map([[0, 0]]), gids: [0], uni: [0], w: g => Math.round(F.adv[g] * 1000 / F.upm) };
+      faces.set(fc.key, u);
+    }
+    return u;
+  }
+  for (const p of items) {
+    if (p.t === 'path') {
+      const fill = p.fill && aOf(p.fill) > 0 ? p.fill : null, stroke = p.stroke && aOf(p.stroke) > 0 && p.sw > 0 ? p.stroke : null;
+      if (!fill && !stroke) continue;
+      const ops = pdfPath(p.d); if (!ops) continue;
+      alpha(fill ? aOf(fill) : 1, stroke ? aOf(stroke) : 1);
+      if (fill) set('fc', fill.c, pdfRGB(fill) + ' rg');
+      if (stroke) {
+        set('sc', stroke.c, pdfRGB(stroke) + ' RG');
+        set('w', pn(p.sw, 3), pn(p.sw, 3) + ' w');
+        set('J', p.cap || 'butt', ({ butt: 0, round: 1, square: 2 }[p.cap] || 0) + ' J');
+        set('j', p.join || 'round', ({ miter: 0, round: 1, bevel: 2 }[p.join || 'round']) + ' j');
+        const dash = p.dash && p.dash.length ? p.dash.map(v => pn(v, 3)).join(' ') : '';
+        set('d', dash, `[${dash}] 0 d`);
+      }
+      c.push(ops, fill && stroke ? (p.evenodd ? 'B*' : 'B') : fill ? (p.evenodd ? 'f*' : 'f') : 'S');
+    } else if (p.t === 'text') {
+      const a = (p.rot || 0) * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
+      push();
+      c.push(`${pn(co, 5)} ${pn(si, 5)} ${pn(-si, 5)} ${pn(co, 5)} ${pn(p.x)} ${pn(p.y)} cm`, 'BT');
+      for (const ln of p.items) {
+        const runs = ln.runs.map(r => {
+          const u = face(r.f); let hex = '', w = 0;
+          for (const ch of r.text) {
+            const cp = ch.codePointAt(0), g = u.F.cmap.get(cp) || 0;
+            let id = u.cid.get(g);
+            if (id === undefined) { id = u.gids.length; u.cid.set(g, id); u.gids.push(g); u.uni.push(cp); }
+            hex += hex4(id); w += u.w(g);
+          }
+          return { r, u, hex, w: w / 1000 * r.size };
+        });
+        let x = -runs.reduce((s, q) => s + q.w, 0) / 2;
+        for (const q of runs) {
+          if (q.hex && q.r.size > 0) {
+            const col = q.r.f.color || TEXT_GREY;
+            alpha(aOf(col), st.gs ? +st.gs.split(' ')[1] : 1);
+            set('fc', col.c, pdfRGB(col) + ' rg');
+            c.push(`/${q.u.res} ${pn(q.r.size, 3)} Tf 1 0 0 -1 ${pn(x, 3)} ${pn(ln.y + q.r.shift, 3)} Tm <${q.hex}> Tj`);
+          }
+          x += q.w;
+        }
+      }
+      c.push('ET');
+      pop();
+    } else if (p.t === 'clip') {
+      push();
+      c.push(`${pn(p.x)} ${pn(p.y)} ${pn(p.w)} ${pn(p.h)} re W n`);
+    } else if (p.t === 'unclip' && saved.length) pop();
+  }
+  while (saved.length) pop();
+
+  /* Objects: 1 catalog, 2 pages, 3 page, 4 info, 5 content, then the fonts. */
+  const objs = [];
+  const obj = (body, stream) => { objs.push({ body, stream }); return objs.length; };
+  async function streamObj(dict, bytes) {
+    const z = await deflate(bytes);
+    return obj(`<< ${dict}${z ? ' /Filter /FlateDecode' : ''} /Length ${(z || bytes).length} >>`, z || bytes);
+  }
+  for (let i = 0; i < 4; i++) obj('');
+  await streamObj('', latin1(c.join('\n')));
+  const fontRes = [];
+  for (const u of faces.values()) {
+    const F = u.F, sub = subsetTTF(F, u.gids), s = v => Math.round(v * 1000 / F.upm);
+    let h = crc32(latin1(u.fc.key + sub.order.join(','))), tag = '';
+    for (let i = 0; i < 6; i++) { tag += String.fromCharCode(65 + h % 26); h = Math.floor(h / 26); }
+    const base = `/${tag}+${F.name}`;
+    const file = await streamObj(`/Length1 ${sub.bytes.length}`, sub.bytes);
+    const flags = (F.fixed ? 1 : 0) | (u.fc.serif ? 2 : 0) | 4 | (F.italicAngle ? 64 : 0);
+    const desc = obj(`<< /Type /FontDescriptor /FontName ${base} /Flags ${flags} /FontBBox [${F.bbox.map(s).join(' ')}] /ItalicAngle ${pn(F.italicAngle)} /Ascent ${s(F.ascent)} /Descent ${s(F.descent)} /CapHeight ${s(F.capHeight)} /StemV ${F.bold ? 140 : 80} /FontFile2 ${file} 0 R >>`);
+    const cid = obj(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont ${base} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${desc} 0 R /W [0 [${sub.order.map(u.w).join(' ')}]] /CIDToGIDMap /Identity >>`);
+    const map = [];
+    for (let i = 1; i < u.uni.length; i++) if (u.gids[i]) map.push(`<${hex4(i)}> <${utf16hex(u.uni[i])}>`);
+    let cmap = '/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n';
+    for (let i = 0; i < map.length; i += 100) { const part = map.slice(i, i + 100); cmap += `${part.length} beginbfchar\n${part.join('\n')}\nendbfchar\n`; }
+    cmap += 'endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend';
+    const toUni = await streamObj('', latin1(cmap));
+    const font = obj(`<< /Type /Font /Subtype /Type0 /BaseFont ${base} /Encoding /Identity-H /DescendantFonts [${cid} 0 R] /ToUnicode ${toUni} 0 R >>`);
+    fontRes.push(`/${u.res} ${font} 0 R`);
+  }
+  const res = [];
+  if (fontRes.length) res.push(`/Font << ${fontRes.join(' ')} >>`);
+  if (alphas.size) res.push(`/ExtGState << ${[...alphas].map(([k, n]) => { const [ca, CA] = k.split(' '); return `/${n} << /Type /ExtGState /ca ${ca} /CA ${CA} >>`; }).join(' ')} >>`);
+  const now = new Date(), two = n => String(n).padStart(2, '0');
+  const date = `D:${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`;
+  objs[0].body = '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[1].body = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
+  objs[2].body = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pn(W)} ${pn(H)}] /Resources << ${res.join(' ')} /ProcSet [/PDF /Text] >> /Contents 5 0 R >>`;
+  objs[3].body = `<< ${opt.title ? `/Title ${pdfString(opt.title)} ` : ''}/Creator (Figura) /Producer (Figura) /CreationDate (${date}) >>`;
+
+  const chunks = [latin1('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n')], xref = [];
+  let pos = chunks[0].length;
+  const put = b => { chunks.push(b); pos += b.length; };
+  objs.forEach((o, i) => {
+    xref.push(pos);
+    put(latin1(`${i + 1} 0 obj\n${o.body}\n`));
+    if (o.stream) { put(latin1('stream\n')); put(o.stream); put(latin1('\nendstream\n')); }
+    put(latin1('endobj\n'));
+  });
+  const id = [0, 1, 2, 3].map(i => crc32(latin1(i + date + c.length + (opt.title || ''))).toString(16).padStart(8, '0')).join('');
+  put(latin1(`xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${xref.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('')}` +
+    `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info 4 0 R /ID [<${id}> <${id}>] >>\nstartxref\n${pos}\n%%EOF\n`));
+  const out = new Uint8Array(pos); let o = 0;
+  for (const b of chunks) { out.set(b, o); o += b.length; }
+  return out;
+}
+
 /* ===== Resolution metadata ===== */
 const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(bytes) { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
@@ -2759,6 +3129,95 @@ function jpegSetDpi(buf, dpi) {
   const app0 = new Uint8Array([0xFF, 0xE0, 0, 16, 0x4A, 0x46, 0x49, 0x46, 0, 1, 1, 1, d >> 8, d & 255, d >> 8, d & 255, 0, 0]);
   const out = new Uint8Array(src.length + app0.length);
   out.set(src.subarray(0, 2), 0); out.set(app0, 2); out.set(src.subarray(2), 2 + app0.length);
+  return out;
+}
+
+/* ===== TIFF =====
+   RGB, or RGBA when transparent, in LZW-compressed strips: the kind of TIFF
+   journals ask for. `rows(y, n)` returns n rows of RGBA pixels from row y. */
+const LZW_TAB = { stamp: null, code: null, gen: 0 };
+function lzw(data) {
+  if (!LZW_TAB.stamp) { LZW_TAB.stamp = new Int32Array(1 << 20); LZW_TAB.code = new Uint16Array(1 << 20); }
+  const stamp = LZW_TAB.stamp, codes = LZW_TAB.code;
+  let out = new Uint8Array(Math.max(4096, data.length >> 2)), o = 0, acc = 0, bits = 0;
+  const put = (code, n) => {
+    acc = (acc << n) | code; bits += n;
+    while (bits >= 8) {
+      bits -= 8;
+      if (o === out.length) { const b = new Uint8Array(out.length * 2); b.set(out); out = b; }
+      out[o++] = (acc >>> bits) & 255;
+    }
+    acc &= (1 << bits) - 1;
+  };
+  // Codes widen one entry early (TIFF's rule) and the table restarts at 4094.
+  let gen = ++LZW_TAB.gen, next = 258, width = 9;
+  const grow = () => {
+    if (++next === 4094) { put(256, width); gen = ++LZW_TAB.gen; next = 258; width = 9; }
+    else if (next > (1 << width) - 1) width++;
+  };
+  put(256, 9);
+  if (data.length) {
+    let w = data[0];
+    for (let i = 1; i < data.length; i++) {
+      const key = (w << 8) | data[i];
+      if (stamp[key] === gen) { w = codes[key]; continue; }
+      put(w, width);
+      stamp[key] = gen; codes[key] = next;
+      grow();
+      w = data[i];
+    }
+    put(w, width);
+    grow();
+  }
+  put(257, width);
+  if (bits) put(0, 8 - bits);
+  return out.subarray(0, o);
+}
+function encodeTIFF(w, h, dpi, alpha, rows) {
+  const spp = alpha ? 4 : 3, rowBytes = w * spp;
+  const rps = Math.max(1, Math.min(h, Math.floor(65536 / rowBytes)));
+  const strips = [];
+  for (let y = 0; y < h; y += rps) {
+    const n = Math.min(rps, h - y), px = rows(y, n);
+    let raw;
+    if (alpha) raw = new Uint8Array(px.buffer, px.byteOffset, n * rowBytes);
+    else {
+      raw = new Uint8Array(n * rowBytes);
+      for (let i = 0, j = 0; j < raw.length; i += 4) { raw[j++] = px[i]; raw[j++] = px[i + 1]; raw[j++] = px[i + 2]; }
+    }
+    strips.push(lzw(raw));
+  }
+  const offs = [];
+  let at = 8;
+  for (const s of strips) { offs.push(at); at += s.length; }
+  const res = [Math.round(dpi), 1];
+  const tags = [
+    [256, 4, [w]], [257, 4, [h]], [258, 3, Array(spp).fill(8)], [259, 3, [5]], [262, 3, [2]],
+    [273, 4, offs], [277, 3, [spp]], [278, 4, [rps]], [279, 4, strips.map(s => s.length)],
+    [282, 5, res], [283, 5, res], [284, 3, [1]], [296, 3, [2]],
+    [305, 2, Array.from(latin1('Figura\0'))]
+  ];
+  if (alpha) tags.push([338, 3, [2]]);
+  const SIZE = { 2: 1, 3: 2, 4: 4, 5: 4 };
+  const ifd = (at + 1) & ~1;
+  let extra = ifd + 2 + 12 * tags.length + 4, end = extra;
+  for (const [, type, vals] of tags) { const len = vals.length * SIZE[type]; if (len > 4) end += (len + 1) & ~1; }
+  const out = new Uint8Array(end), v = new DataView(out.buffer);
+  out.set([0x49, 0x49, 42, 0]); v.setUint32(4, ifd, true);
+  strips.forEach((s, i) => out.set(s, offs[i]));
+  v.setUint16(ifd, tags.length, true);
+  tags.forEach(([tag, type, vals], i) => {
+    const e = ifd + 2 + 12 * i, len = vals.length * SIZE[type];
+    v.setUint16(e, tag, true); v.setUint16(e + 2, type, true);
+    v.setUint32(e + 4, type === 5 ? vals.length / 2 : vals.length, true);
+    let p = e + 8;
+    if (len > 4) { v.setUint32(p, extra, true); p = extra; extra += (len + 1) & ~1; }
+    for (const x of vals) {
+      if (type === 2) out[p++] = x;
+      else if (type === 3) { v.setUint16(p, x, true); p += 2; }
+      else { v.setUint32(p, x, true); p += 4; }
+    }
+  });
   return out;
 }
 
