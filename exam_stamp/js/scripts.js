@@ -78,12 +78,12 @@
         'eb-garamond': { label: 'EB Garamond', group: 'Serif', pkg: 'eb-garamond', family: 'EBGaramond', has: 'r b i bi' },
         lora: { label: 'Lora', group: 'Serif', pkg: 'lora', family: 'Lora', has: 'r b i bi' },
         'pt-serif': { label: 'PT Serif', group: 'Serif', pkg: 'pt-serif', family: 'PTSerif', has: 'r b i bi' },
-        playfair: { label: 'Playfair Display', group: 'Serif', pkg: 'playfair-display', family: 'PlayfairDisplay', has: 'r b i' },
+        playfair: { label: 'Playfair Display', group: 'Serif', pkg: 'playfair-display', family: 'PlayfairDisplay', has: 'r b i bi' },
 
-        'roboto-mono': { label: 'Roboto Mono', group: 'Monospace', pkg: 'roboto-mono', family: 'RobotoMono', has: 'r b i' },
-        'jetbrains-mono': { label: 'JetBrains Mono', group: 'Monospace', pkg: 'jetbrains-mono', family: 'JetBrainsMono', has: 'r b i' },
-        'courier-prime': { label: 'Courier Prime', group: 'Monospace', pkg: 'courier-prime', family: 'CourierPrime', has: 'r b i' },
-        'space-mono': { label: 'Space Mono', group: 'Monospace', pkg: 'space-mono', family: 'SpaceMono', has: 'r b' },
+        'roboto-mono': { label: 'Roboto Mono', group: 'Monospace', pkg: 'roboto-mono', family: 'RobotoMono', has: 'r b i bi' },
+        'jetbrains-mono': { label: 'JetBrains Mono', group: 'Monospace', pkg: 'jetbrains-mono', family: 'JetBrainsMono', has: 'r b i bi' },
+        'courier-prime': { label: 'Courier Prime', group: 'Monospace', pkg: 'courier-prime', family: 'CourierPrime', has: 'r b i bi' },
+        'space-mono': { label: 'Space Mono', group: 'Monospace', pkg: 'space-mono', family: 'SpaceMono', has: 'r b i bi' },
 
         caveat: { label: 'Caveat', group: 'Handwritten', pkg: 'caveat', family: 'Caveat', has: 'r b' },
         'dancing-script': { label: 'Dancing Script', group: 'Handwritten', pkg: 'dancing-script', family: 'DancingScript', has: 'r b' },
@@ -123,6 +123,10 @@
         variants: [],           // { letter, fileName, base, bytes, pdf, pageCount, size }
         active: 0,              // which paper the main preview is showing
         assign: {},             // student name -> variant index
+        // How the current split came about. A deal the app made is redone
+        // whenever the number of papers changes; once a student has been
+        // moved by hand the split is the teacher's, and is only topped up.
+        dealt: 'shuffle',       // 'shuffle' | 'alternate' | 'manual'
 
         currentPage: 1,
         viewport: null,         // pdf.js viewport of the page on screen (CSS px)
@@ -138,6 +142,8 @@
         // across every group's paper.
         stamp: { page: 1, u: 0.5, v: 0.28 },
         style: { bold: true, italic: false, line: false, align: 'center' },
+        stampBox: null,         // the stamp's handle on screen, in viewport px
+        zipAuto: true,          // ZIP name still follows the first paper's name
 
         scratch: null,          // throwaway PDF that owns the measuring fonts
         font: null,             // resolved bundle for the stamp
@@ -163,7 +169,7 @@
         paperList: $('paper-list'), paperHint: $('paper-hint'),
         previewWrap: $('preview-wrap'), pdfCanvas: $('pdf-canvas'), overlay: $('overlay-canvas'),
         pagePrev: $('page-prev'), pageNext: $('page-next'), pageLabel: $('page-label'),
-        stampNote: $('stamp-note'),
+        stampNote: $('stamp-note'), stampWarn: $('stamp-warn'),
 
         stampTemplate: $('stamp-template'), previewNameSel: $('preview-name'),
         stampFont: $('stamp-font'), stampFontState: $('stamp-font-state'),
@@ -236,10 +242,18 @@
         return toStampable(clean);
     }
 
+    // Function replacers throughout: a string replacement would read "$&"
+    // or "$'" inside a name as a pattern, and names are user data.
     const fillTemplate = (tpl, name, variant) => String(tpl || '')
-        .replace(/\{name\}/gi, name)
-        .replace(/\{group\}/gi, variant ? variant.letter : '')
-        .replace(/\{date\}/gi, new Date().toLocaleDateString('en-GB'));
+        .replace(/\{name\}/gi, () => name)
+        .replace(/\{group\}/gi, () => (variant ? variant.letter : ''))
+        .replace(/\{date\}/gi, () => new Date().toLocaleDateString('en-GB'));
+
+    // Excel's "CSV UTF-8" export starts with a byte-order mark, and names
+    // copied out of a web page can carry zero-width spaces. Both are
+    // invisible, both defeat header detection, and either would be stamped
+    // as a stray "?".
+    const INVISIBLE = /[​-‍⁠﻿]/g;
 
 
     /* === FONT LOADING ====================================================
@@ -284,6 +298,9 @@
             const name = PDFLib.StandardFonts[def.std[cut]];
             return {
                 key, cut, standardName: name, css: def.css,
+                // All four built-in cuts share one CSS stack, so the preview
+                // has to ask for the weight and slant explicitly.
+                bold: cut.includes('b'), italic: cut.includes('i'),
                 metrics: await state.scratch.embedFont(name),
             };
         }
@@ -299,10 +316,18 @@
             document.fonts.add(face);
         }
         return {
-            key, cut, bytes, css: `"${family}", sans-serif`,
+            // A downloaded cut is its own family and is asked for plain:
+            // requesting bold on top would make the browser embolden it twice.
+            key, cut, bytes, css: `"${family}", sans-serif`, bold: false, italic: false,
             metrics: await state.scratch.embedFont(bytes, { subset: false }),
         };
     }
+
+    // The canvas font shorthand for a bundle at a given pixel size. A faux
+    // italic is the browser's synthesised slant — the same trick the PDF
+    // side plays with a shear.
+    const canvasFont = (bundle, px) =>
+        `${bundle.italic || bundle.faux ? 'italic ' : ''}${bundle.bold ? 'bold ' : ''}${px}px ${bundle.css}`;
 
     function buildFontSelect(select, selected) {
         select.textContent = '';
@@ -321,7 +346,15 @@
         if (FONTS[selected]) select.value = selected;
     }
 
+    // Each choice takes a ticket. A download is slow and a built-in face is
+    // instant, so picking Merriweather and then straight back to Helvetica
+    // would otherwise let the late Merriweather overwrite the newer choice —
+    // the preview showing one font while the copies get the other.
+    let stampFontTicket = 0;
+    let wmFontTicket = 0;
+
     async function applyStampFont() {
+        const ticket = ++stampFontTicket;
         const key = dom.stampFont.value;
         // Bold has to come from a real cut — unlike italic, it cannot be faked
         // convincingly — so the button is simply unavailable without one.
@@ -334,9 +367,12 @@
         dom.stampFontNote.textContent = FONTS[key].note ||
             'Downloaded once, then embedded (subsetted) into every copy.';
         try {
-            state.font = await ensureFont(key, state.style.bold, state.style.italic);
+            const bundle = await ensureFont(key, state.style.bold, state.style.italic);
+            if (ticket !== stampFontTicket) return;   // overtaken by a later choice
+            state.font = bundle;
             dom.stampFontState.textContent = '';
         } catch (err) {
+            if (ticket !== stampFontTicket) return;
             dom.stampFontState.textContent = 'failed';
             showNotification('error', "Couldn't load that font", err.message || String(err));
             dom.stampFont.value = 'helvetica';
@@ -347,12 +383,16 @@
     }
 
     async function applyWatermarkFont() {
+        const ticket = ++wmFontTicket;
         const key = dom.wmFont.value;
         dom.wmFontState.textContent = FONTS[key].std ? '' : 'loading…';
         try {
-            state.wmFont = await ensureFont(key, false, false);
+            const bundle = await ensureFont(key, false, false);
+            if (ticket !== wmFontTicket) return;
+            state.wmFont = bundle;
             dom.wmFontState.textContent = '';
         } catch (err) {
+            if (ticket !== wmFontTicket) return;
             dom.wmFontState.textContent = 'failed';
             showNotification('error', "Couldn't load that font", err.message || String(err));
             dom.wmFont.value = 'courier';
@@ -397,6 +437,12 @@
 
     const sampleName = () => dom.previewNameSel.value || state.names[0] || 'Student Name';
     const activeVariant = () => state.variants[state.active] || null;
+
+    // The page that carries the name on one particular paper. A paper shorter
+    // than the chosen page gets it on its last page — the preview, the note
+    // and the copies all have to agree on that, so they all ask here.
+    const stampPageOf = (variant) => (variant ? Math.min(state.stamp.page, variant.pageCount) : state.stamp.page);
+    const onStampPage = () => state.currentPage === stampPageOf(activeVariant());
 
 
     /* === LAYOUT MATHS ====================================================
@@ -463,7 +509,7 @@
     // The stamp point, in one particular paper's own coordinates. Every group
     // shares the fractions; each resolves them against its own page.
     async function anchorFor(variant) {
-        const pageNo = Math.min(state.stamp.page, variant.pageCount);
+        const pageNo = stampPageOf(variant);
         const page = await variant.pdf.getPage(pageNo);
         const vp = page.getViewport({ scale: 1 });
         const [x, y] = vp.convertToPdfPoint(state.stamp.u * vp.width, state.stamp.v * vp.height);
@@ -488,11 +534,14 @@
         const viewport = page.getViewport({ scale: Math.min(available, maxWidth) / base.width });
         const ratio = dpr();
 
+        // Only the width is set; the stylesheet's height:auto follows the
+        // bitmap's aspect ratio. A fixed pixel height would let max-width
+        // squash the page sideways whenever it was measured wider than it
+        // ended up — mid-way through a panel opening, say.
         for (const c of [canvas, overlay]) {
             c.width = Math.round(viewport.width * ratio);
             c.height = Math.round(viewport.height * ratio);
             c.style.width = `${viewport.width}px`;
-            c.style.height = `${viewport.height}px`;
         }
 
         const ctx = canvas.getContext('2d');
@@ -569,7 +618,7 @@
         dom.wmPageLabel.textContent = `Page ${state.wmPage} of ${variant.pageCount}`;
         dom.wmPagePrev.disabled = state.wmPage <= 1;
         dom.wmPageNext.disabled = state.wmPage >= variant.pageCount;
-        dom.wmPreviewNote.textContent = state.wmPage === state.stamp.page && !dom.wmCover.checked
+        dom.wmPreviewNote.textContent = state.wmPage === stampPageOf(variant) && !dom.wmCover.checked
             ? 'This is the cover page, which is currently excluded from the pattern.'
             : `Shown at true size and faintness${variant.letter && state.variants.length > 1 ? `, on paper ${variant.letter}` : ''}.`;
         drawWatermarkOverlay();
@@ -596,7 +645,7 @@
         ctx.save();
         ctx.globalAlpha = wm.opacity;
         ctx.fillStyle = wm.hex;
-        ctx.font = `${wm.size * viewport.scale}px ${state.wmFont.css}`;
+        ctx.font = canvasFont(state.wmFont, wm.size * viewport.scale);
         ctx.textBaseline = 'alphabetic';
         for (const row of layout.rows) {
             for (let k = 0; k < layout.repeats; k++) {
@@ -625,7 +674,7 @@
     function drawWatermarkOverlay() {
         if (!state.wmViewport) return;
         const ctx = clearCanvas(dom.wmOverlay);
-        const onCover = state.wmPage === state.stamp.page;
+        const onCover = state.wmPage === stampPageOf(activeVariant());
         if (onCover && !dom.wmCover.checked) return;
         paintWatermark(ctx, state.wmViewport, state.wmPageBox, sampleName(), activeVariant());
     }
@@ -637,12 +686,13 @@
         const name = sampleName();
         const variant = activeVariant();
         const wm = watermarkCfg();
+        state.stampBox = null;
 
-        if (wm.cover || state.currentPage !== state.stamp.page) {
+        if (wm.cover || !onStampPage()) {
             paintWatermark(ctx, vp, state.pageBox, name, variant);
         }
 
-        if (state.currentPage !== state.stamp.page) return;
+        if (!onStampPage()) return;
 
         // Drawn horizontally here because that is exactly how it will appear
         // once the page's own rotation has been compensated for.
@@ -656,9 +706,7 @@
         const x = ax - w * f;
 
         ctx.save();
-        // The browser synthesises the slant when the family has no italic cut,
-        // which is the same trick the PDF side uses.
-        ctx.font = `${state.font.faux ? 'italic ' : ''}${size}px ${state.font.css}`;
+        ctx.font = canvasFont(state.font, size);
         ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = cfg.hex;
         ctx.fillText(text, x, ay);
@@ -675,57 +723,165 @@
 
         // Handle: a dashed box round the text plus a tick on the anchor, so
         // it's obvious both that this is draggable and which point moves.
+        const box = { x: x - 6, y: ay - size - 4, w: w + 12, h: size * 1.45 + 8 };
         ctx.setLineDash([5, 4]);
         ctx.lineWidth = 1;
         ctx.strokeStyle = 'rgba(57, 73, 171, 0.9)';
-        ctx.strokeRect(x - 6, ay - size - 4, w + 12, size * 1.45 + 8);
+        ctx.strokeRect(box.x, box.y, box.w, box.h);
         ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(57, 73, 171, 0.9)';
         ctx.beginPath();
         ctx.arc(ax, ay, 3.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+        state.stampBox = { ...box, ax, ay };
+        updateStampFit();
     }
 
     function updateStampNote() {
-        if (!state.variants.length) { dom.stampNote.textContent = ''; return; }
-        const many = state.variants.length > 1 ? " of every group's paper" : '';
-        dom.stampNote.textContent = state.currentPage === state.stamp.page
-            ? `The name is stamped here, on page ${state.stamp.page}${many}.`
-            : `The name is stamped on page ${state.stamp.page}. Click this page to move it here.`;
+        const v = activeVariant();
+        if (!v) { dom.stampNote.textContent = ''; return; }
+        const page = stampPageOf(v);
+        const many = state.variants.length > 1;
+        const short = state.variants.filter(x => x.pageCount < state.stamp.page);
+        let note = state.currentPage === page
+            ? `The name is stamped here, on page ${page}${many && !short.length ? " of every group's paper" : ''}.`
+            : `The name is stamped on page ${page}. Click this page to move it here.`;
+        if (many && short.length) {
+            const letters = short.map(x => x.letter).join(', ');
+            note += short.length === 1
+                ? ` Paper ${letters} is shorter, so it gets the name on its last page.`
+                : ` Papers ${letters} are shorter, so they get the name on their last page.`;
+        }
+        dom.stampNote.textContent = note;
     }
 
-    function setStampFromEvent(ev) {
+    /* The preview shows one name, but the class has a longest one — and that
+       is the name that runs off the page or into the header. Its width is
+       measured once per (names, font, template), which is the expensive
+       part; checking it against the current position is just arithmetic, so
+       it can run on every frame of a drag. */
+    let longestCache = null;
+
+    function longestStamp() {
+        const tpl = dom.stampTemplate.value;
+        const variant = activeVariant();
+        const c = longestCache;
+        if (c && c.names === state.names && c.font === state.font && c.tpl === tpl && c.variant === variant) return c;
+        let best = { name: '', em: 0 };
+        for (const n of state.names) {
+            const text = prepText(fillTemplate(tpl, n, variant), state.font).text;
+            // Width is linear in size, so measure once at 1000 and scale.
+            const em = state.font.metrics.widthOfTextAtSize(text, 1000) / 1000;
+            if (em > best.em) best = { name: n, em };
+        }
+        longestCache = { names: state.names, font: state.font, tpl, variant, ...best };
+        return longestCache;
+    }
+
+    function updateStampFit() {
+        const vp = state.viewport;
+        const warn = dom.stampWarn;
+        if (!vp || !state.font || state.names.length < 2 || !onStampPage()) {
+            warn.classList.add('hidden');
+            warn._key = '';
+            return;
+        }
+        const longest = longestStamp();
+        const cfg = stampCfg();
+        const f = { left: 0, center: 0.5, right: 1 }[cfg.align] || 0;
+        const pageW = vp.width / vp.scale;              // the displayed page, in pt
+        const left = state.stamp.u * pageW - longest.em * cfg.size * f;
+        const right = left + longest.em * cfg.size;
+        const side = left < 0 ? 'left' : right > pageW ? 'right' : '';
+        warn.classList.toggle('hidden', !side);
+        if (!side) return;
+        // This runs on every frame of a drag; rebuild only when it changes.
+        const offerPreview = dom.previewNameSel.value !== longest.name;
+        const key = `${side}|${longest.name}|${offerPreview}`;
+        if (warn._key === key) return;
+        warn._key = key;
+        warn.textContent = '';
+        const msg = document.createElement('span');
+        msg.textContent = `The longest name, ${longest.name}, runs off the ${side} edge of the page at this size.`;
+        warn.appendChild(msg);
+        if (offerPreview) {
+            const show = document.createElement('button');
+            show.type = 'button';
+            show.textContent = 'Preview it';
+            show.addEventListener('click', () => {
+                dom.previewNameSel.value = longest.name;
+                drawOverlay();
+                drawWatermarkOverlay();
+            });
+            warn.appendChild(show);
+        }
+    }
+
+    const clamp01 = (n) => Math.min(Math.max(n, 0), 1);
+
+    // A pointer position in the viewport's CSS px. The canvas may be drawn
+    // narrower than its viewport (max-width on a small screen), so this goes
+    // through the on-screen rect rather than assuming the two are equal.
+    function pointerToViewport(ev) {
         const rect = dom.overlay.getBoundingClientRect();
+        const vp = state.viewport;
+        return {
+            x: (ev.clientX - rect.left) * (vp.width / rect.width),
+            y: (ev.clientY - rect.top) * (vp.height / rect.height),
+        };
+    }
+
+    const onStampHandle = (p) => {
+        const b = state.stampBox;
+        return Boolean(b) && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+    };
+
+    // `grab` is where inside the handle the pointer took hold, relative to
+    // the anchor — so dragging the name by its middle doesn't first make it
+    // jump to put its anchor under the pointer.
+    function setStampFromEvent(ev, grab) {
+        const p = pointerToViewport(ev);
         state.stamp.page = state.currentPage;
-        state.stamp.u = Math.min(Math.max((ev.clientX - rect.left) / rect.width, 0), 1);
-        state.stamp.v = Math.min(Math.max((ev.clientY - rect.top) / rect.height, 0), 1);
+        state.stamp.u = clamp01((p.x - grab.x) / state.viewport.width);
+        state.stamp.v = clamp01((p.y - grab.y) / state.viewport.height);
         drawOverlay();
         updateStampNote();
         savePrefsSoon();
     }
 
     function wirePreviewInteraction() {
-        let dragging = false;
+        let grab = null;
         dom.overlay.addEventListener('pointerdown', (e) => {
-            dragging = true;
+            if (!state.viewport) return;
+            const p = pointerToViewport(e);
+            const b = state.stampBox;
+            grab = onStampHandle(p) ? { x: p.x - b.ax, y: p.y - b.ay } : { x: 0, y: 0 };
             dom.overlay.setPointerCapture(e.pointerId);
             dom.overlay.focus({ preventScroll: true });
-            setStampFromEvent(e);
+            dom.overlay.classList.add('is-dragging');
+            setStampFromEvent(e, grab);
             e.preventDefault();
         });
-        dom.overlay.addEventListener('pointermove', (e) => { if (dragging) setStampFromEvent(e); });
+        dom.overlay.addEventListener('pointermove', (e) => {
+            if (grab) { setStampFromEvent(e, grab); return; }
+            // Hovering: a move cursor over the name, a crosshair elsewhere,
+            // so it's clear which one a click will do.
+            if (state.viewport) dom.overlay.classList.toggle('over-stamp', onStampHandle(pointerToViewport(e)));
+        });
         const stop = (e) => {
-            if (!dragging) return;
-            dragging = false;
+            if (!grab) return;
+            grab = null;
+            dom.overlay.classList.remove('is-dragging');
             try { dom.overlay.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
         };
         dom.overlay.addEventListener('pointerup', stop);
         dom.overlay.addEventListener('pointercancel', stop);
+        dom.overlay.addEventListener('pointerleave', () => dom.overlay.classList.remove('over-stamp'));
 
         dom.overlay.addEventListener('keydown', (e) => {
             const nudge = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
-            if (!nudge || !state.viewport || state.currentPage !== state.stamp.page) return;
+            if (!nudge || !state.viewport || !onStampPage()) return;
             e.preventDefault();
             const step = (e.shiftKey ? 10 : 1) / state.viewport.width;
             state.stamp.u = Math.min(Math.max(state.stamp.u + nudge[0] * step, 0), 1);
@@ -741,7 +897,7 @@
 
     function parseNames(raw, linesOnly) {
         const parts = [];
-        String(raw).split(/\r?\n/).forEach(line => {
+        String(raw).replace(INVISIBLE, '').split(/\r?\n/).forEach(line => {
             if (linesOnly) parts.push(line);
             else line.split(/[,;\t]/).forEach(p => parts.push(p));
         });
@@ -781,9 +937,11 @@
             remove.type = 'button';
             remove.innerHTML = '&times;';
             remove.setAttribute('aria-label', `Remove ${name}`);
+            // The list is rewritten one per line. That needs no change to
+            // "don't split on commas": with it off, no parsed name can
+            // contain a comma, so the rewrite reads back identically.
             remove.onclick = () => {
                 dom.namesInput.value = state.names.filter((_, j) => j !== i).join('\n');
-                dom.linesOnly.checked = true;   // the rewritten list is one per line
                 refreshNames();
             };
             chip.append(label, remove);
@@ -808,6 +966,9 @@
         dom.previewNameSel.value = names.includes(previous) ? previous : (names[0] || '');
 
         setChip(dom.chipNames, 'fa-users', `${names.length} ${names.length === 1 ? 'name' : 'names'}`);
+        // "Alternate in list order" means the list order, so it is redealt
+        // when the list changes; a shuffle is left alone and only topped up.
+        if (state.dealt === 'alternate' && state.variants.length > 1) alternateGroups();
         ensureAssignments();
         renderGroups();
         updateOutputExample();
@@ -825,22 +986,56 @@
         });
     }
 
+    // Header cells, in English and Albanian. A pair of first-name and surname
+    // columns is joined; any other name-ish header is just dropped.
+    const NAME_HEADER = /^(full ?names?|names?|students?|student ?names?|surnames?|emri|emër|emrat|mbiemri|studenti|studentët)\b/i;
+    const FIRST_HEADER = /^((first|given)[ _-]?)?names?$|^emri$|^emër$/i;
+    const LAST_HEADER = /^(last|family|sur)[ _-]?names?$|^mbiemri$|^mbiemër$/i;
+    const WHOLE_NAME = /[A-Za-zÀ-ÿ]{2,}[ '\-][A-Za-zÀ-ÿ]{2,}/;
+    const ONE_WORD = /^[A-Za-zÀ-ÖØ-öø-ÿĀ-ž'’-]+$/;
+
     // Picks the column that looks most like a list of people. Whatever it
     // guesses lands in the textarea, where it is plainly visible and editable
     // — so a wrong guess costs a glance, not a broken batch.
     function namesFromRows(rows) {
-        const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
-        let best = { score: -1, col: 0 };
+        const cell = (r, c) => String((r && r[c]) ?? '').trim();
+        const filled = rows.filter(r => r.some((_, c) => cell(r, c)));
+        if (!filled.length) return [];
+        // One line of a .txt, "Ana Hoxha, Besa Krasniqi, …": the cells are
+        // the names, not columns to choose between.
+        if (filled.length === 1) return filled[0].map((_, c) => cell(filled[0], c)).filter(Boolean);
+
+        const join = (from, a, b) => filled.slice(from)
+            .map(r => `${cell(r, a)} ${cell(r, b)}`.trim()).filter(Boolean);
+
+        // A header with a first-name column and a surname column — the usual
+        // shape of a registry export. Looked for in the first few rows, since
+        // a title line often sits above the header.
+        for (let h = 0; h < Math.min(filled.length, 5); h++) {
+            const head = filled[h].map((_, c) => cell(filled[h], c));
+            const last = head.findIndex(t => LAST_HEADER.test(t));
+            const first = head.findIndex((t, c) => c !== last && FIRST_HEADER.test(t));
+            if (first >= 0 && last >= 0) return join(h + 1, first, last);
+        }
+
+        const width = filled.reduce((m, r) => Math.max(m, r.length), 0);
+        let best = { score: -1, col: 0, whole: 0 };
+        const oneWordCols = [];
         for (let c = 0; c < width; c++) {
-            const cells = rows.map(r => String(r[c] ?? '').trim()).filter(Boolean);
-            const looksLikeName = cells.filter(v => /[A-Za-zÀ-ÿ]{2,}[ '\-][A-Za-zÀ-ÿ]{2,}/.test(v)).length;
-            const score = looksLikeName * 10 + cells.length;
-            if (score > best.score) best = { score, col: c };
+            const cells = filled.map(r => cell(r, c)).filter(Boolean);
+            const whole = cells.filter(v => WHOLE_NAME.test(v)).length;
+            const score = whole * 10 + cells.length;
+            if (score > best.score) best = { score, col: c, whole };
+            if (cells.length && cells.filter(v => ONE_WORD.test(v)).length >= cells.length * 0.6) oneWordCols.push(c);
         }
-        const cells = rows.map(r => String(r[best.col] ?? '').trim()).filter(Boolean);
-        if (cells.length && /^(name|full ?name|student|emri|emër|surname|mbiemri)\b/i.test(cells[0])) {
-            cells.shift();
-        }
+
+        // No column holds whole names, but two hold single words: first names
+        // and surnames side by side with no header — a two-column paste out
+        // of a spreadsheet, typically. Joined in the order they appear.
+        if (!best.whole && oneWordCols.length >= 2) return join(0, oneWordCols[0], oneWordCols[1]);
+
+        const cells = filled.map(r => cell(r, best.col)).filter(Boolean);
+        if (cells.length > 1 && NAME_HEADER.test(cells[0])) cells.shift();
         return cells;
     }
 
@@ -880,24 +1075,61 @@
                 const sheet = wb.Sheets[wb.SheetNames[0]];
                 names = namesFromRows(window.XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false }));
             } else {
-                const rows = (await file.text()).split(/\r?\n/).map(splitRow);
-                // A single-column file is just a list; anything wider is a
-                // table and gets the column-picking treatment.
-                names = rows.some(r => r.length > 1) ? namesFromRows(rows) : rows.map(r => r[0]);
+                const rows = (await file.text()).replace(INVISIBLE, '').split(/\r?\n/).map(splitRow);
+                names = namesFromRows(rows);
             }
             const clean = parseNames(names.join('\n'), true).names;
             if (!clean.length) {
                 showNotification('warning', 'Nothing to import', `No names found in ${file.name}.`);
                 return;
             }
+            const before = { text: dom.namesInput.value, linesOnly: dom.linesOnly.checked };
             dom.namesInput.value = clean.join('\n');
-            dom.linesOnly.checked = true;
+            // "Hoxha, Ana" from a quoted cell is one name, and must stay one.
+            if (clean.some(n => /[,;\t]/.test(n))) dom.linesOnly.checked = true;
             refreshNames();
+            savePrefsSoon();
             showNotification('success', 'List imported',
-                `${clean.length} name${clean.length === 1 ? '' : 's'} from ${file.name}.`);
+                `${clean.length} name${clean.length === 1 ? '' : 's'} from ${file.name}.`, 8000,
+                before.text.trim() ? { label: 'Undo', onClick: () => restoreNames(before) } : null);
         } catch (err) {
             console.error(err);
             showNotification('error', "Couldn't read that list", err.message || String(err));
+        }
+    }
+
+    function restoreNames(before) {
+        dom.namesInput.value = before.text;
+        dom.linesOnly.checked = before.linesOnly;
+        refreshNames();
+        savePrefsSoon();
+    }
+
+    /* A block copied out of Excel or Sheets arrives as tab-separated rows,
+       usually with a number column and an ID column either side of the
+       names. Split on tabs, every ID would become a "student" — so a
+       multi-row, multi-column paste goes through the same column picker as
+       an uploaded spreadsheet. insertText keeps it on the textarea's own undo
+       stack, so Ctrl+Z still takes it back out. */
+    function onNamesPaste(e) {
+        const text = e.clipboardData && e.clipboardData.getData('text/plain');
+        if (!text || !text.includes('\t')) return;
+        const rows = text.replace(INVISIBLE, '').split(/\r?\n/).filter(l => l.trim()).map(l => l.split('\t'));
+        if (rows.length < 2 || !rows.some(r => r.length > 1)) return;
+        const names = namesFromRows(rows);
+        if (!names.length) return;
+        e.preventDefault();
+
+        const el = dom.namesInput;
+        const before = el.value.slice(0, el.selectionStart);
+        const after = el.value.slice(el.selectionEnd);
+        // Keep the pasted names on lines of their own.
+        const insert = (before && !before.endsWith('\n') ? '\n' : '') + names.join('\n') +
+            (after && !after.startsWith('\n') ? '\n' : '');
+        if (names.some(n => /[,;\t]/.test(n))) dom.linesOnly.checked = true;
+        if (!document.execCommand('insertText', false, insert)) {
+            el.setRangeText(insert, el.selectionStart, el.selectionEnd, 'end');
+            refreshNames();
         }
     }
 
@@ -907,9 +1139,27 @@
     async function addPdfFiles(files) {
         let added = 0;
         for (const file of files) {
-            if (state.variants.length >= LETTERS.length) break;
+            if (state.variants.length >= LETTERS.length) {
+                showNotification('warning', `${LETTERS.length} papers is the limit`,
+                    `One per letter of the alphabet. ${file.name} and anything after it were left out.`);
+                break;
+            }
             try {
                 const bytes = new Uint8Array(await file.arrayBuffer());
+
+                // pdf-lib writes the copies, and it is stricter than pdf.js —
+                // so a file it can't take is turned away now, not half-way
+                // through the class. That includes "restricted" PDFs: no
+                // password to open, but an owner password against editing.
+                // pdf.js shows them happily, yet every copy written from one
+                // comes out unopenable.
+                const check = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+                if (check.isEncrypted) {
+                    showNotification('error', `${file.name} has editing restrictions`,
+                        "Its copies wouldn't open. Open it in a PDF viewer, print it to a new PDF (Microsoft Print to PDF, or Save as PDF), and add that file instead.");
+                    continue;
+                }
+
                 // pdf.js transfers whatever buffer it is given to its worker,
                 // which detaches it — so it gets a copy and pdf-lib keeps the
                 // original.
@@ -936,12 +1186,22 @@
         dom.previewWrap.classList.remove('hidden');
         dom.pdfDrop.classList.add('has-file');
 
-        if (state.variants.length > 1 && Object.keys(state.assign).length === 0) shuffleGroups();
+        // Going from one paper to two used to leave the whole class on A:
+        // everyone already had a valid group (the only one), so nothing was
+        // ever dealt onto B. Now any change in the number of papers redeals —
+        // unless the split was made by hand, which is never thrown away.
+        if (state.variants.length > 1) {
+            if (state.dealt !== 'manual') redeal();
+            else {
+                showNotification('info', 'Your groups were kept',
+                    'You set some students by hand, so the new paper starts with nobody on it. Shuffle in step 3 to deal everyone again.', 8000);
+            }
+        }
         ensureAssignments();
         renderPapers();
         renderGroups();
         updatePdfChip();
-        dom.zipName.value = `${state.variants[0].base}-stamped.zip`;
+        if (state.zipAuto) dom.zipName.value = autoZipName();
 
         openModule('mod-pdf');
         await renderPage(1);
@@ -994,6 +1254,10 @@
             if (g === index) delete state.assign[name];
             else if (g > index) state.assign[name] = g - 1;
         });
+        // Down to one paper there is no split left to protect, so the next
+        // paper added gets a fresh deal rather than an empty group.
+        if (state.variants.length <= 1) state.dealt = 'shuffle';
+        else if (state.dealt !== 'manual') redeal();
 
         state.active = Math.max(0, Math.min(state.active, state.variants.length - 1));
         ensureAssignments();
@@ -1007,13 +1271,17 @@
             dom.pdfDrop.classList.remove('has-file');
             dom.pdfDropTitle.textContent = 'Drop the exam PDF here';
             state.viewport = null;
+            state.stampBox = null;
+            dom.stampWarn.classList.add('hidden');
             renderWatermarkPage();
         } else {
-            dom.zipName.value = `${state.variants[0].base}-stamped.zip`;
+            if (state.zipAuto) dom.zipName.value = autoZipName();
             renderPage(1);
             renderWatermarkPage();
         }
     }
+
+    const autoZipName = () => `${state.variants.length ? state.variants[0].base : 'exam'}-stamped.zip`;
 
     function updatePdfChip() {
         const n = state.variants.length;
@@ -1068,11 +1336,21 @@
                 () => removePaper(i), true));
 
             row.append(badge, info, tools);
-            row.addEventListener('click', () => {
+            const show = () => {
                 state.active = i;
                 renderPapers();
                 renderPage(Math.min(state.currentPage, v.pageCount));
                 renderWatermarkPage(Math.min(state.wmPage, v.pageCount));
+                dom.paperList.children[i]?.focus({ preventScroll: true });
+            };
+            row.tabIndex = 0;
+            row.setAttribute('role', 'button');
+            row.setAttribute('aria-pressed', String(i === state.active));
+            row.addEventListener('click', show);
+            row.addEventListener('keydown', (e) => {
+                if (e.target !== row || (e.key !== 'Enter' && e.key !== ' ')) return;
+                e.preventDefault();
+                show();
             });
             dom.paperList.appendChild(row);
         });
@@ -1121,14 +1399,18 @@
     function shuffleGroups() {
         const k = Math.max(1, state.variants.length);
         state.assign = {};
+        state.dealt = 'shuffle';
         cryptoShuffle(state.names).forEach((n, i) => { state.assign[n] = i % k; });
     }
 
     function alternateGroups() {
         const k = Math.max(1, state.variants.length);
         state.assign = {};
+        state.dealt = 'alternate';
         state.names.forEach((n, i) => { state.assign[n] = i % k; });
     }
+
+    const redeal = () => (state.dealt === 'alternate' ? alternateGroups() : shuffleGroups());
 
     // Everyone always has a valid group: new names join the smallest one, and
     // assignments to a paper that has gone away are redealt.
@@ -1171,6 +1453,11 @@
             : '';
         if (!many) return;
 
+        // The selects first: a filter left pointing at a paper that has just
+        // been removed falls back to "all" here, before the chips read it.
+        fillGroupSelect(dom.groupFilter, true);
+        fillGroupSelect(dom.groupBulk, false);
+
         const counts = groupCounts();
         dom.groupStats.textContent = '';
         state.variants.forEach((v, i) => {
@@ -1186,8 +1473,6 @@
             dom.groupStats.appendChild(chip);
         });
 
-        fillGroupSelect(dom.groupFilter, true);
-        fillGroupSelect(dom.groupBulk, false);
         renderGroupList();
     }
 
@@ -1277,10 +1562,17 @@
         } else {
             dom.groupList.appendChild(frag);
         }
+
+        // The bulk button acts on the rows on screen, so with a search or a
+        // filter in force it says so rather than claiming "all".
+        const narrowed = Boolean(query) || filter !== 'all';
+        dom.btnAssignShown.textContent = narrowed ? `Apply to ${shown} shown` : 'Apply to all';
+        dom.btnAssignShown.disabled = !shown;
     }
 
     function setGroup(name, groupIndex) {
         state.assign[name] = groupIndex;
+        state.dealt = 'manual';
         // Only the row that changed is touched — redrawing hundreds of rows on
         // every click would make the list feel broken.
         const row = dom.groupList.querySelector(`.es-group-row[data-name="${cssEscape(name)}"]`);
@@ -1304,28 +1596,52 @@
 
     const cssEscape = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&'));
 
+    // Every one of the bulk actions replaces the whole split, hand-made
+    // choices included, so each offers its way back.
+    function groupsUndo() {
+        const saved = { assign: { ...state.assign }, dealt: state.dealt };
+        return {
+            label: 'Undo',
+            onClick: () => {
+                state.assign = saved.assign;
+                state.dealt = saved.dealt;
+                ensureAssignments();
+                renderGroups();
+                updateOutputExample();
+            },
+        };
+    }
+
     function wireGroups() {
         dom.btnShuffle.addEventListener('click', () => {
+            const undo = groupsUndo();
             shuffleGroups();
             renderGroups();
+            updateOutputExample();
             showNotification('success', 'Groups shuffled',
-                `${state.names.length} students dealt at random across ${state.variants.length} papers.`);
+                `${state.names.length} students dealt at random across ${state.variants.length} papers.`, 8000, undo);
         });
         dom.btnAlternate.addEventListener('click', () => {
+            const undo = groupsUndo();
             alternateGroups();
             renderGroups();
+            updateOutputExample();
             showNotification('info', 'Groups set in list order',
-                'Useful when the class list is already in seating order.');
+                'Useful when the class list is already in seating order. Reordering the list redeals it.', 8000, undo);
         });
         dom.groupSearch.addEventListener('input', renderGroupList);
         dom.groupFilter.addEventListener('change', renderGroups);
         dom.btnAssignShown.addEventListener('click', () => {
             const target = +dom.groupBulk.value || 0;
             const rows = [...dom.groupList.querySelectorAll('.es-group-row')];
+            if (!rows.length) return;
+            const undo = groupsUndo();
             rows.forEach(r => { state.assign[r.dataset.name] = target; });
+            state.dealt = 'manual';
             renderGroups();
+            updateOutputExample();
             showNotification('info', 'Group set',
-                `${rows.length} student${rows.length === 1 ? '' : 's'} moved to group ${state.variants[target].letter}.`);
+                `${rows.length} student${rows.length === 1 ? '' : 's'} moved to group ${state.variants[target].letter}.`, 8000, undo);
         });
 
         // One listener for every row, however many there are.
@@ -1355,10 +1671,9 @@
         return doc.embedFont(bundle.bytes, { subset: true });
     }
 
-    async function buildCopy(name, variant, fonts, anchor) {
+    async function buildCopy(job, name, variant, anchor) {
         const { PDFDocument, degrees } = PDFLib;
-        const cfg = stampCfg();
-        const wm = watermarkCfg();
+        const { cfg, wm, fonts } = job;
 
         const doc = await PDFDocument.load(variant.bytes.slice(), { ignoreEncryption: true });
         const stampFont = await embed(doc, fonts.stamp);
@@ -1428,11 +1743,35 @@
         // Belt and braces: if someone crops the pattern out of a photo, the
         // file itself still says whose copy it was, and which paper.
         const who = prepText(name, fonts.stamp).text;
-        doc.setSubject(state.variants.length > 1
+        doc.setSubject(job.many
             ? `Personal copy — ${who} — group ${variant.letter}`
             : `Personal copy — ${who}`);
 
         return doc.save({ useObjectStreams: true });
+    }
+
+    /* Everything a batch reads, captured once when it starts. The page stays
+       live while copies are written — and before this, editing the class
+       list mid-batch stamped "undefined" onto every copy after the edit,
+       while a tweak to the size or colour changed only the later copies. */
+    async function snapshotJob() {
+        ensureAssignments();
+        const job = {
+            fonts: {
+                stamp: await ensureFont(dom.stampFont.value, state.style.bold, state.style.italic),
+                wm: await ensureFont(dom.wmFont.value, false, false),
+            },
+            cfg: stampCfg(),
+            wm: watermarkCfg(),
+            names: state.names.slice(),
+            assign: { ...state.assign },
+            variants: state.variants.slice(),
+            pattern: dom.filePattern.value,
+            many: state.variants.length > 1,
+        };
+        // One anchor per paper, worked out once rather than per student.
+        job.anchors = await Promise.all(job.variants.map(anchorFor));
+        return job;
     }
 
     const sameFace = (a, b) => a && b && a.key === b.key && a.cut === b.cut;
@@ -1451,14 +1790,13 @@
         return String(s).split('/').map(sanitizeFileName).filter(Boolean).join('/') || 'file';
     }
 
-    function fileNameFor(name, index, variant, used) {
-        const pattern = dom.filePattern.value.trim() || '{file}_{name}.pdf';
-        let out = pattern
-            .replace(/\{file\}/gi, variant ? variant.base : 'exam')
-            .replace(/\{group\}/gi, variant ? variant.letter : '')
-            .replace(/\{name\}/gi, name)
-            .replace(/\{index\}/gi, String(index + 1))
-            .replace(/\{n\}/gi, String(index + 1).padStart(2, '0'));
+    function fileNameFor(name, index, variant, used, pattern = dom.filePattern.value) {
+        let out = (pattern.trim() || '{file}_{name}.pdf')
+            .replace(/\{file\}/gi, () => (variant ? variant.base : 'exam'))
+            .replace(/\{group\}/gi, () => (variant ? variant.letter : ''))
+            .replace(/\{name\}/gi, () => name)
+            .replace(/\{index\}/gi, () => String(index + 1))
+            .replace(/\{n\}/gi, () => String(index + 1).padStart(2, '0'));
         out = sanitizePath(out);
         if (!/\.pdf$/i.test(out)) out += '.pdf';
 
@@ -1511,26 +1849,22 @@
         return true;
     }
 
-    async function currentFonts() {
-        return {
-            stamp: await ensureFont(dom.stampFont.value, state.style.bold, state.style.italic),
-            wm: await ensureFont(dom.wmFont.value, false, false),
-        };
-    }
-
     async function generateTest() {
         if (state.running || !readyCheck()) return;
         state.running = true;
         setBusy(true);
         try {
-            const name = sampleName() || state.names[0];
-            const variant = state.variants[state.assign[name] ?? state.active] || state.variants[0];
             setProgress(0.5, 'Building test copy…');
-            const bytes = await buildCopy(name, variant, await currentFonts(), await anchorFor(variant));
-            download(new Blob([bytes], { type: 'application/pdf' }),
-                fileNameFor(name, 0, variant, null));
+            const job = await snapshotJob();
+            const name = sampleName() || job.names[0];
+            const gi = job.variants[job.assign[name]] ? job.assign[name] : state.active;
+            const variant = job.variants[gi] || job.variants[0];
+            const bytes = await buildCopy(job, name, variant, job.anchors[job.variants.indexOf(variant)]);
+            // Named exactly as it will be in the ZIP, {index} and {n} included.
+            const file = fileNameFor(name, Math.max(0, job.names.indexOf(name)), variant, null, job.pattern);
+            download(new Blob([bytes], { type: 'application/pdf' }), file);
             showNotification('success', 'Test copy downloaded',
-                'Open it and check the name before running the whole class.');
+                `${file}${job.many ? `, on paper ${variant.letter}` : ''}. Open it and check the name before running the whole class.`);
         } catch (err) {
             console.error(err);
             showNotification('error', "Couldn't build that copy", err.message || String(err));
@@ -1556,24 +1890,21 @@
         setBusy(true);
 
         try {
-            const fonts = await currentFonts();
-            ensureAssignments();
-
-            // One anchor per paper, worked out once rather than per student.
-            const anchors = await Promise.all(state.variants.map(anchorFor));
-
+            const job = await snapshotJob();
             const zip = new JSZip();
             const used = new Set();
-            const total = state.names.length;
+            const total = job.names.length;
+            const counts = new Array(job.variants.length).fill(0);
 
             for (let i = 0; i < total; i++) {
                 if (state.cancelled) break;
-                const name = state.names[i];
-                const gi = state.assign[name] ?? 0;
-                const variant = state.variants[gi];
+                const name = job.names[i];
+                const gi = job.variants[job.assign[name]] ? job.assign[name] : 0;
+                const variant = job.variants[gi];
+                counts[gi]++;
                 setProgress(i / total, `Stamping ${i + 1} of ${total}…`);
-                const bytes = await buildCopy(name, variant, fonts, anchors[gi]);
-                zip.file(fileNameFor(name, i, variant, used), bytes);
+                const bytes = await buildCopy(job, name, variant, job.anchors[gi]);
+                zip.file(fileNameFor(name, i, variant, used, job.pattern), bytes);
                 await yieldToUI();   // keep the tab responsive, and cancel live
             }
 
@@ -1585,13 +1916,22 @@
             setProgress(1, 'Packing the ZIP…');
             const blob = await zip.generateAsync(
                 { type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 3 } },
-                (meta) => setProgress(meta.percent / 100, `Packing the ZIP… ${Math.round(meta.percent)}%`));
+                (meta) => {
+                    if (!state.cancelled) setProgress(meta.percent / 100, `Packing the ZIP… ${Math.round(meta.percent)}%`);
+                });
+            // Cancel stays on screen while the ZIP packs, so it has to work
+            // there too — it used to be ignored and the download went ahead.
+            if (state.cancelled) {
+                showNotification('info', 'Cancelled', 'Nothing was downloaded.');
+                return;
+            }
 
-            const zipName = sanitizeFileName(dom.zipName.value.replace(/\.zip$/i, '')) + '.zip';
+            const typed = dom.zipName.value.replace(/\.zip$/i, '').trim();
+            const zipName = sanitizeFileName(typed || autoZipName().replace(/\.zip$/i, '')) + '.zip';
             download(blob, zipName);
 
-            const spread = state.variants.length > 1
-                ? ` · ${groupCounts().map((c, i) => `${state.variants[i].letter}:${c}`).join(' ')}`
+            const spread = job.many
+                ? ` · ${counts.map((c, i) => `${job.variants[i].letter}:${c}`).join(' ')}`
                 : '';
             showNotification('success', 'Done',
                 `${total} copies · ${formatBytes(blob.size)}${spread}`, 8000);
@@ -1716,6 +2056,36 @@
         ['wmColor', 'value'], ['wmCover', 'checked'], ['filePattern', 'value'],
     ];
 
+    // What every control says in the markup, captured before any saved
+    // preferences are applied — Reset puts these back.
+    const DEFAULTS = {};
+    function captureDefaults() {
+        PREFS.forEach(([key, prop]) => { DEFAULTS[key] = dom[key][prop]; });
+        DEFAULTS.stamp = { ...state.stamp };
+        DEFAULTS.style = { ...state.style };
+    }
+
+    // In place, not by reloading: a reload also threw away the class list
+    // and the papers, which are exactly what nobody wants to re-enter.
+    async function resetPrefs() {
+        clearTimeout(prefsTimer);
+        try { localStorage.removeItem(PREF_KEY); } catch { /* private mode */ }
+        PREFS.forEach(([key, prop]) => { dom[key][prop] = DEFAULTS[key]; });
+        state.stamp = { ...DEFAULTS.stamp };
+        state.style = { ...DEFAULTS.style };
+        document.querySelectorAll('.es-colour').forEach(w => w._paint && w._paint());
+        syncReadouts();
+        syncStyleButtons();
+        await applyStampFont();       // redraws, and re-reads the list
+        await applyWatermarkFont();
+        if (state.variants.length) {
+            renderPage(stampPageOf(activeVariant()));
+            renderWatermarkPage();
+        }
+        updateOutputExample();
+        showNotification('success', 'Settings reset', 'Back to the defaults. The class list and the papers were kept.');
+    }
+
     function savePrefs() {
         const data = { stamp: { ...state.stamp }, style: { ...state.style } };
         PREFS.forEach(([key, prop]) => { if (dom[key]) data[key] = dom[key][prop]; });
@@ -1735,6 +2105,10 @@
         PREFS.forEach(([key, prop]) => {
             if (dom[key] && data[key] !== undefined && data[key] !== null) dom[key][prop] = data[key];
         });
+        // A font that has since left the menu would leave its select blank,
+        // and everything downstream expects a real key.
+        if (!FONTS[dom.stampFont.value]) dom.stampFont.value = DEFAULTS.stampFont;
+        if (!FONTS[dom.wmFont.value]) dom.wmFont.value = DEFAULTS.wmFont;
         if (data.style) {
             state.style = {
                 bold: Boolean(data.style.bold),
@@ -1863,9 +2237,14 @@
             depth++;
             show(true);
         });
+        // Every drop is claimed, so a stray link or file can't navigate the
+        // tab away and lose the list and papers — except text dragged into a
+        // text field, which is left to do its ordinary thing.
         window.addEventListener('dragover', (e) => e.preventDefault());
         window.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) show(false); });
         window.addEventListener('drop', (e) => {
+            const hasFiles = e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+            if (!hasFiles && e.target.closest && e.target.closest('textarea, input[type="text"], input[type="search"], input:not([type])')) return;
             e.preventDefault();
             depth = 0;
             show(false);
@@ -1892,6 +2271,7 @@
     function wireControls() {
         // --- names ---
         dom.namesInput.addEventListener('input', refreshNames);
+        dom.namesInput.addEventListener('paste', onNamesPaste);
         dom.linesOnly.addEventListener('change', () => { refreshNames(); savePrefsSoon(); });
         dom.btnUploadNames.addEventListener('click', () => dom.namesFile.click());
         dom.namesFile.addEventListener('change', () => {
@@ -1902,13 +2282,18 @@
             if (!state.names.length) return;
             dom.namesInput.value = [...state.names]
                 .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).join('\n');
-            dom.linesOnly.checked = true;
             refreshNames();
         });
         dom.btnClearNames.addEventListener('click', () => {
+            if (!dom.namesInput.value.trim()) return;
+            const before = { text: dom.namesInput.value, linesOnly: dom.linesOnly.checked };
+            const count = state.names.length;
             dom.namesInput.value = '';
             refreshNames();
             dom.namesInput.focus();
+            showNotification('info', 'List cleared',
+                `${count} name${count === 1 ? '' : 's'} removed.`, 8000,
+                { label: 'Undo', onClick: () => restoreNames(before) });
         });
 
         // --- papers ---
@@ -1951,22 +2336,33 @@
         });
         dom.wmCover.addEventListener('change', () => renderWatermarkPage(state.wmPage));
 
-        [dom.filePattern, dom.zipName].forEach(el => el.addEventListener('input', () => {
+        dom.filePattern.addEventListener('input', () => {
             updateOutputExample();
             savePrefsSoon();
-        }));
-
-        dom.btnResetPrefs.addEventListener('click', () => {
-            try { localStorage.removeItem(PREF_KEY); } catch { /* private mode */ }
-            location.reload();
+        });
+        // Once the ZIP has been named by hand, adding or removing a paper no
+        // longer renames it. Emptying the field hands it back.
+        dom.zipName.addEventListener('input', () => {
+            state.zipAuto = !dom.zipName.value.trim();
         });
 
+        dom.btnResetPrefs.addEventListener('click', resetPrefs);
+
         // --- generate ---
-        dom.btnTest.addEventListener('click', generateTest);
-        dom.btnGenerate.addEventListener('click', generateZip);
-        dom.btnCancel.addEventListener('click', () => {
+        const cancel = () => {
+            if (!state.running) return;
             state.cancelled = true;
             setChip(dom.chipStatus, 'fa-hourglass-half', 'Stopping…');
+        };
+        dom.btnTest.addEventListener('click', generateTest);
+        dom.btnGenerate.addEventListener('click', generateZip);
+        dom.btnCancel.addEventListener('click', cancel);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cancel(); });
+        // A batch lives only in this tab; closing it half-way loses the lot.
+        window.addEventListener('beforeunload', (e) => {
+            if (!state.running) return;
+            e.preventDefault();
+            e.returnValue = '';
         });
 
         // --- redraw on resize; the canvases are bitmaps, not layout ---
@@ -1991,7 +2387,10 @@
         dom.wmSizeVal.textContent = `${dom.wmSize.value} pt`;
         dom.wmAngleVal.textContent = `${dom.wmAngle.value}°`;
         dom.wmGapVal.textContent = `${dom.wmGap.value} pt`;
+        // Faded and unclickable isn't enough on its own: Tab would still walk
+        // through every control of a switched-off tracer.
         dom.wmBody.classList.toggle('disabled', !dom.wmEnabled.checked);
+        dom.wmBody.inert = !dom.wmEnabled.checked;
     }
 
 
@@ -2022,6 +2421,7 @@
 
         buildFontSelect(dom.stampFont, 'helvetica');
         buildFontSelect(dom.wmFont, 'courier');
+        captureDefaults();
         loadPrefs();
         syncStyleButtons();
 

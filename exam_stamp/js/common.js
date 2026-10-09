@@ -149,9 +149,10 @@ function trackButtonRows(container) {
 /* === TOASTS ==============================================================
    Same markup and lifecycle as the teaching pages: at most two on screen,
    a new toast replaces any earlier one of its own type, and errors stay put
-   until dismissed.
+   until dismissed. An optional `action` ({ label, onClick }) adds one button
+   — used for Undo after anything that throws work away.
    ======================================================================== */
-function showNotification(type, title, message, duration) {
+function showNotification(type, title, message, duration, action) {
     const area = document.getElementById('notification-area');
     if (!area) return;
 
@@ -179,6 +180,14 @@ function showNotification(type, title, message, duration) {
     const strong = document.createElement('strong');
     strong.textContent = title;
     body.append(strong, document.createElement('br'), document.createTextNode(message || ''));
+    if (action) {
+        const act = document.createElement('button');
+        act.type = 'button';
+        act.className = 'notification-action';
+        act.textContent = action.label;
+        act.onclick = () => { dismiss(notification); action.onClick(); };
+        body.append(document.createElement('br'), act);
+    }
     const close = document.createElement('button');
     close.className = 'notification-close';
     close.type = 'button';
